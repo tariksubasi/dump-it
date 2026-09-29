@@ -217,8 +217,9 @@ class WorkflowRenderer:
         kind = type_name(criteria).replace("CompletionCriteria", "").lower() or "?"
         parts = [kind]
         for key, label in (("VetoOutcome", "veto outcome"), ("FallbackOutcome", "fallback outcome")):
-            if field(criteria, key):
-                parts.append("%s %s" % (label, self._ref(field(criteria, key))))
+            ref = field(criteria, key + "Pointer", key)
+            if ref:
+                parts.append("%s %s" % (label, self._ref(ref)))
         if field(criteria, "Threshold") is not None:
             parts.append("threshold %s %s" % (field(criteria, "Threshold"), field(criteria, "CompletionType") or ""))
         if field(criteria, "Microflow"):
@@ -247,7 +248,7 @@ class WorkflowRenderer:
         return "PARALLEL SPLIT %s (all paths run)" % label, []
 
     def _a_JumpToActivity(self, a, label):
-        target = self._ref(field(a, "TargetActivity"))
+        target = self._ref(field(a, "TargetActivityPointer", "TargetActivity"))
         return "JUMP TO %s (step {{STEP:%s}}) %s" % (target, target, label), []
 
     def _a_WaitForTimerActivity(self, a, label):

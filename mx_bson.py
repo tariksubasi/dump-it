@@ -1,7 +1,7 @@
 """Minimal stdlib-only BSON decoder for Mendix model units (.mxunit files / MPR v1 blobs).
 
 Mendix specifics handled here:
-- GUIDs are stored as 16-byte binaries in .NET (little-endian) byte order -> returned as uuid strings.
+- GUIDs are stored as 16-byte binaries (subtype 0, 3 or 4) in .NET byte order -> returned as uuid strings.
 - Every array starts with an integer "array kind" marker, which is dropped.
 """
 import struct
@@ -44,7 +44,7 @@ def _document(data, pos, is_array):
         elif kind == 0x05:
             n = _I32.unpack_from(data, pos)[0]
             raw = data[pos + 5:pos + 5 + n]
-            value = str(uuid.UUID(bytes_le=bytes(raw))) if n == 16 and data[pos + 4] in (3, 4) else bytes(raw)
+            value = str(uuid.UUID(bytes_le=bytes(raw))) if n == 16 and data[pos + 4] in (0, 3, 4) else bytes(raw)
             pos += 5 + n
         elif kind == 0x08:
             value = data[pos] == 1
