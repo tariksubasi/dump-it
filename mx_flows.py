@@ -1,5 +1,7 @@
 """Render microflows, nanoflows and rules as structured, numbered pseudo-code."""
-from mx_model import clean, compact, dtype, short, template, text
+import re
+
+from mx_model import clean, compact, dtype, field, short, template, text, type_name
 
 START = "Microflows$StartEvent"
 MERGE = "Microflows$ExclusiveMerge"
@@ -14,6 +16,22 @@ ON_ERROR = {
     "CustomWithoutRollback": "[on error: custom handler, no rollback]",
 }
 COMMIT = {"Yes": " + COMMIT", "YesWithoutEvents": " + COMMIT (no events)"}
+WORKFLOW_ACTIONS = {
+    "WorkflowCallAction": "START WORKFLOW {Workflow} WITH CONTEXT ${WorkflowContextVariable}",
+    "NotifyWorkflowAction": "NOTIFY WORKFLOW ${WorkflowVariable} AT {target}",
+    "SetTaskOutcomeAction": "COMPLETE USER TASK ${WorkflowTaskVariable} WITH OUTCOME '{OutcomeValue}'",
+    "WorkflowOperationAction": "WORKFLOW {operation} ${variable}{reason}",
+    "GenerateJumpToOptionsAction": "GENERATE JUMP-TO OPTIONS FOR WORKFLOW ${WorkflowVariable}",
+    "ApplyJumpToOptionAction": "APPLY JUMP-TO OPTION ${WorkflowJumpToDetailsVariable}",
+    "GetWorkflowDataAction": "GET WORKFLOW DATA OF ${WorkflowVariable} ({Workflow})",
+    "GetWorkflowsAction": "GET WORKFLOWS OF CONTEXT ${WorkflowContextVariableName}",
+    "GetWorkflowActivityRecordsAction": "GET ACTIVITY RECORDS OF WORKFLOW ${WorkflowVariable}",
+    "OpenUserTaskAction": "OPEN USER TASK ${UserTaskVariable}",
+    "OpenWorkflowAction": "OPEN WORKFLOW ${WorkflowVariable}",
+    "LockWorkflowAction": "PAUSE WORKFLOWS {selection}",
+    "UnlockWorkflowAction": "RESUME WORKFLOWS {selection}",
+}
+_PLACEHOLDER = re.compile(r"\{(\w+)\}")
 
 
 def _is_parameter(obj):
@@ -318,6 +336,8 @@ class FlowRenderer:
 
     def _action(self, a):
         kind = a.get("$Type", "").split("$", 1)[-1]
+        if kind in WORKFLOW_ACTIONS:
+            return self._workflow_action(a, kind)
         handler = getattr(self, "_a_" + kind, None)
         if handler:
             return handler(a)
@@ -325,6 +345,32 @@ class FlowRenderer:
         self.index.effect("ACTIONS WITHOUT A DEDICATED RENDERER (may call external systems, check the flow file)",
                           "%s: %s %s" % (self.qn, kind, compact(a, 200)))
         return "%s %s" % (kind.upper(), compact(a)), []
+
+    def _workflow_action(self, a, kind):
+        target = field(a, "Activity")
+        notify = field(a, "NotifyTarget")
+        if not target and isinstance(notify, dict):
+            target = field(notify, "Activity", "WaitForNotificationActivity", "BoundaryEvent", "Name") or compact(notify, 120)
+        selection = field(a, "WorkflowSelection")
+        if selection:
+            chosen = field(selection, "Workflow") or type_name(selection)
+        else:
+            chosen = field(a, "Workflow") or "all"
+        if field(a, "PauseAllWorkflows") or field(a, "ResumeAllPausedWorkflows"):
+            chosen = "%s (including running instances)" % chosen
+        op = field(a, "Operation") or {}
+        reason = template(field(op, "Reason"))
+        values = {"target": target, "selection": chosen,
+                  "operation": type_name(op).replace("Operation", "").upper() or "OPERATION",
+                  "variable": field(op, "WorkflowVariable") or "?",
+                  "reason": " reason " + reason if reason and reason != "''" else ""}
+        line = _PLACEHOLDER.sub(lambda m: str(values[m.group(1)] if m.group(1) in values else field(a, m.group(1)) or "?"),
+                                WORKFLOW_ACTIONS[kind])
+        self.index.workflow_ops.add("%s <- %s" % (line, self.qn))
+        if kind == "NotifyWorkflowAction" and target:
+            self.index.notify(str(target), self.qn)
+        out = field(a, "OutputVariableName")
+        return ("$%s = %s" % (out, line) if out else line), []
 
     def _a_RetrieveAction(self, a):
         src = a.get("RetrieveSource") or {}

@@ -19,6 +19,7 @@ from mx_docs import (PageRenderer, code_action_signature, code_refs, constant_li
                      scheduled_event_line, security_lines, settings_lines)
 from mx_flows import FlowRenderer, flow_signature
 from mx_model import FLOW_TYPES, STRUCTURAL, Context, Index, Project, clean, collect_texts, harvest, kind_of
+from mx_workflows import WorkflowRenderer
 
 MARKER = ".mxcontext"
 FOLDERS = {
@@ -36,10 +37,12 @@ FOLDERS = {
     "JsonStructures$JsonStructure": "integrations",
     "DataSets$DataSet": "integrations",
     "Rest$ConsumedRestService": "integrations",
+    "Workflows$Workflow": "workflows",
 }
 CODE_ACTIONS = {"JavaActions$JavaAction", "JavaScriptActions$JavaScriptAction"}
 UNUSED_CANDIDATES = FLOW_TYPES | CODE_ACTIONS | {"Forms$Page", "Forms$Snippet", "Forms$Layout", "ImportMappings$ImportMapping",
-                                                 "ExportMappings$ExportMapping", "JsonStructures$JsonStructure", "DataSets$DataSet"}
+                                                 "ExportMappings$ExportMapping", "JsonStructures$JsonStructure", "DataSets$DataSet",
+                                                 "Workflows$Workflow"}
 SKIPPED = {"Forms$PageTemplate", "Forms$BuildingBlock", "Images$ImageCollection", "Projects$ModuleSettings",
            "Texts$SystemTextCollection", "Projects$ProjectConversion"}
 USED_BY = {"Forms$Page", "Forms$Snippet", "Forms$Layout", "ImportMappings$ImportMapping", "ExportMappings$ExportMapping",
@@ -60,6 +63,8 @@ WHERE TO LOOK
 - index/security.txt: per module role, the microflows, pages, entities (rights + XPath), REST services it can access.
 - index/texts.txt: every UI/message text (all languages) -> documents using it. Use it for texts quoted in bug reports.
 - index/unused.txt: documents nothing in the export references (dead code candidates).
+- index/workflows.txt: per workflow its context, user tasks (who gets them, page, outcomes), timers, notification waits
+  and who notifies them; plus every workflow operation (start, complete task, abort, jump, notify) in flows and pages.
 - modules/<Module>/_module.txt: module roles, enumerations, constants, scheduled events, document tree.
 - modules/<Module>/domain-model.txt: entities, attributes, associations, validation, event handlers, access rules.
 - modules/<Module>/<microflows|nanoflows|rules|pages|java-actions|js-actions|integrations|other>/<Name>.txt
@@ -70,6 +75,9 @@ FLOW NOTATION
 - "L1:" marks a merge point, "-> go to L1" jumps to it. ON ERROR: custom error-handler path.
 - "+ COMMIT" = object is committed by that action. XPath follows WHERE. $Name = variable.
 - Texts show all languages separated by " / " (e.g. 'Save / Kaydet').
+- Workflows (modules/<Module>/workflows/): USER TASK / DECISION / CALL MICROFLOW list their outcomes as [value] branches;
+  PARALLEL SPLIT runs all [path N] branches; "JUMP TO X (step N)" loops back; ON ... boundary events run while the
+  activity waits. Instance state at runtime (stuck/failed workflows) is not in the model: ask for logs/admin data.
 - Every file ends with CALLED BY / USED BY listing all documents that reference it (including calls from Java code).
 
 HOW TO WORK
@@ -192,6 +200,8 @@ class Exporter:
             self._store(u, "integrations", render_published_rest(doc, qn, self.index))
         elif t == "Rest$ConsumedRestService":
             self._store(u, "integrations", render_consumed_rest(doc, qn, self.index))
+        elif t == "Workflows$Workflow":
+            self._store(u, "workflows", WorkflowRenderer(doc, qn, u, self.index).render())
         elif t in ("ImportMappings$ImportMapping", "ExportMappings$ExportMapping"):
             self._store(u, "integrations", render_mapping(doc, qn))
         elif t == "JsonStructures$JsonStructure":
@@ -306,7 +316,18 @@ class Exporter:
             title = "USED BY" if unit and unit.type in USED_BY else "CALLED BY"
             if unit and unit.type != "DomainModels$DomainModel":
                 content += "\n%s:\n" % title + ("".join("  - %s\n" % self._label(c) for c in callers) or "  (nothing in the exported model)\n")
+            if qn in self.index.wait_points and self.index.wait_points[qn]:
+                content += "\nNOTIFIED BY (Notify workflow actions per wait-for-notification activity):\n"
+                for name in self.index.wait_points[qn]:
+                    content += "  - %s <- %s\n" % (name, ", ".join(sorted(self._notifiers(qn, name))) or "(no notify action found)")
             self._write(rel, content)
+
+    def _notifiers(self, workflow, activity):
+        found = set()
+        for target, sources in self.index.notifications.items():
+            if target in (activity, "%s.%s" % (workflow, activity)) or (target.startswith(workflow + ".") and target.endswith("." + activity)):
+                found |= sources
+        return found
 
     def _write_modules(self):
         by_module = {}
@@ -369,6 +390,21 @@ class Exporter:
         self._write_security()
         self._write_texts()
         self._write_unused(reverse)
+        self._write_workflows(reverse)
+
+    def _write_workflows(self, reverse):
+        lines = []
+        for qn, summary in sorted(self.index.workflows.items()):
+            lines += ["", "WORKFLOW %s  (%s)" % (qn, self.paths.get(qn))]
+            lines += ["  " + s for s in summary]
+            for name in self.index.wait_points.get(qn, []):
+                lines.append("  waits for notification %s <- %s" % (name, ", ".join(sorted(self._notifiers(qn, name))) or "(no notify action found)"))
+            lines.append("  used by: " + (", ".join(self._label(s) for s in sorted(reverse.get(qn, ()))) or "(nothing)"))
+        if self.index.workflow_ops:
+            lines += ["", "WORKFLOW OPERATIONS IN FLOWS AND PAGES:"] + ["  " + op for op in sorted(self.index.workflow_ops)]
+        if not lines:
+            lines = ["(no workflows in the exported modules)"]
+        self._write("index/workflows.txt", "# workflows, their user tasks and everything that starts/drives them\n" + "\n".join(lines) + "\n")
 
     def _write_effects(self):
         lines = []

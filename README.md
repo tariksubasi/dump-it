@@ -74,6 +74,9 @@ sayfa ve rolleri listele, yan etkileri söyle.
 ```
 Student rolü hangi entity'leri silebilir?
 ```
+```
+Onay workflow'unda "Yönetici onayı" task'ı neden bazı kullanıcılara düşmüyor? Workflow "PaymentReceived"da neden bekliyor?
+```
 
 ---
 
@@ -91,6 +94,7 @@ Student rolü hangi entity'leri silebilir?
 | `index/security.txt` | Hangi rol neye erişebiliyor |
 | `index/texts.txt` | Ekrandaki / hata mesajlarındaki yazılar (tüm diller) nerede geçiyor |
 | `index/unused.txt` | Hiç kullanılmayan dokümanlar |
+| `index/workflows.txt` | Workflow'lar: user task kime düşüyor, hangi sayfa, outcome'lar, timer'lar, bekleme noktalarını kim notify ediyor |
 | `modules/<Modül>/...` | Her microflow, sayfa, Java action vb. için ayrı dosya |
 
 ---

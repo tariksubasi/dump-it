@@ -2,7 +2,7 @@
 import os
 import re
 
-from mx_model import attr_path, clean, compact, dtype, dump, entity_ref, quoted_names, short, template, text
+from mx_model import attr_path, clean, compact, dtype, dump, entity_ref, field, quoted_names, short, template, text
 
 # --------------------------------------------------------------------------- domain model
 
@@ -257,7 +257,10 @@ class PageRenderer:
         elif name == "NoAction":
             return
         elif t.startswith("Forms$") and name.endswith("Action"):
-            out.append("%s: %s" % (_event_label(key), action_text(value)))
+            described = action_text(value)
+            out.append("%s: %s" % (_event_label(key), described))
+            if "Workflow" in name or "Task" in name:
+                self.index.workflow_ops.add("%s <- %s (page)" % (described, self.qn))
         elif name == "SnippetCall":
             out.append("snippet " + (value.get("Form") or ""))
         elif name == "WidgetValidation":
@@ -366,6 +369,15 @@ def action_text(a):
     if name == "OpenLinkClientAction":
         addr = a.get("Address") or {}
         return "open link " + (addr.get("Value") or attr_path(addr.get("AttributeRef") or {}))
+    close = " and close page" if field(a, "ClosePage") else ""
+    if name == "SetTaskOutcomeClientAction":
+        return "complete user task with outcome '%s'%s" % (field(a, "OutcomeValue") or short(str(field(a, "Outcome") or "?")), close)
+    if name == "CallWorkflowClientAction":
+        return "start workflow %s%s" % (field(a, "Workflow"), close)
+    if name == "OpenUserTaskClientAction":
+        return "open user task" + (" (assign on open)" if field(a, "AssignOnOpen") else "")
+    if name == "OpenWorkflowClientAction":
+        return "open workflow" + (" (default page %s)" % field(a, "DefaultPage") if field(a, "DefaultPage") else "")
     return "%s %s" % (name, compact(a, 200))
 
 
@@ -670,6 +682,19 @@ def _menu(items, indent, out):
 def settings_lines(doc, index):
     out = []
     for part in doc.get("Settings") or []:
+        if part.get("$Type") == "Settings$WorkflowsProjectSettingsPart":
+            out.append("WORKFLOW SETTINGS: user entity=%s, task parallelism=%s, engine parallelism=%s" % (
+                field(part, "UserEntity"), field(part, "DefaultTaskParallelism"), field(part, "WorkflowEngineParallelism")))
+            for label, key in (("workflow state change", "WorkflowOnStateChangeEvent"), ("user task state change", "UsertaskOnStateChangeEvent")):
+                mf = field(field(part, key), "Microflow")
+                if mf:
+                    out.append("  %s -> %s" % (label, mf))
+                    index.entry("WORKFLOW EVENT HANDLERS (project)", "%s -> %s" % (label, mf))
+            for handler in field(part, "OnWorkflowEvent") or []:
+                mf = field(field(handler, "MicroflowEventHandler"), "Microflow") or field(handler, "Microflow")
+                out.append("  on %s -> %s" % (", ".join(str(t) for t in field(handler, "EventTypes") or []) or "workflow event", mf))
+                index.entry("WORKFLOW EVENT HANDLERS (project)", "on workflow event -> %s" % mf)
+            continue
         if part.get("$Type") != "Settings$ModelSettings":
             continue
         for key, label in (("AfterStartupMicroflow", "AFTER STARTUP"), ("BeforeShutdownMicroflow", "BEFORE SHUTDOWN"),

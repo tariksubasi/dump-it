@@ -31,6 +31,7 @@ KIND = {
     "DataSets$DataSet": "dataset",
     "Navigation$NavigationDocument": "navigation",
     "Settings$ProjectSettings": "project settings",
+    "Workflows$Workflow": "workflow",
 }
 
 NOISE = {
@@ -51,6 +52,22 @@ _QUOTED_NAME = re.compile(r"""['"]([A-Za-z_]\w*\.[A-Za-z_]\w*)['"]""")
 
 def _skip(key):
     return key in NOISE or key.startswith("$") or bool(_SECRET.search(key))
+
+
+def field(value, *names):
+    """Case-insensitive lookup of the first non-empty field (storage names differ in casing between versions)."""
+    if not isinstance(value, dict):
+        return None
+    lower = {k.lower(): v for k, v in value.items()}
+    for name in names:
+        v = lower.get(name.lower())
+        if v not in (None, "", []):
+            return v
+    return None
+
+
+def type_name(value):
+    return value.get("$Type", "").split("$", 1)[-1] if isinstance(value, dict) else ""
 
 
 def kind_of(unit_type):
@@ -386,6 +403,10 @@ class Index:
         self.unknown = {}
         self.access = {}
         self.texts = {}
+        self.workflows = {}
+        self.wait_points = {}
+        self.notifications = {}
+        self.workflow_ops = set()
 
     def ref(self, source, targets):
         self.refs.setdefault(source, set()).update(t for t in targets if t != source)
@@ -413,6 +434,9 @@ class Index:
 
     def ui_text(self, value, source):
         self.texts.setdefault(value, set()).add(source)
+
+    def notify(self, target, source):
+        self.notifications.setdefault(target, set()).add(source)
 
     def unknown_type(self, type_name):
         self.unknown[type_name] = self.unknown.get(type_name, 0) + 1
