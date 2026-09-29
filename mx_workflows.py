@@ -162,7 +162,13 @@ class WorkflowRenderer:
 
     def _boundary(self, event, indent):
         kind = type_name(event)
-        what = "timer %s" % clean(field(event, "Delay")) if "Timer" in kind else "notification %s" % (field(event, "Name") or "")
+        if "Timer" in kind:
+            what = "timer %s" % (clean(field(event, "Delay", "FirstExecutionTime")) or "(time not set)")
+            recurrence = field(event, "Recurrence")
+            if isinstance(recurrence, dict):
+                what += " repeating %s" % compact(recurrence, 120)
+        else:
+            what = "notification %s" % (field(event, "Name") or "")
         mode = "interrupting" if kind.startswith("Interrupting") or field(event, "IsInterrupting") else "non-interrupting"
         caption = clean(field(event, "Caption"))
         self._emit(indent, "ON %s (%s boundary event)%s:" % (what, mode, " \"%s\"" % caption if caption else ""))
