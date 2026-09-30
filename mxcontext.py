@@ -10,6 +10,7 @@ import argparse
 import json
 import os
 import shutil
+import subprocess
 import sys
 import time
 
@@ -87,6 +88,21 @@ HOW TO WORK
   callers from called-by.txt, scheduled events, REST operations). For a bug: trace from the entry point.
 """
 
+CHECK_GUIDE = """
+CHECKING MODEL CHANGES (this folder is a local git repo; the last commit is the last checked model state)
+- When the user says they changed the model and asks for a check:
+  1. Re-export (also stages all changes): {command}
+     If the shell rejects it, adapt the quoting or use py instead of python.
+  2. git diff --cached --stat, then git diff --cached -- <file> for relevant files. Read other files only for impact.
+  3. Compare with the change agreed in this conversation (if there is none, ask what it was meant to do). Report what
+     is done correctly, what is missing, unintended changes and affected callers (called-by.txt, entity-usage.txt).
+  4. Only if the change is complete and correct: git commit -m "<short summary>". Otherwise do not commit, so the
+     next check sees the whole change.
+- If the user pulled, merged or switched branch: re-export, then git commit -m "sync" without reviewing.
+- Changes unrelated to the request are listed, not reviewed. "What changed since ...": git log, git diff <commit>.
+- Run git commands one at a time (no &&). Never add a git remote: this folder must not leave the machine.
+"""
+
 
 def parse_args():
     ap = argparse.ArgumentParser(description="Export a Mendix model to LLM-friendly text files.")
@@ -98,12 +114,15 @@ def parse_args():
 
 
 def prepare_output(path):
-    """Empty (not delete) the output folder, so an agent or terminal running inside it keeps working."""
+    """Empty (not delete) the output folder except its git history, so an agent or terminal running inside it keeps
+    working and model changes stay reviewable as a diff."""
     if os.path.isdir(path) and os.listdir(path):
         if not os.path.exists(os.path.join(path, MARKER)):
             raise SystemExit("Refusing to overwrite %s: it is not an mxcontext output folder." % path)
         try:
             for name in os.listdir(path):
+                if name == ".git":
+                    continue
                 child = os.path.join(path, name)
                 if os.path.isdir(child) and not os.path.islink(child):
                     shutil.rmtree(child)
@@ -149,11 +168,49 @@ class Exporter:
         self._write_modules()
         self._write_indexes()
         self._write_overview()
-        self._write("AI_GUIDE.txt", GUIDE.format(version=self.project.version))
+        git = shutil.which("git")
+        guide = GUIDE.format(version=self.project.version)
+        if git:
+            guide += CHECK_GUIDE.format(command=self._command())
+        self._write("AI_GUIDE.txt", guide)
         self._write("opencode.json", json.dumps({"$schema": "https://opencode.ai/config.json",
                                                  "instructions": ["AI_GUIDE.txt"]}, indent=2) + "\n")
-        print("Exported %d documents from %d modules to %s in %.1fs (%d warnings)." % (
-            len(self.files), len(self.modules), self.out, time.time() - self.started, len(self.warnings)))
+        history = self._stage_history(git) if git else "git not found: change checks are disabled"
+        print("Exported %d documents from %d modules to %s in %.1fs (%d warnings). %s" % (
+            len(self.files), len(self.modules), self.out, time.time() - self.started, len(self.warnings), history))
+
+    def _command(self):
+        """The exact command that repeats this export, with forward slashes so it works in cmd, PowerShell and bash."""
+        def path(p):
+            return os.path.abspath(p).replace("\\", "/")
+        python = path(sys.executable)
+        cmd = ['"%s"' % python if " " in python else python, '"%s"' % path(__file__), '"%s"' % path(self.project.mpr),
+               "-o", '"%s"' % path(self.out)]
+        cmd += [flag for flag, on in (("--include-marketplace", self.args.include_marketplace),
+                                      ("--show-constant-values", self.args.show_constant_values)) if on]
+        return " ".join(cmd)
+
+    def _stage_history(self, git):
+        """Keep the export in a local git repo: the first run commits a baseline, later runs stage the changes so an
+        agent can review them with git diff --cached and commit once they are correct."""
+        def run(*args):
+            subprocess.run([git, *args], cwd=self.out, check=True, capture_output=True)
+        try:
+            fresh = not os.path.isdir(os.path.join(self.out, ".git"))
+            if fresh:
+                run("init", "-q")
+                run("config", "user.name", "mxcontext")
+                run("config", "user.email", "mxcontext@localhost")
+                run("config", "core.autocrlf", "false")
+            run("add", "-A")
+            if fresh:
+                run("commit", "-q", "-m", "baseline")
+                return "Started change history (baseline commit)."
+            staged = subprocess.run([git, "diff", "--cached", "--name-only"], cwd=self.out, check=True,
+                                    capture_output=True, text=True).stdout.splitlines()
+            return "%d files changed since the last checked state." % len(staged)
+        except (OSError, subprocess.CalledProcessError) as e:
+            return "Change history unavailable (%s)." % e
 
     # ------------------------------------------------------------ documents
 
@@ -448,7 +505,7 @@ class Exporter:
 
     def _write_texts(self):
         lines = []
-        for value, sources in sorted(self.index.texts.items(), key=lambda x: x[0].lower()):
+        for value, sources in sorted(self.index.texts.items(), key=lambda x: (x[0].lower(), x[0])):
             shown = value if len(value) <= 300 else value[:300] + "..."
             lines.append("\"%s\" <- %s" % (shown, ", ".join(sorted(sources))))
         self._write("index/texts.txt", "# UI and message texts in every language -> documents that contain them\n" + "\n".join(lines) + "\n")
