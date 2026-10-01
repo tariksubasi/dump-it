@@ -182,7 +182,8 @@ const PRIM_TO_SDK = {
 const PRIM_TO_PLAIN = {
     Point: v => (v && typeof v === "object" ? `${v.x};${v.y}` : v),
     Size: v => (v && typeof v === "object" ? `${v.width};${v.height}` : v),
-    Blob: v => (typeof v === "string" ? Buffer.from(v, "base64") : v)
+    // Studio Pro stores an empty blob as zero-length binary, never as null
+    Blob: v => (typeof v === "string" ? Buffer.from(v, "base64") : v == null ? Buffer.alloc(0) : v)
 };
 
 function valueToSdk(p, v, schema, opts) {
@@ -275,7 +276,8 @@ function complete(obj, catalog, schema, warn) {
             if (key[0] === "$" || key in obj) continue;
             const d = catalog.get(obj.$Type, key);
             const p = info && info.byKey.get(key);
-            if (d.k === 0x05 && !(p && p.kind === "byId")) obj[key] = randomUUID();
+            if (d.k === 0x05 && p && p.prim === "Blob") obj[key] = Buffer.alloc(0);
+            else if (d.k === 0x05 && !(p && p.kind === "byId")) obj[key] = randomUUID();
             else {
                 const s = catalog.sample(obj.$Type, key);
                 if (s === undefined && d.k === 0x03) warn(`${obj.$Type}.${key} has no default; written as empty`);

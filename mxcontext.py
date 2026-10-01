@@ -113,12 +113,14 @@ MODEL EDIT (only when the user asks you to change the model; Studio Pro must be 
   2. Show the user the planned change and the dry-run output. Only after they agree: the same command + --apply.
   3. Re-export and review git diff --cached as in CHECKING MODEL CHANGES. Every intended change must be there and
      nothing else. The SDK silently ignores properties this Mendix version does not store: a value missing from
-     the diff means the script used the wrong property or factory.
+     the diff means the script used the wrong property or factory.{check}
   4. Wrong result: {mxlocal} restore --project "{mpr}" undoes the last --apply. Fix the script, start again.
 - SDK tips: create with <Type>.createIn(parent) or the createIn<Parent>Under<Property> variant for the exact property
   (e.g. datatypes.StringType.createInMicroflowParameterObjectUnderVariableType(param)). Microflow objects go in
   mf.objectCollection, SequenceFlows in mf.flows (origin, destination; connection index 0 top 1 right 2 bottom
   3 left); IF branches get microflows.EnumerationCase.createInSequenceFlowUnderCaseValues(flow).value = "true"/"false".
+  Move an existing element with el.detach() and then add it to the new list (list.remove deletes it). Set what Studio
+  Pro would fill in, e.g. StoredValue.defaultValue = "false" for a new Boolean attribute.
 - Setting .name renames and updates by-name references in all documents, but not names inside expressions, XPath
   or Java code: grep for the old name and fix those too.
 - Finally ask the user to open the app in Studio Pro and check the Errors pane before they commit.
@@ -220,7 +222,12 @@ class Exporter:
             return ""
         def path(p):
             return os.path.abspath(p).replace("\\", "/")
-        return EDIT_GUIDE.format(mxlocal='node "%s"' % path(script), mpr=path(self.project.mpr), edits=path(self.out + "-edits"))
+        mx = os.path.join(os.environ.get("ProgramFiles", ""), "Mendix", self.project.version, "modeler", "mx.exe")
+        check = ("\n     Then, with Studio Pro closed (in PowerShell prefix it with &): \"%s\" check \"%s\"\n"
+                 "     It must not report more errors than the same check before --apply." % (path(mx), path(self.project.mpr))
+                 if os.path.isfile(mx) else "")
+        return EDIT_GUIDE.format(mxlocal='node "%s"' % path(script), mpr=path(self.project.mpr), edits=path(self.out + "-edits"),
+                                 check=check)
 
     def _stage_history(self, git):
         """Keep the export in a local git repo: the first run commits a baseline, later runs stage the changes so an
