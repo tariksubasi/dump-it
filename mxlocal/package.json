@@ -1,0 +1,12 @@
+{
+  "name": "mxlocal",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Run the Mendix Model SDK offline against a local .mpr (v2) project",
+  "main": "mxlocal.js",
+  "bin": { "mxlocal": "mxlocal.js" },
+  "engines": { "node": ">=22.13" },
+  "dependencies": {
+    "mendixmodelsdk": "4.116.0"
+  }
+}

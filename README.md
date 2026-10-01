@@ -7,7 +7,8 @@ cevap verir. Studio Pro'da yaptığın değişikliği de **"yaptım, kontrol et"
 
 - Sadece **Python** ve **Git** lazım. `pip install` yok, internet yok.
 - Mendix 9 / 10 / 11 projeleriyle çalışır.
-- Projene **hiçbir şey yazmaz**, sadece okur.
+- Export projene **hiçbir şey yazmaz**, sadece okur. İstersen OpenCode modeli **senin onayınla** değiştirebilir
+  ([Modeli yapay zekayla değiştirmek](#modeli-yapay-zekayla-değiştirmek-mxlocal)).
 
 ---
 
@@ -51,7 +52,7 @@ git pull
    ```
 5. **Sorunu sor ya da isteği yaz** (aşağıda örnekler var). OpenCode nerede neyin değişmesi gerektiğini dosya ve adım
    numarasıyla söyler.
-6. **Değişikliği Studio Pro'da kendin yap** ve **Ctrl+S** ile kaydet. Yapay zeka modeli değiştirmez, sadece yol gösterir.
+6. **Değişikliği Studio Pro'da kendin yap** ve **Ctrl+S** ile kaydet. (Ya da OpenCode'a yaptır, aşağıya bak.)
 7. **Aynı OpenCode konuşmasında yaz:**
    ```
    Söylediğin değişiklikleri yaptım, kontrol eder misin?
@@ -83,6 +84,64 @@ OpenCode ilk seferde `python` ve `git` komutlarını çalıştırmak için izin 
    ```
    Dünden beri modelde neler değişti?
    ```
+
+---
+
+## Modeli yapay zekayla değiştirmek (mxlocal)
+
+`mxlocal`, resmi **Mendix Model SDK**'yı internetsiz, doğrudan yerel `.mpr` dosyası üzerinde çalıştırır. OpenCode bir
+SDK script'i yazar, sen onaylarsın, mxlocal yedek alıp modeli yazar. Mendix 10 (MPR v2) projeleri için. Ek kurulum
+yok: gerekli her şey `C:\tools\dump-it\mxlocal` içinde gelir.
+
+**Bir kere yapılır:**
+
+1. Node sürümünü kontrol et, **22.13 veya üstü** olmalı:
+   ```
+   node --version
+   ```
+2. Projende kendi kendine kontrol çalıştır (hiçbir şey yazmaz):
+   ```
+   node C:\tools\dump-it\mxlocal\mxlocal.js verify --project "C:\Projeler\BenimProje"
+   ```
+   İlk üç satır `identical` / `all mapped values identical` demeli. Demiyorsa model değiştirmeyi **kullanma**,
+   çıktıyı bana gönder.
+3. Projenin `.gitignore` dosyasına şu satırı ekle (yedek klasörü projenin git'ine girmesin):
+   ```
+   .mxlocal-backup/
+   ```
+4. Export'u bir kere yeniden çalıştır. `AI_GUIDE.txt` içine **MODEL EDIT** bölümü eklenir; OpenCode nasıl
+   değiştireceğini oradan öğrenir.
+
+**Her değişiklikte:**
+
+1. Projenin git'inde her şey commit'li olsun (ekstra güvenlik ağı).
+2. OpenCode'a isteği yaz:
+   ```
+   BilgeAdam.Video entity'sine Note adında String(200) attribute ekle.
+   ```
+3. OpenCode script'i yazar, **deneme çalıştırması** (dry run) yapar ve neyin değişeceğini gösterir. Hiçbir şey yazılmaz.
+4. **Studio Pro'yu kapat.** Studio Pro açıkken mxlocal yazmayı reddeder.
+5. Uygunsa yaz:
+   ```
+   Onaylıyorum, uygula.
+   ```
+   mxlocal önce `.mxlocal-backup\<tarih>` altına yedek alır, sonra yazar. OpenCode export'u yenileyip diff'ten
+   değişikliğin tam ve doğru olduğunu kontrol eder.
+6. **Studio Pro'yu aç**, Errors panelinde hata olmadığına bak, gerekirse uygulamayı çalıştır.
+7. Sorun varsa Studio Pro'yu kapatıp OpenCode'a `Geri al.` yaz (veya kendin çalıştır):
+   ```
+   node C:\tools\dump-it\mxlocal\mxlocal.js restore --project "C:\Projeler\BenimProje"
+   ```
+   Model, son uygulamadan önceki haline byte byte geri döner.
+8. Her şey doğruysa projeyi her zamanki gibi commit et.
+
+Bilinmesi gerekenler:
+
+1. Yeniden adlandırma (rename) tüm dokümanlardaki referansları günceller; **expression, XPath ve Java kodu içindeki**
+   isimleri güncellemez. OpenCode bunları ayrıca arar.
+2. SDK'nın bu Mendix sürümünde tanımadığı birkaç ayar (`verify` çıktısında listelenir) olduğu gibi korunur, script'ler
+   onları göremez.
+3. Son söz Studio Pro'nundur: Errors paneli temiz değilse geri al.
 
 ---
 
@@ -178,5 +237,17 @@ Söylediğin değişiklikleri yaptım, kontrol eder misin?
 | `git not found: change checks are disabled` | Git kurulu değil. Export çalışır ama "kontrol et" özelliği çalışmaz. Git'i kur |
 | OpenCode kontrolde değişiklik bulamıyor | Studio Pro'da Ctrl+S yaptın mı? Kaydetmeden export eski modeli görür |
 | `overview.txt` sonunda `WITHOUT A DEDICATED RENDERER` yazıyor | O tipler basit `key=value` olarak çıktı. Çalışır, sadece daha az okunaklıdır |
+| `Studio Pro has this project open` | Studio Pro'yu kapat, tekrar dene |
+| `No backup '' in ...` | Geri alınacak bir uygulama yok (hepsi zaten geri alınmış) |
+| `node:sqlite` / `No such built-in module` | Node 22.13'ten eski. Node'u güncelle |
+| `AI_GUIDE.txt` içinde MODEL EDIT yok | `node` PATH'te değil ya da `mxlocal\node_modules` eksik. `git pull` yap |
 
 **Claude Code kullanıyorsan:** ilk mesajda `Önce AI_GUIDE.txt dosyasını oku` de. OpenCode bunu kendisi yapar.
+
+---
+
+## Lisanslar
+
+- `mxlocal/node_modules/mendixmodelsdk`: Mendix Model SDK, MIT lisansı.
+- `mxlocal/storage-names.json`: [mxcli](https://github.com/mendixlabs/mxcli) projesinin üretilmiş Go tiplerinden
+  türetilmiştir, Apache-2.0 lisansı.

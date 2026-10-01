@@ -103,6 +103,27 @@ CHECKING MODEL CHANGES (this folder is a local git repo; the last commit is the 
 - Run git commands one at a time (no &&). Never add a git remote: this folder must not leave the machine.
 """
 
+EDIT_GUIDE = """
+MODEL EDIT (only when the user asks you to change the model; Studio Pro must be closed for --apply/restore)
+- Write a Mendix Model SDK script (mendixmodelsdk 4.x) to {edits}/<name>.js, never inside this folder:
+  module.exports = async ({{ model, sdk, log }}) => {{
+    const mf = await model.allMicroflows().find(m => m.qualifiedName === "Module.Name").load(); /* edit mf */ }};
+  1. Dry run: {mxlocal} run "{edits}/<name>.js" --project "{mpr}"
+     It lists the units that would change. Fix errors and repeat.
+  2. Show the user the planned change and the dry-run output. Only after they agree: the same command + --apply.
+  3. Re-export and review git diff --cached as in CHECKING MODEL CHANGES. Every intended change must be there and
+     nothing else. The SDK silently ignores properties this Mendix version does not store: a value missing from
+     the diff means the script used the wrong property or factory.
+  4. Wrong result: {mxlocal} restore --project "{mpr}" undoes the last --apply. Fix the script, start again.
+- SDK tips: create with <Type>.createIn(parent) or the createIn<Parent>Under<Property> variant for the exact property
+  (e.g. datatypes.StringType.createInMicroflowParameterObjectUnderVariableType(param)). Microflow objects go in
+  mf.objectCollection, SequenceFlows in mf.flows (origin, destination; connection index 0 top 1 right 2 bottom
+  3 left); IF branches get microflows.EnumerationCase.createInSequenceFlowUnderCaseValues(flow).value = "true"/"false".
+- Setting .name renames and updates by-name references in all documents, but not names inside expressions, XPath
+  or Java code: grep for the old name and fix those too.
+- Finally ask the user to open the app in Studio Pro and check the Errors pane before they commit.
+"""
+
 
 def parse_args():
     ap = argparse.ArgumentParser(description="Export a Mendix model to LLM-friendly text files.")
@@ -172,6 +193,7 @@ class Exporter:
         guide = GUIDE.format(version=self.project.version)
         if git:
             guide += CHECK_GUIDE.format(command=self._command())
+            guide += self._edit_guide()
         self._write("AI_GUIDE.txt", guide)
         self._write("opencode.json", json.dumps({"$schema": "https://opencode.ai/config.json",
                                                  "instructions": ["AI_GUIDE.txt"]}, indent=2) + "\n")
@@ -189,6 +211,16 @@ class Exporter:
         cmd += [flag for flag, on in (("--include-marketplace", self.args.include_marketplace),
                                       ("--show-constant-values", self.args.show_constant_values)) if on]
         return " ".join(cmd)
+
+    def _edit_guide(self):
+        """MODEL EDIT section, only when node (on PATH) and mxlocal (next to this script) are available."""
+        script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mxlocal", "mxlocal.js")
+        sdk = os.path.join(os.path.dirname(script), "node_modules", "mendixmodelsdk", "package.json")
+        if not shutil.which("node") or not os.path.isfile(sdk):
+            return ""
+        def path(p):
+            return os.path.abspath(p).replace("\\", "/")
+        return EDIT_GUIDE.format(mxlocal='node "%s"' % path(script), mpr=path(self.project.mpr), edits=path(self.out + "-edits"))
 
     def _stage_history(self, git):
         """Keep the export in a local git repo: the first run commits a baseline, later runs stage the changes so an
