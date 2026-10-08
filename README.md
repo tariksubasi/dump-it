@@ -3,11 +3,12 @@
 Mendix projendeki **tüm iş mantığını** (microflow, nanoflow, workflow, sayfa, domain model, XPath, Java action, REST,
 güvenlik...) yapay zekanın okuyabileceği düz metin dosyalarına döker. Sonra **OpenCode** (veya Claude Code) o klasörde
 çalışır ve "bu nerede oluyor, bu bug nereden geliyor, bu değişiklik neyi etkiler" sorularına **dosya + adım numarasıyla**
-cevap verir. Studio Pro'da yaptığın değişikliği de **"yaptım, kontrol et"** demen yeterli olacak şekilde kontrol eder.
+cevap verir. Studio Pro'da yaptığın değişikliği **`/kontrol`** ile kontrol eder. İstersen modeli **`/degistir`** ile
+**senin onayınla** kendisi değiştirir.
 
-- Sadece **Python** ve **Git** lazım. `pip install` yok, internet yok.
+- Okuma ve kontrol için sadece **Python** ve **Git** lazım. `pip install` yok, internet yok.
 - Mendix 9 / 10 / 11 projeleriyle çalışır.
-- Export projene **hiçbir şey yazmaz**, sadece okur. İstersen OpenCode modeli **senin onayınla** değiştirebilir
+- Export projene **hiçbir şey yazmaz**, sadece okur. Model değiştirme ayrı ve isteğe bağlıdır
   ([Modeli yapay zekayla değiştirmek](#modeli-yapay-zekayla-değiştirmek-mxlocal)).
 
 ---
@@ -52,35 +53,37 @@ git pull
    ```
 5. **Sorunu sor ya da isteği yaz** (aşağıda örnekler var). OpenCode nerede neyin değişmesi gerektiğini dosya ve adım
    numarasıyla söyler.
-6. **Değişikliği Studio Pro'da kendin yap** ve **Ctrl+S** ile kaydet. (Ya da OpenCode'a yaptır, aşağıya bak.)
+6. **Değişikliği Studio Pro'da kendin yap** ve **Ctrl+S** ile kaydet. (Ya da OpenCode'a yaptır: `/degistir`, aşağıya bak.)
 7. **Aynı OpenCode konuşmasında yaz:**
    ```
-   Söylediğin değişiklikleri yaptım, kontrol eder misin?
+   /kontrol
    ```
-   OpenCode export'u kendisi yeniler, **sadece değişen yerlere** bakar ve şunu söyler: doğru olanlar, eksikler,
-   yanlışlıkla değişen şeyler ve etkilenen diğer yerler.
+   OpenCode export'u yeniler, **sadece değişen yerlere** bakar ve şunu söyler: doğru olanlar, eksikler, yanlışlıkla
+   değişen şeyler ve etkilenen diğer yerler.
 8. **Eksik varsa** Studio Pro'da düzelt, kaydet ve 7. adımı tekrarla. OpenCode her seferinde işin tamamına bakar.
-9. **Her şey doğruysa** OpenCode bu hali "kontrol edildi" olarak kendisi kaydeder. Bir sonraki kontrol sadece bundan
-   sonraki değişiklikleri görür.
+9. **Her şey doğruysa** OpenCode bu hali "kontrol edildi" olarak kaydeder. Bir sonraki kontrol sadece bundan sonraki
+   değişiklikleri görür.
 10. **Yeni bir iş için** OpenCode'da yeni bir konuşma aç ve 5. adımdan devam et.
 
-OpenCode ilk seferde `python` ve `git` komutlarını çalıştırmak için izin isteyebilir: **Always allow** de.
+### OpenCode komutları
+
+| Komut | Ne yapar |
+|---|---|
+| `/kontrol` | Export'u yeniler ve Studio Pro'daki değişikliğini kontrol eder. Yeni konuşmadaysan ne yaptığını yaz: `/kontrol şirket pasifse testler gizlensin` |
+| `/degistir <istek>` | Modeli OpenCode değiştirir (dry run, onay, uygulama). Bkz. [mxlocal](#modeli-yapay-zekayla-değiştirmek-mxlocal) |
+| `/geri-al` | Son uygulanan değişikliği geri alır |
+| `/senkron` | `git pull` / merge / branch değişikliğinden sonra export'u yeniler ve başlangıç noktası yapar |
+
+OpenCode komutları otomatik olarak izinli çalıştırır. Sadece **modeli yazan** komutlar (`apply`, `undo`) her seferinde
+senin onayını ister.
 
 ---
 
 ## Başka durumlar
 
-1. **Projede `git pull` / merge yaptıysan ya da başka branch'e geçtiysen** OpenCode'a şunu yaz:
-   ```
-   Projeyi pull ettim, export'u yenile.
-   ```
-   OpenCode export'u yeniler ve bunu yeni başlangıç noktası yapar. Böylece takım arkadaşlarının değişiklikleri
-   senin kontrollerine karışmaz.
-2. **Yeni konuşmada kontrol istiyorsan** OpenCode önceki planı bilmez. Ne yapmak istediğini bir cümleyle yaz:
-   ```
-   Şirket pasif olunca testler öğrencilere görünmesin diye değişiklik yaptım, kontrol et.
-   ```
-3. **Son günlerde ne değiştirdiğini** sorabilirsin:
+1. **Projede `git pull` / merge yaptıysan ya da başka branch'e geçtiysen** OpenCode'da `/senkron` yaz. Böylece takım
+   arkadaşlarının değişiklikleri senin kontrollerine karışmaz.
+2. **Son günlerde ne değiştirdiğini** sorabilirsin:
    ```
    Dünden beri modelde neler değişti?
    ```
@@ -89,8 +92,9 @@ OpenCode ilk seferde `python` ve `git` komutlarını çalıştırmak için izin 
 
 ## Modeli yapay zekayla değiştirmek (mxlocal)
 
-`mxlocal`, resmi **Mendix Model SDK**'yı internetsiz, doğrudan yerel `.mpr` dosyası üzerinde çalıştırır. OpenCode bir
-SDK script'i yazar, sen onaylarsın, mxlocal yedek alıp modeli yazar. Mendix 10 (MPR v2) projeleri için. Ek kurulum
+`mxlocal`, resmi **Mendix Model SDK**'yı internetsiz, doğrudan yerel `.mpr` dosyası üzerinde çalıştırır. OpenCode
+kod yazmaz; hazır ve test edilmiş **işlemlerden** (entity, attribute, association, enumeration, microflow, rol, erişim
+kuralı, yeniden adlandırma, silme) bir değişiklik dosyası doldurur. Mendix 10 / 11 (MPR v2) projeleri için. Ek kurulum
 yok: gerekli her şey `C:\tools\dump-it\mxlocal` içinde gelir.
 
 **Bir kere yapılır:**
@@ -99,49 +103,70 @@ yok: gerekli her şey `C:\tools\dump-it\mxlocal` içinde gelir.
    ```
    node --version
    ```
-2. Projende kendi kendine kontrol çalıştır (hiçbir şey yazmaz):
+2. Projende kendi kendine kontrol çalıştır (projeye hiçbir şey yazmaz):
    ```
    node C:\tools\dump-it\mxlocal\mxlocal.js verify --project "C:\Projeler\BenimProje"
    ```
-   İlk üç satır `identical` / `all mapped values identical` demeli. Demiyorsa model değiştirmeyi **kullanma**,
-   çıktıyı bana gönder.
-3. Projenin `.gitignore` dosyasına şu satırı ekle (yedek klasörü projenin git'ine girmesin):
+   İlk üç satır `identical` / `all mapped values identical` demeli.
+3. Bütün işlemleri projenin **geçici bir kopyasında** dene (gerçek projeye hiçbir şey yazmaz):
+   ```
+   node C:\tools\dump-it\mxlocal\mxlocal.js selftest --project "C:\Projeler\BenimProje"
+   ```
+   Bütün satırlar `OK` demeli. 2. veya 3. adımda `FAIL` varsa model değiştirmeyi **kullanma**, çıktıyı bana gönder.
+   Emin olmak istersen `--keep` ekle, kopyayı Studio Pro'da aç ve Errors paneline bak.
+4. Projenin `.gitignore` dosyasına şu satırı ekle (yedek klasörü projenin git'ine girmesin):
    ```
    .mxlocal-backup/
    ```
-4. Export'u bir kere yeniden çalıştır. `AI_GUIDE.txt` içine **MODEL EDIT** bölümü eklenir; OpenCode nasıl
-   değiştireceğini oradan öğrenir.
+5. Export'u bir kere yeniden çalıştır. OpenCode'a `/degistir` komutu ve `guides\EDIT.txt` eklenir.
 
 **Her değişiklikte:**
 
 1. Projenin git'inde her şey commit'li olsun (ekstra güvenlik ağı).
 2. OpenCode'a isteği yaz:
    ```
-   BilgeAdam.Video entity'sine Note adında String(200) attribute ekle.
+   /degistir Sales.Order entity'sine Note adında String(500) attribute ekle
    ```
-3. OpenCode script'i yazar, **deneme çalıştırması** (dry run) yapar ve neyin değişeceğini gösterir. Hiçbir şey yazılmaz.
+3. OpenCode isimleri bulur, değişiklik dosyasını yazar ve **deneme çalıştırması** (dry run) yapar. Hiçbir şey yazılmaz.
+   Sana planı, değişecek dokümanları, uyarıları ve **4 haneli bir onay kodu** gösterir.
 4. **Studio Pro'yu kapat.** Studio Pro açıkken mxlocal yazmayı reddeder.
-5. Uygunsa yaz:
+5. Uygunsa kodla onay ver:
    ```
-   Onaylıyorum, uygula.
+   evet 7F3A
    ```
-   mxlocal önce `.mxlocal-backup\<tarih>` altına yedek alır, sonra yazar. OpenCode export'u yenileyip diff'ten
-   değişikliğin tam ve doğru olduğunu kontrol eder.
+   OpenCode ayrıca komut için izin ister: **izin ver**. mxlocal önce `.mxlocal-backup\<tarih>` altına yedek alır, sonra
+   yazar, her işlemin modelde olduğunu kontrol eder, export'u yeniler ve değişen dosyaları gösterir.
 6. **Studio Pro'yu aç**, Errors panelinde hata olmadığına bak, gerekirse uygulamayı çalıştır.
-7. Sorun varsa Studio Pro'yu kapatıp OpenCode'a `Geri al.` yaz (veya kendin çalıştır):
-   ```
-   node C:\tools\dump-it\mxlocal\mxlocal.js restore --project "C:\Projeler\BenimProje"
-   ```
-   Model, son uygulamadan önceki haline byte byte geri döner.
+7. Sorun varsa Studio Pro'yu kapatıp `/geri-al` yaz. Model, son uygulamadan önceki haline byte byte geri döner.
 8. Her şey doğruysa projeyi her zamanki gibi commit et.
 
 Bilinmesi gerekenler:
 
-1. Yeniden adlandırma (rename) tüm dokümanlardaki referansları günceller; **expression, XPath ve Java kodu içindeki**
-   isimleri güncellemez. OpenCode bunları ayrıca arar.
-2. SDK'nın bu Mendix sürümünde tanımadığı birkaç ayar (`verify` çıktısında listelenir) olduğu gibi korunur, script'ler
-   onları göremez.
-3. Son söz Studio Pro'nundur: Errors paneli temiz değilse geri al.
+1. Onay kodu **son dry run'a** bağlıdır. Arada model değiştiyse (Studio Pro'da kaydettin, pull yaptın) uygulama
+   reddedilir ve dry run tekrarlanır. Böylece onaylamadığın bir değişiklik yazılmaz.
+2. Dry run şu uyarıları gösterir. Hepsini oku:
+   - `EXPRESSION CHECK`: ifadede olmayan bir attribute ya da değişken var (`$Order/Remak` → `Remark`).
+   - `OLD NAME STILL USED`: yeniden adlandırma; expression, XPath ve Java içindeki eski isimleri güncellemez.
+   - `STILL USED BY`: silinen şeyi kullanan dokümanlar.
+   - `NOT STORED`: script'in verdiği bir değer bu Mendix sürümünde saklanmıyor.
+   - `first use in this project`: bu tip projende ilk kez kullanılıyor. Studio Pro'da özellikle kontrol et.
+3. İşlemlerle yapılamayan değişiklikler için OpenCode Model SDK script'i (`.js`) yazar. Aynı dry run, onay ve kontrol
+   adımları geçerlidir.
+4. Son söz Studio Pro'nundur: Errors paneli temiz değilse `/geri-al`.
+
+### DeepSeek (ya da başka küçük bir model) ile kullanım
+
+Kurulum bunları kendisi ayarlar: düşük temperature (0.1), kısa komutlar (`python mx.py ...`), adım adım protokol
+(`guides\EDIT.txt`), hazır örnekler ve "bunu mu demek istedin?" önerili hata mesajları. Senin yapacakların:
+
+1. **Konuşmaları kısa tut.** Her iş için yeni konuşma aç. Uzun konuşmada küçük modeller kuralları unutur.
+2. **Bir istekte bir iş iste.** "Şu entity'yi ekle, şu microflow'u değiştir" yerine ikisini ayrı `/degistir` ile yap.
+3. **İsimleri tam yaz** (`Modül.İsim`). Bilmiyorsan önce sor: `Order ile ilgili entity'ler neler?`
+4. Model takılırsa (aynı hatayı 3 kez yapıyorsa) hatayı kopyalayıp yeni konuşmada `/degistir` ile tekrar dene.
+
+> **Veri gizliliği:** DeepSeek'i bulut API'si üzerinden kullanıyorsan, OpenCode'un okuduğu her dosya (şirketin iş
+> mantığı) o sunucuya gider. Bu, aşağıdaki 1. kurala aykırı olabilir. Şirketinin iznini al ya da modeli yerel çalıştır
+> (Ollama, LM Studio, vLLM) veya veri sözleşmesi olan bir sağlayıcı kullan.
 
 ---
 
@@ -170,7 +195,7 @@ Student rolü hangi entity'leri silebilir?
 Onay workflow'unda "Yönetici onayı" task'ı neden bazı kullanıcılara düşmüyor? Workflow "PaymentReceived"da neden bekliyor?
 ```
 ```
-Söylediğin değişiklikleri yaptım, kontrol eder misin?
+/degistir Sales.Invoice entity'si oluştur: Number AutoNumber, Total Decimal; Sales.Order'a bağla
 ```
 
 ---
@@ -179,7 +204,11 @@ Söylediğin değişiklikleri yaptım, kontrol eder misin?
 
 | Dosya / klasör | Ne işe yarar |
 |---|---|
-| `AI_GUIDE.txt` | Yapay zekaya klasörü nasıl okuyacağını ve değişiklikleri nasıl kontrol edeceğini anlatır (OpenCode otomatik yükler) |
+| `AI_GUIDE.txt` | Yapay zekaya klasörü nasıl okuyacağını anlatır (OpenCode ve Claude Code otomatik yükler) |
+| `guides/` | Değiştirme (`EDIT.txt`) ve kontrol (`CHECK.txt`) protokolleri; sadece gerektiğinde okunur |
+| `mx.py` | Yapay zekanın kısa komutları: `python mx.py help` |
+| `edits/` | Yapay zekanın yazdığı değişiklik dosyaları (export yenilense de silinmez) |
+| `opencode.json`, `.opencode/` | OpenCode ayarları, izinler, `/komutlar` ve araçlar |
 | `overview.txt` | Modüller, roller, menü, açılışta çalışan microflow |
 | `index/entry-points.txt` | REST endpoint'leri, zamanlanmış işler, event handler'lar |
 | `index/called-by.txt` | Bir microflow'u kim çağırıyor |
@@ -202,7 +231,7 @@ Söylediğin değişiklikleri yaptım, kontrol eder misin?
 2. İlk export o anki modeli başlangıç noktası olarak kaydeder.
 3. Sonraki her export, son kontrol edilen halden bu yana değişen dosyaları hazırlar. OpenCode bunları `git diff` ile
    okur; 900 dosya yerine sadece değişen birkaç dosyaya bakar.
-4. Kontrol "her şey doğru" derse OpenCode commit atar ve bu yeni başlangıç noktası olur.
+4. Kontrol "her şey doğru" derse OpenCode bu hali kaydeder ve bu yeni başlangıç noktası olur.
 5. `-context` klasörünü silersen geçmiş de silinir, sorun olmaz. Sonraki export yeniden başlar.
 
 ---
@@ -214,6 +243,7 @@ Söylediğin değişiklikleri yaptım, kontrol eder misin?
 | `-o D:\baska\klasor` | Çıktıyı başka yere yazar |
 | `--include-marketplace` | Marketplace modüllerini de detaylı döker |
 | `--show-constant-values` | Constant değerlerini de yazar (içinde şifre/API key olabilir, dikkat) |
+| `--no-opencode-tools` | OpenCode'a özel araçları (`.opencode/tools`) yazmaz. OpenCode açılışta takılırsa kullan |
 
 ---
 
@@ -234,15 +264,20 @@ Söylediğin değişiklikleri yaptım, kontrol eder misin?
 | `No .mpr file found` | Yol yanlış. İçinde `.mpr` dosyası olan klasörü ver |
 | `Refusing to overwrite` | Hedef klasör başka bir şey içeriyor. `-o` ile boş bir klasör ver |
 | `Cannot clean ...` | Çıktı klasöründe açık bir dosya var. Onu kapatıp tekrar çalıştır |
-| `git not found: change checks are disabled` | Git kurulu değil. Export çalışır ama "kontrol et" özelliği çalışmaz. Git'i kur |
+| `git not found: change checks are disabled` | Git kurulu değil. Export çalışır ama `/kontrol` çalışmaz. Git'i kur |
 | OpenCode kontrolde değişiklik bulamıyor | Studio Pro'da Ctrl+S yaptın mı? Kaydetmeden export eski modeli görür |
 | `overview.txt` sonunda `WITHOUT A DEDICATED RENDERER` yazıyor | O tipler basit `key=value` olarak çıktı. Çalışır, sadece daha az okunaklıdır |
 | `Studio Pro has this project open` | Studio Pro'yu kapat, tekrar dene |
-| `No backup '' in ...` | Geri alınacak bir uygulama yok (hepsi zaten geri alınmış) |
+| `Code ... does not match the last dry run` | Arada yeni bir dry run yapılmış. Son dry run'ın kodunu kullan |
+| `The model changed since the dry run` | Studio Pro'da kaydettin ya da pull yaptın. OpenCode dry run'ı tekrarlar, yeni kodla onay ver |
+| `Nothing to undo` | Geri alınacak bir uygulama yok (hepsi zaten geri alınmış) |
 | `node:sqlite` / `No such built-in module` | Node 22.13'ten eski. Node'u güncelle |
-| `AI_GUIDE.txt` içinde MODEL EDIT yok | `node` PATH'te değil ya da `mxlocal\node_modules` eksik. `git pull` yap |
+| `/degistir` komutu yok | `node` PATH'te değil ya da `mxlocal\node_modules` eksik. `git pull` yap, export'u tekrar çalıştır |
+| `MPR v1 format` | Proje eski formatta. Okuma ve kontrol çalışır, değiştirme çalışmaz |
+| OpenCode açılırken uzun süre bekliyor | İnternet yoksa OpenCode `.opencode` için paket indirmeyi dener. Export'u `--no-opencode-tools` ile çalıştır |
 
-**Claude Code kullanıyorsan:** ilk mesajda `Önce AI_GUIDE.txt dosyasını oku` de. OpenCode bunu kendisi yapar.
+**Claude Code kullanıyorsan:** klasördeki `CLAUDE.md` rehberi otomatik yükler. `/kontrol` gibi komutlar yerine aynı
+isteği düz yazıyla yaz (örnek: `Değişikliğimi kontrol et, guides/CHECK.txt'ye göre`).
 
 ---
 
@@ -251,3 +286,5 @@ Söylediğin değişiklikleri yaptım, kontrol eder misin?
 - `mxlocal/node_modules/mendixmodelsdk`: Mendix Model SDK, MIT lisansı.
 - `mxlocal/storage-names.json`: [mxcli](https://github.com/mendixlabs/mxcli) projesinin üretilmiş Go tiplerinden
   türetilmiştir, Apache-2.0 lisansı.
+- `mxlocal/list-markers.json`, `mxlocal/reference-catalog.json`: mxcli'nin test projelerinden (Studio Pro ile
+  oluşturulmuş Mendix 11 projeleri) öğrenilmiştir, Apache-2.0 lisansı.

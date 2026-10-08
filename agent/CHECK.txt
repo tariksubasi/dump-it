@@ -1,0 +1,29 @@
+CHECK PROTOCOL - the user changed the model in Studio Pro and asks you to check it.
+This folder is a local git repo: the last commit is the last checked model state.
+
+STEP 1 - REFRESH (the /kontrol command already did this; then skip to STEP 2)
+    @PY@ mx.py refresh
+  It re-exports the model and lists the files that changed since the last checked state.
+  "No model changes": ask the user if they saved in Studio Pro (Ctrl+S).
+
+STEP 2 - READ ONLY THE CHANGES
+    git diff --cached -- <file>
+  for the changed files that matter. Read other files only to judge impact (called-by.txt, entity-usage.txt).
+
+STEP 3 - COMPARE AND REPORT
+  Compare with the change agreed in this conversation. No agreed change in this conversation: ask what it should do.
+  Report in this format:
+    DONE: <what is correct, with file + step number>
+    MISSING: <what the agreed change still needs, or "nothing">
+    UNEXPECTED: <changes nobody asked for, or "none">
+    IMPACT: <callers, pages, roles, scheduled events affected>
+
+STEP 4 - SAVE THE CHECKED STATE
+  Only when MISSING is "nothing" and the user agrees:
+    @PY@ mx.py ok "<short summary>"
+  Otherwise do not save, so the next check sees the whole change.
+
+OTHER CASES
+- The user pulled, merged or switched branch: @PY@ mx.py refresh, then @PY@ mx.py ok "sync" without a review.
+- "What changed since ...": git log --oneline, then git diff <commit> -- <file>.
+- Run git commands one at a time (no &&). Never add a git remote: this folder must not leave the machine.

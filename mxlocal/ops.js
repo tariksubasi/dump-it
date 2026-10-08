@@ -327,6 +327,48 @@ function bind(model, client) {
         return fail(`Unknown type '${spec}'. Use ${DATA_TYPES}`, s, Object.keys(simple));
     }
 
+    // ------------------------------------------------ expression check ($Var/Member paths)
+
+    const lint = [];
+    const toLint = []; // { m, expr, where }
+
+    function expr(m, value, where) {
+        toLint.push({ m, expr: String(value), where });
+        return String(value);
+    }
+
+    // After all ops ran (variables of later actions exist), check $Var/Member against the variable's entity.
+    async function lintExpressions() {
+        for (const { m, expr: e, where } of toLint) {
+            const re = /\$(\w+)\/([\w.]+)/g;
+            let hit;
+            while ((hit = re.exec(e))) {
+                const [, variable, member] = hit;
+                const v = variablesOf(m).get(variable);
+                if (!v) {
+                    lint.push(`${where}: $${variable} is not a parameter or a variable created in ${m.qualifiedName}`);
+                    continue;
+                }
+                let entityQn;
+                try {
+                    entityQn = await entityOfVariable(m, variable, where);
+                } catch (err) {
+                    continue; // primitive variable or unknown: nothing to check
+                }
+                if (!entityQn) continue;
+                const ent = await entity(entityQn);
+                await loadParents(ent);
+                const first = member.split("/")[0];
+                if (first.includes(".")) continue; // association path: Module.Assoc
+                const chain = attributeChain(ent);
+                if (!chain.complete) continue; // inherits from an entity outside the project (System.User, ...)
+                const names = chain.attributes.map(a => a.name);
+                if (!names.includes(first)) lint.push(`${where}: ${entityQn} has no attribute '${first}' (in $${variable}/${member})` + ((s => (s.length ? `. Did you mean: ${s.join(", ")}?` : ""))(suggest(first, names, 3))));
+            }
+        }
+        return lint;
+    }
+
     // ------------------------------------------------ microflow building
 
     const X_STEP = 190;
@@ -355,34 +397,55 @@ function bind(model, client) {
         return out;
     }
 
-    async function memberChanges(action, entityQn, set, where) {
+    async function memberChanges(action, entityQn, set, where, m0) {
         const ent = await entity(entityQn);
+        await loadParents(ent);
         for (const [member, value] of Object.entries(set || {})) {
             const mc = mf.MemberChange.createIn(action);
             mc.type = mf.ChangeActionItemType.Set;
-            mc.value = String(value);
+            mc.value = expr(m0, value, where);
             if (member.includes(".")) {
                 const assoc = await get(member);
                 if (!(assoc instanceof dm.AssociationBase)) throw new Error(`${where}: '${member}' is not an association`);
                 mc.association = assoc;
             } else {
-                const attr = allAttributes(ent).find(a => a.name === member);
-                if (!attr) fail(`${where}: ${entityQn} has no attribute '${member}'`, member, allAttributes(ent).map(a => a.name));
+                const chain = attributeChain(ent);
+                const attr = chain.attributes.find(a => a.name === member);
+                if (!attr && !chain.complete) throw new Error(`${where}: '${member}' is not an own attribute of ${entityQn}; attributes inherited from System entities cannot be set by ops (use a .js script or Studio Pro)`);
+                if (!attr) fail(`${where}: ${entityQn} has no attribute '${member}'`, member, chain.attributes.map(a => a.name));
                 mc.attribute = attr;
             }
         }
     }
 
     function allAttributes(ent) {
-        const out = [...ent.attributes];
+        return attributeChain(ent).attributes;
+    }
+
+    // Own + inherited attributes; complete = false when a parent is not in the project (System.User, ...).
+    function attributeChain(ent) {
+        const attributes = [...ent.attributes];
+        let complete = true;
         let g = ent.generalization;
-        for (let i = 0; i < 10 && g instanceof dm.Generalization && g.generalization; i++) {
+        for (let i = 0; i < 10 && g instanceof dm.Generalization; i++) {
             const parent = g.generalization;
-            if (!parent.isLoaded) break;
-            out.push(...parent.attributes);
+            if (!parent || !parent.isLoaded) {
+                complete = false;
+                break;
+            }
+            attributes.push(...parent.attributes);
             g = parent.generalization;
         }
-        return out;
+        return { attributes, complete };
+    }
+
+    // Load the generalization chain so attributeChain can see inherited attributes.
+    async function loadParents(ent) {
+        let g = ent.generalization;
+        for (let i = 0; i < 10 && g instanceof dm.Generalization && g.generalization; i++) {
+            const parent = g.generalization.isLoaded ? g.generalization : await g.generalization.load();
+            g = parent.generalization;
+        }
     }
 
     // Entity of an object variable in microflow m (parameter, retrieve, create).
@@ -435,7 +498,7 @@ function bind(model, client) {
                 a.entity = await entity(spec.entity);
                 a.outputVariableName = noDollar(spec.variable);
                 a.commit = bool(spec.commit, false) ? mf.CommitEnum.Yes : mf.CommitEnum.No;
-                await memberChanges(a, spec.entity, spec.set, where);
+                await memberChanges(a, spec.entity, spec.set, where, m);
                 break;
             }
             case "change": {
@@ -443,7 +506,7 @@ function bind(model, client) {
                 a.changeVariableName = noDollar(spec.variable);
                 a.commit = bool(spec.commit, false) ? mf.CommitEnum.Yes : mf.CommitEnum.No;
                 a.refreshInClient = bool(spec.refresh, false);
-                await memberChanges(a, await entityOfVariable(m, spec.variable, where), spec.set, where);
+                await memberChanges(a, await entityOfVariable(m, spec.variable, where), spec.set, where, m);
                 break;
             }
             case "commit": {
@@ -469,7 +532,7 @@ function bind(model, client) {
                     if (!p) fail(`${where}: ${spec.microflow} has no parameter '${name}'`, name, params.map(x => x.name));
                     const pm = mf.MicroflowCallParameterMapping.createIn(call);
                     pm.parameter = p;
-                    pm.argument = String(value);
+                    pm.argument = expr(m, value, where);
                 }
                 const missing = params.filter(p => !(p.name in (spec.args || {})));
                 if (missing.length) throw new Error(`${where}: ${spec.microflow} needs args for: ${missing.map(p => p.name).join(", ")}`);
@@ -482,7 +545,7 @@ function bind(model, client) {
                 a.level = enumValue(mf.LogLevel, spec.level || "Info", "log level");
                 a.node = `'${String(spec.node || m.qualifiedName.split(".")[0]).replace(/'/g, "''")}'`;
                 a.messageTemplate.text = String(spec.message);
-                for (const e of spec.args || []) mf.TemplateArgument.createIn(a.messageTemplate).expression = String(e);
+                for (const e of spec.args || []) mf.TemplateArgument.createIn(a.messageTemplate).expression = expr(m, e, where);
                 break;
             }
             case "message": {
@@ -496,13 +559,13 @@ function bind(model, client) {
                 const a = mf.CreateVariableAction.createIn(act);
                 a.variableName = noDollar(spec.name);
                 a.variableType = await dataType(spec.type);
-                a.initialValue = String(spec.value);
+                a.initialValue = expr(m, spec.value, where);
                 break;
             }
             case "set": {
                 const a = mf.ChangeVariableAction.createIn(act);
                 a.changeVariableName = noDollar(spec.name);
-                a.value = String(spec.value);
+                a.value = expr(m, spec.value, where);
                 break;
             }
         }
@@ -610,6 +673,7 @@ function bind(model, client) {
         },
         async addAccessRule(o) {
             const e = await entity(o.entity);
+            await loadParents(e);
             const rule = dm.AccessRule.createInEntityUnderAccessRules(e);
             for (const qn of [].concat(o.roles)) {
                 const r = await get(qn);
@@ -669,7 +733,7 @@ function bind(model, client) {
             const end = mf.EndEvent.createIn(m.objectCollection);
             point(end, 100 + (acts.length + 1) * X_STEP, 200);
             end.size = { width: 20, height: 20 };
-            end.returnValue = o.returns ? String(o.returnValue) : "";
+            end.returnValue = o.returns ? expr(m, o.returnValue, qn + " returnValue") : "";
             const chain = [start, ...acts, end];
             for (let i = 0; i + 1 < chain.length; i++) flow(m, chain[i], chain[i + 1]);
             if (o.roles) await impl.grantAccess({ document: qn, roles: o.roles });
@@ -821,6 +885,7 @@ function bind(model, client) {
                 throw e;
             }
         }
+        return lintExpressions();
     }
 
     async function checkPlan(plan) {
@@ -839,7 +904,7 @@ function bind(model, client) {
         return failed;
     }
 
-    const api = { get, runPlan, checkPlan, dataType, folder };
+    const api = { get, runPlan, checkPlan, dataType, folder, lintExpressions };
     for (const name of Object.keys(OPS)) {
         api[name] = o => {
             validate("op", name, OPS[name], o || {}, `ops.${name}`);

@@ -209,8 +209,12 @@ async function run(file, mpr) {
         lines.push(s);
         out(s);
     };
-    if (change.plan) await ops.runPlan(change.plan, s => say("  " + s));
-    else await change.fn({ model, sdk: require("mendixmodelsdk"), ops, log: s => say("  " + s) });
+    let exprWarnings = [];
+    if (change.plan) exprWarnings = await ops.runPlan(change.plan, s => say("  " + s));
+    else {
+        await change.fn({ model, sdk: require("mendixmodelsdk"), ops, log: s => say("  " + s) });
+        exprWarnings = await ops.lintExpressions();
+    }
     await model.flushChanges();
     const s = client.summary();
     say(`Changes: ${s.created.length} created, ${s.updated.length} updated, ${s.deleted.length} deleted unit(s)`);
@@ -225,6 +229,7 @@ async function run(file, mpr) {
     const enc = client.encode();
     const lost = lostProperties(client, model, enc);
     const warnings = relevant(client.summary().warnings, enc);
+    if (exprWarnings.length) say("EXPRESSION CHECK (Studio Pro will show these as errors; fix the change file):\n" + exprWarnings.map(w => "  ! " + w).join("\n"));
     if (lost.length) say("NOT STORED (the script set these, but this Mendix version does not keep them; use api <Type>):\n" + lost.map(w => "  ! " + w).join("\n"));
     if (s.leftovers.length) say("OLD NAME STILL USED (rename does not update expressions, XPath, Java; fix these too):\n" + s.leftovers.map(w => "  ! " + w).join("\n"));
     if (warnings.length) say("Warnings:\n" + warnings.map(w => "  ! " + w).join("\n"));
@@ -354,7 +359,8 @@ function restoreCmd(mpr, name) {
     const dir = path.dirname(mpr);
     const all = backups(dir);
     const pick = name && name !== true ? name : all[all.length - 1];
-    if (!pick || !all.includes(pick)) throw new Error(`No backup '${pick || ""}' in ${path.join(dir, BACKUP_DIR)}`);
+    if (!pick) throw new Error("Nothing to undo: no applied change is left to restore (all were undone, or none was applied).");
+    if (!all.includes(pick)) throw new Error(`No backup '${pick}' in ${path.join(dir, BACKUP_DIR)}. Backups: ${all.join(", ") || "(none)"}`);
     if (fs.existsSync(mpr + ".lock")) throw new Error("Studio Pro has this project open. Close it first.");
     const m = restore(dir, path.join(dir, BACKUP_DIR, pick));
     pending.clear(dir);
@@ -411,7 +417,7 @@ function report(e, file) {
     const stack = (e && e.stack ? e.stack : "").split("\n").slice(1);
     const own = file && stack.find(l => l.includes(path.resolve(file)));
     if (own) lines.push("  at " + own.trim().replace(/^at /, ""));
-    else if (!/^(No |Code |The model|apply needs|run needs|Studio Pro|Expected|--project|Only|This project|Unknown command|Op \d)/.test(msg)) lines.push(...stack.slice(0, 4).map(l => "  " + l.trim()));
+    else if (!/^(No |Nothing |Code |The model|apply needs|run needs|Studio Pro|Expected|--project|Only|This project|Unknown command|Op \d)/.test(msg)) lines.push(...stack.slice(0, 4).map(l => "  " + l.trim()));
     const hint = HINTS.find(([re]) => re.test(msg));
     if (hint) lines.push("HINT: " + hint[1]);
     return lines.join("\n") + "\n";

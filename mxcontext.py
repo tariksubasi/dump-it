@@ -50,8 +50,13 @@ USED_BY = {"Forms$Page", "Forms$Snippet", "Forms$Layout", "ImportMappings$Import
            "JsonStructures$JsonStructure", "DataSets$DataSet"}
 ENTITY_OPS = ("create", "retrieve", "change", "commit", "delete", "page", "referenced")
 
-GUIDE = """You are analysing a Mendix {version} app. Its model was exported to text by mxcontext; the export is
-read-only (changes are made in Mendix Studio Pro). Only custom modules are exported in detail.
+GUIDE = """You are analysing a Mendix {version} app. Its model was exported to text by mxcontext. Only custom modules
+are exported in detail. Answer in the user's language.
+
+RULES
+1. Cite file path + step number for every claim. If something is not in the export, say so instead of guessing.
+2. Grep first, then read only the files you need. Do not read whole folders.
+3. Never edit the exported files: they are regenerated. {edit_rule}
 
 WHERE TO LOOK
 - overview.txt: modules, user roles -> module roles, app lifecycle microflows, navigation, export warnings.
@@ -88,43 +93,25 @@ HOW TO WORK
   callers from called-by.txt, scheduled events, REST operations). For a bug: trace from the entry point.
 """
 
-CHECK_GUIDE = """
-CHECKING MODEL CHANGES (this folder is a local git repo; the last commit is the last checked model state)
-- When the user says they changed the model and asks for a check:
-  1. Re-export (also stages all changes): {command}
-     If the shell rejects it, adapt the quoting or use py instead of python.
-  2. git diff --cached --stat, then git diff --cached -- <file> for relevant files. Read other files only for impact.
-  3. Compare with the change agreed in this conversation (if there is none, ask what it was meant to do). Report what
-     is done correctly, what is missing, unintended changes and affected callers (called-by.txt, entity-usage.txt).
-  4. Only if the change is complete and correct: git commit -m "<short summary>". Otherwise do not commit, so the
-     next check sees the whole change.
-- If the user pulled, merged or switched branch: re-export, then git commit -m "sync" without reviewing.
-- Changes unrelated to the request are listed, not reviewed. "What changed since ...": git log, git diff <commit>.
-- Run git commands one at a time (no &&). Never add a git remote: this folder must not leave the machine.
+CHANGE_GUIDE = """
+CHANGING OR CHECKING THE MODEL
+- The user asks to change the model (entities, attributes, associations, enumerations, microflows, roles, access,
+  renames, deletes): read guides/EDIT.txt first and follow it step by step. The user may also type /degistir.
+- The user changed the model in Studio Pro and asks for a check: read guides/CHECK.txt and follow it (/kontrol).
+- Short commands, run from this folder: {py} mx.py help
+
+RULES (again): cite file + step; say "not in the export" instead of guessing; never edit exported files.
 """
 
-EDIT_GUIDE = """
-MODEL EDIT (only when the user asks you to change the model; Studio Pro must be closed for --apply/restore)
-- Write a Mendix Model SDK script (mendixmodelsdk 4.x) to {edits}/<name>.js, never inside this folder:
-  module.exports = async ({{ model, sdk, log }}) => {{
-    const mf = await model.allMicroflows().find(m => m.qualifiedName === "Module.Name").load(); /* edit mf */ }};
-  1. Dry run: {mxlocal} run "{edits}/<name>.js" --project "{mpr}"
-     It lists the units that would change. Fix errors and repeat.
-  2. Show the user the planned change and the dry-run output. Only after they agree: the same command + --apply.
-  3. Re-export and review git diff --cached as in CHECKING MODEL CHANGES. Every intended change must be there and
-     nothing else. The SDK silently ignores properties this Mendix version does not store: a value missing from
-     the diff means the script used the wrong property or factory.{check}
-  4. Wrong result: {mxlocal} restore --project "{mpr}" undoes the last --apply. Fix the script, start again.
-- SDK tips: create with <Type>.createIn(parent) or the createIn<Parent>Under<Property> variant for the exact property
-  (e.g. datatypes.StringType.createInMicroflowParameterObjectUnderVariableType(param)). Microflow objects go in
-  mf.objectCollection, SequenceFlows in mf.flows (origin, destination; connection index 0 top 1 right 2 bottom
-  3 left); IF branches get microflows.EnumerationCase.createInSequenceFlowUnderCaseValues(flow).value = "true"/"false".
-  Move an existing element with el.detach() and then add it to the new list (list.remove deletes it). Set what Studio
-  Pro would fill in, e.g. StoredValue.defaultValue = "false" for a new Boolean attribute.
-- Setting .name renames and updates by-name references in all documents, but not names inside expressions, XPath
-  or Java code: grep for the old name and fix those too.
-- Finally ask the user to open the app in Studio Pro and check the Errors pane before they commit.
+NO_EDIT_GUIDE = """
+CHANGING OR CHECKING THE MODEL
+- Model editing is not set up here (needs an MPR v2 project, Node.js 22.13+ and mxlocal). For a change request, give
+  step-by-step Studio Pro instructions instead.
+- The user changed the model in Studio Pro and asks for a check: read guides/CHECK.txt and follow it (/kontrol).
 """
+
+AGENT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent")
+KEEP = {".git", "edits", ".opencode"}  # survive re-exports: history, the agent's change files, OpenCode's own files
 
 
 def parse_args():
@@ -133,18 +120,19 @@ def parse_args():
     ap.add_argument("-o", "--out", help="output folder (default: <project folder>-context next to the project)")
     ap.add_argument("--include-marketplace", action="store_true", help="also export marketplace modules in detail")
     ap.add_argument("--show-constant-values", action="store_true", help="write constant default values (may contain secrets)")
+    ap.add_argument("--no-opencode-tools", action="store_true", help="do not write OpenCode custom tools (.opencode/tools)")
     return ap.parse_args()
 
 
 def prepare_output(path):
-    """Empty (not delete) the output folder except its git history, so an agent or terminal running inside it keeps
-    working and model changes stay reviewable as a diff."""
+    """Empty (not delete) the output folder except KEEP, so an agent or terminal running inside it keeps working, model
+    changes stay reviewable as a diff and the agent's change files survive."""
     if os.path.isdir(path) and os.listdir(path):
         if not os.path.exists(os.path.join(path, MARKER)):
             raise SystemExit("Refusing to overwrite %s: it is not an mxcontext output folder." % path)
         try:
             for name in os.listdir(path):
-                if name == ".git":
+                if name in KEEP:
                     continue
                 child = os.path.join(path, name)
                 if os.path.isdir(child) and not os.path.islink(child):
@@ -192,42 +180,92 @@ class Exporter:
         self._write_indexes()
         self._write_overview()
         git = shutil.which("git")
-        guide = GUIDE.format(version=self.project.version)
-        if git:
-            guide += CHECK_GUIDE.format(command=self._command())
-            guide += self._edit_guide()
-        self._write("AI_GUIDE.txt", guide)
-        self._write("opencode.json", json.dumps({"$schema": "https://opencode.ai/config.json",
-                                                 "instructions": ["AI_GUIDE.txt"]}, indent=2) + "\n")
+        self._write_agent_files(bool(git))
         history = self._stage_history(git) if git else "git not found: change checks are disabled"
         print("Exported %d documents from %d modules to %s in %.1fs (%d warnings). %s" % (
             len(self.files), len(self.modules), self.out, time.time() - self.started, len(self.warnings), history))
 
-    def _command(self):
-        """The exact command that repeats this export, with forward slashes so it works in cmd, PowerShell and bash."""
-        def path(p):
-            return os.path.abspath(p).replace("\\", "/")
-        python = path(sys.executable)
-        cmd = ['"%s"' % python if " " in python else python, '"%s"' % path(__file__), '"%s"' % path(self.project.mpr),
-               "-o", '"%s"' % path(self.out)]
-        cmd += [flag for flag, on in (("--include-marketplace", self.args.include_marketplace),
-                                      ("--show-constant-values", self.args.show_constant_values)) if on]
-        return " ".join(cmd)
+    # ------------------------------------------------------------ agent files (OpenCode / Claude Code)
 
-    def _edit_guide(self):
-        """MODEL EDIT section, only when node (on PATH) and mxlocal (next to this script) are available."""
-        script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mxlocal", "mxlocal.js")
-        sdk = os.path.join(os.path.dirname(script), "node_modules", "mendixmodelsdk", "package.json")
-        if not shutil.which("node") or not os.path.isfile(sdk):
-            return ""
-        def path(p):
-            return os.path.abspath(p).replace("\\", "/")
-        mx = os.path.join(os.environ.get("ProgramFiles", ""), "Mendix", self.project.version, "modeler", "mx.exe")
-        check = ("\n     Then, with Studio Pro closed (in PowerShell prefix it with &): \"%s\" check \"%s\"\n"
-                 "     It must not report more errors than the same check before --apply." % (path(mx), path(self.project.mpr))
-                 if os.path.isfile(mx) else "")
-        return EDIT_GUIDE.format(mxlocal='node "%s"' % path(script), mpr=path(self.project.mpr), edits=path(self.out + "-edits"),
-                                 check=check)
+    def _python_command(self):
+        """Shortest command that starts Python 3 here, for guides and permission rules."""
+        for name in ("python", "py", "python3"):
+            found = shutil.which(name)
+            if found and "WindowsApps" not in found:
+                return name
+        exe = sys.executable.replace("\\", "/")
+        return '"%s"' % exe if " " in exe else exe
+
+    def _mx_exe(self):
+        """Studio Pro's command line tool for this version, when installed (Windows)."""
+        root = os.path.join(os.environ.get("ProgramFiles", ""), "Mendix")
+        for version in (self.project.version, ".".join(self.project.version.split(".")[:3])):
+            exe = os.path.join(root, version, "modeler", "mx.exe")
+            if os.path.isfile(exe):
+                return exe
+        if os.path.isdir(root):
+            short = ".".join(self.project.version.split(".")[:3])
+            for name in sorted(os.listdir(root), reverse=True):
+                exe = os.path.join(root, name, "modeler", "mx.exe")
+                if name.startswith(short) and os.path.isfile(exe):
+                    return exe
+        return ""
+
+    def _agent_template(self, *parts):
+        with open(os.path.join(AGENT_DIR, *parts), encoding="utf-8") as f:
+            return f.read()
+
+    def _write_agent_files(self, git):
+        """AI_GUIDE.txt (always loaded) + guides/ (read on demand) + mx.py (short commands) + OpenCode config,
+        permissions, slash commands and tools. Weak models do much better with short, fixed commands."""
+        mxlocal = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mxlocal", "mxlocal.js")
+        sdk = os.path.join(os.path.dirname(mxlocal), "node_modules", "mendixmodelsdk", "package.json")
+        can_edit = bool(shutil.which("node")) and os.path.isfile(sdk) and not self.project.inline
+        py = self._python_command()
+        fill = lambda text: text.replace("@PY@", py)  # noqa: E731
+
+        guide = GUIDE.format(version=self.project.version,
+                             edit_rule="Write change files only in edits/." if can_edit else "")
+        guide += (CHANGE_GUIDE if can_edit else NO_EDIT_GUIDE).format(py=py)
+        self._write("AI_GUIDE.txt", guide)
+        self._write("CLAUDE.md", "@AI_GUIDE.txt\n")  # Claude Code loads the guide by itself
+        self._write("guides/CHECK.txt", fill(self._agent_template("CHECK.txt")))
+        if can_edit:
+            self._write("guides/EDIT.txt", fill(self._agent_template("EDIT.txt")))
+        os.makedirs(os.path.join(self.out, "edits"), exist_ok=True)
+
+        flags = [flag for flag, on in (("--include-marketplace", self.args.include_marketplace),
+                                       ("--show-constant-values", self.args.show_constant_values),
+                                       ("--no-opencode-tools", self.args.no_opencode_tools)) if on]
+        config = {"mxcontext": os.path.abspath(__file__), "mpr": os.path.abspath(self.project.mpr),
+                  "export_flags": flags, "mxlocal": mxlocal, "mx_exe": self._mx_exe()}
+        script = self._agent_template("mx.py").replace(
+            "CONFIG = None  # filled in by mxcontext.py",
+            "CONFIG = json.loads(%r)  # written by mxcontext.py" % json.dumps(config))
+        self._write("mx.py", script)
+
+        opencode = os.path.join(self.out, ".opencode")
+        for sub in ("commands", "tools"):
+            shutil.rmtree(os.path.join(opencode, sub), ignore_errors=True)
+        for name in sorted(os.listdir(os.path.join(AGENT_DIR, "commands"))):
+            if name == "degistir.md" and not can_edit or name == "geri-al.md" and not can_edit:
+                continue
+            self._write(".opencode/commands/" + name, fill(self._agent_template("commands", name)))
+        if not self.args.no_opencode_tools:
+            exe = sys.executable
+            self._write(".opencode/tools/mx.js", self._agent_template("tools", "mx.js").replace("@PYTHON_JSON@", json.dumps(exe)))
+
+        edits = os.path.join(self.out, "edits")
+        bash = {"*": "ask", "git *": "allow", "grep *": "allow", "rg *": "allow", "ls *": "allow", "dir *": "allow",
+                "cat *": "allow", "type *": "allow", "head *": "allow", "tail *": "allow",
+                py + " mx.py *": "allow", py + " mx.py apply*": "ask", py + " mx.py undo*": "ask",
+                "git remote*": "deny", "git push*": "deny"}
+        edit = {"*": "deny", "edits/*": "allow", edits + os.sep + "*": "allow", edits.replace("\\", "/") + "/*": "allow"}
+        settings = {"$schema": "https://opencode.ai/config.json",
+                    "instructions": ["AI_GUIDE.txt"],
+                    "permission": {"edit": edit, "bash": bash},
+                    "agent": {"build": {"temperature": 0.1}, "plan": {"temperature": 0.1}}}
+        self._write("opencode.json", json.dumps(settings, indent=2) + "\n")
 
     def _stage_history(self, git):
         """Keep the export in a local git repo: the first run commits a baseline, later runs stage the changes so an
@@ -241,6 +279,12 @@ class Exporter:
                 run("config", "user.name", "mxcontext")
                 run("config", "user.email", "mxcontext@localhost")
                 run("config", "core.autocrlf", "false")
+            exclude = os.path.join(self.out, ".git", "info", "exclude")
+            os.makedirs(os.path.dirname(exclude), exist_ok=True)
+            with open(exclude, "a+", encoding="utf-8") as f:
+                f.seek(0)
+                present = f.read().split()
+                f.write("".join(p + "\n" for p in ("edits/", ".opencode/") if p not in present))
             run("add", "-A")
             if fresh:
                 run("commit", "-q", "-m", "baseline")

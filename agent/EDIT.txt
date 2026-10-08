@@ -1,0 +1,111 @@
+MODEL EDIT PROTOCOL - follow these steps in order. Do not skip a step. Do not invent steps.
+
+THREE RULES (most important)
+R1. Never run "@PY@ mx.py apply" before the user says yes to the approval code of the LAST dry run.
+R2. Never say something is done unless a command output shows it ("Checked: ...", "Saved ...").
+R3. Write change files only in edits/. Never edit other files in this folder: they are regenerated.
+
+STEP 1 - FIND THE NAMES
+  Find the exact names of everything you will touch (case matters):
+    @PY@ mx.py find <part of a name>          (or tool mx_find)
+  Read the related files in modules/ when you need the current logic.
+
+STEP 2 - WRITE THE CHANGE FILE
+  Write edits/<short-name>.json with operations. See all operations and fields:
+    @PY@ mx.py ops                            (or tool mx_ops)
+  Use ONLY operations and fields from that list. Use a .js file only when no operation fits (see SDK SCRIPTS).
+  Several operations in one file are fine; they run in order.
+
+STEP 3 - DRY RUN (writes nothing)
+    @PY@ mx.py dryrun <short-name>            (or tool mx_dryrun)
+  If it prints ERROR: read the HINT line, fix the file, run again. After 5 failed tries: stop, show the user the
+  last error and ask for help.
+  If it prints EXPRESSION CHECK lines: fix the names in the change file and run again (Studio Pro would show errors).
+
+STEP 4 - SHOW AND ASK
+  Show the user, in this format:
+    PLAN: <1-5 bullets: what changes and why>
+    DRY RUN: <the numbered op lines and the "Changes:" lines from the output>
+    ATTENTION: <every line under EXPRESSION CHECK / NOT STORED / OLD NAME STILL USED / STILL USED BY / Warnings,
+               or "none">
+    To apply: close Studio Pro and answer "yes <CODE>".
+  Then STOP and wait for the answer.
+
+STEP 5 - APPLY (only after the user said yes with that code; Studio Pro closed)
+    @PY@ mx.py apply <CODE>
+  It saves the model (with a backup), re-exports, shows the changed files and runs mx check when available.
+  "does not match the last dry run" or "model changed since the dry run": go back to STEP 3, then STEP 4.
+
+STEP 6 - REPORT
+  Report from the apply output: the "Checked:" or "CHECK FAILED" line, the changed export files, the mx check result
+  (or that it did not run). Fix OLD NAME / STILL USED lines with a new change (back to STEP 2).
+  Tell the user: open the app in Studio Pro, look at the Errors pane, run the app, then commit as usual.
+  Wrong result: ask the user to close Studio Pro, then run "@PY@ mx.py undo". It restores the model from before
+  the apply.
+
+EXAMPLES (copy the shape, change the names)
+
+Add an attribute:
+{ "ops": [ { "op": "addAttribute", "entity": "Sales.Order", "name": "Note", "type": "String(500)" } ] }
+
+New enumeration + entity using it:
+{ "ops": [
+  { "op": "createEnumeration", "module": "Sales", "name": "OrderStatus", "values": ["Open", "Paid", { "name": "Cancelled", "caption": "Canceled" }] },
+  { "op": "createEntity", "module": "Sales", "name": "Invoice", "attributes": [
+      { "name": "Number", "type": "AutoNumber" }, { "name": "Total", "type": "Decimal" },
+      { "name": "Status", "type": "Enum(Sales.OrderStatus)", "default": "Open" } ] },
+  { "op": "addAssociation", "from": "Sales.Invoice", "to": "Sales.Order" }
+] }
+
+New microflow with steps (runs top to bottom):
+{ "ops": [ { "op": "createMicroflow", "module": "Sales", "name": "ACT_Order_Close", "folder": "Orders",
+  "parameters": [ { "name": "Order", "type": "Sales.Order" } ], "roles": ["Sales.User"],
+  "actions": [
+    { "action": "retrieve", "variable": "Lines", "entity": "Sales.OrderLine", "xpath": "[Sales.OrderLine_Order = $Order]" },
+    { "action": "change", "variable": "Order", "set": { "Status": "Sales.OrderStatus.Paid" }, "commit": true },
+    { "action": "call", "microflow": "Sales.SUB_Order_Notify", "args": { "Order": "$Order" } },
+    { "action": "message", "text": "Order closed", "type": "Information" } ] } ] }
+
+Insert steps into an existing microflow (after the step that creates $Customer), and rename:
+{ "ops": [
+  { "op": "addActions", "microflow": "Sales.ACT_Order_Save", "after": "Customer",
+    "actions": [ { "action": "log", "message": "Customer {1} saved", "args": ["$Customer/Name"] } ] },
+  { "op": "rename", "target": "Sales.Order.Note", "newName": "Remark" }
+] }
+
+Security:
+{ "ops": [
+  { "op": "createModuleRole", "module": "Sales", "name": "Manager" },
+  { "op": "grantAccess", "document": "Sales.ACT_Order_Close", "roles": ["Sales.Manager"] },
+  { "op": "addAccessRule", "entity": "Sales.Order", "roles": ["Sales.Manager"], "access": "ReadWrite", "create": true, "delete": true }
+] }
+
+ERRORS AND FIXES
+- "not found in the model. Did you mean: X" -> use X (check with find).
+- "unknown field 'a'. Did you mean: b" -> rename the field to b.
+- "needs 'x'" -> add field x (see ops).
+- "already exists" -> it is done already: remove that operation, or use another name.
+- "no variable 'V' before this action" -> the variable must be a parameter or be created by an earlier action.
+- "has N end events / outgoing flows" -> add "after": "<variable name created by a step>" or "start".
+- "has no attribute 'A' (in $V/A). Did you mean: B" -> use B in that expression.
+- "Studio Pro has this project open" -> ask the user to close Studio Pro, then run the same command again.
+
+SDK SCRIPTS (only when no operation fits)
+  Write edits/<name>.js:
+    module.exports = async ({ model, sdk, ops, log }) => {
+      const entity = await ops.get("Sales.Order");          // any document or element by qualified name, loaded
+      const a = sdk.domainmodels.Attribute.createIn(entity);
+      a.name = "Weight";
+      sdk.domainmodels.DecimalAttributeType.createInAttributeUnderType(a);
+      await ops.addAttribute({ entity: "Sales.Order", name: "Code", type: "String(20)" });  // ops work here too
+    };
+  Before using a type, read its properties and create functions for this Mendix version:
+    @PY@ mx.py api <Type> [parent word]       e.g. @PY@ mx.py api ObjectType MicroflowParameterObject
+  Use only properties listed there; "NOT IN THIS MENDIX VERSION" ones fail.
+  Microflow objects go in mf.objectCollection, flows in mf.flows (SequenceFlow origin/destination).
+  The dry run reports NOT STORED values: fix the script until there are none.
+
+THREE RULES (again)
+R1. No apply without the user's yes for the code of the last dry run.
+R2. No claim without command output that shows it.
+R3. Change files only in edits/.
