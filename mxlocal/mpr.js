@@ -18,7 +18,8 @@ class Project {
         try {
             this.meta = db.prepare("select * from _MetaData").get();
             if (this.meta._FormatVersion !== 2 || !fs.existsSync(this.contents)) {
-                throw new Error("Only MPR v2 projects (with an mprcontents folder) are supported.");
+                throw new Error("This project uses the MPR v1 format (one .mpr file, no mprcontents folder). mxlocal only " +
+                    "supports MPR v2. Reading with mxcontext.py still works; change the model in Studio Pro.");
             }
             this.units = new Map();
             for (const r of db.prepare("select UnitID, ContainerID, ContainmentName, ContentsHash from Unit").all()) {
@@ -64,34 +65,64 @@ class Project {
         }
     }
 
-    // changes: { updated: Set<id>, created: Map<id,{containerId, containmentName}>, deleted: Set<id> }; contents come from this.plain.
+    // Identity of the saved model: every unit id + contents hash, read fresh from the .mpr. Any save in Studio Pro,
+    // pull or branch switch changes it.
+    fingerprint() {
+        const db = new DatabaseSync(this.mpr, { readOnly: true });
+        try {
+            const rows = db.prepare("select UnitID, ContentsHash from Unit").all()
+                .map(r => guidToString(Buffer.from(r.UnitID)) + ":" + r.ContentsHash).sort();
+            return crypto.createHash("sha256").update(rows.join("\n")).digest("hex");
+        } finally {
+            db.close();
+        }
+    }
+
+    // changes: { updated: Set<id>, created: Map<id,{containerId, containmentName}>, deleted: Set<id> }; contents come
+    // from this.plain. Returns what write() needs, so a dry run can store it and apply it later without the SDK.
+    encode(changes, hint) {
+        const files = [];
+        for (const id of new Set([...changes.updated, ...changes.created.keys()])) {
+            if (changes.deleted.has(id)) continue;
+            const bytes = bson.encode(fromPlain(this.read(id), hint));
+            files.push({ id, bytes, hash: crypto.createHash("sha256").update(bytes).digest("base64") });
+        }
+        const created = [...changes.created].filter(([id]) => !changes.deleted.has(id))
+            .map(([id, c]) => ({ id, containerId: c.containerId, containmentName: c.containmentName }));
+        const deleted = [...changes.deleted].filter(id => !changes.created.has(id));
+        return { files, created, deleted };
+    }
+
     write(changes, hint) {
+        return this.writeEncoded(this.encode(changes, hint));
+    }
+
+    // enc: { files: [{id, bytes, hash}], created: [{id, containerId, containmentName}], deleted: [id] }
+    writeEncoded(enc) {
         this.assertClosed();
+        const createdIds = new Set(enc.created.map(c => c.id));
         const stamp = new Date().toISOString().replace(/[:.]/g, "-");
         const backup = path.join(this.dir, BACKUP_DIR, stamp);
         fs.mkdirSync(backup, { recursive: true });
         fs.copyFileSync(this.mpr, path.join(backup, path.basename(this.mpr)));
         const manifest = { mpr: path.basename(this.mpr), restore: [], remove: [] };
-        const touched = [...changes.updated, ...changes.deleted].filter(id => !changes.created.has(id));
-        for (const id of touched) {
+        const touched = [...enc.files.map(f => f.id), ...enc.deleted].filter(id => !createdIds.has(id));
+        for (const id of new Set(touched)) {
+            if (!fs.existsSync(this.unitFile(id))) continue;
             const rel = path.relative(this.dir, this.unitFile(id));
             fs.mkdirSync(path.dirname(path.join(backup, rel)), { recursive: true });
             fs.copyFileSync(this.unitFile(id), path.join(backup, rel));
             manifest.restore.push(rel);
         }
-        for (const id of changes.created.keys()) if (!changes.deleted.has(id)) manifest.remove.push(path.relative(this.dir, this.unitFile(id)));
+        for (const id of createdIds) manifest.remove.push(path.relative(this.dir, this.unitFile(id)));
         fs.writeFileSync(path.join(backup, "manifest.json"), JSON.stringify(manifest, null, 1));
 
-        const hashes = new Map();
         try {
-            for (const id of new Set([...changes.updated, ...changes.created.keys()])) {
-                if (changes.deleted.has(id)) continue;
-                const bytes = bson.encode(fromPlain(this.read(id), hint));
-                const file = this.unitFile(id);
+            for (const f of enc.files) {
+                const file = this.unitFile(f.id);
                 fs.mkdirSync(path.dirname(file), { recursive: true });
-                fs.writeFileSync(file + ".tmp", bytes);
+                fs.writeFileSync(file + ".tmp", f.bytes);
                 fs.renameSync(file + ".tmp", file);
-                hashes.set(id, crypto.createHash("sha256").update(bytes).digest("base64"));
             }
             const db = new DatabaseSync(this.mpr);
             let open = false;
@@ -101,12 +132,13 @@ class Project {
                 const upd = db.prepare("update Unit set ContentsHash = ? where UnitID = ?");
                 const ins = db.prepare("insert into Unit (UnitID, ContainerID, ContainmentName, TreeConflict, ContentsHash, ContentsConflicts) values (?, ?, ?, 0, ?, '')");
                 const del = db.prepare("delete from Unit where UnitID = ?");
-                for (const [id, hash] of hashes) {
-                    const c = changes.created.get(id);
-                    if (c) ins.run(guidToBytes(id), guidToBytes(c.containerId), c.containmentName, hash);
-                    else upd.run(hash, guidToBytes(id));
+                const created = new Map(enc.created.map(c => [c.id, c]));
+                for (const f of enc.files) {
+                    const c = created.get(f.id);
+                    if (c) ins.run(guidToBytes(f.id), guidToBytes(c.containerId), c.containmentName, f.hash);
+                    else upd.run(f.hash, guidToBytes(f.id));
                 }
-                for (const id of changes.deleted) if (!changes.created.has(id)) del.run(guidToBytes(id));
+                for (const id of enc.deleted) del.run(guidToBytes(id));
                 db.prepare("update _Transaction set LastTransactionID = ?").run(crypto.randomUUID());
                 db.exec("COMMIT");
                 open = false;
@@ -116,18 +148,28 @@ class Project {
             } finally {
                 db.close();
             }
-            for (const id of changes.deleted) if (fs.existsSync(this.unitFile(id))) fs.unlinkSync(this.unitFile(id));
+            for (const id of enc.deleted) if (fs.existsSync(this.unitFile(id))) fs.unlinkSync(this.unitFile(id));
         } catch (e) {
             restore(this.dir, backup);
             throw new Error(`Write failed and the project was restored from ${backup}: ${e.message}`);
         }
-        return { backup, written: hashes.size, deleted: changes.deleted.size };
+        prune(this.dir);
+        return { backup, written: enc.files.length, deleted: enc.deleted.length };
     }
+}
+
+const KEEP_BACKUPS = 20;
+
+// Keep the newest KEEP_BACKUPS backups (restored or not) so the folder does not grow forever.
+function prune(dir) {
+    const root = path.join(dir, BACKUP_DIR);
+    const all = fs.readdirSync(root).filter(n => /^\d{4}-/.test(n)).sort();
+    for (const name of all.slice(0, Math.max(0, all.length - KEEP_BACKUPS))) fs.rmSync(path.join(root, name), { recursive: true, force: true });
 }
 
 function backups(dir) {
     const root = path.join(dir, BACKUP_DIR);
-    return fs.existsSync(root) ? fs.readdirSync(root).filter(n => !n.endsWith(".restored")).sort() : [];
+    return fs.existsSync(root) ? fs.readdirSync(root).filter(n => /^\d{4}-/.test(n) && !n.endsWith(".restored")).sort() : [];
 }
 
 function restore(dir, backup) {

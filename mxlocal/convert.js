@@ -157,6 +157,32 @@ class Catalog {
         return t && t.get(key);
     }
 
+    // Types this project never used: take key sets and BSON kinds from reference-catalog.json (learned from real
+    // Mendix 11 projects). Mendix 11+ (strict): added before schema calibration, so storage names are learned from
+    // them too, and keys outside the set are dropped as usual. Older versions (loose): only keys the SDK maps for this
+    // version, added after calibration, nothing dropped.
+    addReference(ref, schema, version) {
+        this.reference = this.reference || new Set();
+        this.referenceLoose = Number(String(version).split(".")[0]) < 11;
+        for (const [type, keys] of Object.entries(ref)) {
+            if (this.types.has(type)) continue;
+            const info = schema && schema.info(schema.sdkType(type));
+            if (schema && !info) continue;
+            const t = new Map();
+            for (const [key, d] of Object.entries(keys)) {
+                if (info && !info.byKey.has(key)) continue;
+                const entry = { k: d.k, values: new Map() };
+                if (d.s !== undefined) entry.s = d.s;
+                if (d.m !== undefined) entry.m = d.m;
+                if (d.e !== undefined) entry.e = { k: d.e };
+                if (d.v !== undefined) entry.values.set(Array.isArray(d.v) ? "[]" : d.v, 1);
+                t.set(key, entry);
+            }
+            this.types.set(type, t);
+            this.reference.add(type);
+        }
+    }
+
     keys(type) {
         const t = this.types.get(type);
         return t ? [...t.keys()] : [];
@@ -264,10 +290,12 @@ function complete(obj, catalog, schema, warn) {
     if (!obj.$Type) return;
     const keys = catalog.keys(obj.$Type);
     const info = schema.info(schema.sdkType(obj.$Type));
-    if (!keys.length) warn(`${obj.$Type} never occurs in this project; written with SDK defaults only`);
+    const fromReference = catalog.reference && catalog.reference.has(obj.$Type);
+    if (!catalog.types.has(obj.$Type)) warn(`${obj.$Type} never occurs in this project; written with SDK defaults only`);
     else {
+        if (fromReference) warn(`${obj.$Type} first use in this project (layout from reference projects): check it in Studio Pro`);
         for (const key of Object.keys(obj)) {
-            if (key[0] !== "$" && !keys.includes(key)) {
+            if (key[0] !== "$" && !keys.includes(key) && !(fromReference && catalog.referenceLoose)) {
                 warn(`${obj.$Type}.${key} is not stored by this Mendix version; dropped`);
                 delete obj[key];
             }
@@ -293,6 +321,9 @@ function complete(obj, catalog, schema, warn) {
     }
 }
 
+// List markers Studio Pro writes per Type.Key (learned from real projects), for types this project never used.
+const LIST_MARKERS = require("./list-markers.json");
+
 // Descriptor for keys that the original BSON did not contain.
 function hinter(catalog, schema, warn) {
     return (type, key, value) => {
@@ -304,8 +335,9 @@ function hinter(catalog, schema, warn) {
         if (p && p.prim === "Double") return { k: 0x01 };
         if (Array.isArray(value)) {
             const parts = p && p.kind === "partList";
-            if (parts) warn(`${type}.${key}: list kind unknown in this project, using marker 2`);
-            return { k: 0x04, m: parts ? 2 : 1, e: parts ? { k: 0x03 } : { k: 0x02 } };
+            const known = LIST_MARKERS[`${type}.${key}`];
+            if (parts && known === undefined) warn(`${type}.${key}: list kind unknown in this project, using marker 2`);
+            return { k: 0x04, m: known !== undefined ? known : parts ? 2 : 1, e: parts ? { k: 0x03 } : { k: 0x02 } };
         }
         return {};
     };
