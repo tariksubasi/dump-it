@@ -99,6 +99,7 @@ CHANGING OR CHECKING THE MODEL
   renames, deletes): read guides/EDIT.txt first and follow it step by step. The user may also type /degistir.
 - The user changed the model in Studio Pro and asks for a check: read guides/CHECK.txt and follow it (/kontrol).
 - Short commands, run from this folder: {py} mx.py help
+- Full manual (commands, operations, outputs, errors): guides/MANUAL.md. Read it when you are unsure.
 
 RULES (again): cite file + step; say "not in the export" instead of guessing; never edit exported files.
 """
@@ -108,6 +109,7 @@ CHANGING OR CHECKING THE MODEL
 - Model editing is not set up here (needs an MPR v2 project, Node.js 22.13+ and mxlocal). For a change request, give
   step-by-step Studio Pro instructions instead.
 - The user changed the model in Studio Pro and asks for a check: read guides/CHECK.txt and follow it (/kontrol).
+- Full manual: guides/MANUAL.md. Read it when you are unsure.
 """
 
 AGENT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent")
@@ -230,6 +232,8 @@ class Exporter:
         self._write("AI_GUIDE.txt", guide)
         self._write("CLAUDE.md", "@AI_GUIDE.txt\n")  # Claude Code loads the guide by itself
         self._write("guides/CHECK.txt", fill(self._agent_template("CHECK.txt")))
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs", "OPENCODE.md"), encoding="utf-8") as f:
+            self._write("guides/MANUAL.md", f.read())
         if can_edit:
             self._write("guides/EDIT.txt", fill(self._agent_template("EDIT.txt")))
         os.makedirs(os.path.join(self.out, "edits"), exist_ok=True)

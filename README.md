@@ -154,6 +154,15 @@ Bilinmesi gerekenler:
    adımları geçerlidir.
 4. Son söz Studio Pro'nundur: Errors paneli temiz değilse `/geri-al`.
 
+### OpenCode'a öğretmek
+
+Ajan için yazılmış tam kılavuz: [`docs/OPENCODE.md`](docs/OPENCODE.md) (komutlar, işlemler, çıktıların anlamı,
+hatalar). Export bunu `guides/MANUAL.md` olarak klasöre koyar ve `AI_GUIDE.txt` ona yönlendirir. OpenCode emin
+olmadığında kendisi okur. İstersen konuşmanın başında şunu yaz:
+```
+guides/MANUAL.md dosyasını oku ve buna göre çalış.
+```
+
 ### DeepSeek (ya da başka küçük bir model) ile kullanım
 
 Kurulum bunları kendisi ayarlar: düşük temperature (0.1), kısa komutlar (`python mx.py ...`), adım adım protokol
