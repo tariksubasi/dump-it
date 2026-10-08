@@ -295,7 +295,9 @@ function complete(obj, catalog, schema, warn) {
     else {
         if (fromReference) warn(`${obj.$Type} first use in this project (layout from reference projects): check it in Studio Pro`);
         for (const key of Object.keys(obj)) {
-            if (key[0] !== "$" && !keys.includes(key) && !(fromReference && catalog.referenceLoose)) {
+            // reference types: the sample may predate this version, so keys the SDK maps for it are kept too
+            const sdkKnown = fromReference && info && info.byKey.has(key);
+            if (key[0] !== "$" && !keys.includes(key) && !(fromReference && catalog.referenceLoose) && !sdkKnown) {
                 warn(`${obj.$Type}.${key} is not stored by this Mendix version; dropped`);
                 delete obj[key];
             }

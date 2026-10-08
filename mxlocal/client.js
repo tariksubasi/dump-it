@@ -160,7 +160,11 @@ class LocalClient {
     // Does this Mendix version store key for storage type? Unknown types (never seen anywhere) are assumed to.
     stored(type, key) {
         if (!this.catalog.types.has(type)) return true;
-        if (this.catalog.referenceLoose && this.catalog.reference.has(type)) return true;
+        if (this.catalog.reference.has(type)) {
+            if (this.catalog.referenceLoose) return true;
+            const info = this.schema.info(this.schema.sdkType(type));
+            if (info && info.byKey.has(key)) return true; // see complete(): sample may predate this version
+        }
         return !!this.catalog.get(type, key);
     }
 

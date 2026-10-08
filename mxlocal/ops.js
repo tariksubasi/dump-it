@@ -592,7 +592,11 @@ function bind(model, client) {
                 const g = dm.Generalization.createIn(e);
                 g.generalization = await entity(o.generalization);
             } else if (e.generalization instanceof dm.NoGeneralization) e.generalization.persistable = bool(o.persistable, true);
-            for (const a of o.attributes || []) await impl.addAttribute({ entity: `${o.module}.${o.name}`, ...a }, e);
+            const attrSpec = { fields: { name: "R attribute name", type: "R " + ATTRIBUTE_TYPES, default: "optional default value" } };
+            for (const [i, a] of (o.attributes || []).entries()) {
+                validate("-", "attribute", attrSpec, a || {}, `${o.module}.${o.name} attribute ${i + 1}`);
+                await impl.addAttribute({ entity: `${o.module}.${o.name}`, ...a }, e);
+            }
             return `${o.module}.${o.name}`;
         },
         async addAttribute(o, loaded) {
