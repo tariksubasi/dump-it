@@ -59,6 +59,7 @@ Run all of these from the export folder.
 | `python mx.py help` | Lists the commands | no |
 | `python mx.py refresh` | Re-exports the model and lists files changed since the last checked state | no |
 | `python mx.py find <text>` | Lists elements whose qualified name contains `<text>`, with their SDK type | no |
+| `python mx.py steps <Module.Flow>` | Lists the steps of a microflow/nanoflow with stable ids (for `changeAction`, `deleteAction`, `addActions` `after`) | no |
 | `python mx.py ops` | Lists all operations and fields for change files | no |
 | `python mx.py api <Type> [word]` | SDK type reference for this Mendix version (for `.js` files only) | no |
 | `python mx.py dryrun <file>` | Computes a change from `edits/<file>`. Writes nothing. Prints an approval code | no |
@@ -68,8 +69,8 @@ Run all of these from the export folder.
 | `python mx.py ok "<summary>"` | Saves the current export as the checked state (git commit) | no |
 | `python mx.py selftest` | Runs every operation on a temporary copy of the project and checks the result | no |
 
-In OpenCode the same read-only commands also exist as tools: `mx_find`, `mx_ops`, `mx_api`, `mx_dryrun`,
-`mx_refresh`. Use the tool or the command; the result is the same. `apply` and `undo` exist only as commands, so
+In OpenCode the same read-only commands also exist as tools: `mx_find`, `mx_steps`, `mx_ops`, `mx_api`,
+`mx_dryrun`, `mx_refresh`. Use the tool or the command; the result is the same. `apply` and `undo` exist only as commands, so
 OpenCode asks the user before they run.
 
 The user can type these slash commands:
@@ -192,6 +193,10 @@ The live list is `python mx.py ops`. If it differs from this table, trust the li
 | `addAttribute` | **entity**, **name**, **type**, default | Default when not given: Integer/Long/Decimal `0`, Boolean `false`, AutoNumber `1`, others empty |
 | `changeAttribute` | **attribute** (`Module.Entity.Attr`), type, default | At least one of type/default |
 | `addAssociation` | **from**, **to**, name (default `From_To`), type (`Reference`/`ReferenceSet`), owner (`Default`/`Both`) | `from` stores the reference: many `from` → one `to` for Reference. Other module in `to` → cross-module association |
+| `setGeneralization` | **entity**, **generalization** (`Module.Parent` or `"none"`), persistable | Refuses loops. Check access rules and pages of the entity afterwards |
+| `addValidationRule` | **entity**, **attribute**, **rule** (`required`/`unique`/`maxLength`/`range`/`regex`/`equals`), **message**, maxLength, min, max, regex, value | |
+| `addEventHandler` | **entity**, **moment** (`Before`/`After`), **event** (`Create`/`Commit`/`Delete`/`RollBack`), **microflow**, passObject (default true), raiseErrorOnFalse | The microflow needs one parameter of the entity (when passObject) and must return Boolean for `Before` |
+| `addIndex` | **entity**, **attributes** `["A", {"name":"B","ascending":false}]` | |
 | `createEnumeration` | **module**, **name**, **values** (`["A", {"name":"B","caption":"Bee"}]`), folder | Captions are written in the project's default language |
 | `addEnumerationValue` | **enumeration**, **name**, caption | |
 
@@ -207,17 +212,20 @@ The default of an `Enum` attribute is the value name, e.g. `"default": "Open"`.
 | `grantAccess` | **document** (microflow, nanoflow or page), **roles** `["Module.Role"]` | Adds to the allowed roles; existing roles stay |
 | `addAccessRule` | **entity**, **roles**, access (`ReadWrite`/`ReadOnly`/`None`, default `ReadOnly`), members `{"Attr":"ReadWrite"}`, create, delete, xpath | Every attribute and owned association gets a member right. AutoNumber and calculated attributes are never more than ReadOnly |
 
-### Microflows
+### Microflows and nanoflows
 
 | Op | Fields | Notes |
 |---|---|---|
-| `createMicroflow` | **module**, **name**, folder, parameters `[{name, type}]`, returns, returnValue (required with returns), actions, roles | Straight line: start → actions → end. Folders are created when missing |
-| `addActions` | **microflow**, **actions**, after (`"start"` or a variable name) | Without `after`: before the single end event. Inserts on the main line only (not inside loops) |
+| `createMicroflow` | **module**, **name**, folder, parameters `[{name, type}]`, returns, returnValue (required with returns), actions, roles | Start → actions → end, with decisions, loops and error handlers. Folders are created when missing |
+| `createNanoflow` | same as `createMicroflow` | Runs in the browser/app. No `log`. Can call nanoflows and microflows |
+| `addActions` | **microflow** (or nanoflow), **actions**, after (`"start"`, a variable name, or a step id) | Without `after`: before the single end event. Works inside loops too. Inserted actions must not end the flow |
+| `changeAction` | **microflow**, **id** (from `steps`), and the fields to change | See the table below |
+| `deleteAction` | **microflow**, **id** | Deletes one action or loop and reconnects the line. Refuses steps with an error handler, decisions, merges and events |
 
 Data types for parameters, variables and returns: `String`, `Integer`, `Long`, `Decimal`, `Boolean`, `DateTime`,
 `Module.Entity` (one object), `List(Module.Entity)`, `Enum(Module.Enumeration)`.
 
-Actions (inside `"actions": [ { "action": "<name>", ... } ]`):
+Actions (inside `"actions": [ { "action": "<name>", ... } ]`). Every action also takes `caption` and `onError`:
 
 | Action | Fields | Defaults |
 |---|---|---|
@@ -226,21 +234,63 @@ Actions (inside `"actions": [ { "action": "<name>", ... } ]`):
 | `change` | **variable**, **set**, commit, refresh | commit = false |
 | `commit` | **variable**, events | events = true |
 | `delete` | **variable** | |
-| `call` | **microflow**, args `{"Param":"expr"}`, variable | Every parameter needs an arg |
-| `log` | **message** (`{1}`, `{2}` = args), args `["expr"]`, level, node | level Info, node = module name |
+| `call` | **microflow** (a nanoflow too, inside a nanoflow), args `{"Param":"expr"}`, variable | Every parameter needs an arg. A microflow cannot call a nanoflow |
+| `log` | **message** (`{1}`, `{2}` = args), args `["expr"]`, level, node | Microflows only. level Info, node = module name |
 | `message` | **text**, type (`Information`/`Warning`/`Error`), blocking | blocking = true |
 | `variable` | **name**, **type**, **value** | |
 | `set` | **name**, **value** | |
+| `showPage` | **page**, args `{"PageParameter":"$Var"}` | Every page parameter needs an arg |
+| `closePage` | count | |
 
-Variable names are written without `$` in `variable`, `from`, `after` and `name`. Expressions are Mendix
-expressions as text: `"'Hello'"`, `"$Order/Total * 2"`, `"empty"`, `"[%CurrentDateTime%]"`,
+Flow control (also inside `"actions"`):
+
+| Action | Fields | Notes |
+|---|---|---|
+| `if` | **condition**, then `[...]`, else `[...]`, caption | A branch may end with `end`, `break` or `continue`; open branches join again after the decision |
+| `loop` | **actions** + either over (list variable), item (default `<List>Item`) or while (expression) | |
+| `end` | value | Required `value` when the flow returns something. Not inside loops |
+| `break` / `continue` | | Only inside a loop |
+| `error` | | Only inside an `onError` handler: ends with the error again |
+
+`onError` on an action: `"continue"`, or `{ "rollback": true/false, "actions": [...], "returnValue": "..." }`. A
+handler path that does not end gets an end event automatically (`returnValue` when the flow returns something).
+Inside a loop a handler must end with `break`, `continue` or `error`.
+
+`changeAction` fields per kind of step:
+
+| Step | Fields |
+|---|---|
+| any action | caption, disabled |
+| retrieve | xpath, first, entity |
+| create / change | set (adds or replaces), unset `["Attr"]`, commit, refresh |
+| commit | events, refresh |
+| call | args |
+| log | message, level, args |
+| message | text, type, blocking |
+| variable / set | value |
+| decision (`IF`) | condition, caption |
+| loop | while (while loop), over (list loop) |
+| end | value |
+
+Variable names are written without `$` in `variable`, `from`, `over`, `item`, `after` and `name`. Expressions are
+Mendix expressions as text: `"'Hello'"`, `"$Order/Total * 2"`, `"empty"`, `"[%CurrentDateTime%]"`,
 `"Module.Enum.Value"`. String literals need single quotes inside the JSON string.
 
-### Rename and delete
+### Pages, constants, scheduled events, REST
 
 | Op | Fields | Notes |
 |---|---|---|
-| `rename` | **target** (qualified name), **newName** | Updates every reference. Reports old names left in expressions, XPath and Java (`OLD NAME STILL USED`); fix those with another change |
+| `createPage` | **module**, **name**, title, entity, fields `["Attr"]`, buttons (default true), layout, folder, roles | With `entity`: a page parameter and a data view with an input per attribute (text box, check box, date picker, drop-down) and Save/Cancel. Without: an empty page. The layout is the one the project's own pages use |
+| `createConstant` | **module**, **name**, **type**, **default**, exposedToClient, folder | Type String/Integer/Long/Decimal/Boolean/DateTime |
+| `createScheduledEvent` | **module**, **name**, **microflow**, **every** (`Minute`/`Hour`/`Day`/`Week`), interval, at (`HH:MM`), days, enabled (default false), timeZone, onOverlap, folder | The microflow must have no parameters |
+| `publishRest` | **module**, **service**, **resource**, **method**, **microflow**, path (e.g. `{Id}`), servicePath, authentication (default Basic), roles, folder | Microflow parameters become path (`{Name}` in path) or query parameters. Object/list parameters or results need mappings: refused, do those in Studio Pro. Experimental |
+
+### Documents, rename and delete
+
+| Op | Fields | Notes |
+|---|---|---|
+| `moveDocument` | **document**, folder (missing or `""` = module root) | Within the same module |
+| `rename` | **target** (qualified name, or a module name), **newName** | Updates every reference. A module rename also updates `Module.` in expressions and XPath and lists code folders to move. Other renames report old names left in expressions, XPath and Java (`OLD NAME STILL USED`) |
 | `delete` | **target** | Deletes a document, entity, attribute, association, enumeration value or module role. Lists documents that still use it (`STILL USED BY`) |
 
 ### Examples
@@ -275,6 +325,38 @@ Microflow with steps:
     { "action": "message", "text": "Order closed", "type": "Information" } ] } ] }
 ```
 
+Decision, loop and error handler:
+
+```json
+{ "ops": [ { "op": "createMicroflow", "module": "Sales", "name": "ACT_Orders_Process",
+  "actions": [
+    { "action": "retrieve", "variable": "Open", "entity": "Sales.Order", "xpath": "[Paid = false()]" },
+    { "action": "if", "condition": "$Open = empty", "then": [ { "action": "end" } ] },
+    { "action": "loop", "over": "Open", "item": "Order", "actions": [
+        { "action": "if", "condition": "$Order/Total = 0", "then": [ { "action": "continue" } ] },
+        { "action": "call", "microflow": "Sales.SUB_Order_Pay", "args": { "Order": "$Order" },
+          "onError": { "rollback": false, "actions": [ { "action": "log", "message": "pay failed", "level": "Error" }, { "action": "continue" } ] } } ] } ] } ] }
+```
+
+Change and delete single steps (ids from `python mx.py steps Sales.ACT_Orders_Process`):
+
+```json
+{ "ops": [
+  { "op": "changeAction", "microflow": "Sales.ACT_Orders_Process", "id": "dba83c80", "xpath": "[Paid = false() and Total > 0]" },
+  { "op": "deleteAction", "microflow": "Sales.ACT_Orders_Process", "id": "8d0e4a77" }
+] }
+```
+
+Page and nanoflow:
+
+```json
+{ "ops": [
+  { "op": "createPage", "module": "Sales", "name": "Order_Edit", "entity": "Sales.Order", "fields": ["Number", "Total", "Status"], "roles": ["Sales.User"] },
+  { "op": "createNanoflow", "module": "Sales", "name": "NF_Order_Open", "parameters": [ { "name": "Order", "type": "Sales.Order" } ],
+    "actions": [ { "action": "showPage", "page": "Sales.Order_Edit", "args": { "Order": "$Order" } } ] }
+] }
+```
+
 Insert a step and rename:
 
 ```json
@@ -299,10 +381,11 @@ Security:
 
 ## 8. When no operation fits: SDK scripts
 
-Operations cannot do these things: pages and snippets, nanoflow actions, decisions, loops and error handlers in
-microflows, REST/OData services, workflows, setting attributes inherited from System entities (for example
-`System.User.Name`). For these, write `edits/<name>.js` with the Mendix Model SDK, or give the user Studio Pro
-steps. Prefer Studio Pro steps when the change is small or risky.
+Operations cannot do these things: page changes other than creating a form/empty page (editing widgets, list
+views, data grids, pluggable widgets), import/export mappings, JSON structures, consumed REST services, workflows,
+REST operations with object bodies or results, inheritance splits, and setting attributes inherited from System
+entities (for example `System.User.Name`). For these, write `edits/<name>.js` with the Mendix Model SDK, or give the
+user Studio Pro steps. Prefer Studio Pro steps when the change is large or risky.
 
 ```js
 module.exports = async ({ model, sdk, ops, log }) => {
@@ -336,6 +419,7 @@ EXPRESSION CHECK ...                                       <- wrong $Var/Attribu
 NOT STORED ...                                             <- a value this Mendix version does not keep: fix the script
 OLD NAME STILL USED ...                                    <- rename left old names in expressions/XPath/Java
 Warnings:
+  > Module.Doc -> Module/Folder                              <- a document moved to another folder
   ! ... first use in this project ...                      <- first element of this type: ask the user to check it in Studio Pro
 Dry run: nothing written. Approval code: 7F3A              <- the code the user must confirm
 ```
@@ -366,7 +450,12 @@ mx check: NOT RUN (mx.exe not found) ...                          <- say this to
 | `already exists` | It is already done. Remove that operation or use another name |
 | `no variable 'V' before this action` | V must be a parameter or be created by an earlier action |
 | `has no attribute 'A' (in $V/A). Did you mean: B` | Use B in that expression |
-| `has N end events` / `has N outgoing flows` | Add `"after": "<variable name>"` or `"after": "start"` |
+| `has N end events` / `has N outgoing flows` | Add `"after": "<variable name>"`, a step id, or `"after": "start"` |
+| `has no step with id` | Run `python mx.py steps <Module.Flow>` and copy the id in brackets |
+| `'x' cannot be changed on ...` | The message lists the fields that kind of step accepts |
+| `is only allowed inside a loop` / `unreachable` | `break`/`continue` only in loops; nothing may follow `end`/`break`/`continue` |
+| `it has an error handler` | `deleteAction` refuses this step; give Studio Pro steps |
+| `needs an import mapping` / `export mapping` | `publishRest` supports simple parameters and results only; give Studio Pro steps |
 | `needs args for: P` | Add every parameter of the called microflow to `args` |
 | `Studio Pro has this project open` | Ask the user to close Studio Pro, then run the same command again |
 | `Code ... does not match the last dry run` | Use the code of the latest dry run (show it to the user again) |

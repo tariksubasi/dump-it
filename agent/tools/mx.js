@@ -26,6 +26,13 @@ export const find = {
     execute: (args, context) => mx(context, ["find", args.text])
 };
 
+export const steps = {
+    description: "Steps of a microflow or nanoflow in order, with stable ids. Use the ids in changeAction, deleteAction " +
+        "and addActions 'after'.",
+    args: { flow: text("qualified name, e.g. Sales.ACT_Order_Save") },
+    execute: (args, context) => mx(context, ["steps", args.flow])
+};
+
 export const ops = {
     description: "List the operations (and their fields) that a change file edits/<name>.json can use.",
     args: {},

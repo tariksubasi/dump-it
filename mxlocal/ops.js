@@ -3,28 +3,15 @@
 // code; every op validates its fields, explains mistakes ("did you mean"), and can check itself after apply.
 const sdk = require("mendixmodelsdk");
 
-const { domainmodels: dm, microflows: mf, datatypes, enumerations, texts, security, projects } = sdk;
+const { domainmodels: dm, microflows: mf, datatypes, enumerations, texts, security, projects, constants, scheduledevents, rest } = sdk;
+const { ATTRIBUTE_TYPES, DATA_TYPES, suggest, fail, validate, bool, noDollar, enumValue } = require("./ops-util");
+
 
 // ---------------------------------------------------------------- op catalog (also the 'ops' help text)
 
-const ATTRIBUTE_TYPES = "String(200) | String(unlimited) | Integer | Long | Decimal | Boolean | DateTime | AutoNumber | HashedString | Binary | Enum(Module.Enumeration)";
-const DATA_TYPES = "String | Integer | Long | Decimal | Boolean | DateTime | Module.Entity | List(Module.Entity) | Enum(Module.Enumeration)";
 
-const ACTIONS = {
-    retrieve: {
-        doc: "Retrieve from the database, or over an association when 'from' is set.",
-        fields: { variable: "R result variable name", entity: "database retrieve: Module.Entity", xpath: "optional XPath, e.g. [Active = true()]", first: "optional true = single object", from: "association retrieve: variable name, e.g. Order", association: "association retrieve: Module.Association" }
-    },
-    create: { doc: "Create an object.", fields: { variable: "R new variable name", entity: "R Module.Entity", set: "optional { \"Attribute\": \"expression\", \"Module.Assoc\": \"$Var\" }", commit: "optional true/false (default false)" } },
-    change: { doc: "Change members of an object.", fields: { variable: "R variable to change (no $)", set: "R { \"Attribute\": \"expression\" }", commit: "optional true/false", refresh: "optional true/false" } },
-    commit: { doc: "Commit an object or list.", fields: { variable: "R variable (no $)", events: "optional false = without events" } },
-    delete: { doc: "Delete an object or list.", fields: { variable: "R variable (no $)" } },
-    call: { doc: "Call a microflow.", fields: { microflow: "R Module.Microflow", args: "optional { \"ParamName\": \"expression\" }", variable: "optional result variable name" } },
-    log: { doc: "Write a log line.", fields: { message: "R text; {1} {2} are filled from args", args: "optional [\"expression\", ...]", level: "optional Info | Warning | Error | Debug | Trace | Critical", node: "optional log node name (default the module name)" } },
-    message: { doc: "Show a message to the user.", fields: { text: "R message text", type: "optional Information | Warning | Error", blocking: "optional true/false" } },
-    variable: { doc: "Create a variable.", fields: { name: "R variable name", type: "R " + DATA_TYPES, value: "R initial value expression, e.g. 0 or 'text' or empty" } },
-    set: { doc: "Change a variable.", fields: { name: "R variable name (no $)", value: "R expression" } }
-};
+const { makeFlows, ACTIONS, CONTROL, COMMON } = require("./ops-flows");
+const { makePages, PAGE_FIELDS } = require("./ops-pages");
 
 const OPS = {
     createEntity: {
@@ -46,14 +33,53 @@ const OPS = {
         fields: { entity: "R Module.Entity", roles: "R [ \"Module.Role\" ]", access: "optional ReadWrite | ReadOnly | None (default ReadOnly)", members: "optional { \"Attribute\": \"ReadWrite\", \"Module.Assoc\": \"ReadOnly\" }", create: "optional true/false", delete: "optional true/false", xpath: "optional XPath, e.g. [Owner = '[%CurrentUser%]']" }
     },
     createMicroflow: {
-        doc: "Create a microflow: start -> actions in order -> end.",
+        doc: "Create a microflow: start -> actions (with if/loop/onError) -> end.",
         fields: { module: "R module name", name: "R microflow name", folder: "optional folder path", parameters: "optional [ { \"name\": ..., \"type\": " + JSON.stringify(DATA_TYPES) + " } ]", returns: "optional return type (default nothing)", returnValue: "required when returns is set: return expression", actions: "optional [ actions, see ACTIONS ]", roles: "optional [ \"Module.Role\" ]" }
     },
-    addActions: {
-        doc: "Insert actions into an existing microflow. Default: just before the end event (needs exactly one end event).",
-        fields: { microflow: "R Module.Microflow", after: "optional \"start\" or the variable name an existing action creates", actions: "R [ actions, see ACTIONS ]" }
+    createNanoflow: {
+        doc: "Create a nanoflow (runs in the browser/app). Same fields and actions as createMicroflow; no 'log'.",
+        fields: { module: "R module name", name: "R nanoflow name", folder: "optional folder path", parameters: "optional [ { \"name\": ..., \"type\": ... } ]", returns: "optional return type", returnValue: "required when returns is set", actions: "optional [ actions ]", roles: "optional [ \"Module.Role\" ]" }
     },
-    rename: { doc: "Rename a document, entity, attribute, association, enumeration value. Updates references, reports names left in expressions/XPath/Java.", fields: { target: "R qualified name, e.g. Module.Entity.Attribute", newName: "R new short name" } },
+    addActions: {
+        doc: "Insert actions into an existing microflow or nanoflow. Default: just before the end event (needs exactly one end event).",
+        fields: { microflow: "R Module.Microflow or Module.Nanoflow", after: "optional \"start\", the variable name an existing step creates, or a step id (see: steps)", actions: "R [ actions ]" }
+    },
+    changeAction: {
+        doc: "Change one existing step. Get its id with: steps Module.Flow. Give only the fields to change.",
+        fields: {
+            microflow: "R Module.Microflow or Module.Nanoflow", id: "R step id from 'steps', e.g. 3f2a9c1b",
+            xpath: "retrieve: new XPath", first: "retrieve: true/false", entity: "retrieve: Module.Entity",
+            set: "create/change: { \"Attr\": \"expression\" } (adds or replaces)", unset: "create/change: [ \"Attr\" ] to remove",
+            commit: "create/change: true/false", refresh: "change/commit: true/false", events: "commit: true/false",
+            args: "call: { \"Param\": \"expression\" }", message: "log: text", level: "log: level", text: "message: text",
+            type: "message: Information | Warning | Error", blocking: "message: true/false", value: "variable/set/end: expression",
+            condition: "decision: expression", caption: "decision or action: caption", disabled: "action: true/false",
+            while: "while loop: expression", over: "list loop: list variable"
+        }
+    },
+    deleteAction: { doc: "Delete one action or loop from a flow and reconnect the line. Get its id with: steps Module.Flow.", fields: { microflow: "R Module.Microflow or Module.Nanoflow", id: "R step id from 'steps'" } },
+    setGeneralization: { doc: "Make an entity inherit from another entity, or from none.", fields: { entity: "R Module.Entity", generalization: "R Module.Parent, or \"\" / \"none\" for no parent", persistable: "optional true/false when there is no parent (default true)" } },
+    addValidationRule: {
+        doc: "Add a validation rule to an attribute.",
+        fields: { entity: "R Module.Entity", attribute: "R attribute name", rule: "R required | unique | maxLength | range | regex | equals", message: "R error message shown to the user", maxLength: "maxLength: number", min: "range: minimum value", max: "range: maximum value", regex: "regex: Module.RegularExpression", value: "equals: value" }
+    },
+    addEventHandler: {
+        doc: "Run a microflow before/after an entity is created, committed, deleted or rolled back.",
+        fields: { entity: "R Module.Entity", moment: "R Before | After", event: "R Create | Commit | Delete | RollBack", microflow: "R Module.Microflow (one parameter of the entity when passObject is true; returns Boolean for Before)", passObject: "optional true/false (default true)", raiseErrorOnFalse: "optional true/false (Before only, default true)" }
+    },
+    addIndex: { doc: "Add a database index.", fields: { entity: "R Module.Entity", attributes: "R [ \"Attr\" or { \"name\": \"Attr\", \"ascending\": false } ]" } },
+    createConstant: { doc: "Create a constant.", fields: { module: "R module name", name: "R constant name", type: "R String | Integer | Long | Decimal | Boolean | DateTime", default: "R default value as text, e.g. 'https://...' is written without quotes: https://...", exposedToClient: "optional true/false (default false)", folder: "optional folder path" } },
+    createScheduledEvent: {
+        doc: "Run a microflow (without parameters) on a schedule.",
+        fields: { module: "R module name", name: "R event name", microflow: "R Module.Microflow", every: "R Minute | Hour | Day | Week", interval: "optional number for Minute/Hour (default 1)", at: "optional time HH:MM for Day/Week, minutes MM for Hour (default 00:00)", days: "Week: [ \"Monday\", ... ]", enabled: "optional true/false (default false)", timeZone: "optional UTC | Server (default UTC)", onOverlap: "optional DelayNext | SkipNext (default DelayNext)", folder: "optional folder path" }
+    },
+    createPage: { doc: "Create a page: an edit form for an entity (inputs by attribute type, Save/Cancel), or an empty page. Uses the layout the project's other pages use.", fields: PAGE_FIELDS },
+    publishRest: {
+        doc: "Publish a microflow as a REST operation (creates the service and resource when missing). Microflow parameters become path parameters when the path has {Name}, otherwise query parameters. Object parameters/results need mappings: do those in Studio Pro.",
+        fields: { module: "R module name", service: "R service name, e.g. OrderAPI", resource: "R resource name, e.g. orders", method: "R Get | Post | Put | Patch | Delete", microflow: "R Module.Microflow", path: "optional operation path, e.g. {OrderId} (default empty)", servicePath: "optional base path for a new service (default rest/<service>/v1)", authentication: "optional [ \"Basic\" | \"Session\" | \"Microflow\" | \"None\" ] for a new service (default [\"Basic\"])", roles: "optional [ \"Module.Role\" ] allowed to call the service", folder: "optional folder path for a new service" }
+    },
+    moveDocument: { doc: "Move a document to another folder of the same module.", fields: { document: "R Module.Document", folder: "optional folder path, e.g. Orders/Actions (missing or \"\" = the module root)" } },
+    rename: { doc: "Rename a module, document, entity, attribute, association or enumeration value. Updates references, reports names left in expressions/XPath/Java.", fields: { target: "R qualified name, e.g. Module.Entity.Attribute", newName: "R new short name" } },
     delete: { doc: "Delete a document, entity, attribute, association, enumeration value or module role. Lists what still uses it.", fields: { target: "R qualified name" } }
 };
 
@@ -68,63 +94,16 @@ function help() {
         lines.push(`${name}: ${o.doc}`);
         for (const [f, d] of Object.entries(o.fields)) lines.push(`    ${f}: ${d}`);
     }
+    lines.push("Every action above also takes:");
+    for (const [f, d] of Object.entries(COMMON)) lines.push(`    ${f}: ${d}`);
+    lines.push("", "FLOW CONTROL (also inside \"actions\"):");
+    for (const [name, o] of Object.entries(CONTROL)) {
+        lines.push(`${name}: ${o.doc}`);
+        for (const [f, d] of Object.entries(o.fields)) lines.push(`    ${f}: ${d}`);
+    }
     lines.push("", "Expressions are Mendix expressions as text: \"'Hello'\", \"$Order/Total * 2\", \"empty\", \"[%CurrentDateTime%]\".");
     lines.push("Anything not covered here: write a change.js with the Model SDK (use: api <Type>).");
     return lines.join("\n");
-}
-
-// ---------------------------------------------------------------- helpers
-
-function distance(a, b) {
-    a = a.toLowerCase();
-    b = b.toLowerCase();
-    const d = Array.from({ length: a.length + 1 }, (_, i) => [i]);
-    for (let j = 1; j <= b.length; j++) d[0][j] = j;
-    for (let i = 1; i <= a.length; i++) {
-        for (let j = 1; j <= b.length; j++) d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
-    }
-    return d[a.length][b.length];
-}
-
-function suggest(word, options, n = 5) {
-    const w = String(word).toLowerCase();
-    const last = w.split(".").pop();
-    return options
-        .map(o => {
-            const l = o.toLowerCase();
-            const score = l === w ? 0 : l.split(".").pop() === last ? 1 : l.includes(last) || last.includes(l.split(".").pop()) ? 2 : 3 + distance(l, w) / Math.max(l.length, w.length);
-            return { o, score };
-        })
-        .filter(x => x.score < 3.5)
-        .sort((a, b) => a.score - b.score)
-        .slice(0, n)
-        .map(x => x.o);
-}
-
-function fail(msg, word, options) {
-    const s = word !== undefined && options ? suggest(word, options) : [];
-    throw new Error(msg + (s.length ? `. Did you mean: ${s.join(", ")}?` : ""));
-}
-
-function validate(kind, name, spec, obj, where) {
-    const known = Object.keys(spec.fields);
-    for (const k of Object.keys(obj)) {
-        if (k === kind) continue;
-        if (!known.includes(k)) fail(`${where}: unknown field '${k}' for ${name}`, k, known);
-    }
-    for (const [k, d] of Object.entries(spec.fields)) {
-        if (d.startsWith("R ") && (obj[k] === undefined || obj[k] === "")) throw new Error(`${where}: ${name} needs '${k}' (${d.slice(2)})`);
-    }
-}
-
-const bool = (v, dflt) => (v === undefined || v === null ? dflt : v === true || v === "true" || v === "yes");
-const noDollar = v => String(v).replace(/^\$/, "");
-
-function enumValue(enumCls, value, field) {
-    const names = Object.keys(enumCls).filter(k => enumCls[k] && enumCls[k] instanceof enumCls);
-    const hit = names.find(n => n.toLowerCase() === String(value).toLowerCase());
-    if (!hit) fail(`'${value}' is not a valid ${field} (use ${names.join(" | ")})`, value, names);
-    return enumCls[hit];
 }
 
 // ---------------------------------------------------------------- bound operations
@@ -327,97 +306,6 @@ function bind(model, client) {
         return fail(`Unknown type '${spec}'. Use ${DATA_TYPES}`, s, Object.keys(simple));
     }
 
-    // ------------------------------------------------ expression check ($Var/Member paths)
-
-    const lint = [];
-    const toLint = []; // { m, expr, where }
-
-    function expr(m, value, where) {
-        toLint.push({ m, expr: String(value), where });
-        return String(value);
-    }
-
-    // After all ops ran (variables of later actions exist), check $Var/Member against the variable's entity.
-    async function lintExpressions() {
-        for (const { m, expr: e, where } of toLint) {
-            const re = /\$(\w+)\/([\w.]+)/g;
-            let hit;
-            while ((hit = re.exec(e))) {
-                const [, variable, member] = hit;
-                const v = variablesOf(m).get(variable);
-                if (!v) {
-                    lint.push(`${where}: $${variable} is not a parameter or a variable created in ${m.qualifiedName}`);
-                    continue;
-                }
-                let entityQn;
-                try {
-                    entityQn = await entityOfVariable(m, variable, where);
-                } catch (err) {
-                    continue; // primitive variable or unknown: nothing to check
-                }
-                if (!entityQn) continue;
-                const ent = await entity(entityQn);
-                await loadParents(ent);
-                const first = member.split("/")[0];
-                if (first.includes(".")) continue; // association path: Module.Assoc
-                const chain = attributeChain(ent);
-                if (!chain.complete) continue; // inherits from an entity outside the project (System.User, ...)
-                const names = chain.attributes.map(a => a.name);
-                if (!names.includes(first)) lint.push(`${where}: ${entityQn} has no attribute '${first}' (in $${variable}/${member})` + ((s => (s.length ? `. Did you mean: ${s.join(", ")}?` : ""))(suggest(first, names, 3))));
-            }
-        }
-        return lint;
-    }
-
-    // ------------------------------------------------ microflow building
-
-    const X_STEP = 190;
-
-    function point(el, x, y) {
-        el.relativeMiddlePoint = { x, y };
-    }
-
-    function flow(m, from, to) {
-        const f = mf.SequenceFlow.createIn(m);
-        f.origin = from;
-        f.destination = to;
-        f.originConnectionIndex = 1;
-        f.destinationConnectionIndex = 3;
-        return f;
-    }
-
-    function variablesOf(m) {
-        const out = new Map();
-        for (const o of m.objectCollection.objects) {
-            if (o instanceof mf.MicroflowParameterObject) out.set(o.name, o);
-            const a = o instanceof mf.ActionActivity && o.action;
-            if (!a) continue;
-            for (const key of ["outputVariableName", "variableName"]) if (a[key]) out.set(a[key], o);
-        }
-        return out;
-    }
-
-    async function memberChanges(action, entityQn, set, where, m0) {
-        const ent = await entity(entityQn);
-        await loadParents(ent);
-        for (const [member, value] of Object.entries(set || {})) {
-            const mc = mf.MemberChange.createIn(action);
-            mc.type = mf.ChangeActionItemType.Set;
-            mc.value = expr(m0, value, where);
-            if (member.includes(".")) {
-                const assoc = await get(member);
-                if (!(assoc instanceof dm.AssociationBase)) throw new Error(`${where}: '${member}' is not an association`);
-                mc.association = assoc;
-            } else {
-                const chain = attributeChain(ent);
-                const attr = chain.attributes.find(a => a.name === member);
-                if (!attr && !chain.complete) throw new Error(`${where}: '${member}' is not an own attribute of ${entityQn}; attributes inherited from System entities cannot be set by ops (use a .js script or Studio Pro)`);
-                if (!attr) fail(`${where}: ${entityQn} has no attribute '${member}'`, member, chain.attributes.map(a => a.name));
-                mc.attribute = attr;
-            }
-        }
-    }
-
     function allAttributes(ent) {
         return attributeChain(ent).attributes;
     }
@@ -448,137 +336,44 @@ function bind(model, client) {
         }
     }
 
-    // Entity of an object variable in microflow m (parameter, retrieve, create).
-    async function entityOfVariable(m, name, where) {
-        const v = variablesOf(m).get(noDollar(name));
-        if (!v) fail(`${where}: no variable '${name}' before this action in ${m.qualifiedName}`, noDollar(name), [...variablesOf(m).keys()]);
-        if (v instanceof mf.MicroflowParameterObject) {
-            if (v.variableType && v.variableType.entity) return v.variableType.entityQualifiedName;
-        } else {
-            const a = v.action;
-            if (a.entity) return a.entityQualifiedName;
-            if (a.retrieveSource && a.retrieveSource.entity) return a.retrieveSource.entityQualifiedName;
-            if (a.retrieveSource && a.retrieveSource.association) {
-                const assoc = a.retrieveSource.association;
-                return assoc.child ? (assoc.child.qualifiedName || assoc.childQualifiedName) : null;
-            }
-        }
-        throw new Error(`${where}: cannot tell the entity of variable '${name}'`);
-    }
-
-    async function action(m, spec, x, y, where) {
-        const kind = spec.action;
-        const def = ACTIONS[kind];
-        if (!def) fail(`${where}: unknown action '${kind}'`, kind, Object.keys(ACTIONS));
-        validate("action", kind, def, spec, where);
-        const act = mf.ActionActivity.createIn(m.objectCollection);
-        point(act, x, y);
-        act.size = { width: 120, height: 60 };
-        switch (kind) {
-            case "retrieve": {
-                const a = mf.RetrieveAction.createIn(act);
-                a.outputVariableName = noDollar(spec.variable);
-                if (spec.from || spec.association) {
-                    if (!spec.from || !spec.association) throw new Error(`${where}: association retrieve needs both 'from' and 'association'`);
-                    const src = mf.AssociationRetrieveSource.createIn(a);
-                    src.startVariableName = noDollar(spec.from);
-                    src.association = await get(spec.association);
-                } else {
-                    if (!spec.entity) throw new Error(`${where}: retrieve needs 'entity' (database) or 'from' + 'association'`);
-                    const src = mf.DatabaseRetrieveSource.createIn(a);
-                    src.entity = await entity(spec.entity);
-                    src.xPathConstraint = spec.xpath || "";
-                    const range = mf.ConstantRange.createInDatabaseRetrieveSourceUnderRange(src);
-                    range.singleObject = bool(spec.first, false);
-                }
-                break;
-            }
-            case "create": {
-                const a = mf.CreateObjectAction.createIn(act);
-                a.entity = await entity(spec.entity);
-                a.outputVariableName = noDollar(spec.variable);
-                a.commit = bool(spec.commit, false) ? mf.CommitEnum.Yes : mf.CommitEnum.No;
-                await memberChanges(a, spec.entity, spec.set, where, m);
-                break;
-            }
-            case "change": {
-                const a = mf.ChangeObjectAction.createIn(act);
-                a.changeVariableName = noDollar(spec.variable);
-                a.commit = bool(spec.commit, false) ? mf.CommitEnum.Yes : mf.CommitEnum.No;
-                a.refreshInClient = bool(spec.refresh, false);
-                await memberChanges(a, await entityOfVariable(m, spec.variable, where), spec.set, where, m);
-                break;
-            }
-            case "commit": {
-                const a = mf.CommitAction.createIn(act);
-                a.commitVariableName = noDollar(spec.variable);
-                a.withEvents = bool(spec.events, true);
-                break;
-            }
-            case "delete": {
-                const a = mf.DeleteAction.createIn(act);
-                a.deleteVariableName = noDollar(spec.variable);
-                break;
-            }
-            case "call": {
-                const target = await get(spec.microflow);
-                if (!(target instanceof mf.Microflow)) throw new Error(`${where}: '${spec.microflow}' is not a microflow`);
-                const a = mf.MicroflowCallAction.createIn(act);
-                const call = mf.MicroflowCall.createIn(a);
-                call.microflow = target;
-                const params = target.objectCollection.objects.filter(o => o instanceof mf.MicroflowParameterObject);
-                for (const [name, value] of Object.entries(spec.args || {})) {
-                    const p = params.find(x => x.name === name);
-                    if (!p) fail(`${where}: ${spec.microflow} has no parameter '${name}'`, name, params.map(x => x.name));
-                    const pm = mf.MicroflowCallParameterMapping.createIn(call);
-                    pm.parameter = p;
-                    pm.argument = expr(m, value, where);
-                }
-                const missing = params.filter(p => !(p.name in (spec.args || {})));
-                if (missing.length) throw new Error(`${where}: ${spec.microflow} needs args for: ${missing.map(p => p.name).join(", ")}`);
-                a.useReturnVariable = !!spec.variable;
-                a.outputVariableName = spec.variable ? noDollar(spec.variable) : "";
-                break;
-            }
-            case "log": {
-                const a = mf.LogMessageAction.createIn(act);
-                a.level = enumValue(mf.LogLevel, spec.level || "Info", "log level");
-                a.node = `'${String(spec.node || m.qualifiedName.split(".")[0]).replace(/'/g, "''")}'`;
-                a.messageTemplate.text = String(spec.message);
-                for (const e of spec.args || []) mf.TemplateArgument.createIn(a.messageTemplate).expression = expr(m, e, where);
-                break;
-            }
-            case "message": {
-                const a = mf.ShowMessageAction.createIn(act);
-                a.type = enumValue(mf.ShowMessageType, spec.type || "Information", "message type");
-                a.blocking = bool(spec.blocking, true);
-                await text(a.template.text, spec.text);
-                break;
-            }
-            case "variable": {
-                const a = mf.CreateVariableAction.createIn(act);
-                a.variableName = noDollar(spec.name);
-                a.variableType = await dataType(spec.type);
-                a.initialValue = expr(m, spec.value, where);
-                break;
-            }
-            case "set": {
-                const a = mf.ChangeVariableAction.createIn(act);
-                a.changeVariableName = noDollar(spec.name);
-                a.value = expr(m, spec.value, where);
-                break;
-            }
-        }
-        return act;
-    }
-
-    async function buildChain(m, specs, x, y, where) {
-        const list = [];
-        for (let i = 0; i < specs.length; i++) list.push(await action(m, specs[i], x + i * X_STEP, y, `${where} action ${i + 1}`));
-        return list;
-    }
+    const flows = makeFlows({ model, get, entity, text, dataType, attributeChain, loadParents });
+    const pageOps = makePages({ model, client, get, exists, entity, text, folder, attributeChain, loadParents });
 
     // ------------------------------------------------ operations
+
+    async function createFlowOp(o, nano) {
+        const qn = `${o.module}.${o.name}`;
+        if (await exists(qn)) throw new Error(`${qn} already exists`);
+        const { count } = await flows.createFlow(o, nano, folder(o.module, o.folder));
+        if (o.roles) await impl.grantAccess({ document: qn, roles: o.roles });
+        return `${qn} (${count} action(s))`;
+    }
+
+    // Activities (boxes) a list of action specs creates, including nested branches, loops and error handlers.
+    function countActivities(specs) {
+        let n = 0;
+        for (const sp of specs || []) {
+            if (!sp || typeof sp !== "object") continue;
+            if (sp.action === "if") n += countActivities(sp.then) + countActivities(sp.else);
+            else if (sp.action === "loop") n += countActivities(sp.actions);
+            else if (ACTIONS[sp.action]) n += 1 + (sp.onError && sp.onError.actions ? countActivities(sp.onError.actions) : 0);
+        }
+        return n;
+    }
+
+    function createdVariables(specs, out = []) {
+        for (const sp of specs || []) {
+            if (!sp || typeof sp !== "object") continue;
+            if (["retrieve", "create", "call"].includes(sp.action) && sp.variable) out.push(sp.variable);
+            if (sp.action === "variable") out.push(sp.name);
+            if (sp.action === "loop" && sp.over) out.push(sp.item || `${noDollar(sp.over)}Item`);
+            createdVariables(sp.then, out);
+            createdVariables(sp.else, out);
+            createdVariables(sp.actions, out);
+            if (sp.onError && sp.onError.actions) createdVariables(sp.onError.actions, out);
+        }
+        return out;
+    }
 
     const impl = {
         async createEntity(o) {
@@ -667,14 +462,16 @@ function bind(model, client) {
         },
         async grantAccess(o) {
             const doc = await get(o.document);
-            if (!doc.allowedModuleRoles) throw new Error(`'${o.document}' has no allowed roles (only microflows, nanoflows, pages)`);
+            const list = doc.allowedModuleRoles || doc.allowedRoles; // microflows/nanoflows | pages
+            if (!list) throw new Error(`'${o.document}' has no allowed roles (only microflows, nanoflows, pages)`);
             for (const qn of [].concat(o.roles)) {
                 const r = await get(qn);
                 if (!(r instanceof security.ModuleRole)) throw new Error(`'${qn}' is not a module role`);
-                if (!doc.allowedModuleRoles.includes(r)) doc.allowedModuleRoles.push(r);
+                if (!list.includes(r)) list.push(r);
             }
             return `${o.document} <- ${[].concat(o.roles).join(", ")}`;
         },
+
         async addAccessRule(o) {
             const e = await entity(o.entity);
             await loadParents(e);
@@ -712,68 +509,231 @@ function bind(model, client) {
             return `${o.entity} for ${[].concat(o.roles).join(", ")}`;
         },
         async createMicroflow(o) {
+            return createFlowOp(o, false);
+        },
+        async createNanoflow(o) {
+            return createFlowOp(o, true);
+        },
+        addActions: o => flows.addActions(o),
+        changeAction: o => flows.changeAction(o),
+        deleteAction: o => flows.deleteAction(o),
+        async setGeneralization(o) {
+            const e = await entity(o.entity);
+            const none = !o.generalization || /^none$/i.test(o.generalization);
+            if (none) {
+                const g = dm.NoGeneralization.createIn(e);
+                g.persistable = bool(o.persistable, true);
+                return `${o.entity}: no parent`;
+            }
+            const parent = await entity(o.generalization);
+            for (let p = parent, i = 0; p && i < 20; i++) {
+                if (p === e) throw new Error(`${o.generalization} already inherits from ${o.entity}: that would be a loop`);
+                const g = p.generalization;
+                p = g instanceof dm.Generalization && g.generalization ? (g.generalization.isLoaded ? g.generalization : await g.generalization.load()) : null;
+            }
+            const g = dm.Generalization.createIn(e);
+            g.generalization = parent;
+            return `${o.entity} inherits from ${o.generalization} (check access rules and pages that use ${o.entity} in Studio Pro)`;
+        },
+        async addValidationRule(o) {
+            const e = await entity(o.entity);
+            const attr = e.attributes.find(a => a.name === o.attribute);
+            if (!attr) fail(`${o.entity} has no attribute '${o.attribute}'`, o.attribute, e.attributes.map(a => a.name));
+            const rules = { required: dm.RequiredRuleInfo, unique: dm.UniqueRuleInfo, maxlength: dm.MaxLengthRuleInfo, range: dm.RangeRuleInfo, regex: dm.RegExRuleInfo, equals: dm.EqualsToRuleInfo };
+            const kind = String(o.rule).toLowerCase();
+            if (!rules[kind]) fail(`'${o.rule}' is not a rule (use required | unique | maxLength | range | regex | equals)`, o.rule, Object.keys(rules));
+            const need = { maxlength: ["maxLength"], range: [], regex: ["regex"], equals: ["value"] }[kind] || [];
+            for (const f of need) if (o[f] === undefined) throw new Error(`addValidationRule ${kind} needs '${f}'`);
+            if (kind === "range" && o.min === undefined && o.max === undefined) throw new Error("addValidationRule range needs 'min' and/or 'max'");
+            const vr = dm.ValidationRule.createIn(e);
+            vr.attribute = attr;
+            await text(vr.errorMessage, o.message);
+            const info = rules[kind].createIn(vr);
+            if (kind === "maxlength") info.maxLength = Number(o.maxLength);
+            if (kind === "range") {
+                info.useMinValue = o.min !== undefined;
+                info.useMaxValue = o.max !== undefined;
+                if (o.min !== undefined) info.minValue = String(o.min);
+                if (o.max !== undefined) info.maxValue = String(o.max);
+                info.typeOfRange = o.min !== undefined && o.max !== undefined ? dm.RangeType.Between : o.min !== undefined ? dm.RangeType.GreaterThanOrEqualTo : dm.RangeType.SmallerThanOrEqualTo;
+            }
+            if (kind === "regex") {
+                const re = await get(o.regex);
+                if (!(re instanceof sdk.regularexpressions.RegularExpression)) throw new Error(`'${o.regex}' is not a regular expression document`);
+                info.regularExpression = re;
+            }
+            if (kind === "equals") {
+                info.useValue = true;
+                info.equalsToValue = String(o.value);
+            }
+            return `${o.entity}.${o.attribute}: ${kind}`;
+        },
+        async addEventHandler(o) {
+            const e = await entity(o.entity);
+            const mfl = await get(o.microflow);
+            if (!(mfl instanceof mf.Microflow)) throw new Error(`'${o.microflow}' is not a microflow`);
+            const moment = enumValue(dm.ActionMoment, o.moment, "moment");
+            const event = enumValue(dm.EventType, o.event, "event");
+            const pass = bool(o.passObject, true);
+            const params = mfl.objectCollection.objects.filter(x => x instanceof mf.MicroflowParameterObject);
+            if (pass && params.length !== 1) throw new Error(`${o.microflow} must have exactly one parameter (the ${o.entity} object), it has ${params.length}; or set "passObject": false`);
+            if (!pass && params.length) throw new Error(`${o.microflow} has parameters, but passObject is false`);
+            if (moment === dm.ActionMoment.Before && !(mfl.microflowReturnType instanceof datatypes.BooleanType)) throw new Error(`a Before handler microflow must return Boolean; ${o.microflow} does not`);
+            const eh = dm.EventHandler.createIn(e);
+            eh.moment = moment;
+            eh.event = event;
+            eh.microflow = mfl;
+            eh.passEventObject = pass;
+            eh.raiseErrorOnFalse = moment === dm.ActionMoment.Before ? bool(o.raiseErrorOnFalse, true) : false;
+            return `${o.entity}: ${o.moment} ${o.event} -> ${o.microflow}`;
+        },
+        async addIndex(o) {
+            const e = await entity(o.entity);
+            if (!Array.isArray(o.attributes) || !o.attributes.length) throw new Error("addIndex needs attributes: [ \"Attr\" ]");
+            const idx = dm.Index.createIn(e);
+            for (const spec of o.attributes) {
+                const name = typeof spec === "string" ? spec : spec && spec.name;
+                const attr = e.attributes.find(a => a.name === name);
+                if (!attr) fail(`${o.entity} has no attribute '${name}'`, name, e.attributes.map(a => a.name));
+                const ia = dm.IndexedAttribute.createIn(idx);
+                ia.type = dm.IndexedAttributeType.Normal;
+                ia.attribute = attr;
+                ia.ascending = typeof spec === "object" ? bool(spec.ascending, true) : true;
+            }
+            return `${o.entity}(${o.attributes.map(a => (typeof a === "string" ? a : a.name)).join(", ")})`;
+        },
+        async createConstant(o) {
             const qn = `${o.module}.${o.name}`;
             if (await exists(qn)) throw new Error(`${qn} already exists`);
-            const m = mf.Microflow.createIn(folder(o.module, o.folder));
-            m.name = o.name;
-            const start = mf.StartEvent.createIn(m.objectCollection);
-            point(start, 100, 200);
-            start.size = { width: 20, height: 20 };
-            (o.parameters || []).forEach((p, i) => {
-                if (!p || !p.name || !p.type) throw new Error(`createMicroflow ${qn}: parameter ${i + 1} needs name and type`);
-            });
-            for (const [i, p] of (o.parameters || []).entries()) {
-                const po = mf.MicroflowParameterObject.createIn(m.objectCollection);
-                po.name = p.name;
-                po.variableType = await dataType(p.type);
-                point(po, 100 + i * 120, 80);
-                po.size = { width: 30, height: 30 };
-            }
-            if (o.returns) {
-                m.microflowReturnType = await dataType(o.returns);
-                if (o.returnValue === undefined) throw new Error(`createMicroflow ${qn}: returns is set, so returnValue is required`);
-            }
-            const acts = await buildChain(m, o.actions || [], 100 + X_STEP, 200, qn);
-            const end = mf.EndEvent.createIn(m.objectCollection);
-            point(end, 100 + (acts.length + 1) * X_STEP, 200);
-            end.size = { width: 20, height: 20 };
-            end.returnValue = o.returns ? expr(m, o.returnValue, qn + " returnValue") : "";
-            const chain = [start, ...acts, end];
-            for (let i = 0; i + 1 < chain.length; i++) flow(m, chain[i], chain[i + 1]);
-            if (o.roles) await impl.grantAccess({ document: qn, roles: o.roles });
-            return `${qn} (${acts.length} action(s))`;
+            const allowed = ["string", "integer", "long", "decimal", "boolean", "datetime"];
+            if (!allowed.includes(String(o.type).toLowerCase())) fail(`constant type '${o.type}' is not allowed`, o.type, ["String", "Integer", "Long", "Decimal", "Boolean", "DateTime"]);
+            const c = constants.Constant.createIn(folder(o.module, o.folder));
+            c.name = o.name;
+            c.type = await dataType(o.type);
+            c.defaultValue = String(o.default);
+            c.exposedToClient = bool(o.exposedToClient, false);
+            return qn;
         },
-        async addActions(o) {
-            const m = await get(o.microflow);
-            if (!(m instanceof mf.Microflow)) throw new Error(`'${o.microflow}' is not a microflow`);
-            if (!Array.isArray(o.actions) || !o.actions.length) throw new Error("addActions needs actions: [ ... ]");
-            const objects = m.objectCollection.objects;
-            const sequence = m.flows.filter(f => f instanceof mf.SequenceFlow && !f.isErrorHandler);
-            let anchorFlow;
-            if (!o.after) {
-                const ends = objects.filter(x => x instanceof mf.EndEvent);
-                if (ends.length !== 1) throw new Error(`${o.microflow} has ${ends.length} end events; say where with "after": "start" or a variable name`);
-                const into = sequence.filter(f => f.destination === ends[0]);
-                if (into.length !== 1) throw new Error(`${o.microflow}: ${into.length} flows reach the end event; use "after"`);
-                anchorFlow = into[0];
+        async createScheduledEvent(o) {
+            const qn = `${o.module}.${o.name}`;
+            if (await exists(qn)) throw new Error(`${qn} already exists`);
+            const target = await get(o.microflow);
+            if (!(target instanceof mf.Microflow)) throw new Error(`'${o.microflow}' is not a microflow`);
+            if (target.objectCollection.objects.some(x => x instanceof mf.MicroflowParameterObject)) throw new Error(`${o.microflow} has parameters; a scheduled event needs a microflow without parameters`);
+            const unit = String(o.every).toLowerCase();
+            const interval = Number(o.interval === undefined ? 1 : o.interval);
+            if (!(interval >= 1)) throw new Error("interval must be a number >= 1");
+            const at = /^(\d{1,2}):(\d{2})$/.exec(String(o.at || "00:00")) || /^()(\d{1,2})$/.exec(String(o.at));
+            if (!at) throw new Error(`'at' must look like 02:30 (or 15 for minutes past the hour), got '${o.at}'`);
+            const hour = Number(at[1] || 0);
+            const minute = Number(at[2]);
+            if (hour > 23 || minute > 59) throw new Error(`'at' ${o.at} is not a valid time`);
+            const ev = scheduledevents.ScheduledEvent.createIn(folder(o.module, o.folder));
+            ev.name = o.name;
+            ev.microflow = target;
+            ev.enabled = bool(o.enabled, false);
+            ev.timeZone = enumValue(scheduledevents.TimeZoneEnum, o.timeZone || "UTC", "timeZone");
+            ev.onOverlap = enumValue(scheduledevents.OverlapStrategy, o.onOverlap || "DelayNext", "onOverlap");
+            const se = scheduledevents;
+            if (unit === "minute") {
+                se.MinuteSchedule.createIn(ev).multiplier = interval;
+                ev.interval = interval;
+                ev.intervalType = se.IntervalType.Minute;
+            } else if (unit === "hour") {
+                const s = se.HourSchedule.createIn(ev);
+                s.multiplier = interval;
+                s.minuteOffset = minute;
+                ev.interval = interval;
+                ev.intervalType = se.IntervalType.Hour;
+            } else if (unit === "day") {
+                const s = se.DaySchedule.createIn(ev);
+                s.hourOfDay = hour;
+                s.minuteOfHour = minute;
+                ev.interval = 1;
+                ev.intervalType = se.IntervalType.Day;
+            } else if (unit === "week") {
+                const names = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+                const days = [].concat(o.days || []).map(d => String(d).toLowerCase());
+                if (!days.length) throw new Error("every Week needs days: [ \"Monday\", ... ]");
+                const s = se.WeekSchedule.createIn(ev);
+                for (const d of days) {
+                    if (!names.includes(d)) fail(`'${d}' is not a weekday`, d, names);
+                    s[d] = true;
+                }
+                s.hourOfDay = hour;
+                s.minuteOfHour = minute;
+                ev.interval = 1;
+                ev.intervalType = se.IntervalType.Week;
+            } else fail(`'every' must be Minute | Hour | Day | Week, got '${o.every}'`, o.every, ["Minute", "Hour", "Day", "Week"]);
+            return `${qn}: every ${unit === "minute" || unit === "hour" ? interval + " " : ""}${unit}${unit === "day" || unit === "week" ? " at " + String(hour).padStart(2, "0") + ":" + String(minute).padStart(2, "0") : ""} -> ${o.microflow}${ev.enabled ? "" : " (disabled)"}`;
+        },
+        createPage: async o => {
+            const r = await pageOps.createPage(o);
+            if (o.roles) await impl.grantAccess({ document: `${o.module}.${o.name}`, roles: o.roles });
+            return r;
+        },
+        async publishRest(o) {
+            const mfl = await get(o.microflow);
+            if (!(mfl instanceof mf.Microflow)) throw new Error(`'${o.microflow}' is not a microflow`);
+            const special = t => t && t.entity && ["System.HttpRequest", "System.HttpResponse"].includes(t.entityQualifiedName);
+            const ret = mfl.microflowReturnType;
+            if (ret && (ret instanceof datatypes.ObjectType || ret instanceof datatypes.ListType) && !special(ret)) throw new Error(`${o.microflow} returns an object/list; that needs an export mapping. Return a String or System.HttpResponse, or publish it in Studio Pro`);
+            const qn = `${o.module}.${o.service}`;
+            let svc;
+            if (await exists(qn)) {
+                svc = await get(qn);
+                if (!(svc instanceof rest.PublishedRestService)) throw new Error(`${qn} exists and is not a published REST service`);
             } else {
-                const anchor = o.after === "start" ? objects.find(x => x instanceof mf.StartEvent) : variablesOf(m).get(noDollar(o.after));
-                if (!anchor || anchor instanceof mf.MicroflowParameterObject) fail(`${o.microflow}: no action creates variable '${o.after}'`, noDollar(o.after), ["start", ...[...variablesOf(m).keys()]]);
-                const out = sequence.filter(f => f.origin === anchor);
-                if (out.length !== 1) throw new Error(`${o.microflow}: '${o.after}' has ${out.length} outgoing flows; pick another point`);
-                anchorFlow = out[0];
+                svc = rest.PublishedRestService.createIn(folder(o.module, o.folder));
+                svc.name = o.service;
+                svc.serviceName = o.service;
+                svc.version = "1.0.0";
+                svc.path = o.servicePath || `rest/${o.service.toLowerCase()}/v1`;
+                svc.authenticationTypes.clear();
+                for (const a of [].concat(o.authentication || ["Basic"])) svc.authenticationTypes.push(enumValue(rest.RestAuthenticationType, a, "authentication"));
             }
-            const from = anchorFlow.origin;
-            const to = anchorFlow.destination;
-            const fx = from.relativeMiddlePoint.x;
-            const y = from.relativeMiddlePoint.y;
-            const shift = o.actions.length * X_STEP;
-            for (const x of objects) if (x.relativeMiddlePoint.x > fx && !(x instanceof mf.MicroflowParameterObject)) x.relativeMiddlePoint = { x: x.relativeMiddlePoint.x + shift, y: x.relativeMiddlePoint.y };
-            const acts = await buildChain(m, o.actions, fx + X_STEP, y, o.microflow);
-            anchorFlow.destination = acts[0];
-            for (let i = 0; i + 1 < acts.length; i++) flow(m, acts[i], acts[i + 1]);
-            flow(m, acts[acts.length - 1], to);
-            return `${o.microflow}: ${acts.length} action(s) after ${o.after || "the last step"}`;
+            for (const r of [].concat(o.roles || [])) {
+                const role = await get(r);
+                if (!(role instanceof security.ModuleRole)) throw new Error(`'${r}' is not a module role`);
+                if (!svc.allowedRoles.includes(role)) svc.allowedRoles.push(role);
+            }
+            let res = svc.resources.find(x => x.name === o.resource);
+            if (!res) {
+                res = rest.PublishedRestServiceResource.createIn(svc);
+                res.name = o.resource;
+            }
+            const method = enumValue(sdk.services.HttpMethod, o.method, "method");
+            const path = String(o.path || "");
+            if (res.operations.some(x => x.httpMethod === method && x.path === path)) throw new Error(`${qn}/${o.resource}: ${o.method} '${path}' already exists`);
+            const op = rest.PublishedRestServiceOperation.createIn(res);
+            op.httpMethod = method;
+            op.path = path;
+            op.microflow = mfl;
+            op.commit = mf.CommitEnum.No;
+            const inPath = new Set([...path.matchAll(/\{(\w+)\}/g)].map(m => m[1]));
+            for (const p of mfl.objectCollection.objects.filter(x => x instanceof mf.MicroflowParameterObject)) {
+                const t = p.variableType;
+                if (special(t)) continue; // System.HttpRequest/HttpResponse are passed by the runtime
+                if (t instanceof datatypes.ObjectType || t instanceof datatypes.ListType) throw new Error(`${o.microflow} parameter '${p.name}' is an object/list; that needs an import mapping. Publish it in Studio Pro`);
+                const rp = rest.RestOperationParameter.createInPublishedRestServiceOperationUnderParameters(op);
+                rp.name = p.name;
+                rp.microflowParameter = p;
+                rp.parameterType = inPath.has(p.name) ? rest.RestOperationParameterType.Path : rest.RestOperationParameterType.Query;
+                const copy = sdk.datatypes[t.structureTypeName.split("$")[1]].create(model);
+                if (copy instanceof datatypes.EnumerationType) copy.enumeration = t.enumeration;
+                rp.type = copy;
+                inPath.delete(p.name);
+            }
+            if (inPath.size) throw new Error(`path has {${[...inPath].join("}, {")}} but ${o.microflow} has no such parameter`);
+            return `${qn}: ${o.method.toUpperCase()} /${svc.path}/${o.resource}${path ? "/" + path : ""} -> ${o.microflow} (experimental: check in Studio Pro)`;
+        },
+        async moveDocument(o) {
+            const doc = await get(o.document);
+            if (!(doc instanceof projects.Document)) throw new Error(`'${o.document}' is not a document`);
+            const module = o.document.split(".")[0];
+            const target = folder(module, o.folder);
+            client.moveUnit(doc.id, target.id, "Documents");
+            return `${o.document} -> ${module}${o.folder ? "/" + o.folder : " (module root)"}`;
         },
         async rename(o) {
             const el = await get(o.target);
@@ -830,9 +790,10 @@ function bind(model, client) {
         },
         async grantAccess(o) {
             const doc = await get(o.document);
-            const have = doc.allowedModuleRolesQualifiedNames;
+            const have = doc.allowedModuleRolesQualifiedNames || doc.allowedRolesQualifiedNames || [];
             return [].concat(o.roles).filter(r => !have.includes(r)).map(r => `${o.document} does not allow ${r}`);
         },
+
         async addAccessRule(o) {
             const e = await entity(o.entity);
             const ok = e.accessRules.some(r => [].concat(o.roles).every(x => r.moduleRolesQualifiedNames.includes(x)));
@@ -840,20 +801,81 @@ function bind(model, client) {
         },
         async createMicroflow(o) {
             const m = await get(`${o.module}.${o.name}`);
-            const acts = m.objectCollection.objects.filter(x => x instanceof mf.ActionActivity).length;
-            const params = m.objectCollection.objects.filter(x => x instanceof mf.MicroflowParameterObject).length;
+            let acts = 0;
+            let params = 0;
+            flows.walkObjects(m.objectCollection, x => {
+                if (x instanceof mf.ActionActivity) acts++;
+                if (x instanceof mf.MicroflowParameterObject) params++;
+            });
             const r = [];
-            if (acts !== (o.actions || []).length) r.push(`${o.module}.${o.name} has ${acts} actions, expected ${(o.actions || []).length}`);
+            const want = countActivities(o.actions);
+            if (acts !== want) r.push(`${o.module}.${o.name} has ${acts} actions, expected ${want}`);
             if (params !== (o.parameters || []).length) r.push(`${o.module}.${o.name} has ${params} parameters, expected ${(o.parameters || []).length}`);
             return r;
         },
+        async createNanoflow(o) {
+            const m = await get(`${o.module}.${o.name}`);
+            if (!(m instanceof mf.Nanoflow)) return [`${o.module}.${o.name} is not a nanoflow`];
+            return checks.createMicroflow(o);
+        },
         async addActions(o) {
             const m = await get(o.microflow);
-            const vars = variablesOf(m);
-            return o.actions
-                .map(a => (["retrieve", "create", "call"].includes(a.action) ? a.variable : a.action === "variable" ? a.name : null))
-                .filter(v => v && !vars.has(noDollar(v)))
-                .map(v => `${o.microflow}: no action creates '${v}'`);
+            const vars = flows.variablesOf(m);
+            return createdVariables(o.actions).filter(v => !vars.has(noDollar(v))).map(v => `${o.microflow}: no action creates '${v}'`);
+        },
+        async changeAction(o) {
+            const m = await get(o.microflow);
+            return flows.findStep(m, o.id, true) ? [] : [`${o.microflow}: step ${o.id} is missing`];
+        },
+        async deleteAction(o) {
+            const m = await get(o.microflow);
+            return flows.findStep(m, o.id, true) ? [`${o.microflow}: step ${o.id} still exists`] : [];
+        },
+        async setGeneralization(o) {
+            const e = await entity(o.entity);
+            const none = !o.generalization || /^none$/i.test(o.generalization);
+            const g = e.generalization;
+            if (none) return g instanceof dm.NoGeneralization ? [] : [`${o.entity} still has a parent`];
+            return g instanceof dm.Generalization && g.generalizationQualifiedName === o.generalization ? [] : [`${o.entity} does not inherit from ${o.generalization}`];
+        },
+        async addValidationRule(o) {
+            const e = await entity(o.entity);
+            return e.validationRules.some(r => r.attributeQualifiedName === `${o.entity}.${o.attribute}`) ? [] : [`${o.entity}.${o.attribute} has no validation rule`];
+        },
+        async addEventHandler(o) {
+            const e = await entity(o.entity);
+            return e.eventHandlers.some(x => x.microflowQualifiedName === o.microflow) ? [] : [`${o.entity} has no event handler for ${o.microflow}`];
+        },
+        async addIndex(o) {
+            const e = await entity(o.entity);
+            return e.indexes.length ? [] : [`${o.entity} has no index`];
+        },
+        async createConstant(o) {
+            const c = await get(`${o.module}.${o.name}`);
+            return c.defaultValue === String(o.default) ? [] : [`${o.module}.${o.name} default is '${c.defaultValue}'`];
+        },
+        async createScheduledEvent(o) {
+            const ev = await get(`${o.module}.${o.name}`);
+            return ev.microflowQualifiedName === o.microflow && ev.schedule ? [] : [`${o.module}.${o.name} is incomplete`];
+        },
+        async createPage(o) {
+            const page = await get(`${o.module}.${o.name}`);
+            const r = [];
+            if (o.entity && !page.parameters.length) r.push(`${o.module}.${o.name} has no page parameter`);
+            return r;
+        },
+        async publishRest(o) {
+            const svc = await get(`${o.module}.${o.service}`);
+            const res = svc.resources.find(x => x.name === o.resource);
+            const ok = res && res.operations.some(x => x.microflowQualifiedName === o.microflow);
+            return ok ? [] : [`${o.module}.${o.service}/${o.resource} has no operation for ${o.microflow}`];
+        },
+        async moveDocument(o) {
+            const doc = await get(o.document);
+            const path = [];
+            for (let c = doc.container; c && !(c instanceof projects.Module); c = c.container) path.unshift(c.name);
+            const want = String(o.folder || "").split(/[/\\]/).filter(Boolean).join("/");
+            return path.join("/") === want ? [] : [`${o.document} is in '${path.join("/")}', expected '${want}'`];
         },
         async rename(o) {
             const parts = o.target.split(".");
@@ -889,16 +911,19 @@ function bind(model, client) {
                 throw e;
             }
         }
-        return lintExpressions();
+        return flows.lintExpressions();
     }
 
     async function checkPlan(plan) {
         const failed = [];
         for (const [i, o] of plan.ops.entries()) {
             const { name } = opOf(o, i);
-            // ops later in the plan can undo earlier ones (rename, delete); only check the final state of each name
-            const later = plan.ops.slice(i + 1).some(x => ["rename", "delete"].includes(x.op));
-            if (later && name !== "rename" && name !== "delete") continue;
+            // ops later in the plan can undo earlier ones (rename, delete) or edit the same flow; check final states only
+            const rest = plan.ops.slice(i + 1);
+            const later = rest.some(x => ["rename", "delete"].includes(x.op));
+            const qn = o.module && o.name ? `${o.module}.${o.name}` : null;
+            const edited = qn && rest.some(x => ["addActions", "changeAction", "deleteAction"].includes(x.op) && x.microflow === qn);
+            if ((later && name !== "rename" && name !== "delete") || edited) continue;
             try {
                 failed.push(...(await checks[name](o)).map(f => `${i + 1}. ${name}: ${f}`));
             } catch (e) {
@@ -908,7 +933,7 @@ function bind(model, client) {
         return failed;
     }
 
-    const api = { get, runPlan, checkPlan, dataType, folder, lintExpressions };
+    const api = { get, runPlan, checkPlan, dataType, folder, lintExpressions: () => flows.lintExpressions(), steps: qn => flows.steps(qn) };
     for (const name of Object.keys(OPS)) {
         api[name] = o => {
             validate("op", name, OPS[name], o || {}, `ops.${name}`);

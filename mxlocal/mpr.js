@@ -90,7 +90,9 @@ class Project {
         const created = [...changes.created].filter(([id]) => !changes.deleted.has(id))
             .map(([id, c]) => ({ id, containerId: c.containerId, containmentName: c.containmentName }));
         const deleted = [...changes.deleted].filter(id => !changes.created.has(id));
-        return { files, created, deleted };
+        const moved = [...(changes.moved || [])].filter(([id]) => !changes.deleted.has(id) && !changes.created.has(id))
+            .map(([id, m]) => ({ id, containerId: m.containerId, containmentName: m.containmentName }));
+        return { files, created, deleted, moved };
     }
 
     write(changes, hint) {
@@ -139,6 +141,8 @@ class Project {
                     else upd.run(f.hash, guidToBytes(f.id));
                 }
                 for (const id of enc.deleted) del.run(guidToBytes(id));
+                const move = db.prepare("update Unit set ContainerID = ?, ContainmentName = ? where UnitID = ?");
+                for (const m of enc.moved || []) move.run(guidToBytes(m.containerId), m.containmentName, guidToBytes(m.id));
                 db.prepare("update _Transaction set LastTransactionID = ?").run(crypto.randomUUID());
                 db.exec("COMMIT");
                 open = false;
@@ -154,7 +158,7 @@ class Project {
             throw new Error(`Write failed and the project was restored from ${backup}: ${e.message}`);
         }
         prune(this.dir);
-        return { backup, written: enc.files.length, deleted: enc.deleted.length };
+        return { backup, written: enc.files.length, deleted: enc.deleted.length, moved: (enc.moved || []).length };
     }
 }
 

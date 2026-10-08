@@ -4,6 +4,7 @@ Copied into the export folder by mxcontext.py with CONFIG filled in, so the agen
 
     python mx.py refresh              re-export the model and show what changed since the last checked state
     python mx.py find <text>          model elements whose name contains <text>
+    python mx.py steps <Module.Flow>  steps of a microflow/nanoflow with ids (for changeAction / deleteAction)
     python mx.py ops                  the operations a change file can use
     python mx.py api <Type> [word]    Model SDK type details (for .js change files)
     python mx.py dryrun <file>        compute a change from edits/<file> (.json or .js); writes nothing
@@ -117,6 +118,11 @@ def main(argv):
             say("Usage: python mx.py find <part of a name>")
             return 1
         return mxlocal("find", " ".join(rest))
+    if cmd == "steps":
+        if not rest:
+            say("Usage: python mx.py steps <Module.Microflow>")
+            return 1
+        return mxlocal("steps", rest[0])
     if cmd == "ops":
         return mxlocal("ops", project=False)
     if cmd == "api":

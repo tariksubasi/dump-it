@@ -22,7 +22,7 @@ function save(projectDir, enc, info) {
         fs.writeFileSync(path.join(d, "units", f.id + ".mxunit"), f.bytes);
         h.update(f.id).update(f.bytes);
     }
-    h.update(JSON.stringify([enc.created, enc.deleted, info.plan || null]));
+    h.update(JSON.stringify([enc.created, enc.deleted, enc.moved || [], info.plan || null]));
     const code = h.digest("hex").slice(0, 4).toUpperCase();
     const manifest = {
         code,
@@ -32,6 +32,7 @@ function save(projectDir, enc, info) {
         files: enc.files.map(f => ({ id: f.id, hash: f.hash })),
         created: enc.created,
         deleted: enc.deleted,
+        moved: enc.moved || [],
         summary: info.summary,
         plan: info.plan || null
     };

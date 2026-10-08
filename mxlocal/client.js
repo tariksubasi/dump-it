@@ -15,11 +15,16 @@ async function loadProject(mprPath) {
     const catalog = new Catalog();
     for (const [id] of project.units) catalog.learn(project.read(id));
     const schema = await Schema.create(project.version);
-    const reference = require("./reference-catalog.json");
-    const strict = Number(project.version.split(".")[0]) >= 11;
-    if (strict) catalog.addReference(reference, null, project.version);
-    schema.calibrate(catalog);
-    if (!strict) catalog.addReference(reference, schema, project.version);
+    // reference-catalog.json: { "<major>": { storageType: keys } } learned from Studio Pro projects of that major version.
+    // Same major: strict (added before calibration). Other major: only keys the SDK maps for this version.
+    // Types the same major version's samples lack are then taken loosely from the other versions (nearest first).
+    const all = require("./reference-catalog.json");
+    const major = project.version.split(".")[0];
+    const byDistance = Object.keys(all).sort((a, b) => Math.abs(a - major) - Math.abs(b - major) || b - a);
+    if (all[major]) catalog.addReference(all[major], null, true);
+    for (const other of byDistance) if (other !== major) catalog.addReference(all[other], null, false);
+    schema.calibrate(catalog); // learns storage names from the reference types too
+    catalog.pruneLoose(schema);
     return { project, catalog, schema };
 }
 
@@ -33,7 +38,7 @@ class LocalClient {
         this.index = new Map(); // elementId -> { obj, parent, key, unitId }
         this.indexed = new Set();
         this.detached = new Map();
-        this.changes = { updated: new Set(), created: new Map(), deleted: new Set() };
+        this.changes = { updated: new Set(), created: new Map(), deleted: new Set(), moved: new Map() };
         this.warnings = new Set();
         this.log = [];
         this.warn = w => this.warnings.add(w);
@@ -161,7 +166,7 @@ class LocalClient {
     stored(type, key) {
         if (!this.catalog.types.has(type)) return true;
         if (this.catalog.reference.has(type)) {
-            if (this.catalog.referenceLoose) return true;
+            if (this.catalog.looseTypes.has(type)) return true;
             const info = this.schema.info(this.schema.sdkType(type));
             if (info && info.byKey.has(key)) return true; // see complete(): sample may predate this version
         }
@@ -303,6 +308,7 @@ class LocalClient {
     // The Model Server rewrites by-name references when something is renamed; do the same across all units.
     rename(elementId, oldName, newName) {
         const s = this.model && this.findStructure(elementId);
+        if (s && /^Projects\$Module/.test(s.structureTypeName)) return this.renameModule(oldName, newName);
         const qn = s && s._getQualifiedName && s._getQualifiedName();
         if (!qn) return;
         const parts = qn.split(".");
@@ -337,6 +343,48 @@ class LocalClient {
         for (const unitId of this.project.units.keys()) walk(this.project.read(unitId), unitId);
         this.renames = (this.renames || []).concat(`${oldQn} -> ${newQn} (${changed} references)`);
         this.leftovers = (this.leftovers || []).concat(this.findText(oldQn, oldName, parts.length > 2));
+    }
+
+    // A module name prefixes every qualified name: rewrite by-name references, and "Old." in expressions and XPath
+    // (unambiguous because of the dot). Code folders named after the module must be moved by hand.
+    renameModule(oldName, newName) {
+        let refs = 0;
+        let exprs = 0;
+        const prefix = oldName + ".";
+        const re = new RegExp(`(^|[^A-Za-z0-9_.])${oldName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.`, "g");
+        const exprKey = /expression|xpath|constraint|argument|value|formula|node|condition/i;
+        const walk = (obj, unitId) => {
+            if (!obj || typeof obj !== "object" || Buffer.isBuffer(obj)) return;
+            if (Array.isArray(obj)) return obj.forEach(x => walk(x, unitId));
+            const info = obj.$Type && this.schema.info(this.schema.sdkType(obj.$Type));
+            for (const [k, v] of Object.entries(obj)) {
+                if (k[0] === "$") continue;
+                const p = info && info.byKey.get(k);
+                const byName = p && (p.kind === "byName" || p.kind === "byNameList");
+                const fix = x => {
+                    if (typeof x !== "string") return x;
+                    if (byName) return x === oldName ? newName : x.startsWith(prefix) ? newName + "." + x.slice(prefix.length) : x;
+                    return exprKey.test(k) ? x.replace(re, (m, pre) => `${pre}${newName}.`) : x;
+                };
+                if (typeof v === "string" || (Array.isArray(v) && v.every(x => typeof x === "string") && v.length)) {
+                    const nv = Array.isArray(v) ? v.map(fix) : fix(v);
+                    if (JSON.stringify(nv) !== JSON.stringify(v)) {
+                        obj[k] = nv;
+                        this.changes.updated.add(unitId);
+                        if (byName) refs++;
+                        else exprs++;
+                    }
+                } else if (v && typeof v === "object") walk(v, unitId);
+            }
+        };
+        for (const unitId of this.project.units.keys()) walk(this.project.read(unitId), unitId);
+        this.renames = (this.renames || []).concat(`${oldName} -> ${newName} (${refs} references, ${exprs} expressions/XPath)`);
+        const folders = ["javasource", "javascriptsource", "themesource"].map(d => path.join(this.project.dir, d, oldName.toLowerCase())).filter(d => fs.existsSync(d));
+        const left = this.findText(oldName, oldName, false).filter(h => !/expression|xpath|constraint|argument|value|formula|node|condition/i.test(h.split(": ")[2] || ""));
+        this.leftovers = (this.leftovers || []).concat(
+            folders.map(d => `${oldName}: folder ${path.relative(this.project.dir, d)} keeps the old name; Studio Pro creates ${path.basename(d) === oldName.toLowerCase() ? newName.toLowerCase() : newName}: move the code over`),
+            left.slice(0, 30)
+        );
     }
 
     // Names inside expressions, XPath, texts and Java code are plain strings: the rename cannot update them.
@@ -402,6 +450,20 @@ class LocalClient {
         return [...users].sort();
     }
 
+    // Module/Folder/Sub for a module or folder unit id.
+    folderPath(unitId) {
+        const parts = [];
+        for (let id = unitId; id; ) {
+            const u = this.project.units.get(id);
+            if (!u) break;
+            const p = this.project.read(id);
+            if (p.Name) parts.unshift(p.Name);
+            if (/^Projects\$Module/.test(p.$Type)) break;
+            id = u.containerId;
+        }
+        return parts.join("/");
+    }
+
     // Module.Document for a unit id, for messages.
     label(unitId) {
         const names = [];
@@ -432,6 +494,17 @@ class LocalClient {
         return null;
     }
 
+    // The Model SDK cannot move a unit to another folder; Studio Pro only changes the unit's container row.
+    moveUnit(unitId, containerId, containmentName = "Documents") {
+        const u = this.project.units.get(unitId);
+        if (!u) throw new Error(`Unit ${unitId} not found`);
+        u.containerId = containerId;
+        u.containmentName = containmentName;
+        const created = this.changes.created.get(unitId);
+        if (created) Object.assign(created, { containerId, containmentName });
+        else this.changes.moved.set(unitId, { containerId, containmentName });
+    }
+
     summary() {
         const name = id => {
             const p = this.project.plain.get(id);
@@ -441,6 +514,7 @@ class LocalClient {
             created: [...this.changes.created.keys()].map(name),
             updated: [...this.changes.updated].filter(id => !this.changes.created.has(id)).map(name),
             deleted: [...this.changes.deleted].map(name),
+            moved: [...this.changes.moved].map(([id, m]) => `${this.label(id)} -> ${this.folderPath(m.containerId)}`),
             renames: this.renames || [],
             leftovers: this.leftovers || [],
             warnings: [...this.warnings]

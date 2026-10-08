@@ -204,18 +204,19 @@ class FlowRenderer:
                 for dest, flow in sorted(normal, key=lambda x: self._case_order(x[1])):
                     self._emit(indent + 1, "[%s]" % self._case(flow))
                     self._seq(dest, join, indent + 2)
-                self._error_branch(node, errors, indent)
+                self._error_branch(node, errors, indent, bool(normal))
                 node = join if join not in (None, EXIT) else None
                 continue
             self._node(node, obj, indent)
-            self._error_branch(node, errors, indent)
+            self._error_branch(node, errors, indent, bool(normal))
             node = normal[0][0] if normal else None
         return False
 
-    def _error_branch(self, node, errors, indent):
+    def _error_branch(self, node, errors, indent, has_normal=True):
         if not errors:
             return
-        join = self.ipdom.get(node)
+        # Without a normal path (e.g. the last step in a loop) the error path itself post-dominates: no join.
+        join = self.ipdom.get(node) if has_normal else None
         self._emit(indent + 1, "ON ERROR:")
         if self._seq(errors[0][0], join, indent + 2) and join not in (None, EXIT):
             self.jump_targets.add(join)

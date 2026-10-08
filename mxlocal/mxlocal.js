@@ -26,6 +26,8 @@ const USAGE = `mxlocal - Mendix Model SDK offline on a local .mpr (v2)
   node mxlocal.js api <Type>            SDK type: properties, enum values, createIn functions
   node mxlocal.js find <text> --project <app.mpr|folder>
                                         model elements whose qualified name contains <text>
+  node mxlocal.js steps <Module.Flow> --project <app.mpr|folder>
+                                        the steps of a microflow/nanoflow with ids (for changeAction/deleteAction)
   node mxlocal.js ops                   the operations a change.json can use
   node mxlocal.js verify --project ...  read-only self check (byte roundtrip + SDK mapping)
   node mxlocal.js open --project ...    load every unit through the Model SDK, report problems
@@ -217,12 +219,13 @@ async function run(file, mpr) {
     }
     await model.flushChanges();
     const s = client.summary();
-    say(`Changes: ${s.created.length} created, ${s.updated.length} updated, ${s.deleted.length} deleted unit(s)`);
+    say(`Changes: ${s.created.length} created, ${s.updated.length} updated, ${s.deleted.length} deleted${s.moved.length ? `, ${s.moved.length} moved` : ""} unit(s)`);
     for (const x of s.created) say("  + " + x);
     for (const x of s.updated) say("  ~ " + x);
     for (const x of s.deleted) say("  - " + x);
+    for (const x of s.moved) say("  > " + x);
     for (const x of s.renames) say("  rename " + x);
-    if (!s.created.length && !s.updated.length && !s.deleted.length) {
+    if (!s.created.length && !s.updated.length && !s.deleted.length && !s.moved.length) {
         pending.clear(client.project.dir);
         return out("Nothing to write.");
     }
@@ -249,10 +252,10 @@ async function apply(mpr, code) {
         pending.clear(project.dir);
         throw new Error("The model changed since the dry run (Studio Pro save, pull or other apply). Run the dry run again.");
     }
-    const r = project.writeEncoded({ files: p.files, created: p.created, deleted: p.deleted });
+    const r = project.writeEncoded({ files: p.files, created: p.created, deleted: p.deleted, moved: p.moved || [] });
     fs.writeFileSync(path.join(r.backup, "change.txt"), `Source: ${p.source}\n${p.summary.join("\n")}\n`);
     pending.clear(project.dir);
-    out(`Saved ${r.written} unit file(s), deleted ${r.deleted}. Backup: ${path.relative(project.dir, r.backup)}`);
+    out(`Saved ${r.written} unit file(s), deleted ${r.deleted}${r.moved ? `, moved ${r.moved}` : ""}. Backup: ${path.relative(project.dir, r.backup)}`);
     if (p.plan) {
         const ctx = await loadProject(mpr);
         const client = new LocalClient(ctx);
@@ -261,97 +264,6 @@ async function apply(mpr, code) {
         if (failed.length) out("CHECK FAILED - the saved model does not show:\n" + failed.map(f => "  ! " + f).join("\n") + "\nUndo with restore, fix the change, dry run again.");
         else out(`Checked: all ${p.plan.ops.length} operation(s) are in the saved model.`);
         process.exitCode = failed.length ? 1 : 0;
-    }
-}
-
-// Runs every op on a temporary copy of the project: dry run, apply, checks, byte roundtrip, SDK reopen.
-// Proves the ops work for this project's Mendix version before they touch the real model.
-async function selftest(mpr, keep) {
-    const os = require("os");
-    const src = new Project(mpr);
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mxlocal-selftest-"));
-    try {
-        fs.copyFileSync(src.mpr, path.join(tmp, path.basename(src.mpr)));
-        fs.cpSync(src.contents, path.join(tmp, "mprcontents"), { recursive: true });
-        const copy = path.join(tmp, path.basename(src.mpr));
-        const ctx = await loadProject(copy);
-        const client = new LocalClient(ctx);
-        const model = await client.open();
-        const custom = model.allModules().filter(m => !m.fromAppStore);
-        const mod = (custom.find(m => m.name === "MyFirstModule") || custom[0] || model.allModules()[0]).name;
-        const role = model.allModules().map(m => m.name).includes(mod) ? `${mod}.ZzRole` : null;
-        const T = "ZzMxlocalTest";
-        const plan = { ops: [
-            { op: "createEnumeration", module: mod, name: `${T}Status`, values: ["Open", { name: "Done", caption: "Done!" }] },
-            { op: "createEntity", module: mod, name: T, attributes: [
-                { name: "Title", type: "String(100)" }, { name: "Count", type: "Integer" }, { name: "Big", type: "Long" },
-                { name: "Amount", type: "Decimal" }, { name: "Flag", type: "Boolean" }, { name: "When", type: "DateTime" },
-                { name: "Status", type: `Enum(${mod}.${T}Status)`, default: "Open" }, { name: "No", type: "AutoNumber" }] },
-            { op: "createEntity", module: mod, name: `${T}Line`, persistable: true },
-            { op: "addAttribute", entity: `${mod}.${T}Line`, name: "Text", type: "String(unlimited)" },
-            { op: "addAssociation", from: `${mod}.${T}Line`, to: `${mod}.${T}` },
-            { op: "addEnumerationValue", enumeration: `${mod}.${T}Status`, name: "Cancelled" },
-            { op: "changeAttribute", attribute: `${mod}.${T}.Title`, type: "String(200)" },
-            { op: "createModuleRole", module: mod, name: "ZzRole" },
-            { op: "addAccessRule", entity: `${mod}.${T}`, roles: [role], access: "ReadWrite", create: true, members: { Count: "ReadOnly" } },
-            { op: "createMicroflow", module: mod, name: `${T}_Sub`, folder: "ZzTest", parameters: [{ name: "Item", type: `${mod}.${T}` }],
-                returns: "Boolean", returnValue: "true", actions: [{ action: "log", message: "sub {1}", args: ["$Item/Title"] }] },
-            { op: "createMicroflow", module: mod, name: `${T}_Main`, folder: "ZzTest", roles: [role], actions: [
-                { action: "variable", name: "N", type: "Integer", value: "0" },
-                { action: "retrieve", variable: "List", entity: `${mod}.${T}`, xpath: "[Flag = true()]" },
-                { action: "retrieve", variable: "One", entity: `${mod}.${T}`, first: true },
-                { action: "create", variable: "New", entity: `${mod}.${T}`, set: { Title: "'x'", Count: "1" }, commit: false },
-                { action: "change", variable: "New", set: { Flag: "true" } },
-                { action: "commit", variable: "New" },
-                { action: "call", microflow: `${mod}.${T}_Sub`, args: { Item: "$New" }, variable: "Ok" },
-                { action: "set", name: "N", value: "$N + 1" },
-                { action: "message", text: "Done", type: "Information" },
-                { action: "delete", variable: "New" }] },
-            { op: "addActions", microflow: `${mod}.${T}_Main`, after: "One", actions: [{ action: "log", message: "inserted" }] },
-            { op: "addActions", microflow: `${mod}.${T}_Main`, actions: [{ action: "log", message: "last" }] },
-            { op: "rename", target: `${mod}.${T}.Flag`, newName: "Active" },
-            { op: "grantAccess", document: `${mod}.${T}_Sub`, roles: [role] }
-        ] };
-        const ops = require("./ops").bind(model, client);
-        await ops.runPlan(plan, () => {});
-        await model.flushChanges();
-        const enc = client.encode();
-        const lost = lostProperties(client, model, enc);
-        const s = client.summary();
-        client.project.writeEncoded(enc);
-        const results = [];
-        const check = (name, ok, detail) => results.push(`${ok ? "OK  " : "FAIL"} ${name}${detail ? ": " + detail : ""}`);
-        check("dry run + apply of " + plan.ops.length + " ops", true, `${s.created.length} created, ${s.updated.length} updated unit(s)`);
-        check("nothing lost on save", !lost.length, lost.join("; "));
-        const ctx2 = await loadProject(copy);
-        const c2 = new LocalClient(ctx2);
-        const m2 = await c2.open();
-        const failed = await require("./ops").bind(m2, c2).checkPlan(plan);
-        check("saved model shows every op", !failed.length, failed.join("; "));
-        let bytes = 0;
-        for (const [id] of ctx2.project.units) if (bson.encode(bson.decode(ctx2.project.readBytes(id))).equals(ctx2.project.readBytes(id))) bytes++;
-        check("byte roundtrip", bytes === ctx2.project.units.size, `${bytes}/${ctx2.project.units.size}`);
-        const errors = [];
-        for (const u of m2.allUnits().filter(u => u.isLoadable && !u.isLoaded)) {
-            try {
-                await m2.loadUnitById(u.id, false);
-            } catch (e) {
-                errors.push(e.message);
-            }
-        }
-        await m2.flushChanges();
-        check("reopen with the Model SDK", !errors.length && !c2.log.length, errors.length ? errors[0] : c2.log.length ? `${c2.log.length} deltas on open` : "");
-        const firstUse = relevant(s.warnings, enc).filter(w => /first use|never occurs/.test(w));
-        out(`Self test on a copy (module ${mod}, Mendix ${src.meta._ProductVersion}):`);
-        out(results.map(r => "  " + r).join("\n"));
-        if (firstUse.length) out("  Note: types new to this project (open the copy in Studio Pro to be sure): " + firstUse.map(w => w.split(" ")[0]).join(", "));
-        const ok = results.every(r => r.startsWith("OK"));
-        if (ok && !keep) fs.rmSync(tmp, { recursive: true, force: true });
-        else out(`Copy kept: ${tmp} (open it in Studio Pro to inspect, then delete it)`);
-        return ok;
-    } catch (e) {
-        out(`Self test FAILED: ${e.message}\nCopy kept for inspection: ${tmp}`);
-        return false;
     }
 }
 
@@ -383,14 +295,20 @@ async function main() {
     let ok = true;
     if (cmd === "verify") ok = await verify(mpr);
     else if (cmd === "open") ok = await open(mpr);
-    else if (cmd === "selftest") ok = await selftest(mpr, a.keep === true);
+    else if (cmd === "selftest") ok = await require("./selftest").selftest(mpr, a.keep === true, { out, relevant });
     else if (cmd === "run") {
         if (!a._[1]) throw new Error("run needs a change file (.json or .js)");
         if (a.apply) throw new Error("run only does a dry run now. Apply with: apply --code <CODE> (the code is printed by the dry run)");
         await run(a._[1], mpr);
     } else if (cmd === "apply") await apply(mpr, a.code);
     else if (cmd === "restore") restoreCmd(mpr, a.backup);
-    else if (cmd === "find") {
+    else if (cmd === "steps") {
+        if (!a._[1]) throw new Error("steps needs a microflow or nanoflow, e.g. steps Module.ACT_Save");
+        const ctx = await loadProject(mpr);
+        const client = new LocalClient(ctx);
+        const model = await client.open();
+        out(await require("./ops").bind(model, client).steps(a._[1]));
+    } else if (cmd === "find") {
         if (!a._[1]) throw new Error("find needs a text, e.g. find Customer");
         const ctx = await loadProject(mpr);
         out(inspect.find(new LocalClient(ctx), a._.slice(1).join(" ")));

@@ -157,13 +157,13 @@ class Catalog {
         return t && t.get(key);
     }
 
-    // Types this project never used: take key sets and BSON kinds from reference-catalog.json (learned from real
-    // Mendix 11 projects). Mendix 11+ (strict): added before schema calibration, so storage names are learned from
-    // them too, and keys outside the set are dropped as usual. Older versions (loose): only keys the SDK maps for this
-    // version, added after calibration, nothing dropped.
-    addReference(ref, schema, version) {
+    // Types this project never used: take key sets and BSON kinds from reference-catalog.json (learned from Studio Pro
+    // projects). strict (same major version): added before schema calibration, so storage names are learned from them
+    // too, and keys outside the set are dropped as usual. Loose (other major version): only keys the SDK maps for
+    // this version, added after calibration, nothing dropped.
+    addReference(ref, schema, strict) {
         this.reference = this.reference || new Set();
-        this.referenceLoose = Number(String(version).split(".")[0]) < 11;
+        this.looseTypes = this.looseTypes || new Set();
         for (const [type, keys] of Object.entries(ref)) {
             if (this.types.has(type)) continue;
             const info = schema && schema.info(schema.sdkType(type));
@@ -180,6 +180,22 @@ class Catalog {
             }
             this.types.set(type, t);
             this.reference.add(type);
+            if (!strict) this.looseTypes.add(type);
+        }
+    }
+
+    // Other-version samples: keep only keys the Model SDK maps for this version (after calibration).
+    pruneLoose(schema) {
+        for (const type of this.looseTypes || []) {
+            const info = schema.info(schema.sdkType(type));
+            const t = this.types.get(type);
+            if (!info) {
+                this.types.delete(type);
+                this.reference.delete(type);
+                this.looseTypes.delete(type);
+                continue;
+            }
+            for (const key of [...t.keys()]) if (!info.byKey.has(key)) t.delete(key);
         }
     }
 
@@ -295,9 +311,12 @@ function complete(obj, catalog, schema, warn) {
     else {
         if (fromReference) warn(`${obj.$Type} first use in this project (layout from reference projects): check it in Studio Pro`);
         for (const key of Object.keys(obj)) {
-            // reference types: the sample may predate this version, so keys the SDK maps for it are kept too
-            const sdkKnown = fromReference && info && info.byKey.has(key);
-            if (key[0] !== "$" && !keys.includes(key) && !(fromReference && catalog.referenceLoose) && !sdkKnown) {
+            // reference types: the sample may predate this version, so keys the SDK maps for it are kept when they hold
+            // a value; empty ones are dropped like keys Studio Pro does not write
+            const v = obj[key];
+            const empty = v === null || v === undefined || v === "" || v === NULL_GUID || (Array.isArray(v) && !v.length);
+            const sdkKnown = fromReference && info && info.byKey.has(key) && !empty;
+            if (key[0] !== "$" && !keys.includes(key) && !sdkKnown) {
                 warn(`${obj.$Type}.${key} is not stored by this Mendix version; dropped`);
                 delete obj[key];
             }

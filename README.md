@@ -93,9 +93,20 @@ senin onayını ister.
 ## Modeli yapay zekayla değiştirmek (mxlocal)
 
 `mxlocal`, resmi **Mendix Model SDK**'yı internetsiz, doğrudan yerel `.mpr` dosyası üzerinde çalıştırır. OpenCode
-kod yazmaz; hazır ve test edilmiş **işlemlerden** (entity, attribute, association, enumeration, microflow, rol, erişim
-kuralı, yeniden adlandırma, silme) bir değişiklik dosyası doldurur. Mendix 10 / 11 (MPR v2) projeleri için. Ek kurulum
-yok: gerekli her şey `C:\tools\dump-it\mxlocal` içinde gelir.
+kod yazmaz; hazır ve test edilmiş **işlemlerden** bir değişiklik dosyası doldurur. Mendix 10 / 11 (MPR v2) projeleri
+için. Ek kurulum yok: gerekli her şey `C:\tools\dump-it\mxlocal` içinde gelir.
+
+| Alan | Yapabildikleri |
+|---|---|
+| Domain model | Entity, attribute (tüm tipler), association, kalıtım (generalization), validation rule, event handler, index, enumeration |
+| Microflow / nanoflow | Oluşturma; retrieve, create, change, commit, delete, call, log, mesaj, değişken, sayfa aç/kapat; **karar (if), döngü (liste / while), break, continue, hata yakalama (error handler)** |
+| Var olan akış | Araya adım ekleme (döngü içine de), **tek bir adımı değiştirme** (XPath, değer, koşul, devre dışı bırakma...) ve **silme** |
+| Sayfa | Bir entity için düzenleme formu (alan tipine göre input, Kaydet/İptal) ya da boş sayfa |
+| Güvenlik | Modül rolü, erişim kuralı, microflow/nanoflow/sayfa erişimi |
+| Diğer | Constant, scheduled event, basit published REST operasyonu, doküman taşıma, yeniden adlandırma (modül dahil), silme |
+
+Yapamadıkları (Studio Pro'da ya da SDK script'iyle): mevcut sayfadaki widget'ları düzenleme, list view / data grid,
+import/export mapping, JSON structure, consumed REST, workflow, nesne gövdeli REST operasyonları.
 
 **Bir kere yapılır:**
 
@@ -112,8 +123,11 @@ yok: gerekli her şey `C:\tools\dump-it\mxlocal` içinde gelir.
    ```
    node C:\tools\dump-it\mxlocal\mxlocal.js selftest --project "C:\Projeler\BenimProje"
    ```
+   35'ten fazla işlemi dener ve 7 kontrol yapar: kayıpsız kayıt, her işlemin modelde görünmesi, **Studio Pro'nun bu
+   projede yazdığı yapıyla aynı yapı**, modül yeniden adlandırma, byte byte okuma/yazma, SDK ile yeniden açma.
    Bütün satırlar `OK` demeli. 2. veya 3. adımda `FAIL` varsa model değiştirmeyi **kullanma**, çıktıyı bana gönder.
-   Emin olmak istersen `--keep` ekle, kopyayı Studio Pro'da aç ve Errors paneline bak.
+   `Note: first use` satırındaki tipler projende hiç yok; bunları Studio Pro'da görmek için `--keep` ekle, kopyayı
+   Studio Pro'da aç ve Errors paneline bak.
 4. Projenin `.gitignore` dosyasına şu satırı ekle (yedek klasörü projenin git'ine girmesin):
    ```
    .mxlocal-backup/
@@ -149,10 +163,14 @@ Bilinmesi gerekenler:
    - `OLD NAME STILL USED`: yeniden adlandırma; expression, XPath ve Java içindeki eski isimleri güncellemez.
    - `STILL USED BY`: silinen şeyi kullanan dokümanlar.
    - `NOT STORED`: script'in verdiği bir değer bu Mendix sürümünde saklanmıyor.
-   - `first use in this project`: bu tip projende ilk kez kullanılıyor. Studio Pro'da özellikle kontrol et.
-3. İşlemlerle yapılamayan değişiklikler için OpenCode Model SDK script'i (`.js`) yazar. Aynı dry run, onay ve kontrol
+   - `first use in this project` / `never occurs`: bu tip projende ilk kez kullanılıyor. Studio Pro'da özellikle
+     kontrol et.
+   - `> Modül.Doküman -> Modül/Klasör`: doküman başka klasöre taşınıyor.
+3. Var olan bir microflow'un tek adımını değiştirmek için OpenCode önce adımların kimliklerini (id) listeler
+   (`python mx.py steps Modül.Microflow`), sonra o id ile değiştirir ya da siler.
+4. İşlemlerle yapılamayan değişiklikler için OpenCode Model SDK script'i (`.js`) yazar. Aynı dry run, onay ve kontrol
    adımları geçerlidir.
-4. Son söz Studio Pro'nundur: Errors paneli temiz değilse `/geri-al`.
+5. Son söz Studio Pro'nundur: Errors paneli temiz değilse `/geri-al`.
 
 ### OpenCode'a öğretmek
 
@@ -295,5 +313,6 @@ isteği düz yazıyla yaz (örnek: `Değişikliğimi kontrol et, guides/CHECK.tx
 - `mxlocal/node_modules/mendixmodelsdk`: Mendix Model SDK, MIT lisansı.
 - `mxlocal/storage-names.json`: [mxcli](https://github.com/mendixlabs/mxcli) projesinin üretilmiş Go tiplerinden
   türetilmiştir, Apache-2.0 lisansı.
-- `mxlocal/list-markers.json`, `mxlocal/reference-catalog.json`: mxcli'nin test projelerinden (Studio Pro ile
-  oluşturulmuş Mendix 11 projeleri) öğrenilmiştir, Apache-2.0 lisansı.
+- `mxlocal/list-markers.json`, `mxlocal/reference-catalog.json`: Studio Pro ile oluşturulmuş açık kaynak test
+  projelerinden öğrenilmiştir: [mxcli](https://github.com/mendixlabs/mxcli) test projeleri (Apache-2.0) ve
+  [mendix/testProjects](https://github.com/mendix/testProjects) (Mendix 10.22 – 11.12).
