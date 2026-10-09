@@ -36,6 +36,17 @@ cd C:\tools\dump-it
 git pull
 ```
 
+### Mac: tek komutla kurulum
+
+Terminal'e yapıştır:
+```
+curl -fsSL https://raw.githubusercontent.com/tariksubasi/dump-it/feature/local-sdk/scripts/setup-mac.sh | bash
+```
+Script sırayla şunları yapar: eksik araçları Homebrew ile kurar (git, Python, Node 22.13+, OpenCode), repoyu
+`~/dump-it` içine alır, ev klasöründeki Mendix projelerini bulur ve sorar, `verify` ve `selftest`'i projenin bir
+kopyasında çalıştırır, `.gitignore`'a `.mxlocal-backup/` ekler ve export alır. Modele hiçbir şey yazmaz. Belirli bir
+proje için: `bash ~/dump-it/scripts/setup-mac.sh ~/Mendix/BenimProje`. Mac'te `mx check` (sadece Windows) çalışmaz.
+
 ---
 
 ## Her gün kullanım (adım adım)
