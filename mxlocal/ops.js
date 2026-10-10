@@ -27,6 +27,7 @@ const OPS = {
     },
     createEnumeration: { doc: "Create an enumeration.", fields: { module: "R module name", name: "R enumeration name", values: "R [ \"Value\" or { \"name\": ..., \"caption\": ... } ]", folder: "optional folder path, e.g. Enums/Order" } },
     addEnumerationValue: { doc: "Add a value to an enumeration.", fields: { enumeration: "R Module.Enumeration", name: "R value name", caption: "optional caption (default the name)" } },
+    createModule: { doc: "Create a module (with its domain model, module security and settings, as Studio Pro does).", fields: { name: "R module name, e.g. EmployeeOnboarding", roles: "optional [ \"RoleName\" ] module roles to create in it" } },
     createModuleRole: { doc: "Create a module role.", fields: { module: "R module name", name: "R role name", description: "optional" } },
     grantAccess: { doc: "Allow module roles to run a microflow/nanoflow or open a page.", fields: { document: "R Module.Microflow or Module.Page", roles: "R [ \"Module.Role\" ]" } },
     ...SECURITY_OPS,
@@ -499,6 +500,20 @@ function bind(model, client) {
             await text(val.caption, o.caption || o.name);
             return `${o.enumeration}.${o.name}`;
         },
+        async createModule(o) {
+            if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(o.name)) throw new Error(`'${o.name}' is not a valid module name (letters, digits, _; no spaces)`);
+            if (model.allModules().some(m => m.name === o.name)) throw new Error(`module ${o.name} already exists`);
+            const m = projects.Module.createIn(model.allProjects()[0]);
+            m.name = o.name;
+            m.sortIndex = Math.floor(Math.max(0, ...model.allModules().filter(x => x !== m).map(x => x.sortIndex || 0))) + 1;
+            dm.DomainModel.createIn(m);
+            const sec = security.ModuleSecurity.createIn(m);
+            const settings = projects.ModuleSettings.createIn(m);
+            settings.version = "1.0.0"; // what Studio Pro writes for a new module
+            for (const r of [].concat(o.roles || [])) security.ModuleRole.createIn(sec).name = r;
+            fresh.add(o.name);
+            return o.name + (o.roles && o.roles.length ? ` (roles ${[].concat(o.roles).join(", ")})` : "");
+        },
         async createModuleRole(o) {
             const s = await moduleSecurity(o.module);
             if (s.moduleRoles.some(r => r.name === o.name)) throw new Error(`${o.module}.${o.name} already exists`);
@@ -834,6 +849,14 @@ function bind(model, client) {
         },
         async addEnumerationValue(o) {
             return (await exists(`${o.enumeration}.${o.name}`)) ? [] : [`${o.enumeration}.${o.name} missing`];
+        },
+        async createModule(o) {
+            const m = model.allModules().find(x => x.name === o.name);
+            if (!m) return [`module ${o.name} missing`];
+            const r = [];
+            if (!model.allDomainModels().some(d => d.containerAsModule === m)) r.push(`${o.name} has no domain model`);
+            if (!model.allModuleSecurities().some(d => d.containerAsModule === m)) r.push(`${o.name} has no module security`);
+            return r;
         },
         async createModuleRole(o) {
             return (await exists(`${o.module}.${o.name}`)) ? [] : [`role ${o.module}.${o.name} missing`];

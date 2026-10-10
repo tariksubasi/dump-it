@@ -218,6 +218,7 @@ The default of an `Enum` attribute is the value name, e.g. `"default": "Open"`.
 
 | Op | Fields | Notes |
 |---|---|---|
+| `createModule` | **name**, roles `["RoleName"]` | New module with its domain model, module security and settings (as Studio Pro makes them). Then `addModuleRoles` to give its roles to user roles |
 | `createModuleRole` | **module**, **name**, description | |
 | `grantAccess` | **document** (microflow, nanoflow or page), **roles** `["Module.Role"]` | Adds to the allowed roles; existing roles stay |
 | `addAccessRule` | **entity**, **roles**, access (`ReadWrite`/`ReadOnly`/`None`, default `ReadOnly`), members `{"Attr":"ReadWrite"}`, create, delete, xpath | Every attribute and owned association gets a member right. AutoNumber and calculated attributes are never more than ReadOnly |
