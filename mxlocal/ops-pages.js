@@ -1,21 +1,110 @@
 "use strict";
-// Pages: create a page with a data view form for an entity (inputs per attribute type, Save/Cancel), or an empty page.
-// The layout and its placeholder are learned from the project's own pages, so the result looks like its other pages.
+// Pages: create a page with a data view form for an entity (inputs per attribute type, Save/Cancel), an empty page, or a
+// page from a widget list (layout grids, containers, texts, data views, data grids, list views, buttons, inputs), plus
+// menu items and home pages. The layout and its placeholder are learned from the project's own pages; widget names,
+// defaults and storage follow what Studio Pro writes (checked against Studio Pro-saved pages of Mendix 10.22-11.13).
+// A Data grid 2 is copied from one on the project's own pages whose type matches widgets/*.mpk (see pluggable.js).
 const sdk = require("mendixmodelsdk");
-const { fail, bool, setIfAvailable } = require("./ops-util");
+const { fail, bool, setIfAvailable, enumValue } = require("./ops-util");
+const pluggable = require("./pluggable");
 
-const { pages, domainmodels: dm, datatypes } = sdk;
+const { pages, domainmodels: dm, datatypes, menus, navigation, microflows: mf, customwidgets: cw } = sdk;
+
+// Widget kinds of createPage "widgets" (also the help text). Every widget also takes "name".
+const WIDGETS = {
+    layoutGrid: {
+        doc: "rows of columns; weights 1-12 per row",
+        fields: { rows: "[ { \"columns\": [ 8, { \"weight\": 4, \"tablet\": 12, \"phone\": 12, \"widgets\": [...] } ] } ]", columns: "one row: [ 8, 4 ] or [ { \"weight\": 8, \"widgets\": [...] }, ... ]", width: "optional full | fixed (default full)" }
+    },
+    container: { doc: "a container around widgets", fields: { widgets: "[ widgets ]", class: "optional CSS class" } },
+    text: { doc: "a text or heading. Inside a data view or list view {Attribute} shows its value", fields: { text: "R the text", style: "optional Text | Paragraph | H1 | H2 | H3 | H4 | H5 | H6 (default Text)" } },
+    dataView: {
+        doc: "shows one object: a page parameter (source parameter) or the selected row of a grid/list view (listenTo)",
+        fields: {
+            entity: "optional Module.Entity (default: the page entity; with listenTo: the grid's entity)",
+            source: "optional parameter | listen (default: listen with listenTo, else parameter = adds a page parameter)",
+            listenTo: "optional name of a grid/list view on this page, or dataGrid / listView when the page has one",
+            editable: "optional true/false (default true)",
+            fields: "optional [ \"Attribute\" ] inputs by attribute type (default: all attributes, unless widgets is given)",
+            buttons: "optional true/false: Save/Cancel in the footer (default: true for an editable parameter data view)",
+            widgets: "optional [ widgets ] inside the data view (after the fields)",
+            footer: "optional [ widgets ] in the footer, e.g. buttons"
+        }
+    },
+    dataGrid: {
+        doc: "data grid over the database (XPath source) with single selection: a classic Data grid with a search bar, or with kind datagrid2 a Data grid 2 copied from the project's own pages",
+        fields: {
+            entity: "optional Module.Entity (default: the page entity)",
+            columns: "optional [ \"Attribute\" or { \"attribute\": ..., \"caption\": ..., \"width\": 25 } ] (default: all attributes; width: classic only)",
+            xpath: "optional XPath constraint, e.g. [Active = true()]",
+            search: "optional true/false: classic only, Search button + search fields for text, number and enumeration columns (default true)",
+            selection: "optional Single | SingleAndMaintain | Multi | SimpleMulti | None (default Single; Data grid 2: Single | Multi | None)",
+            selectFirst: "optional true/false (default false)",
+            rows: "optional rows per page (default 20)",
+            kind: "optional classic | datagrid2 | auto (default classic). datagrid2 copies a Data grid 2 from a page of this project whose widget matches widgets/*.mpk (columns, data source and selection set; filters, actions and personalization left empty); auto = datagrid2 when that is possible, else classic. \"widget\": \"dataGrid2\" = kind datagrid2"
+        }
+    },
+    listView: {
+        doc: "list of objects over the database (XPath source); a data view can listen to it",
+        fields: { entity: "optional Module.Entity (default: the page entity)", xpath: "optional XPath constraint", fields: "optional [ \"Attribute\" ] one text per attribute (default: all attributes, unless widgets is given)", widgets: "optional [ widgets ] per item", pageSize: "optional (default 10)" }
+    },
+    actionButton: {
+        doc: "a button",
+        fields: {
+            action: "R save | cancel | close | delete | showPage | callMicroflow | callNanoflow",
+            caption: "optional (default Save/Cancel/Close/Delete; required for the others)",
+            page: "showPage: Module.Page", microflow: "callMicroflow: Module.Microflow", nanoflow: "callNanoflow: Module.Nanoflow",
+            style: "optional Default | Primary | Success | Info | Warning | Danger | Inverse",
+            closePage: "optional true/false for save/cancel/delete"
+        }
+    },
+    input: { doc: "input for an attribute, inside a data view: text box, text area, check box, date picker or drop-down by attribute type (or use textBox, textArea, checkBox, datePicker, dropDown)", fields: { attribute: "R attribute name", label: "optional label (default: the attribute name)" } }
+};
+const INPUTS = { textBox: "TextBox", textArea: "TextArea", checkBox: "CheckBox", datePicker: "DatePicker", dropDown: "DropDown" };
+const ALIASES = { button: "actionButton", grid: "dataGrid", datagrid: "dataGrid", datagrid2: "dataGrid", list: "listView", heading: "text", div: "container" };
+const KINDS = [...Object.keys(WIDGETS), ...Object.keys(INPUTS)];
+const PREFIX = { layoutGrid: "layoutGrid", container: "container", text: "text", dataView: "dataView", dataGrid: "grid", listView: "listView", actionButton: "actionButton" };
+// enumValue with the widget location in the message
+function choice(cls, value, field, where) {
+    try {
+        return enumValue(cls, value, field);
+    } catch (e) {
+        e.message = `${where}: ${e.message}`;
+        throw e;
+    }
+}
+const LISTENABLE = { datagrid: "dataGrid", grid: "dataGrid", listview: "listView", list: "listView" };
+const DATAGRID2 = "com.mendix.widget.web.datagrid.Datagrid";
+// Studio Pro's own captions for buttons it creates, in Dutch (the only other language in the test projects)
+const NL = { Search: "Zoeken", Save: "Opslaan", Cancel: "Annuleren", Close: "Sluiten", Delete: "Verwijderen" };
+
+const widgetHelp = () => Object.entries(WIDGETS).map(([k, w]) => `\n        ${k}: ${w.doc}` + Object.entries(w.fields).map(([f, d]) => `\n            ${f}: ${d}`).join("")).join("");
 
 const PAGE_FIELDS = {
     module: "R module name",
     name: "R page name",
     title: "optional page title (default: the name)",
-    entity: "optional Module.Entity: adds a page parameter and a data view form for it",
-    fields: "optional [ \"Attribute\", ... ] inputs in the form (default: all attributes of the entity)",
-    buttons: "optional true/false: Save and Cancel buttons under the form (default true)",
+    entity: "optional Module.Entity: without widgets, a page parameter and a data view form for it; with widgets, the default entity of grids and data views (no page parameter unless a data view uses source parameter)",
+    fields: "optional [ \"Attribute\", ... ] inputs in the form (default: all attributes of the entity); not with widgets",
+    buttons: "optional true/false: Save and Cancel buttons under the form (default true); not with widgets",
+    widgets: "optional [ { \"widget\": \"<kind>\", ...fields } ] the page content, top to bottom; every widget takes \"name\" (default: Studio Pro style grid1 / dataGrid2_1, dataView1, ...). A grid followed by a data view that listens to it is placed side by side (layout grid 8/4). Kinds:" + widgetHelp(),
+    arrange: "optional auto | rows: rows stacks every top-level widget, also a grid and its listening data view (default auto)",
+    menu: "optional \"Responsive\" (navigation profile) or { \"profile\": ..., \"caption\": ..., \"parent\": \"<menu item caption>\" }: a menu item that opens the page",
     layout: "optional Module.Layout (default: the layout most pages of this kind use)",
     folder: "optional folder path",
     roles: "optional [ \"Module.Role\" ] that may open the page"
+};
+const MENU_FIELDS = {
+    page: "R Module.Page (without page parameters)",
+    profile: "optional navigation profile: Responsive, Tablet, Phone or its name (default Responsive)",
+    caption: "optional (default: the page title)",
+    parent: "optional caption of an existing menu item to put it under"
+};
+const HOME_FIELDS = {
+    page: "Module.Page without parameters (or use microflow)",
+    microflow: "Module.Microflow without parameters, instead of a page",
+    profile: "optional navigation profile (default Responsive)",
+    roles: "optional [ \"UserRole\" ] (user roles, e.g. Administrator): home page for these roles only; without: the default home page"
 };
 
 function makePages(h) {
@@ -84,9 +173,782 @@ function makePages(h) {
         return w;
     }
 
+    // A unit by qualified name, without the "did you mean" search of h.get (slow on big projects).
+    const unitNamed = qn => model.allUnits().find(u => {
+        try {
+            return u.qualifiedName === qn;
+        } catch (e) {
+            return false;
+        }
+    });
+
+    // ------------------------------------------------ texts in every project language
+
+    let langs = null;
+    async function languages() {
+        if (langs) return langs;
+        const s = model.allProjectSettings()[0];
+        const loaded = s && (await s.load());
+        const ls = loaded && loaded.settingsParts.find(p => p instanceof sdk.settings.LanguageSettings);
+        const dflt = (ls && ls.defaultLanguageCode) || "en_US";
+        langs = [dflt, ...(ls ? ls.languages.map(l => l.code) : []).filter(c => c !== dflt)];
+        return langs;
+    }
+
+    // Writes value in every project language (Studio Pro's own captions get its Dutch text); counts copies to translate.
+    async function textAll(t, value, ctx) {
+        const items = {};
+        for (const code of await languages()) items[code] = code === "nl_NL" && NL[value] ? NL[value] : String(value);
+        if (ctx && value !== "" && Object.keys(items).length > 1 && !NL[value]) ctx.untranslated++;
+        return h.text(t, items);
+    }
+
+    async function templateAll(owner, prop, value, ctx) {
+        if (!owner[prop]) owner[prop] = pages.ClientTemplate.create(model);
+        await textAll(owner[prop].template, value, ctx);
+        return owner[prop];
+    }
+
+    // ------------------------------------------------ the widget list: validate, name, resolve listenTo
+
+    function kindOf(spec, where) {
+        if (!spec || typeof spec !== "object" || Array.isArray(spec)) throw new Error(`${where}: each widget is an object { "widget": "<kind>", ... }`);
+        const raw = spec.widget !== undefined ? spec.widget : spec.type;
+        if (raw === undefined) throw new Error(`${where}: missing "widget". Supported: ${KINDS.join(", ")}`);
+        const low = String(raw).toLowerCase();
+        const kind = KINDS.find(k => k.toLowerCase() === low) || ALIASES[low];
+        if (!kind) fail(`${where}: unknown widget '${raw}'. Supported: ${KINDS.join(", ")} (other widgets, e.g. gallery, tab container, snippet, image: add them in Studio Pro)`, raw, KINDS);
+        const known = ["widget", "type", "name", ...Object.keys((WIDGETS[kind] || WIDGETS.input).fields)];
+        for (const k of Object.keys(spec)) if (!known.includes(k)) fail(`${where}: unknown field '${k}' for ${kind}`, k, known.filter(x => x !== "type"));
+        for (const [k, d] of Object.entries((WIDGETS[kind] || WIDGETS.input).fields)) if (d.startsWith("R ") && (spec[k] === undefined || spec[k] === "")) throw new Error(`${where}: ${kind} needs '${k}' (${d.slice(2)})`);
+        if (spec.name !== undefined && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(String(spec.name))) throw new Error(`${where}: name '${spec.name}' is not valid (letters, digits, _)`);
+        return kind;
+    }
+
+    const list = (v, where) => {
+        if (v === undefined) return [];
+        if (!Array.isArray(v)) throw new Error(`${where} must be a list [ ... ]`);
+        return v;
+    };
+
+    function weight(v, where, dflt) {
+        if (v === undefined) return dflt;
+        if (/^auto$/i.test(String(v))) return -1;
+        const n = Number(v);
+        if (!Number.isInteger(n) || n < 1 || n > 12) throw new Error(`${where}: weight '${v}' must be 1-12 or "auto"`);
+        return n;
+    }
+
+    // Spec tree -> node tree. container: nearest data view / list view node around this one.
+    function scan(specs, where, container, nodes) {
+        return list(specs, where).map((spec, i) => {
+            const at = `${where}[${i + 1}]`;
+            const kind = kindOf(spec, at);
+            const node = { kind, spec, where: `${at} (${kind})`, container, name: spec.name !== undefined ? String(spec.name) : null };
+            nodes.push(node);
+            if (kind === "layoutGrid") {
+                if (spec.rows !== undefined && spec.columns !== undefined) throw new Error(`${node.where}: give rows or columns, not both`);
+                const rows = spec.rows !== undefined ? list(spec.rows, `${node.where}.rows`) : [{ columns: spec.columns }];
+                if (!rows.length) throw new Error(`${node.where}: needs rows or columns`);
+                node.rows = rows.map((r, ri) => {
+                    const rw = `${node.where} row ${ri + 1}`;
+                    if (!r || typeof r !== "object" || Array.isArray(r)) throw new Error(`${rw}: a row is { "columns": [ ... ] }`);
+                    for (const k of Object.keys(r)) if (k !== "columns") fail(`${rw}: unknown field '${k}'`, k, ["columns"]);
+                    const cols = list(r.columns, `${rw}.columns`);
+                    if (!cols.length) throw new Error(`${rw}: needs columns, e.g. [ 8, 4 ]`);
+                    const out = cols.map((c, ci) => {
+                        const at = `${rw} column ${ci + 1}`;
+                        const col = typeof c === "object" && c ? c : { weight: c };
+                        for (const k of Object.keys(col)) if (!["weight", "tablet", "phone", "widgets"].includes(k)) fail(`${at}: unknown field '${k}'`, k, ["weight", "tablet", "phone", "widgets"]);
+                        return { weight: weight(col.weight, at, -1), tablet: weight(col.tablet, at, -1), phone: weight(col.phone, at, -1), widgets: scan(col.widgets, `${at}.widgets`, container, nodes) };
+                    });
+                    if (out.reduce((s, c) => s + Math.max(c.weight, 0), 0) > 12) client.warn(`layout grid ${rw}: column weights add up to more than 12; the columns wrap`);
+                    return out;
+                });
+            } else if (kind === "container") node.widgets = scan(spec.widgets, `${node.where}.widgets`, container, nodes);
+            else if (kind === "dataView") {
+                node.widgets = scan(spec.widgets, `${node.where}.widgets`, node, nodes);
+                node.footer = scan(spec.footer, `${node.where}.footer`, node, nodes);
+            } else if (kind === "listView") node.widgets = scan(spec.widgets, `${node.where}.widgets`, node, nodes);
+            if ((INPUTS[kind] || kind === "input") && (!container || container.kind !== "dataView")) throw new Error(`${node.where}: inputs go inside a dataView (its "widgets" or "fields")`);
+            if (kind === "actionButton") {
+                const a = String(spec.action).toLowerCase();
+                if (["save", "cancel"].includes(a) && (!container || container.kind !== "dataView")) throw new Error(`${node.where}: a ${a} button goes inside a dataView`);
+                if (a === "delete" && !container) throw new Error(`${node.where}: a delete button goes inside a dataView or listView`);
+            }
+            return node;
+        });
+    }
+
+    function names() {
+        const used = new Set();
+        return {
+            reserve(n, where) {
+                if (used.has(n)) throw new Error(`${where}: the name '${n}' is used twice on this page`);
+                used.add(n);
+            },
+            next(prefix) {
+                for (let i = 1; ; i++) {
+                    if (!used.has(prefix + i)) {
+                        used.add(prefix + i);
+                        return prefix + i;
+                    }
+                }
+            }
+        };
+    }
+
+    // ------------------------------------------------ model lookups
+
+    const entities = new Map();
+    async function entityOf(qn, where) {
+        if (!qn) throw new Error(`${where}: needs 'entity' (or a page-level "entity")`);
+        if (!entities.has(qn)) {
+            const e = await h.entity(qn);
+            await h.loadParents(e);
+            entities.set(qn, e);
+        }
+        return entities.get(qn);
+    }
+
+    function attributeOf(ent, name, where) {
+        const attrs = h.attributeChain(ent).attributes;
+        const a = attrs.find(x => x.name === name);
+        if (!a) fail(`${where}: ${ent.qualifiedName} has no attribute '${name}'`, name, attrs.map(x => x.name));
+        return a;
+    }
+
+    const shown = ent => h.attributeChain(ent).attributes.filter(a => !(a.type instanceof dm.BinaryAttributeType)).map(a => a.name);
+
+    // ent is (a specialization of) the entity named qn
+    function isA(ent, qn) {
+        for (let e = ent, i = 0; e && i < 20; i++) {
+            if (e.qualifiedName === qn) return true;
+            const g = e.generalization;
+            e = g instanceof dm.Generalization && g.generalization && g.generalization.isLoaded ? g.generalization : null;
+        }
+        return false;
+    }
+
+    // Studio Pro passes the object of the enclosing data view / list view implicitly (no parameter mapping is stored),
+    // so a button can call a page or flow without parameters or with exactly that one object parameter.
+    function implicitOnly(params, node, what) {
+        if (!params.length) return;
+        const ctx = node.container && node.container.ent;
+        if (params.length === 1 && params[0].entity && ctx && isA(ctx, params[0].entity)) return;
+        const list = params.map(p => `${p.name}${p.entity ? " (" + p.entity + ")" : ""}`).join(", ");
+        throw new Error(`${node.where}: ${what} has parameter(s) ${list}. A button passes only the object of the data view or list view it is in` +
+            (ctx ? ` (${ctx.qualifiedName})` : " (this button is in none)") + ". Use a page/flow with that one parameter or none");
+    }
+
+    async function flowParams(qn, cls, kind, node) {
+        const f = await h.get(qn);
+        if (!(f instanceof cls)) throw new Error(`${node.where}: '${qn}' is not a ${kind}`);
+        const params = f.objectCollection.objects.filter(x => x instanceof mf.MicroflowParameterObject)
+            .map(p => ({ name: p.name, entity: p.variableType instanceof datatypes.ObjectType ? p.variableType.entityQualifiedName : null }));
+        return { f, params };
+    }
+
+    // Data grid 2 on the project's pages and snippets: { exemplars (copyable: type = installed .mpk), stale, def, reason }.
+    let dg2 = null;
+    const dg2Info = () => dg2 || (dg2 = pluggable.exemplars(client.project, DATAGRID2));
+
+    // classic | datagrid2 for a dataGrid node ("auto" picks datagrid2 when the project has a copyable one and no
+    // classic-only field is used); a datagrid2 that cannot be copied is refused before anything is built.
+    function gridKind(node) {
+        const s = node.spec;
+        const raw = s.kind !== undefined ? String(s.kind) : /^datagrid2$/i.test(String(s.widget !== undefined ? s.widget : s.type)) ? "datagrid2" : "classic";
+        const asked = { classic: "classic", datagrid: "classic", datagrid1: "classic", datagrid2: "datagrid2", dg2: "datagrid2", auto: "auto" }[raw.toLowerCase().replace(/[\s_-]/g, "")];
+        if (!asked) fail(`${node.where}: kind '${raw}' is not known (use classic | datagrid2 | auto)`, raw, ["classic", "datagrid2", "auto"]);
+        const cols = Array.isArray(s.columns) ? s.columns : [];
+        const classicOnly = [bool(s.search, false) && "search", cols.some(c => c && typeof c === "object" && c.width !== undefined) && "column width",
+            s.selection !== undefined && !/^(single|multi|none)$/i.test(String(s.selection)) && `selection ${s.selection}`].filter(Boolean);
+        node.kindAsked = asked;
+        node.gridKind = "classic";
+        if (asked === "classic") return;
+        const info = dg2Info();
+        if (bool(s.selectFirst, false) && info.def && !info.def.lines.some(l => l.startsWith("autoSelect "))) classicOnly.push(`selectFirst (Data grid 2 ${info.def.version} has no autoSelect)`);
+        if (asked === "datagrid2") {
+            if (!info.exemplars.length) throw new Error(`${node.where}: "kind": "datagrid2" is not possible here: ${info.reason}. Use "kind": "classic" (a classic Data grid, works in every project)`);
+            if (classicOnly.length) throw new Error(`${node.where}: ${classicOnly.join(", ")} ${classicOnly.length > 1 ? "work" : "works"} only with "kind": "classic" (a Data grid 2 gets column filters in Studio Pro; its selection is Single, Multi or None)`);
+        }
+        if (info.exemplars.length && !classicOnly.length) node.gridKind = "datagrid2";
+        else node.autoWhy = info.exemplars.length ? `${classicOnly.join(", ")} ${classicOnly.length > 1 ? "are" : "is"} classic only` : info.reason;
+    }
+
+    // ------------------------------------------------ widget builders
+
+    async function textTemplate(ct, text, node, ctx) {
+        const used = [];
+        const out = String(text).replace(/\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (m, attr) => {
+            if (!used.includes(attr)) used.push(attr);
+            return `{${used.indexOf(attr) + 1}}`;
+        });
+        if (used.length && !node.container) throw new Error(`${node.where}: {${used[0]}} needs a dataView or listView around the text`);
+        for (const name of used) {
+            const p = pages.ClientTemplateParameter.create(model);
+            ct.parameters.push(p);
+            const ref = dm.AttributeRef.create(model);
+            ref.attribute = attributeOf(node.container.ent, name, node.where);
+            p.attributeRef = ref;
+        }
+        await textAll(ct.template, out, ctx);
+    }
+
+    // An input in data view node dv (Studio Pro names: textBox1, checkBox1, ...).
+    async function attrInput(kind, list, attr, dv, where, ctx, label, name) {
+        const t = attr.type;
+        if (kind === "input") {
+            if (t instanceof dm.BooleanAttributeType) kind = "checkBox";
+            else if (t instanceof dm.DateTimeAttributeType) kind = "datePicker";
+            else if (t instanceof dm.EnumerationAttributeType) kind = "dropDown";
+            else if (t instanceof dm.StringAttributeType && t.length === 0) kind = "textArea";
+            else kind = "textBox";
+        }
+        const fits = {
+            checkBox: t instanceof dm.BooleanAttributeType, datePicker: t instanceof dm.DateTimeAttributeType, dropDown: t instanceof dm.EnumerationAttributeType,
+            textArea: t instanceof dm.StringAttributeType, textBox: !(t instanceof dm.BinaryAttributeType)
+        };
+        if (!fits[kind]) throw new Error(`${where}: a ${kind} cannot show '${attr.name}' (${t.structureTypeName.split("$")[1].replace("AttributeType", "")}); use "widget": "input" to pick by type`);
+        const w = pages[INPUTS[kind]].create(model);
+        list.push(w);
+        w.name = name || ctx.names.next(kind);
+        const ref = dm.AttributeRef.create(model);
+        ref.attribute = attr;
+        w.attributeRef = ref;
+        if (kind === "textBox" && t instanceof dm.HashedStringAttributeType) w.isPasswordBox = true;
+        await templateAll(w, "labelTemplate", label || humanize(attr.name), ctx);
+        // a parameter data view: Studio Pro writes the parameter + data view; a listening data view: SourceVariable null
+        if (dv.source === "parameter") {
+            const v = pages.PageVariable.createInAttributeWidgetUnderSourceVariable(w);
+            v.pageParameter = dv.param;
+            v.widget = dv.widget;
+        }
+        ctx.count.inputs++;
+        return w;
+    }
+
+    async function pageParameter(ent, ctx) {
+        if (ctx.params.has(ent.qualifiedName)) return ctx.params.get(ent.qualifiedName);
+        const p = pages.PageParameter.createIn(ctx.page);
+        let n = ent.name;
+        for (let i = 2; ctx.page.parameters.some(x => x !== p && x.name === n); i++) n = ent.name + i;
+        p.name = n;
+        const pt = datatypes.ObjectType.create(model);
+        pt.entity = ent;
+        p.parameterType = pt;
+        setIfAvailable(p, "isRequired", true); // 11.5+
+        ctx.params.set(ent.qualifiedName, p);
+        return p;
+    }
+
+    async function button(list, caption, action, style, closePage, ctx) {
+        const b = pages.ActionButton.create(model);
+        list.push(b);
+        b.name = ctx.names.next(action === "save" ? "saveButton" : "cancelButton");
+        b.buttonStyle = style;
+        const cls = action === "save" ? pages.SaveChangesClientAction : pages.CancelChangesClientAction;
+        cls.createInActionButtonUnderAction(b).closePage = closePage;
+        await templateAll(b, "caption", caption, ctx);
+        return b;
+    }
+
+    // ------------------------------------------------ Data grid 2 (copied from the project's own pages)
+
+    const ATTR_TYPES = { String: "String", HashedString: "HashString", AutoNumber: "AutoNumber", Boolean: "Boolean", DateTime: "DateTime",
+        Decimal: "Decimal", Enumeration: "Enum", Integer: "Integer", Long: "Long", Binary: "Binary" };
+    const PRIMITIVE = ["Boolean", "Integer", "Decimal", "String", "Enumeration"];
+
+    // Writes only what differs: every SDK write is a model change, and a Data grid 2 has ~70 values to reset.
+    function put(o, k, v) {
+        let cur;
+        try {
+            cur = o[k];
+        } catch (e) {
+            if (/not yet available|no longer|can no longer/.test(e.message)) return;
+            throw e;
+        }
+        if (cur !== v) setIfAvailable(o, k, v);
+    }
+
+    // A property value as Studio Pro creates it: the type's default and no model references. shape: a value of the same
+    // property whose text template / translatable text (null or not) is copied as empty.
+    async function blank(v, pt, shape) {
+        const vt = pt.valueType, t = vt.type.name;
+        put(v, "primitiveValue", PRIMITIVE.includes(t) ? vt.defaultValue : "");
+        put(v, "expression", t === "Expression" ? vt.defaultValue : "");
+        for (const k of ["attributeRef", "entityRef", "page", "microflow", "nanoflow", "image", "icon", "sourceVariable", "dataSource"]) put(v, k, null);
+        for (const k of ["xPathConstraint", "entityPath", "attributePath"]) put(v, k, "");
+        put(v, "selection", cw.CustomWidgetSelectionType.None);
+        if (!(v.action instanceof pages.NoClientAction)) pages.NoClientAction.createInWidgetValueUnderAction(v);
+        if (v.widgets.length) v.widgets.clear();
+        if (v.objects.length) v.objects.clear();
+        const tt = shape ? shape.textTemplate : v.textTemplate;
+        if (!tt) put(v, "textTemplate", null);
+        else if (shape || tt.parameters.length) v.textTemplate = pages.ClientTemplate.create(model);
+        if (shape && shape.translatableValue) v.translatableValue = shape.translatableValue.deepCopy(model);
+        // a required text gets the widget's own default texts (as when Studio Pro drops the widget)
+        if (t === "TextTemplate" && vt.required && (!v.textTemplate || !v.textTemplate.template.translations.some(x => x.text))) {
+            if (!v.textTemplate) v.textTemplate = pages.ClientTemplate.create(model);
+            await h.text(v.textTemplate.template, Object.fromEntries(vt.translations.map(x => [x.languageCode, x.text])));
+        }
+    }
+
+    const isGrid2 = el => el instanceof cw.CustomWidget && !!el.type && el.type.widgetId === DATAGRID2;
+    const valueOf = (obj, key) => {
+        const p = obj && obj.properties.find(x => x.type && x.type.key === key);
+        return p ? p.value : null;
+    };
+
+    // A new object (e.g. a column) of the given object type, every property blank, shaped like pattern (may be null).
+    async function blankObject(objType, pattern) {
+        const o = cw.WidgetObject.create(model);
+        o.type = objType;
+        for (const pt of objType.propertyTypes) {
+            const p = cw.WidgetProperty.create(model);
+            o.properties.push(p);
+            p.type = pt;
+            const v = cw.WidgetValue.create(model);
+            p.value = v;
+            v.type = pt.valueType;
+            await blank(v, pt, valueOf(pattern, pt.key) || { textTemplate: null });
+        }
+        return o;
+    }
+
+    async function dataGrid2(node, target, ctx) {
+        const ent = node.ent;
+        const info = dg2Info();
+        const pick = info.exemplars[0];
+        const unit = model.allUnits().find(u => u.id === pick.unitId);
+        const doc = await unit.load();
+        let src = null;
+        doc.traverse(el => {
+            if (!src && el.id === pick.id) src = el;
+        });
+        if (!(src instanceof cw.CustomWidget)) throw new Error(`${node.where}: the Data grid 2 on ${pick.unitName} could not be loaded; use "kind": "classic"`);
+        const grid = src.deepCopy(model);
+        grid.name = node.name;
+        target.push(grid);
+        node.widget = grid;
+        // the copy's object must point into the copy's own type
+        const root = grid.object && grid.object.type;
+        if (!root || root.containerAsCustomWidgetType !== grid.type) throw new Error(`${node.where}: copying the Data grid 2 kept links to the original; use "kind": "classic"`);
+        const ap = grid.appearance;
+        for (const k of ["class", "style", "dynamicClasses"]) put(ap, k, "");
+        if (ap.designProperties.length) ap.designProperties.clear();
+        for (const k of ["conditionalVisibilitySettings", "conditionalEditabilitySettings"]) put(grid, k, null);
+        put(grid, "tabIndex", 0);
+        if (grid.labelTemplate && grid.labelTemplate.parameters.length) grid.labelTemplate = null;
+        const props = new Map(grid.object.properties.map(p => [p.type.key, p]));
+        for (const k of ["datasource", "columns", "itemSelection"]) if (!props.has(k)) throw new Error(`${node.where}: this Data grid 2 version has no '${k}' property; use "kind": "classic"`);
+        // columns: one per attribute, shaped like an attribute column of the original
+        const colProp = props.get("columns");
+        const colType = colProp.type.valueType.objectType;
+        const olds = [...colProp.value.objects];
+        const pattern = olds.find(o => (valueOf(o, "showContentAs") || {}).primitiveValue === "attribute") || olds[0] || null;
+        const attrPt = colType.propertyTypes.find(pt => pt.key === "attribute");
+        const allowed = attrPt ? attrPt.valueType.attributeTypes.map(x => x.name) : [];
+        const specs = node.spec.columns !== undefined ? list(node.spec.columns, `${node.where}.columns`) : shown(ent);
+        if (!specs.length) throw new Error(`${node.where}: a Data grid 2 needs at least one column`);
+        const cols = specs.map((c, i) => {
+            const s = typeof c === "string" ? { attribute: c } : c;
+            if (!s || typeof s !== "object" || !s.attribute) throw new Error(`${node.where} column ${i + 1}: use "Attribute" or { "attribute": ..., "caption": ... }`);
+            for (const k of Object.keys(s)) if (!["attribute", "caption"].includes(k)) fail(`${node.where} column ${i + 1}: unknown field '${k}' for a Data grid 2 column`, k, ["attribute", "caption"]);
+            const attr = attributeOf(ent, s.attribute, node.where);
+            const tn = ATTR_TYPES[attr.type.structureTypeName.split("$")[1].replace("AttributeType", "")] || "?";
+            if (allowed.length && !allowed.includes(tn)) throw new Error(`${node.where}: a Data grid 2 column cannot show '${attr.name}' (${tn}); it shows ${allowed.join(", ")}`);
+            return { attr, caption: s.caption !== undefined ? String(s.caption) : humanize(attr.name) };
+        });
+        const made = [];
+        for (const c of cols) {
+            const col = await blankObject(colType, pattern);
+            const show = valueOf(col, "showContentAs");
+            if (show) show.primitiveValue = "attribute";
+            const ref = dm.AttributeRef.create(model);
+            ref.attribute = c.attr;
+            valueOf(col, "attribute").attributeRef = ref;
+            const header = valueOf(col, "header");
+            if (header) await templateAll(header, "textTemplate", c.caption, ctx);
+            made.push(col);
+        }
+        // everything else back to the widget's defaults, without the original's references
+        for (const p of grid.object.properties) if (p.type.key !== "columns") await blank(p.value, p.type, null);
+        colProp.value.objects.clear();
+        for (const col of made) colProp.value.objects.push(col);
+        // data source: the database (XPath), this entity
+        const dsv = props.get("datasource").value;
+        const ds = cw.CustomWidgetXPathSource.createInWidgetValueUnderDataSource(dsv);
+        dm.DirectEntityRef.createInEntityPathSourceUnderEntityRef(ds).entity = ent;
+        if (node.spec.xpath) ds.xPathConstraint = String(node.spec.xpath);
+        // selection (Single: row click, as Studio Pro's own master-detail grids)
+        const selName = { single: "Single", multi: "Multi", none: "None" }[String(node.spec.selection || "Single").toLowerCase()];
+        const selVal = props.get("itemSelection").value;
+        if (!selVal.type.selectionTypes.some(x => x.name === selName)) throw new Error(`${node.where}: this Data grid 2 has no selection ${selName}`);
+        selVal.selection = cw.CustomWidgetSelectionType[selName];
+        const method = valueOf(grid.object, "itemSelectionMethod");
+        if (selName === "Single" && method && method.type.enumerationValues.some(e => e.key === "rowClick")) method.primitiveValue = "rowClick";
+        if (node.spec.rows !== undefined) {
+            const n = Number(node.spec.rows);
+            if (!Number.isInteger(n) || n < 1) throw new Error(`${node.where}: rows must be a number >= 1`);
+            valueOf(grid.object, "pageSize").primitiveValue = String(n);
+        }
+        if (bool(node.spec.selectFirst, false)) valueOf(grid.object, "autoSelect").primitiveValue = "true"; // checked in gridKind
+        // the copy may refer to nothing but this entity
+        const okAttrs = new Set(h.attributeChain(ent).attributes.map(a => a.qualifiedName));
+        const left = [];
+        grid.traverse(el => {
+            if (el === grid) return;
+            if (el instanceof pages.Widget) left.push(`widget ${el.name}`);
+            else if (el instanceof dm.AttributeRef && !okAttrs.has(el.attributeQualifiedName)) left.push(el.attributeQualifiedName);
+            else if (el instanceof dm.EntityRef && !(el instanceof dm.DirectEntityRef && el.entityQualifiedName === ent.qualifiedName)) left.push("entity path");
+            else if (el instanceof pages.ClientAction && !(el instanceof pages.NoClientAction)) left.push(el.structureTypeName);
+            else if (el instanceof pages.ClientTemplateParameter || el instanceof pages.PageVariable) left.push(el.structureTypeName);
+            else if (el instanceof cw.WidgetValue && (el.pageQualifiedName || el.microflowQualifiedName || el.nanoflowQualifiedName || el.imageQualifiedName)) left.push("document link");
+        });
+        if (left.length) throw new Error(`${node.where}: the Data grid 2 copy still refers to ${[...new Set(left)].slice(0, 3).join(", ")}; use "kind": "classic"`);
+        const why = node.kindAsked === "auto" ? `"kind": "auto"` : `"kind": "datagrid2"`;
+        client.warnFirst(`${ctx.qn}: ${grid.name} is a Data grid 2 ${info.def.version} (${why}), copied from ${doc.qualifiedName}.${pick.name} with its filters, actions and personalization left empty; "kind": "classic" for a classic Data grid`);
+        return `${grid.name} (Data grid 2 ${info.def.version}, ${ent.qualifiedName}, ${cols.length} column(s), selection ${selName}${node.spec.xpath ? ", XPath " + node.spec.xpath : ""})`;
+    }
+
+    const BUILD = {
+        async layoutGrid(node, target, ctx) {
+            const lg = pages.LayoutGrid.create(model);
+            target.push(lg);
+            lg.name = node.name || ctx.names.next("layoutGrid");
+            if (node.spec.width) lg.width = choice(pages.ContainerWidth, /^fixed$/i.test(node.spec.width) ? "FixedWidth" : /^full$/i.test(node.spec.width) ? "FullWidth" : node.spec.width, "width", node.where);
+            const parts = [];
+            for (const r of node.rows) {
+                const row = pages.LayoutGridRow.create(model);
+                lg.rows.push(row);
+                for (const c of r) {
+                    const col = pages.LayoutGridColumn.create(model);
+                    row.columns.push(col);
+                    col.weight = c.weight;
+                    col.tabletWeight = c.tablet;
+                    col.phoneWeight = c.phone;
+                    const inner = [];
+                    for (const ch of c.widgets) inner.push(await build(ch, col.widgets, ctx));
+                    parts.push(`${c.weight === -1 ? "auto" : c.weight}: ${inner.join(", ") || "empty"}`);
+                }
+            }
+            return `${lg.name} [${parts.join(" | ")}]`;
+        },
+        async container(node, target, ctx) {
+            const d = pages.DivContainer.create(model);
+            target.push(d);
+            d.name = node.name || ctx.names.next("container");
+            if (node.spec.class) d.appearance.class = String(node.spec.class);
+            const inner = [];
+            for (const ch of node.widgets) inner.push(await build(ch, d.widgets, ctx));
+            return `${d.name} [${inner.join(", ")}]`;
+        },
+        async text(node, target, ctx) {
+            const t = pages.DynamicText.create(model);
+            target.push(t);
+            t.name = node.name || ctx.names.next("text");
+            t.renderMode = choice(pages.TextRenderMode, node.spec.style || "Text", "text style", node.where);
+            await textTemplate(t.content, node.spec.text, node, ctx);
+            return t.name;
+        },
+        async dataView(node, target, ctx) {
+            const dv = pages.DataView.create(model);
+            target.push(dv);
+            dv.name = node.name || ctx.names.next("dataView");
+            const ent = node.ent;
+            node.widget = dv;
+            if (node.source === "listen") {
+                pages.ListenTargetSource.createInEntityWidgetUnderDataSource(dv).listenTarget = node.target.name;
+            } else {
+                node.param = await pageParameter(ent, ctx);
+                const src = pages.DataViewSource.createInEntityWidgetUnderDataSource(dv);
+                dm.DirectEntityRef.createInEntityPathSourceUnderEntityRef(src).entity = ent;
+                const sv = pages.PageVariable.create(model);
+                src.sourceVariable = sv; // attach first: the parameter reference is local to the page
+                sv.pageParameter = node.param;
+            }
+            const editable = bool(node.spec.editable, true);
+            // Mendix 10.7+: editability; older: editable
+            if (!setIfAvailable(dv, "editability", editable ? pages.EditableEnum.Always : pages.EditableEnum.Never)) setIfAvailable(dv, "editable", editable);
+            const fields = node.spec.fields !== undefined ? list(node.spec.fields, `${node.where}.fields`) : node.widgets.length ? [] : shown(ent);
+            const inner = [];
+            for (const f of fields) inner.push((await attrInput("input", dv.widgets, attributeOf(ent, f, node.where), node, node.where, ctx)).name);
+            for (const ch of node.widgets) inner.push(await build(ch, dv.widgets, ctx));
+            const buttons = bool(node.spec.buttons, editable && node.source === "parameter" && !node.footer.length);
+            const foot = [];
+            if (buttons) {
+                foot.push((await button(dv.footerWidgets, "Save", "save", pages.ButtonStyle.Success, node.source === "parameter", ctx)).name);
+                foot.push((await button(dv.footerWidgets, "Cancel", "cancel", pages.ButtonStyle.Default, node.source === "parameter", ctx)).name);
+            }
+            for (const ch of node.footer) foot.push(await build(ch, dv.footerWidgets, ctx));
+            if (!dv.widgets.length) client.warn(`${ctx.qn}: ${dv.name} has no widgets and shows nothing`);
+            const how = node.source === "listen" ? `listens to ${node.target.name}` : `parameter ${node.param.name}`;
+            return `${dv.name} (${ent.qualifiedName}, ${how}, ${editable ? "editable" : "read-only"}) [${inner.join(", ")}${foot.length ? " | footer: " + foot.join(", ") : ""}]`;
+        },
+        async dataGrid(node, target, ctx) {
+            if (node.gridKind === "datagrid2") return dataGrid2(node, target, ctx);
+            const ent = node.ent;
+            const grid = pages.DataGrid.create(model);
+            grid.columns.clear(); // the SDK adds an empty column
+            target.push(grid);
+            grid.name = node.name;
+            node.widget = grid;
+            const src = grid.dataSource; // GridXPathSource from Mendix 10.5 (the "Database" source in Studio Pro)
+            if (!(src instanceof pages.GridXPathSource)) throw new Error(`${node.where}: this Mendix version gives a ${src.structureTypeName} source; only the XPath source (10.5+) is supported`);
+            dm.DirectEntityRef.createInEntityPathSourceUnderEntityRef(src).entity = ent;
+            if (node.spec.xpath) src.xPathConstraint = String(node.spec.xpath);
+            grid.selectionMode = choice(pages.GridSelectionMode, node.spec.selection || "Single", "selection", node.where);
+            grid.selectFirst = bool(node.spec.selectFirst, false);
+            if (node.spec.rows !== undefined) {
+                const n = Number(node.spec.rows);
+                if (!Number.isInteger(n) || n < 1) throw new Error(`${node.where}: rows must be a number >= 1`);
+                grid.numberOfRows = n;
+            }
+            const specs = node.spec.columns !== undefined ? list(node.spec.columns, `${node.where}.columns`) : shown(ent);
+            const cols = specs.map((c, i) => {
+                const s = typeof c === "string" ? { attribute: c } : c;
+                if (!s || typeof s !== "object" || !s.attribute) throw new Error(`${node.where} column ${i + 1}: use "Attribute" or { "attribute": ..., "caption": ..., "width": ... }`);
+                for (const k of Object.keys(s)) if (!["attribute", "caption", "width"].includes(k)) fail(`${node.where} column ${i + 1}: unknown field '${k}'`, k, ["attribute", "caption", "width"]);
+                const attr = attributeOf(ent, s.attribute, node.where);
+                if (attr.type instanceof dm.BinaryAttributeType) throw new Error(`${node.where}: '${attr.name}' is binary; a grid column cannot show it`);
+                return { attr, caption: s.caption !== undefined ? String(s.caption) : humanize(attr.name), width: s.width };
+            });
+            // widths are weights (Studio Pro: WidthUnit Weight, 100 in total)
+            const given = cols.filter(c => c.width !== undefined).reduce((s, c) => s + Number(c.width), 0);
+            const open = cols.filter(c => c.width === undefined);
+            const share = open.length ? Math.max(1, Math.floor(Math.max(100 - given, open.length) / open.length)) : 0;
+            for (const [i, c] of cols.entries()) {
+                const col = pages.GridColumn.create(model);
+                grid.columns.push(col);
+                col.name = ctx.names.next("column");
+                const ref = dm.AttributeRef.create(model);
+                ref.attribute = c.attr;
+                col.attributeRef = ref;
+                await textAll(col.caption, c.caption, ctx);
+                await textAll(col.aggregateCaption, "", ctx);
+                const last = open.length && c === open[open.length - 1];
+                col.width = c.width !== undefined ? Number(c.width) : last ? Math.max(1, 100 - given - share * (open.length - 1)) : share;
+                if (!(col.width > 0)) throw new Error(`${node.where} column ${i + 1}: width must be a number > 0`);
+            }
+            // search: Studio Pro's generated grids have a Search button and one search field per text/number/enum column
+            let fields = 0;
+            if (bool(node.spec.search, true)) {
+                for (const c of cols) {
+                    const t = c.attr.type;
+                    const text = t instanceof dm.StringAttributeType;
+                    const num = [dm.IntegerAttributeType, dm.LongAttributeType, dm.DecimalAttributeType, dm.AutoNumberAttributeType].some(k => t instanceof k);
+                    const en = t instanceof dm.EnumerationAttributeType;
+                    if (!text && !num && !en) continue;
+                    const f = (en ? pages.DropDownSearchField : pages.ComparisonSearchField).create(model);
+                    src.searchBar.items.push(f);
+                    f.name = ctx.names.next("searchField");
+                    const ref = dm.AttributeRef.create(model);
+                    ref.attribute = c.attr;
+                    f.attributeRef = ref;
+                    f.operator = text ? pages.SearchFieldOperator.Contains : pages.SearchFieldOperator.Equal;
+                    await textAll(f.caption, c.caption, ctx);
+                    fields++;
+                }
+            }
+            if (fields) {
+                const b = pages.GridSearchButton.create(model);
+                grid.controlBar.items.push(b);
+                b.name = ctx.names.next("searchButton");
+                await textAll(b.caption.template, "Search", ctx);
+            } else src.searchBar.type = pages.SearchBarTypeEnum.None;
+            if (!cols.length) client.warn(`${ctx.qn}: ${grid.name} has 0 columns; it shows empty rows (give "columns")`);
+            let why = node.kindAsked === "auto" ? `"kind": "auto" picks classic: ${node.autoWhy}` : `"kind": "classic"`;
+            if (node.kindAsked === "classic") {
+                const d2 = dg2Info();
+                if (d2.exemplars.length) why += `; this project uses Data grid 2 (${d2.exemplars.length + d2.stale}x), "kind": "datagrid2" makes one`;
+            }
+            client.warnFirst(`${ctx.qn}: ${grid.name} is a classic Data grid (${why})`);
+            return `${grid.name} (classic Data grid, ${ent.qualifiedName}, ${cols.length} column(s)${fields ? `, ${fields} search field(s)` : ""}${node.spec.xpath ? ", XPath " + node.spec.xpath : ""})`;
+        },
+        async listView(node, target, ctx) {
+            const ent = node.ent;
+            const lv = pages.ListView.create(model);
+            target.push(lv);
+            lv.name = node.name;
+            node.widget = lv;
+            const src = lv.dataSource;
+            if (!(src instanceof pages.ListViewXPathSource)) throw new Error(`${node.where}: this Mendix version gives a ${src.structureTypeName} source; only the XPath source (10.5+) is supported`);
+            dm.DirectEntityRef.createInEntityPathSourceUnderEntityRef(src).entity = ent;
+            if (node.spec.xpath) src.xPathConstraint = String(node.spec.xpath);
+            if (node.spec.pageSize !== undefined) lv.pageSize = Number(node.spec.pageSize);
+            const fields = node.spec.fields !== undefined ? list(node.spec.fields, `${node.where}.fields`) : node.widgets.length ? [] : shown(ent);
+            const inner = [];
+            for (const f of fields) {
+                const attr = attributeOf(ent, f, node.where);
+                inner.push(await build({ kind: "text", spec: { text: `{${attr.name}}` }, where: node.where, container: node }, lv.widgets, ctx));
+            }
+            for (const ch of node.widgets) inner.push(await build(ch, lv.widgets, ctx));
+            return `${lv.name} (${ent.qualifiedName}${node.spec.xpath ? ", XPath " + node.spec.xpath : ""}) [${inner.join(", ")}]`;
+        },
+        async actionButton(node, target, ctx) {
+            const s = node.spec;
+            const action = String(s.action).toLowerCase();
+            const known = ["save", "cancel", "close", "delete", "showpage", "callmicroflow", "callnanoflow"];
+            if (!known.includes(action)) fail(`${node.where}: action '${s.action}' is not known (use save | cancel | close | delete | showPage | callMicroflow | callNanoflow)`, s.action, ["save", "cancel", "close", "delete", "showPage", "callMicroflow", "callNanoflow"]);
+            const need = { showpage: "page", callmicroflow: "microflow", callnanoflow: "nanoflow" }[action];
+            if (need && !s[need]) throw new Error(`${node.where}: action ${s.action} needs '${need}'`);
+            for (const k of ["page", "microflow", "nanoflow"]) if (s[k] !== undefined && k !== need) throw new Error(`${node.where}: '${k}' does not go with action ${s.action}`);
+            if (s.closePage !== undefined && !["save", "cancel", "delete"].includes(action)) throw new Error(`${node.where}: closePage goes with save, cancel or delete`);
+            const caption = s.caption !== undefined ? String(s.caption) : { save: "Save", cancel: "Cancel", close: "Close", delete: "Delete" }[action];
+            if (caption === undefined) throw new Error(`${node.where}: a ${s.action} button needs 'caption'`);
+            const b = pages.ActionButton.create(model);
+            target.push(b);
+            b.name = node.name || ctx.names.next("actionButton");
+            b.buttonStyle = choice(pages.ButtonStyle, s.style || (action === "save" ? "Success" : "Default"), "style", node.where);
+            const dvParam = node.container && node.container.source === "parameter";
+            let what = action;
+            if (action === "save" || action === "cancel") {
+                const cls = action === "save" ? pages.SaveChangesClientAction : pages.CancelChangesClientAction;
+                cls.createInActionButtonUnderAction(b).closePage = bool(s.closePage, !!dvParam);
+            } else if (action === "delete") pages.DeleteClientAction.createInActionButtonUnderAction(b).closePage = bool(s.closePage, false);
+            else if (action === "close") pages.ClosePageClientAction.createInActionButtonUnderAction(b);
+            else if (action === "showpage") {
+                const page = await h.get(s.page);
+                if (!(page instanceof pages.Page)) throw new Error(`${node.where}: '${s.page}' is not a page`);
+                implicitOnly(page.parameters.map(p => ({ name: p.name, entity: p.parameterType instanceof datatypes.ObjectType ? p.parameterType.entityQualifiedName : null })), node, s.page);
+                pages.PageClientAction.createInActionButtonUnderAction(b).pageSettings.page = page;
+                what = `opens ${s.page}`;
+            } else {
+                const nano = action === "callnanoflow";
+                const { f, params } = await flowParams(nano ? s.nanoflow : s.microflow, nano ? mf.Nanoflow : mf.Microflow, nano ? "nanoflow" : "microflow", node);
+                implicitOnly(params, node, f.qualifiedName);
+                if (nano) pages.CallNanoflowClientAction.createInActionButtonUnderAction(b).nanoflow = f;
+                else pages.MicroflowClientAction.createInActionButtonUnderAction(b).microflowSettings.microflow = f;
+                what = `calls ${f.qualifiedName}`;
+            }
+            await templateAll(b, "caption", caption, ctx);
+            return `${b.name} (${what})`;
+        },
+        async input(node, target, ctx) {
+            const w = await attrInput(node.kind, target, attributeOf(node.container.ent, node.spec.attribute, node.where), node.container, node.where, ctx, node.spec.label, node.name);
+            return w.name;
+        }
+    };
+    for (const k of Object.keys(INPUTS)) BUILD[k] = BUILD.input;
+
+    const build = (node, target, ctx) => BUILD[node.kind](node, target, ctx);
+
+    // ------------------------------------------------ navigation
+
+    async function navProfile(name, where) {
+        const doc = model.allNavigationDocuments()[0];
+        if (!doc) throw new Error(`${where}: the project has no navigation document`);
+        const nav = await doc.load();
+        const want = String(name || "Responsive");
+        const label = p => `${p.name} (${p.kind ? p.kind.name : "native"})`;
+        const hit = nav.profiles.find(p => p.name.toLowerCase() === want.toLowerCase()) ||
+            nav.profiles.find(p => p.kind && String(p.kind.name).toLowerCase() === want.toLowerCase());
+        if (!hit) fail(`${where}: no navigation profile '${want}' (profiles: ${nav.profiles.map(label).join(", ")})`, want, nav.profiles.map(p => p.name));
+        if (!(hit instanceof navigation.NavigationProfile)) throw new Error(`${where}: '${hit.name}' is a native profile; its menu and home page are not supported here (use Studio Pro)`);
+        return hit;
+    }
+
+    const captionOf = t => (t && t.translations.length ? t.translations[0].text : "");
+    function menuItems(items, out = [], depth = 0) {
+        for (const it of items) {
+            out.push({ item: it, depth });
+            menuItems(it.items, out, depth + 1);
+        }
+        return out;
+    }
+    const opens = (it, qn) => it.action instanceof pages.PageClientAction && it.action.pageSettings && it.action.pageSettings.pageQualifiedName === qn;
+
+    async function menuItem(o, where, ctx) {
+        const page = o.pageObj || (await h.get(o.page));
+        if (!(page instanceof pages.Page)) throw new Error(`${where}: '${o.page}' is not a page`);
+        if (page.parameters.length) throw new Error(`${where}: ${page.qualifiedName} has a page parameter (${page.parameters.map(p => p.name).join(", ")}); a menu item can only open a page without parameters`);
+        const profile = await navProfile(o.profile, where);
+        const all = menuItems(profile.menuItemCollection.items);
+        if (all.some(x => opens(x.item, page.qualifiedName))) throw new Error(`${where}: ${page.qualifiedName} is already in the ${profile.name} menu`);
+        let items = profile.menuItemCollection.items;
+        let under = "";
+        if (o.parent) {
+            const p = all.find(x => x.item.caption.translations.some(t => t.text.toLowerCase() === String(o.parent).toLowerCase()));
+            if (!p) fail(`${where}: no menu item '${o.parent}' in the ${profile.name} menu`, o.parent, all.map(x => captionOf(x.item.caption)).filter(Boolean));
+            if (p.depth >= 2) throw new Error(`${where}: '${o.parent}' is already 3 levels deep; pick a higher menu item`);
+            items = p.item.items;
+            under = ` > ${captionOf(p.item.caption)}`;
+            if (!(p.item.action instanceof pages.NoClientAction)) client.warn(`${where}: menu item '${o.parent}' opens something itself; menu items with sub-items usually have no action`);
+        }
+        const item = menus.MenuItem.create(model);
+        items.push(item);
+        const caption = o.caption !== undefined ? String(o.caption) : captionOf(page.title) || humanize(page.name);
+        await textAll(item.caption, caption, ctx);
+        const a = pages.PageClientAction.createInMenuItemUnderAction(item);
+        a.disabledDuringExecution = false; // what Studio Pro writes for menu items
+        a.pageSettings.page = page;
+        await menuRoleLint(where, page, caption);
+        return `${profile.name} menu${under}: "${caption}" -> ${page.qualifiedName}`;
+    }
+
+    async function projectSecurity() {
+        const s = model.allProjectSecurities()[0];
+        return s ? s.load() : null;
+    }
+
+    // A menu item shows only for users whose user role has one of the page's module roles.
+    async function menuRoleLint(where, page, caption) {
+        const pr = page.allowedRolesQualifiedNames;
+        if (!pr.length) return client.warn(`${where}: ${page.qualifiedName} allows no module roles, so the menu item "${caption}" is hidden for every user (give the page roles)`);
+        const sec = await projectSecurity();
+        if (!sec || !sec.userRoles.length || sec.securityLevel === sdk.security.SecurityLevel.CheckNothing) return;
+        const hidden = sec.userRoles.filter(u => !u.moduleRolesQualifiedNames.some(r => pr.includes(r))).map(u => u.name);
+        if (hidden.length === sec.userRoles.length) client.warn(`${where}: no user role has ${pr.join(" or ")}, so the menu item "${caption}" is hidden for every user (add the module role to a user role in App Security)`);
+        else if (hidden.length) client.warn(`${where}: the menu item "${caption}" shows only for user roles with ${pr.join(" or ")}; it is hidden for ${hidden.join(", ")}`);
+    }
+
+    // Lints for the roles of a new page: roles of its own module, that reach users and read the entities the page shows.
+    async function roleLints(qn, roles, ents) {
+        if (!roles.length) return;
+        const sec = await projectSecurity();
+        const off = sec && sec.securityLevel === sdk.security.SecurityLevel.CheckNothing ? " once app security is on" : "";
+        const mod = qn.split(".")[0];
+        for (const r of roles) {
+            if (!r.startsWith(mod + ".")) client.warn(`${qn}: ${r} is a role of another module; Studio Pro lets a page use only roles of its own module (${mod}.*)`);
+            if (sec && !sec.userRoles.some(u => u.moduleRolesQualifiedNames.includes(r))) client.warn(`${qn}: module role ${r} is in no user role, so no user can open the page${off} (add it to a user role in App Security)`);
+            for (const e of ents) {
+                let ok = false, unknown = false;
+                for (let x = e, i = 0; x && i < 20 && !ok; i++) {
+                    ok = x.accessRules.some(a => a.moduleRolesQualifiedNames.includes(r));
+                    const g = x.generalization;
+                    if (g instanceof dm.Generalization && g.generalization && !g.generalization.isLoaded) unknown = true;
+                    x = g instanceof dm.Generalization && g.generalization && g.generalization.isLoaded ? g.generalization : null;
+                }
+                if (!ok && !unknown) client.warn(`${qn}: ${r} has no access rule on ${e.qualifiedName}; with production security the page shows no ${e.name} data for it (addAccessRule)`);
+            }
+        }
+    }
+
+    // ------------------------------------------------ operations
+
     async function createPage(o) {
         const qn = `${o.module}.${o.name}`;
-        if (await h.exists(qn)) throw new Error(`${qn} already exists`);
+        if (unitNamed(qn)) throw new Error(`${qn} already exists`);
+        h.folder(o.module, o.folder); // fails with "did you mean" for a wrong module before anything is created
+        const r = o.widgets !== undefined ? await widgetPage(o, qn) : await formPage(o, qn);
+        if (o.roles) await h.grantAccess({ document: qn, roles: o.roles });
+        const extra = [];
+        if (o.menu !== undefined && o.menu !== false) {
+            const m = o.menu === true ? {} : typeof o.menu === "string" ? { profile: o.menu } : o.menu;
+            if (!m || typeof m !== "object" || Array.isArray(m)) throw new Error(`${qn}: menu is "Responsive" or { "profile": ..., "caption": ..., "parent": ... }`);
+            for (const k of Object.keys(m)) if (!["profile", "caption", "parent"].includes(k)) fail(`${qn}: unknown menu field '${k}'`, k, ["profile", "caption", "parent"]);
+            extra.push("menu: " + (await menuItem({ ...m, page: qn, pageObj: await h.get(qn) }, `${qn} menu`, r.ctx)));
+        }
+        await roleLints(qn, [].concat(o.roles || []), r.ctx ? r.ctx.ents : r.ents);
+        if (r.ctx) {
+            const ls = await languages();
+            if (r.ctx.untranslated && ls.length > 1) client.warn(`${qn}: ${r.ctx.untranslated} text(s) are written as given for ${ls.slice(1).join(", ")} too; translate them in Studio Pro`);
+        }
+        return r.text + extra.map(x => "\n      " + x).join("");
+    }
+
+    async function formPage(o, qn) {
         const { layout, placeholder } = pickLayout(o.layout, !!o.entity);
         const layoutDoc = await h.get(layout);
         const page = pages.Page.createIn(h.folder(o.module, o.folder));
@@ -104,9 +966,11 @@ function makePages(h) {
         if (!lp) throw new Error(`layout ${layout} has no placeholder '${short}'`);
         arg.parameter = lp;
         let inputs = 0;
+        const ents = [];
         if (o.entity) {
             const ent = await h.entity(o.entity);
             await h.loadParents(ent);
+            ents.push(ent);
             const param = pages.PageParameter.createIn(page);
             param.name = ent.name;
             const pt = datatypes.ObjectType.create(model);
@@ -142,10 +1006,208 @@ function makePages(h) {
                 await clientTemplate(cancel, "caption", "Cancel");
             }
         } else if (o.fields) throw new Error(`${qn}: 'fields' needs 'entity'`);
-        return `${qn} (layout ${layout}${o.entity ? `, form for ${o.entity} with ${inputs} input(s)` : ""})`;
+        return { ents, text: `${qn} (layout ${layout}${o.entity ? `, form for ${o.entity} with ${inputs} input(s)` : ""})` };
     }
 
-    return { createPage };
+    async function widgetPage(o, qn) {
+        for (const k of ["fields", "buttons"]) if (o[k] !== undefined) throw new Error(`${qn}: '${k}' goes in a dataView widget when 'widgets' is given`);
+        if (o.arrange !== undefined && !/^(auto|rows)$/i.test(String(o.arrange))) fail(`${qn}: arrange must be auto or rows`, o.arrange, ["auto", "rows"]);
+        const nodes = [];
+        const top = scan(o.widgets, "widgets", null, nodes);
+        if (!top.length) throw new Error(`${qn}: 'widgets' is empty; leave it out for an empty page`);
+        const ctx = { qn, names: names(), params: new Map(), count: { inputs: 0 }, untranslated: 0, ents: new Set() };
+        for (const n of nodes) if (n.kind === "dataGrid") gridKind(n);
+        // names: given ones first, then grids and list views (listenTo needs them before anything is built)
+        for (const n of nodes) if (n.name) ctx.names.reserve(n.name, n.where);
+        for (const n of nodes) if (!n.name && (n.kind === "dataGrid" || n.kind === "listView")) n.name = ctx.names.next(n.gridKind === "datagrid2" ? "dataGrid2_" : PREFIX[n.kind]);
+        // entities and data view sources
+        for (const n of nodes) {
+            if (n.kind === "dataGrid" || n.kind === "listView") n.ent = await entityOf(n.spec.entity || o.entity, n.where);
+        }
+        for (const n of nodes.filter(x => x.kind === "dataView")) {
+            const s = n.spec;
+            let source = s.source !== undefined ? String(s.source).toLowerCase() : null;
+            if (source === "entity") source = "parameter";
+            if (source !== null && !["parameter", "listen"].includes(source)) fail(`${n.where}: source '${s.source}' is not known (use parameter | listen)`, s.source, ["parameter", "listen", "entity"]);
+            if (s.parameter !== undefined) throw new Error(`${n.where}: use "source": "parameter"`);
+            if (s.listenTo !== undefined && source === "parameter") throw new Error(`${n.where}: listenTo goes with source listen, not parameter`);
+            n.source = source || (s.listenTo !== undefined ? "listen" : "parameter");
+            if (n.source === "listen") {
+                if (s.listenTo === undefined) throw new Error(`${n.where}: source listen needs listenTo (a grid or list view on this page)`);
+                n.target = listenTarget(n, nodes);
+                if (s.entity && s.entity !== n.target.ent.qualifiedName) throw new Error(`${n.where}: listens to ${n.target.name} (${n.target.ent.qualifiedName}), but entity is ${s.entity}`);
+                n.ent = n.target.ent;
+                const sel = String(n.target.spec.selection || "Single").toLowerCase();
+                if (n.target.kind === "dataGrid" && sel === "none") client.warn(`${qn}: ${n.name || "the data view"} listens to ${n.target.name}, whose selection is None; select Single so it can show a row`);
+                else if (n.target.kind === "dataGrid" && /multi/.test(sel)) client.warn(`${qn}: ${n.target.name} allows multi-selection; the listening data view shows one of the selected rows (Single is usual)`);
+            } else n.ent = await entityOf(s.entity || o.entity, n.where);
+        }
+        for (const n of nodes) if (n.ent) ctx.ents.add(n.ent);
+        // a grid or list view followed by the data view that listens to it: side by side (8/4)
+        let arranged = top;
+        if (!/^rows$/i.test(String(o.arrange || ""))) {
+            arranged = [];
+            for (let i = 0; i < top.length; i++) {
+                const a = top[i], b = top[i + 1];
+                if (b && b.kind === "dataView" && b.target === a) {
+                    arranged.push({ kind: "layoutGrid", spec: {}, where: `${a.where} + ${b.where}`, rows: [[{ weight: 8, tablet: -1, phone: -1, widgets: [a] }, { weight: 4, tablet: -1, phone: -1, widgets: [b] }]] });
+                    i++;
+                } else arranged.push(a);
+            }
+        }
+        const withParameter = nodes.some(n => n.kind === "dataView" && n.source === "parameter");
+        const { layout, placeholder } = pickLayout(o.layout, withParameter);
+        const layoutDoc = await h.get(layout);
+        const page = pages.Page.createIn(h.folder(o.module, o.folder));
+        ctx.page = page;
+        page.name = o.name;
+        if (pages.Autofocus && pages.Autofocus.DesktopOnly) setIfAvailable(page, "autofocus", pages.Autofocus.DesktopOnly); // Studio Pro's default (11.1+)
+        await textAll(page.title, o.title || humanize(o.name), ctx);
+        const call = pages.LayoutCall.createInPageUnderLayoutCall(page);
+        call.layout = layoutDoc;
+        const arg = pages.LayoutCallArgument.createIn(call);
+        const short = placeholder.split(".").pop();
+        let lp = null;
+        layoutDoc.traverse(el => {
+            if (!lp && el instanceof pages.Placeholder && el.name === short) lp = el;
+        });
+        if (!lp) throw new Error(`layout ${layout} has no placeholder '${short}'`);
+        arg.parameter = lp;
+        const parts = [];
+        for (const n of arranged) parts.push(await build(n, arg.widgets, ctx));
+        return { ctx, text: `${qn} (layout ${layout}${ctx.params.size ? `, parameter ${[...ctx.params.values()].map(p => p.name).join(", ")}` : ""})\n      widgets: ${parts.join("; ")}` };
+    }
+
+    function listenTarget(n, nodes) {
+        const want = String(n.spec.listenTo);
+        const listenable = nodes.filter(x => x.kind === "dataGrid" || x.kind === "listView");
+        const cands = listenable.length ? `grids and list views on this page: ${listenable.map(x => `${x.name} (${x.kind})`).join(", ")}` : `this page has no dataGrid or listView; add one to "widgets"`;
+        const named = nodes.find(x => x.name === want);
+        if (named) {
+            if (!listenable.includes(named)) throw new Error(`${n.where}: listenTo '${want}' is a ${named.kind}; a data view listens to a dataGrid or listView (${cands})`);
+            return named;
+        }
+        const kind = LISTENABLE[want.toLowerCase()];
+        if (kind) {
+            const c = listenable.filter(x => x.kind === kind);
+            if (c.length === 1) return c[0];
+            if (!c.length) throw new Error(`${n.where}: listenTo '${want}': there is no ${kind} on this page (${cands})`);
+            throw new Error(`${n.where}: listenTo '${want}' is ambiguous: ${c.length} ${kind}s on this page (${c.map(x => x.name).join(", ")}); give the name of the one to follow`);
+        }
+        return fail(`${n.where}: listenTo '${want}' is no grid or list view on this page (${cands})`, want, listenable.map(x => x.name).concat(["dataGrid", "listView"]));
+    }
+
+    async function addMenuItem(o) {
+        return menuItem(o, `addMenuItem ${o.page}`, null);
+    }
+
+    async function setHomePage(o) {
+        const where = "setHomePage";
+        if (!o.page === !o.microflow) throw new Error(`${where} needs 'page' or 'microflow' (one of them)`);
+        let page = null, flow = null;
+        if (o.page) {
+            page = await h.get(o.page);
+            if (!(page instanceof pages.Page)) throw new Error(`${where}: '${o.page}' is not a page`);
+            if (page.parameters.length) throw new Error(`${where}: ${o.page} has a page parameter; a home page cannot have one`);
+        } else {
+            flow = await h.get(o.microflow);
+            if (!(flow instanceof mf.Microflow)) throw new Error(`${where}: '${o.microflow}' is not a microflow`);
+            if (flow.objectCollection.objects.some(x => x instanceof mf.MicroflowParameterObject)) throw new Error(`${where}: ${o.microflow} has parameters; a home microflow cannot have any`);
+        }
+        const profile = await navProfile(o.profile, where);
+        const target = page ? page.qualifiedName : flow.qualifiedName;
+        const roles = [].concat(o.roles || []);
+        const pageRoles = page ? page.allowedRolesQualifiedNames : flow.allowedModuleRolesQualifiedNames;
+        if (!roles.length) {
+            profile.homePage.page = page;
+            profile.homePage.microflow = flow;
+            if (!pageRoles.length) client.warn(`${where}: ${target} allows no module roles; users get an error instead of the home page (give it roles)`);
+            return `${profile.name} home page -> ${target}`;
+        }
+        const sec = await projectSecurity();
+        const userRoles = sec ? sec.userRoles : [];
+        for (const name of roles) {
+            const ur = userRoles.find(u => u.name === name);
+            if (!ur) fail(`${where}: no user role '${name}' (user roles are project-wide, e.g. Administrator)`, name, userRoles.map(u => u.name));
+            let rb = profile.roleBasedHomePages.find(x => x.userRoleQualifiedName === ur.qualifiedName);
+            if (!rb) {
+                rb = navigation.RoleBasedHomePage.create(model);
+                profile.roleBasedHomePages.push(rb);
+                rb.userRole = ur;
+            }
+            rb.page = page;
+            rb.microflow = flow;
+            if (!ur.moduleRolesQualifiedNames.some(r => pageRoles.includes(r))) client.warn(`${where}: user role ${name} has none of the roles that may open ${target} (${pageRoles.join(", ") || "none"})`);
+        }
+        return `${profile.name} home page for ${roles.join(", ")} -> ${target}`;
+    }
+
+    // ------------------------------------------------ checks after apply (fresh model)
+
+    function countSpecs(specs, out = {}) {
+        for (const s of specs || []) {
+            if (!s || typeof s !== "object") continue;
+            const raw = String(s.widget !== undefined ? s.widget : s.type).toLowerCase();
+            const kind = KINDS.find(k => k.toLowerCase() === raw) || ALIASES[raw];
+            out[kind] = (out[kind] || 0) + 1;
+            countSpecs(s.widgets, out);
+            countSpecs(s.footer, out);
+            if (kind === "layoutGrid") for (const r of [].concat(s.rows || [{ columns: s.columns }])) for (const c of (r && r.columns) || []) if (c && typeof c === "object") countSpecs(c.widgets, out);
+        }
+        return out;
+    }
+
+    async function menuHas(profileName, qn) {
+        const profile = await navProfile(profileName, "check");
+        return menuItems(profile.menuItemCollection.items).some(x => opens(x.item, qn));
+    }
+
+    const checks = {
+        async createPage(o) {
+            const qn = `${o.module}.${o.name}`;
+            const page = await h.get(qn);
+            const r = [];
+            if (o.widgets === undefined) {
+                if (o.entity && !page.parameters.length) r.push(`${qn} has no page parameter`);
+            } else {
+                const want = countSpecs(o.widgets);
+                const have = {};
+                const names = new Map();
+                const listens = [];
+                page.traverse(el => {
+                    const k = el instanceof pages.DataGrid || isGrid2(el) ? "dataGrid" : el instanceof pages.DataView ? "dataView" : el instanceof pages.ListView ? "listView" : el instanceof pages.ActionButton ? "actionButton" : el instanceof pages.LayoutGrid ? "layoutGrid" : null;
+                    if (k) have[k] = (have[k] || 0) + 1;
+                    if (el instanceof pages.Widget) names.set(el.name, el);
+                    if (el instanceof pages.ListenTargetSource) listens.push(el.listenTarget);
+                });
+                for (const k of ["dataGrid", "dataView", "listView"]) if ((want[k] || 0) !== (have[k] || 0)) r.push(`${qn} has ${have[k] || 0} ${k}(s), expected ${want[k] || 0}`);
+                for (const k of ["layoutGrid", "actionButton"]) if ((have[k] || 0) < (want[k] || 0)) r.push(`${qn} has ${have[k] || 0} ${k}(s), expected at least ${want[k]}`);
+                for (const t of listens) {
+                    const w = names.get(t);
+                    if (!(w instanceof pages.DataGrid || w instanceof pages.ListView || isGrid2(w))) r.push(`${qn}: a data view listens to '${t}', which is no grid or list view on the page`);
+                    else if (isGrid2(w) && valueOf(w.object, "itemSelection").selection !== cw.CustomWidgetSelectionType.Single) r.push(`${qn}: ${t} is listened to but its selection is not Single`);
+                }
+            }
+            if (o.menu !== undefined && o.menu !== false) {
+                const m = typeof o.menu === "string" ? { profile: o.menu } : o.menu === true ? {} : o.menu;
+                if (!(await menuHas(m.profile, qn))) r.push(`${qn} is not in the ${m.profile || "Responsive"} menu`);
+            }
+            return r;
+        },
+        async addMenuItem(o) {
+            return (await menuHas(o.profile, o.page)) ? [] : [`${o.page} is not in the ${o.profile || "Responsive"} menu`];
+        },
+        async setHomePage(o) {
+            const profile = await navProfile(o.profile, "check");
+            const target = o.page || o.microflow;
+            const roles = [].concat(o.roles || []);
+            const at = hp => hp && (hp.pageQualifiedName === target || hp.microflowQualifiedName === target);
+            if (!roles.length) return at(profile.homePage) ? [] : [`${profile.name} home page is not ${target}`];
+            return roles.filter(r => !at(profile.roleBasedHomePages.find(x => x.userRoleQualifiedName === r))).map(r => `${profile.name} home page for ${r} is not ${target}`);
+        }
+    };
+
+    return { createPage, addMenuItem, setHomePage, checks };
 }
 
-module.exports = { makePages, PAGE_FIELDS };
+module.exports = { makePages, PAGE_FIELDS, MENU_FIELDS, HOME_FIELDS, WIDGETS };

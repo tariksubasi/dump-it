@@ -292,11 +292,80 @@ Variable names are written without `$` in `variable`, `from`, `over`, `item`, `a
 Mendix expressions as text: `"'Hello'"`, `"$Order/Total * 2"`, `"empty"`, `"[%CurrentDateTime%]"`,
 `"Module.Enum.Value"`. String literals need single quotes inside the JSON string.
 
-### Pages, constants, scheduled events, REST
+### Pages and navigation
 
 | Op | Fields | Notes |
 |---|---|---|
-| `createPage` | **module**, **name**, title, entity, fields `["Attr"]`, buttons (default true), layout, folder, roles | With `entity`: a page parameter and a data view with an input per attribute (text box, check box, date picker, drop-down) and Save/Cancel. Without: an empty page. The layout is the one the project's own pages use |
+| `createPage` | **module**, **name**, title, entity, fields `["Attr"]`, buttons (default true), widgets, arrange, menu, layout, folder, roles | Without `widgets`: with `entity` an edit form (page parameter, data view, an input per attribute, Save/Cancel), without `entity` an empty page. With `widgets`: the page content from the widget list below; `entity` is then the default entity of grids and data views. `menu` (`"Responsive"` or `{profile, caption, parent}`) adds a menu item, `roles` lets module roles open the page. The layout is the one the project's own pages use most |
+| `addMenuItem` | **page**, profile (default Responsive), caption (default: the page title), parent (caption of an existing menu item) | Only pages without parameters. A page is in a menu once. New items go at the end |
+| `setHomePage` | **page** or **microflow**, profile (default Responsive), roles (user roles, e.g. `["Administrator"]`) | Without roles: the default home page. Only pages/microflows without parameters |
+
+Widgets in `"widgets": [ { "widget": "<kind>", ... } ]`, top to bottom. Every widget takes `name` (default as
+Studio Pro: `grid1`, `dataGrid2_1`, `dataView1`, ...). Full field list: `python mx.py ops createPage`.
+
+| Widget | Fields | Notes |
+|---|---|---|
+| `layoutGrid` | columns `[8, 4]` or `[{"weight": 8, "widgets": [...]}]`, or rows `[{"columns": [...]}]`, width | Weights 1-12 or `"auto"`; `tablet`/`phone` weights per column |
+| `container` | widgets, class | |
+| `text` | **text**, style (`Text`, `Paragraph`, `H1`-`H6`) | Inside a data view or list view, `{Attribute}` shows the value |
+| `dataGrid` | entity, columns (`"Attr"` or `{attribute, caption, width}`), xpath, search, selection (default Single), selectFirst, rows, kind | Database (XPath) source. `kind`: `classic` (default; search bar), `datagrid2` (a Data grid 2 copied from one on this project's pages; refused when the project has none or its widget differs from `widgets/*.mpk`), `auto` (datagrid2 when possible, else classic) |
+| `dataView` | entity, source (`parameter`/`listen`), listenTo, editable (default true), fields, buttons, widgets, footer | `listenTo`: the name of a grid or list view, or `dataGrid` / `listView` when the page has exactly one. Without `listenTo`: a page parameter of the entity, with Save/Cancel when editable |
+| `listView` | entity, xpath, fields, widgets, pageSize | A data view can listen to it |
+| `actionButton` | **action** (`save`, `cancel`, `close`, `delete`, `showPage`, `callMicroflow`, `callNanoflow`), caption, page, microflow, nanoflow, style, closePage | Passes only the object of the data view or list view it is in (target with that one parameter or none) |
+| `input`, `textBox`, `textArea`, `checkBox`, `datePicker`, `dropDown` | **attribute**, label | Inside a data view; `input` picks the widget by attribute type |
+
+A grid followed by the data view that listens to it is placed side by side (layout grid 8/4); `"arrange": "rows"`
+stacks them. The dry run's `Warnings` start with the grid kind that was used, then lint lines: a grid with 0
+columns, a listened grid whose selection is None or Multi, page roles that are in no user role, belong to another
+module or have no access rule on the shown entity, user roles that will not see the menu item, texts to translate.
+A wrong or ambiguous `listenTo` is an error that lists the grids and list views on the page.
+
+Dashboard: a grid, a read-only detail of the selected row next to it, a menu item, two roles:
+
+```json
+{ "ops": [ { "op": "createPage", "module": "EmployeeOnboarding", "name": "Dashboard", "entity": "EmployeeOnboarding.EmployeeOnboarding",
+  "widgets": [ { "widget": "dataGrid", "columns": ["FullName", "WFH", "FirstDay", "PhoneModel", "LaptopModel"] },
+               { "widget": "dataView", "listenTo": "dataGrid", "editable": false } ],
+  "menu": "Responsive", "roles": ["EmployeeOnboarding.User", "EmployeeOnboarding.HR"] } ] }
+```
+
+Layout grid, heading, list view with an editable detail and buttons, a Data grid 2, menu item and home page:
+
+```json
+{ "ops": [
+  { "op": "createPage", "module": "HR", "name": "Employee_Board", "entity": "HR.Employee", "roles": ["HR.User"],
+    "widgets": [
+      { "widget": "text", "text": "Employees", "style": "H2" },
+      { "widget": "layoutGrid", "columns": [
+        { "weight": 4, "widgets": [ { "widget": "listView", "fields": ["Name"] } ] },
+        { "weight": 8, "widgets": [ { "widget": "dataView", "listenTo": "listView", "fields": ["Name", "Email", "Active"],
+            "widgets": [ { "widget": "text", "text": "Started on {StartDate}" } ],
+            "footer": [ { "widget": "actionButton", "action": "save", "closePage": false },
+                        { "widget": "actionButton", "action": "callNanoflow", "nanoflow": "HR.NF_Employee_Check", "caption": "Check" } ] } ] } ] },
+      { "widget": "dataGrid", "kind": "datagrid2", "entity": "HR.Department", "columns": ["Name", { "attribute": "Code", "caption": "Department code" }] } ] },
+  { "op": "addMenuItem", "page": "HR.Employee_Board", "caption": "Employees" },
+  { "op": "setHomePage", "page": "HR.Employee_Board", "roles": ["User"] }
+] }
+```
+
+What pages cannot do yet (use Studio Pro, and `python mx.py gap "<what>"`):
+- Change an existing page, snippet or layout: add, move, remove or edit widgets there.
+- Widgets other than the ones above: tab container, group box, snippet call, image, reference selector, combo box,
+  gallery and every other pluggable widget, except a Data grid 2 copied from the project.
+- Data grid 2: columns show attributes only; no filters, default sorting, custom content, export, personalization or
+  click actions (they are left empty). It needs a Data grid 2 on a page or snippet of this project whose widget equals
+  `widgets/*.mpk` (otherwise `kind: datagrid2` is refused; use `classic`).
+- Classic data grid: only the database (XPath) source and a Search button (no New/Edit/Delete buttons in the bar).
+- Data views: only a page parameter or a listened grid/list view (no microflow, nanoflow or association source).
+- Buttons: no parameter mappings, no create-object action; conditional visibility, styling (design properties) and
+  on-change events are not set.
+- Menus: web profiles only (native profiles are refused); no reordering. Texts are written as given in every project
+  language (translate them in Studio Pro).
+
+### Constants, scheduled events, REST
+
+| Op | Fields | Notes |
+|---|---|---|
 | `createConstant` | **module**, **name**, **type**, **default**, exposedToClient, folder | Type String/Integer/Long/Decimal/Boolean/DateTime |
 | `createScheduledEvent` | **module**, **name**, **microflow**, **every** (`Minute`/`Hour`/`Day`/`Week`), interval, at (`HH:MM`), days, enabled (default false), timeZone, onOverlap, folder | The microflow must have no parameters |
 | `publishRest` | **module**, **service**, **resource**, **method**, **microflow**, path (e.g. `{Id}`), servicePath, authentication (default Basic), roles, folder | Microflow parameters become path (`{Name}` in path) or query parameters. Object/list parameters or results need mappings: refused, do those in Studio Pro. Experimental |
@@ -402,11 +471,13 @@ Then give the user exact Studio Pro steps. SDK scripts (`edits/<name>.js`) run o
 `--allow-scripts`, because a script runs with full rights before the user approves anything; otherwise `dryrun`
 refuses them.
 
-Operations cannot do these things: page changes other than creating a form/empty page (editing widgets, list
-views, data grids, pluggable widgets), import/export mappings, JSON structures, consumed REST services, workflows,
-REST operations with object bodies or results, inheritance splits, and setting attributes inherited from System
-entities (for example `System.User.Name`). For these, write `edits/<name>.js` with the Mendix Model SDK, or give the
-user Studio Pro steps. Prefer Studio Pro steps when the change is large or risky.
+Operations cannot do these things: changing existing pages, snippets or layouts (widgets can only be placed when
+`createPage` creates the page), widgets outside the `createPage` list (tab containers, galleries and other pluggable
+widgets; only a Data grid 2 copied from the project), modules and user roles (App Security), import/export mappings,
+JSON structures, consumed REST services, workflows, REST operations with object bodies or results, inheritance
+splits, and setting attributes inherited from System entities (for example `System.User.Name`). For these, write
+`edits/<name>.js` with the Mendix Model SDK, or give the user Studio Pro steps. Prefer Studio Pro steps when the
+change is large or risky.
 
 ```js
 module.exports = async ({ model, sdk, ops, log }) => {
@@ -448,6 +519,7 @@ OLD NAME STILL USED ...                                    <- rename left old na
       DATA LOSS: the column A and its values are dropped ...  <- deleting/retyping stored data: tell the user first
 Warnings:
   > Module.Doc -> Module/Folder                              <- a document moved to another folder
+  ! Module.Page: grid1 is a classic Data grid (...)         <- createPage: the grid kind used (always the first line)
   ! ... first use in this project ...                      <- first element of this type: ask the user to check it in Studio Pro
 Dry run: nothing written. Approval code: 7F3A              <- the code the user must confirm
 ```
@@ -483,6 +555,10 @@ mx check: NOT RUN (mx.exe not found) ...                          <- say this to
 | `'x' cannot be changed on ...` | The message lists the fields that kind of step accepts |
 | `is only allowed inside a loop` / `unreachable` | `break`/`continue` only in loops; nothing may follow `end`/`break`/`continue` |
 | `it has an error handler` | `deleteAction` refuses this step; give Studio Pro steps |
+| `unknown widget 'x'. Supported: ...` | Use a listed widget kind. For other widgets: `python mx.py gap "<what>"` and Studio Pro steps |
+| `listenTo 'x' is no grid or list view on this page (...)` / `is ambiguous` | Use one of the grid or list view names the message lists |
+| `"kind": "datagrid2" is not possible here` | Use `"kind": "classic"` (or leave `kind` out) |
+| `has a page parameter; a menu item can only open a page without parameters` | Open that page from a button or microflow instead |
 | `needs an import mapping` / `export mapping` | `publishRest` supports simple parameters and results only; give Studio Pro steps |
 | `needs args for: P` | Add every parameter of the called microflow to `args` |
 | `Studio Pro has this project open` | Ask the user to close Studio Pro, then run the same command again |

@@ -98,12 +98,18 @@ Change and delete existing steps (ids from: @PY@ mx.py steps Sales.ACT_Orders_Pr
   { "op": "deleteAction", "microflow": "Sales.ACT_Orders_Process", "id": "8d0e4a77" }
 ] }
 
-Nanoflow and page (edit form with Save/Cancel), opened from the nanoflow:
+Dashboard page (grid + read-only detail of the selected row, in the menu), an edit form, a nanoflow that opens it:
 { "ops": [
+  { "op": "createPage", "module": "Sales", "name": "Order_Dashboard", "entity": "Sales.Order", "roles": ["Sales.User"], "menu": "Responsive",
+    "widgets": [ { "widget": "dataGrid", "columns": ["Number", "Total", "Status"] },
+                 { "widget": "dataView", "listenTo": "dataGrid", "editable": false } ] },
   { "op": "createPage", "module": "Sales", "name": "Order_Edit", "entity": "Sales.Order", "fields": ["Number", "Total", "Status"], "roles": ["Sales.User"] },
   { "op": "createNanoflow", "module": "Sales", "name": "NF_Order_Open", "parameters": [ { "name": "Order", "type": "Sales.Order" } ],
     "actions": [ { "action": "showPage", "page": "Sales.Order_Edit", "args": { "Order": "$Order" } } ] }
 ] }
+  Page widgets: layoutGrid, container, text, dataGrid, dataView (listenTo a grid), listView, actionButton, input
+  (fields: @PY@ mx.py ops createPage). A data grid is classic; "kind": "datagrid2" copies a Data grid 2 from this
+  project's pages. The first Warnings line says which grid was made: show it to the user.
 
 Security:
 { "ops": [
@@ -116,7 +122,8 @@ Security:
 ] }
 
 More domain and app operations (see @PY@ mx.py ops for fields): setGeneralization, addValidationRule,
-addEventHandler, addIndex, createConstant, createScheduledEvent, publishRest, moveDocument, rename of a module.
+addEventHandler, addIndex, createConstant, createScheduledEvent, publishRest, moveDocument, rename of a module,
+addMenuItem (menu item for a page), setHomePage (home page, also per user role).
 
 ERRORS AND FIXES
 - "not found in the model. Did you mean: X" -> use X (check with find).
@@ -128,6 +135,9 @@ ERRORS AND FIXES
 - "has no step with id" -> run @PY@ mx.py steps <Module.Flow> and copy the id in [brackets].
 - "'x' cannot be changed on ..." -> the message lists the fields this kind of step accepts.
 - "is only allowed inside a loop" / "unreachable" -> break/continue only in loops; nothing may follow end/break/continue.
+- "unknown widget 'x'. Supported: ..." -> use a listed widget; other widgets: gap + Studio Pro steps.
+- "listenTo 'x' is no grid or list view on this page (...)" / "is ambiguous" -> use a name the message lists.
+- "datagrid2 ... is not possible here" -> use "kind": "classic" (or leave kind out).
 - "needs an import mapping" / "export mapping" -> publishRest supports only simple parameters/results; do it in Studio Pro.
 - "has no attribute 'A' (in $V/A). Did you mean: B" -> use B in that expression.
 - "Studio Pro has this project open" -> ask the user to close Studio Pro, then run the same command again.

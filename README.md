@@ -120,12 +120,13 @@ istemiyorsan export'u `--no-mcp` ile al.
 | Domain model | Entity, attribute (tüm tipler), association, kalıtım (generalization), validation rule, event handler, index, enumeration |
 | Microflow / nanoflow | Oluşturma; retrieve, create, change, commit, delete, call, log, mesaj, değişken, sayfa aç/kapat; **karar (if), döngü (liste / while), break, continue, hata yakalama (error handler)** |
 | Var olan akış | Araya adım ekleme (döngü içine de), **tek bir adımı değiştirme** (XPath, değer, koşul, devre dışı bırakma...) ve **silme** |
-| Sayfa | Bir entity için düzenleme formu (alan tipine göre input, Kaydet/İptal) ya da boş sayfa |
+| Sayfa | Bir entity için düzenleme formu (alan tipine göre input, Kaydet/İptal), boş sayfa ya da widget listesinden sayfa: layout grid, container, metin/başlık, data grid (klasik ya da projedeki bir Data grid 2'den kopya), seçili satırı gösteren data view (listenTo), list view, butonlar, input'lar; menü öğesi ve ana sayfa (rol bazlı da) |
 | Güvenlik | Modül rolü, erişim kuralı, microflow/nanoflow/sayfa erişimi |
 | Diğer | Constant, scheduled event, basit published REST operasyonu, doküman taşıma, yeniden adlandırma (modül dahil), silme |
 
-Yapamadıkları (Studio Pro'da ya da SDK script'iyle): mevcut sayfadaki widget'ları düzenleme, list view / data grid,
-import/export mapping, JSON structure, consumed REST, workflow, nesne gövdeli REST operasyonları.
+Yapamadıkları (Studio Pro'da ya da SDK script'iyle): mevcut sayfa/snippet/layout'taki widget'ları düzenleme, listede
+olmayan widget'lar (tab container, gallery ve Data grid 2 dışındaki pluggable widget'lar), modül ve kullanıcı rolü
+oluşturma, import/export mapping, JSON structure, consumed REST, workflow, nesne gövdeli REST operasyonları.
 
 **Bir kere yapılır:**
 
