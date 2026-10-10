@@ -362,6 +362,12 @@ async function main() {
     const cmd = a._[0];
     if (!cmd || a.help) return out(USAGE);
     if (cmd === "ops") return out(require("./ops").help(a._[1]));
+    if (cmd === "doccheck") {
+        const { count, problems } = require("./doccheck").doccheck();
+        out(problems.length ? `DOC PROBLEMS (${problems.length}):\n` + problems.map(p => "  ! " + p).join("\n") : `Docs OK: ${count} JSON examples valid, every operation and action described.`);
+        process.exitCode = problems.length ? 1 : 0;
+        return;
+    }
     if (cmd === "api") {
         if (!a._[1]) throw new Error("api needs a type name, e.g. api Attribute");
         const version = a.project ? new Project(findMpr(a.project)).version : require("./versions").normalize(a.version);
