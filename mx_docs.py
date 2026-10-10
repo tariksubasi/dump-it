@@ -113,10 +113,21 @@ def _access_rule(rule, entity, index):
 
 WIDGET_PREFIXES = ("Forms$", "CustomWidgets$CustomWidget")
 NOT_WIDGETS = {"Forms$PageParameter", "Forms$SnippetParameter", "Forms$LocalVariable", "Forms$PageVariable"}
-TRANSPARENT = {"LayoutGrid", "DivContainer", "ScrollContainer", "Table", "TableRow", "TableCell", "GroupBox",
+TRANSPARENT = {"DivContainer", "ScrollContainer", "Table", "TableRow", "TableCell", "GroupBox",
                "LayoutGridRow", "LayoutGridColumn", "Placeholder", "TabControl", "Header", "Footer"}
 CUSTOM = "CustomWidgets$CustomWidget"
 PAGE_HEADINGS = {"Forms$Page": "PAGE", "Forms$Snippet": "SNIPPET", "Forms$Layout": "LAYOUT"}
+
+
+def _width(column):
+    """Layout grid column width: 1-12, auto (fill the rest) or fit (as wide as its content); tablet/phone when they
+    differ."""
+    def one(v):
+        return "auto" if v in (None, -1) else "fit" if v == -2 else str(v)
+    w = one(column.get("Weight"))
+    extra = ["%s %s" % (k, one(column.get(key))) for k, key in (("tablet", "TabletWeight"), ("phone", "PhoneWeight"))
+             if column.get(key) not in (None, -1) and one(column.get(key)) != w]
+    return w + (" (%s)" % ", ".join(extra) if extra else "")
 
 
 def _is_widget(value):
@@ -197,6 +208,9 @@ class PageRenderer:
 
     def _widgets(self, widgets, indent):
         for w in widgets:
+            if w["$Type"] == "Forms$LayoutGrid":
+                self._layout_grid(w, indent)
+                continue
             kind = w["$Type"].split("$", 1)[-1]
             if w["$Type"] == CUSTOM:
                 kind = (w.get("Type") or {}).get("WidgetName") or kind
@@ -211,6 +225,23 @@ class PageRenderer:
                 line += " \"%s\"" % caption
             self.lines.append(line + "".join(" | " + f for f in facts))
             self._widgets(kids, indent + 1)
+
+    def _layout_grid(self, grid, indent):
+        """Rows and columns with their widths, so an agent sees what sits next to what (12 = full width)."""
+        pad = "  " * indent
+        facts = self._facts({k: v for k, v in grid.items() if k != "Rows"})
+        self.lines.append("%s- LayoutGrid %s%s" % (pad, grid.get("Name"), "".join(" | " + f for f in facts)))
+        for i, row in enumerate(grid.get("Rows") or [], 1):
+            cols = row.get("Columns") or []
+            self.lines.append("%s  - row %d: %s" % (pad, i, " | ".join(_width(c) for c in cols) or "(empty)"))
+            for j, col in enumerate(cols, 1):
+                kids = []
+                self._collect_widgets(col.get("Widgets"), kids)
+                if len(cols) > 1:
+                    self.lines.append("%s    - column %d (%s):%s" % (pad, j, _width(col), "" if kids else " (empty)"))
+                    self._widgets(kids, indent + 3)
+                else:
+                    self._widgets(kids, indent + 2)
 
     def _caption(self, w):
         for key in ("CaptionTemplate", "LabelTemplate", "Content"):
@@ -654,9 +685,11 @@ def security_lines(doc):
 def navigation_lines(doc, index):
     out = ["NAVIGATION:"]
     for profile in doc.get("Profiles") or []:
-        out.append("  PROFILE %s (%s)" % (profile.get("Name"), profile.get("Kind")))
+        kind = profile.get("Kind") or ("native" if "Native" in profile.get("$Type", "") else "?")
+        out.append("  PROFILE %s (%s)" % (profile.get("Name"), kind))
         home = profile.get("HomePage") or {}
-        target = home.get("Page") or home.get("Microflow")
+        # native profiles store the home page by name, web profiles as a HomePage object
+        target = home if isinstance(home, str) else home.get("Page") or home.get("Microflow")
         if target:
             out.append("    default home: " + target)
             index.entry("HOME PAGES", "%s default -> %s" % (profile.get("Name"), target))
