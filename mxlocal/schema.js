@@ -139,12 +139,32 @@ class Schema {
             const t = this.storageToSdk[st];
             const info = this.info(t);
             for (const [key, p] of fitOf(st, t).pairs) {
-                info.byKey.delete(p.key);
-                p.key = key;
-                info.byKey.set(key, p);
+                this.renameKey(t, p.name, key);
                 this.pairs.push(`${st}.${key} = ${t}.${p.name}`);
             }
         }
+    }
+
+    // Storage key of an SDK property learned from the project (calibration, or its cached result).
+    renameKey(sdkType, name, key) {
+        const info = this.info(sdkType);
+        const p = info.byName.get(name);
+        info.byKey.delete(p.key);
+        p.key = key;
+        info.byKey.set(key, p);
+        (this.renamed = this.renamed || []).push([sdkType, name, key]);
+    }
+
+    // The outcome of calibrate(), to store; restore() puts it back without redoing the work.
+    calibration() {
+        return { storageToSdk: { ...this.storageToSdk }, sdkToStorage: { ...this.sdkToStorage }, pairs: this.pairs || [], renamed: this.renamed || [] };
+    }
+
+    restore(c) {
+        Object.assign(this.storageToSdk, c.storageToSdk);
+        Object.assign(this.sdkToStorage, c.sdkToStorage);
+        this.pairs = c.pairs;
+        for (const [t, name, key] of c.renamed) this.renameKey(t, name, key);
     }
 
     // { byName: Map<sdkName, info>, byKey: Map<storageKey, info> } for an SDK type, or null if unknown.

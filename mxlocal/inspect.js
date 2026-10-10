@@ -135,25 +135,17 @@ function propLine(declKey, p, v, lists) {
 function names(client) {
     const hits = [];
     const schema = client.schema;
+    const { localNames } = require("./cache");
+    const cache = client.project.cache;
     for (const unitId of client.project.units.keys()) {
-        const plain = client.project.read(unitId);
+        // cached names of units unchanged in this run; changed or new units from their current contents
+        const e = cache && !client.project.plain.has(unitId) && cache.units.get(unitId);
+        const info = e || client.unitInfo(unitId);
+        const local = e ? e.names : localNames(client.project.read(unitId));
         const unitName = client.label(unitId);
-        const walk = (obj, prefix, depth) => {
-            if (!obj || typeof obj !== "object" || Buffer.isBuffer(obj)) return;
-            if (Array.isArray(obj)) return obj.forEach(x => walk(x, prefix, depth));
-            let next = prefix;
-            if (obj.$Type && typeof obj.Name === "string" && obj.Name && depth > 0) {
-                next = `${prefix}.${obj.Name}`;
-                hits.push({ qn: next, type: schema.sdkType(obj.$Type) || obj.$Type });
-            }
-            for (const [k, v] of Object.entries(obj)) if (k[0] !== "$" && v && typeof v === "object") walk(v, next, depth + 1);
-        };
-        if (plain.$Type === "DomainModels$DomainModel") walk(plain, unitName.split(".")[0], 0);
-        else if (/Security\$ModuleSecurity/.test(plain.$Type)) walk(plain, unitName.split(".")[0], 0);
-        else {
-            if (plain.Name) hits.push({ qn: unitName, type: schema.sdkType(plain.$Type) || plain.$Type });
-            if (/Enumeration|Microflow|Nanoflow/.test(plain.$Type)) walk(plain, unitName, 0);
-        }
+        const prefix = local.base === "module" ? unitName.split(".")[0] : unitName;
+        if (local.base === "unit" && info.name) hits.push({ qn: unitName, type: schema.sdkType(info.type) || info.type });
+        for (const [rel, type] of local.items) hits.push({ qn: `${prefix}.${rel}`, type: schema.sdkType(type) || type });
     }
     return hits;
 }

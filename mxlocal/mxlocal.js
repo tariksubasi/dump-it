@@ -1,5 +1,11 @@
 #!/usr/bin/env node
 "use strict";
+// Node 22.1+: keep compiled code of the Model SDK between runs (it is most of the start-up time).
+try {
+    require("module").enableCompileCache(require("path").join(__dirname, ".cache", "compile"));
+} catch {
+    // older Node or read-only folder: start without it
+}
 const emitWarning = process.emitWarning;
 process.emitWarning = (w, ...rest) => (String(w).includes("SQLite") ? undefined : emitWarning.call(process, w, ...rest));
 

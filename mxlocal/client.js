@@ -7,13 +7,16 @@ const { Model } = require("mendixmodelsdk");
 const { Project } = require("./mpr");
 const { Schema } = require("./schema");
 const { Catalog, toSdk, fromSdk, valueToPlain, complete, hinter } = require("./convert");
+const { Cache } = require("./cache");
 
 const WC = "local";
 
 async function loadProject(mprPath) {
     const project = new Project(mprPath);
+    const cache = (project.cache = new Cache(project));
     const catalog = new Catalog();
-    for (const [id] of project.units) catalog.learn(project.read(id));
+    // unit order matters: merging cached fragments in this order equals learning the units in this order
+    for (const [id] of project.units) catalog.merge(cache.unit(id, Catalog).types);
     const schema = await Schema.create(project.version);
     // reference-catalog.json: { "<major>": { storageType: keys } } learned from Studio Pro projects of that major version.
     // Same major: strict (added before calibration). Other major: only keys the SDK maps for this version.
@@ -23,8 +26,15 @@ async function loadProject(mprPath) {
     const byDistance = Object.keys(all).sort((a, b) => Math.abs(a - major) - Math.abs(b - major) || b - a);
     if (all[major]) catalog.addReference(all[major], null, true);
     for (const other of byDistance) if (other !== major) catalog.addReference(all[other], null, false);
-    schema.calibrate(catalog); // learns storage names from the reference types too
+    const signature = catalog.signature();
+    const known = cache.calibrationFor(signature);
+    if (known) schema.restore(known);
+    else {
+        schema.calibrate(catalog); // learns storage names from the reference types too
+        cache.setCalibration(signature, schema.calibration());
+    }
     catalog.pruneLoose(schema);
+    cache.save();
     return { project, catalog, schema };
 }
 
@@ -94,10 +104,17 @@ class LocalClient {
     loadUnitInterfaces(id, callback, errorCallback) {
         try {
             const units = [];
+            const cache = this.project.cache;
             for (const uid of this.project.units.keys()) {
-                const j = this.unitJson(uid, true);
+                const e = cache && cache.units.get(uid);
+                if (e && e.iface === undefined) {
+                    e.iface = this.unitJson(uid, true); // stored contents: nothing has changed yet at open()
+                    cache.dirty = true;
+                }
+                const j = e ? e.iface : this.unitJson(uid, true);
                 if (j) units.push(j);
             }
+            if (cache) cache.save();
             callback({ units, eventId: this.eventId });
         } catch (e) {
             errorCallback(e);
@@ -456,12 +473,20 @@ class LocalClient {
         for (let id = unitId; id; ) {
             const u = this.project.units.get(id);
             if (!u) break;
-            const p = this.project.read(id);
-            if (p.Name) parts.unshift(p.Name);
-            if (/^Projects\$Module/.test(p.$Type)) break;
+            const p = this.unitInfo(id);
+            if (p.name) parts.unshift(p.name);
+            if (/^Projects\$Module/.test(p.type)) break;
             id = u.containerId;
         }
         return parts.join("/");
+    }
+
+    // { type, name } of a unit as it is now: from the cache for units not changed in this run, without decoding.
+    unitInfo(id) {
+        const e = this.project.cache && this.project.cache.units.get(id);
+        if (e && !this.changes.updated.has(id) && !this.project.plain.has(id)) return { type: e.type, name: e.name };
+        const p = this.project.read(id);
+        return { type: p.$Type, name: typeof p.Name === "string" ? p.Name : null };
     }
 
     // Module.Document for a unit id, for messages.
@@ -471,14 +496,14 @@ class LocalClient {
         while (id) {
             const u = this.project.units.get(id);
             if (!u) break;
-            const p = this.project.read(id);
-            if (p.$Type === "Projects$Folder") {
+            const p = this.unitInfo(id);
+            if (p.type === "Projects$Folder") {
                 id = u.containerId;
                 continue;
             }
-            if (p.Name) names.unshift(p.Name);
-            else if (p.$Type === "DomainModels$DomainModel") names.unshift("(domain model)");
-            if (/^Projects\$Module/.test(p.$Type)) break;
+            if (p.name) names.unshift(p.name);
+            else if (p.type === "DomainModels$DomainModel") names.unshift("(domain model)");
+            if (/^Projects\$Module/.test(p.type)) break;
             id = u.containerId;
         }
         return names.join(".") || unitId;

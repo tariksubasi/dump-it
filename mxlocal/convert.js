@@ -128,8 +128,11 @@ function describe(value) {
 // ---------- catalog: what BSON kind does (storageType, key) use in this project ----------
 
 class Catalog {
-    constructor() {
+    // cap: distinct sample values kept per key. Per-unit fragments (cache.js) keep more, so merging them in unit order
+    // gives the same samples as learning every unit in that order.
+    constructor(cap = 32) {
         this.types = new Map();
+        this.cap = cap;
     }
 
     learn(obj) {
@@ -148,10 +151,34 @@ class Catalog {
                 if (d.e && !cur.e) cur.e = { k: d.e.k, s: d.e.s };
                 const v = obj[key];
                 const sample = v === null || ["string", "boolean", "number"].includes(typeof v) ? v : Array.isArray(v) && !v.length ? "[]" : undefined;
-                if (sample !== undefined && (cur.values.size < 32 || cur.values.has(sample))) cur.values.set(sample, (cur.values.get(sample) || 0) + 1);
+                if (sample !== undefined && (cur.values.size < this.cap || cur.values.has(sample))) cur.values.set(sample, (cur.values.get(sample) || 0) + 1);
             }
         }
         for (const v of Object.values(obj)) if (v && typeof v === "object" && !Buffer.isBuffer(v)) this.learn(v);
+    }
+
+    // Add what another catalog learned (a cached per-unit fragment), as if its objects were learned here now.
+    merge(types) {
+        for (const [type, keys] of types) {
+            let t = this.types.get(type);
+            if (!t) this.types.set(type, (t = new Map()));
+            for (const [key, d] of keys) {
+                let cur = t.get(key);
+                if (!cur) t.set(key, (cur = { k: d.k, values: new Map() }));
+                if (cur.k === 0x0a && d.k !== 0x0a) cur.k = d.k;
+                if (d.s !== undefined) cur.s = d.s;
+                if (d.m !== undefined) cur.m = d.m;
+                if (d.e && !cur.e) cur.e = { k: d.e.k, s: d.e.s };
+                for (const [v, n] of d.values) if (cur.values.size < this.cap || cur.values.has(v)) cur.values.set(v, (cur.values.get(v) || 0) + n);
+            }
+        }
+    }
+
+    // What schema calibration depends on: every storage type's keys with their BSON kinds.
+    signature() {
+        const parts = [];
+        for (const [type, keys] of this.types) parts.push(type + ":" + [...keys].map(([k, d]) => k + "=" + d.k).join(","));
+        return require("crypto").createHash("sha256").update(parts.join("\n")).digest("base64");
     }
 
     // Most common primitive value seen for (type, key), or undefined.
