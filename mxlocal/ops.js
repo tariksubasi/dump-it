@@ -119,6 +119,28 @@ function help(name) {
     return lines.join("\n");
 }
 
+// Deleting a stored entity, attribute or association drops database data when the app next starts.
+function persistable(entity) {
+    try {
+        let e = entity;
+        for (let i = 0; e && i < 20; i++) {
+            const g = e.generalization;
+            if (g instanceof dm.NoGeneralization) return g.persistable;
+            e = g && g.generalization;
+        }
+    } catch {
+        // parent entity in a document that is not loaded: assume stored, the safe side for a warning
+    }
+    return true;
+}
+
+function dataLoss(el) {
+    if (el instanceof dm.Entity && persistable(el)) return `the table of ${el.name} and all its rows are dropped when the app next starts`;
+    if (el instanceof dm.Attribute && persistable(el.containerAsEntity)) return `the column ${el.name} and its values are dropped when the app next starts`;
+    if (el instanceof dm.AssociationBase) return `the links stored in ${el.name} are dropped when the app next starts`;
+    return null;
+}
+
 // ---------------------------------------------------------------- bound operations
 
 function bind(model, client) {
@@ -388,8 +410,13 @@ function bind(model, client) {
         return out;
     }
 
+    // Entities, attributes and associations created by this plan: deleting or retyping them loses no stored data.
+    const fresh = new Set();
+    const isFresh = qn => [...fresh].some(f => qn === f || qn.startsWith(f + "."));
+
     const impl = {
         async createEntity(o) {
+            fresh.add(`${o.module}.${o.name}`);
             const d = await domainModel(o.module);
             if (d.entities.some(e => e.name === o.name)) throw new Error(`${o.module}.${o.name} already exists`);
             const e = dm.Entity.createIn(d);
@@ -408,6 +435,7 @@ function bind(model, client) {
             return `${o.module}.${o.name}`;
         },
         async addAttribute(o, loaded) {
+            fresh.add(`${o.entity}.${o.name}`);
             const e = loaded || (await entity(o.entity));
             if (!o.name || !o.type) throw new Error(`addAttribute needs name and type (${o.entity})`);
             if (e.attributes.some(a => a.name === o.name)) throw new Error(`${o.entity}.${o.name} already exists`);
@@ -421,12 +449,14 @@ function bind(model, client) {
             const a = await get(o.attribute);
             if (!(a instanceof dm.Attribute)) throw new Error(`'${o.attribute}' is not an attribute`);
             if (o.type === undefined && o.default === undefined) throw new Error("changeAttribute needs 'type' and/or 'default'");
+            const before = a.type.structureTypeName;
             if (o.type !== undefined) {
                 const dflt = await attributeType(a, o.type);
                 if (o.default === undefined) setDefault(a, dflt);
             }
             if (o.default !== undefined) setDefault(a, o.default);
-            return o.attribute;
+            const changed = a.type.structureTypeName !== before && persistable(a.containerAsEntity) && !isFresh(o.attribute);
+            return o.attribute + (changed ? `\n      DATA LOSS: existing values are converted on the next app start; values that do not convert to ${o.type} are lost` : "");
         },
         async addAssociation(o) {
             const from = await entity(o.from);
@@ -441,6 +471,7 @@ function bind(model, client) {
             a.child = to;
             a.type = enumValue(dm.AssociationType, o.type || "Reference", "association type");
             a.owner = enumValue(dm.AssociationOwner, o.owner || "Default", "association owner");
+            fresh.add(`${o.from.split(".")[0]}.${name}`);
             return `${o.from.split(".")[0]}.${name}: ${o.from} -> ${o.to}`;
         },
         async createEnumeration(o) {
@@ -758,8 +789,10 @@ function bind(model, client) {
         async delete(o) {
             const el = await get(o.target);
             const users = client.referencesTo(o.target);
+            const loss = isFresh(o.target) ? null : dataLoss(el);
             el.delete();
-            return `${o.target}` + (users.length ? `\n      STILL USED BY (fix these, or Studio Pro shows errors): ${users.join(", ")}` : "");
+            return `${o.target}` + (users.length ? `\n      STILL USED BY (fix these, or Studio Pro shows errors): ${users.join(", ")}` : "") +
+                (loss ? `\n      DATA LOSS: ${loss}` : "");
         }
     };
 

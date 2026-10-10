@@ -146,7 +146,7 @@ python mx.py dryrun <short-name>
 ```
 PLAN: <1-5 bullets: what changes and why>
 DRY RUN: <the numbered op lines and the "Changes:" lines>
-ATTENTION: <every EXPRESSION CHECK / NOT STORED / OLD NAME STILL USED / STILL USED BY / Warnings line, or "none">
+ATTENTION: <every DATA LOSS line first, then every EXPRESSION CHECK / NOT STORED / OLD NAME STILL USED / STILL USED BY / Warnings line, or "none">
 To apply: close Studio Pro and answer "yes <CODE>".
 ```
 
@@ -430,6 +430,7 @@ Changes: 0 created, 1 updated, 0 deleted unit(s)           <- documents that wil
 EXPRESSION CHECK ...                                       <- wrong $Var/Attribute in an expression: fix the file
 NOT STORED ...                                             <- a value this Mendix version does not keep: fix the script
 OLD NAME STILL USED ...                                    <- rename left old names in expressions/XPath/Java
+      DATA LOSS: the column A and its values are dropped ...  <- deleting/retyping stored data: tell the user first
 Warnings:
   > Module.Doc -> Module/Folder                              <- a document moved to another folder
   ! ... first use in this project ...                      <- first element of this type: ask the user to check it in Studio Pro

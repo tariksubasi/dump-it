@@ -31,7 +31,7 @@ STEP 4 - SHOW AND ASK
   Show the user, in this format:
     PLAN: <1-5 bullets: what changes and why>
     DRY RUN: <the numbered op lines and the "Changes:" lines from the output>
-    ATTENTION: <every line under EXPRESSION CHECK / NOT STORED / OLD NAME STILL USED / STILL USED BY / Warnings,
+    ATTENTION: <every DATA LOSS line first, then every line under EXPRESSION CHECK / NOT STORED / OLD NAME STILL USED / STILL USED BY / Warnings,
                or "none">
     To apply: close Studio Pro and answer "yes <CODE>".
   Then STOP and wait for the answer.
