@@ -4,7 +4,7 @@
 // manages no other roles and has its own GUID; a demo user uses the entity the other demo users use.
 const crypto = require("crypto");
 const sdk = require("mendixmodelsdk");
-const { fail, bool } = require("./ops-util");
+const { fail, suggest, bool, validName } = require("./ops-util");
 
 const { security, domainmodels: dm } = sdk;
 
@@ -31,6 +31,22 @@ const SECURITY_OPS = {
     }
 };
 
+// A user role of project security ps by name; the error lists the user roles (and who has a module role given by mistake).
+function userRoleNamed(ps, name, where = "") {
+    const r = ps.userRoles.find(x => x.name === name);
+    if (r) return r;
+    const all = ps.userRoles.map(x => x.name);
+    if (String(name).includes(".")) {
+        const holders = ps.userRoles.filter(u => u.moduleRolesQualifiedNames.includes(name)).map(u => u.name);
+        throw new Error(`${where}'${name}' is a module role; this takes user roles (project-wide: ${all.join(", ") || "none"}). ` +
+            (holders.length ? `User roles with ${name}: ${holders.join(", ")}` : `No user role has ${name} yet (addModuleRoles)`));
+    }
+    const s = suggest(name, all);
+    throw new Error(`${where}no user role '${name}'. ${s.length ? `Did you mean: ${s.join(", ")}? ` : ""}User roles (project-wide): ${all.join(", ") || "none"}`);
+}
+
+const SYSTEM_ROLES = ["System.User", "System.Administrator"];
+
 // Off/Prototype/Production as Studio Pro shows them, and the stored names.
 const LEVELS = { Off: "CheckNothing", Prototype: "CheckFormsAndMicroflows", Production: "CheckEverything" };
 
@@ -43,15 +59,17 @@ function makeSecurity(h) {
         return ps.load();
     }
 
-    function userRole(ps, name) {
-        const r = ps.userRoles.find(x => x.name === name);
-        if (!r) fail(`no user role '${name}'`, name, ps.userRoles.map(x => x.name));
-        return r;
-    }
+    const userRole = (ps, name) => userRoleNamed(ps, name);
 
+    // Module roles: objects, or the name of a System module role (the System module is built into Studio Pro, so it is
+    // not in the project; such references are written by name, as Studio Pro stores them).
     async function moduleRoles(list) {
         const out = [];
         for (const qn of [].concat(list || [])) {
+            if (SYSTEM_ROLES.includes(qn)) {
+                out.push(qn);
+                continue;
+            }
             const r = await get(qn);
             if (!(r instanceof security.ModuleRole)) throw new Error(`'${qn}' is not a module role (Module.Role)`);
             out.push(r);
@@ -59,12 +77,25 @@ function makeSecurity(h) {
         return out;
     }
 
+    // Adds module roles to user role ur; returns the names it did not have yet.
+    function addRoles(ur, roles) {
+        const added = [];
+        for (const m of roles) {
+            const qn = typeof m === "string" ? m : m.qualifiedName;
+            if (ur.moduleRolesQualifiedNames.includes(qn)) continue;
+            if (typeof m === "string") ur.__moduleRoles.updateWithRawValue([...ur.moduleRolesQualifiedNames, m]);
+            else ur.moduleRoles.push(m);
+            added.push(qn);
+        }
+        return added;
+    }
+
     const password = () => crypto.randomBytes(9).toString("base64").replace(/[+/=]/g, "x").slice(0, 12);
 
     const impl = {
         async createUserRole(o) {
             const ps = await projectSecurity();
-            if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(o.name)) throw new Error(`'${o.name}' is not a valid name (letters, digits, _; no spaces)`);
+            validName(o.name, "user role name");
             if (ps.userRoles.some(x => x.name === o.name)) throw new Error(`user role ${o.name} already exists`);
             const roles = await moduleRoles(o.moduleRoles);
             if (!roles.length) throw new Error("createUserRole needs at least one module role in 'moduleRoles'");
@@ -75,18 +106,12 @@ function makeSecurity(h) {
             r.checkSecurity = true;
             r.manageAllRoles = bool(o.manageAllRoles, false);
             r.manageUsersWithoutRoles = false;
-            for (const m of roles) r.moduleRoles.push(m);
-            return `${o.name}: ${roles.map(m => m.qualifiedName).join(", ")}`;
+            return `${o.name}: ${addRoles(r, roles).join(", ")}`;
         },
         async addModuleRoles(o) {
             const ps = await projectSecurity();
             const r = userRole(ps, o.userRole);
-            const added = [];
-            for (const m of await moduleRoles(o.moduleRoles)) {
-                if (r.moduleRoles.includes(m)) continue;
-                r.moduleRoles.push(m);
-                added.push(m.qualifiedName);
-            }
+            const added = addRoles(r, await moduleRoles(o.moduleRoles));
             return `${o.userRole} + ${added.join(", ") || "(had them all)"}`;
         },
         async createDemoUser(o) {
@@ -95,12 +120,13 @@ function makeSecurity(h) {
             const roles = [].concat(o.userRoles || []).map(n => userRole(ps, n));
             if (!roles.length) throw new Error("createDemoUser needs at least one user role in 'userRoles'");
             const entityName = o.entity || (ps.demoUsers.length && ps.demoUsers[0].entityQualifiedName) || "System.User";
-            const e = await get(entityName);
-            if (!(e instanceof dm.Entity)) throw new Error(`'${entityName}' is not an entity`);
+            const e = entityName === "System.User" ? null : await get(entityName);
+            if (e && !(e instanceof dm.Entity)) throw new Error(`'${entityName}' is not an entity`);
             const d = security.DemoUser.createIn(ps);
             d.userName = o.userName;
             d.password = o.password || password();
-            d.entity = e;
+            if (e) d.entity = e;
+            else d.__entity.updateWithRawValue(entityName); // System.User: by name (not in the project)
             for (const r of roles) d.userRoles.push(r);
             return `${o.userName} (${roles.map(r => r.name).join(", ")}; ${entityName})` + (ps.enableDemoUsers ? "" : "\n      NOTE: demo users are switched off; turn them on with setSecurity demoUsers: true");
         },
@@ -181,4 +207,4 @@ function makeSecurity(h) {
     return { impl, checks };
 }
 
-module.exports = { makeSecurity, SECURITY_OPS };
+module.exports = { makeSecurity, SECURITY_OPS, userRoleNamed };

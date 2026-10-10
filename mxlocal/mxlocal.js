@@ -421,8 +421,18 @@ const HINTS = [
     [/Property '.*' of .* cannot be stored/, "This Mendix version has no such property. Check with: api <Type>"],
     [/not loaded|isLoaded|load\(\)/i, "Load the document first: const d = await ops.get(\"Module.Name\") (it loads for you)."],
     [/not found in the model/, "Check the exact name with: find <part of the name>"],
-    [/unknown op|unknown field|unknown action|needs '/i, "List the operations and their fields with: ops"]
+    [/unknown op|unknown field|unknown action|needs '/i, fieldsHint]
 ];
+
+// "Fields: ops <op>" for the op, widget kind or action the message is about.
+function fieldsHint(m) {
+    if (/unknown op /.test(m)) return "List the operations with: ops";
+    const { widgetKind } = require("./ops-pages");
+    const kinds = [...m.matchAll(/\((\w+)\)|for (\w+)\b/g)].map(x => x[1] || x[2]).filter(k => widgetKind(k));
+    if (/(widgets|form)\[/.test(m) && kinds.length) return `Fields of ${kinds[kinds.length - 1]}: ops ${kinds[kinds.length - 1]} (all widgets: ops createPage)`;
+    const w = /unknown field '[^']*' for (\w+)/.exec(m) || /(\w+) needs '/.exec(m) || /^Op \d+ \((\w+)\)/.exec(m);
+    return w ? `Fields: ops ${w[1]}` : "List the operations and their fields with: ops";
+}
 
 const MAX_MESSAGE = 400; // long SDK messages cost a weak model a whole turn and hide the useful first line
 

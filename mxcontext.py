@@ -95,8 +95,9 @@ HOW TO WORK
 
 CHANGE_GUIDE = """
 CHANGING OR CHECKING THE MODEL
-- The user asks to change the model (entities, attributes, associations, enumerations, microflows, roles, access,
-  renames, deletes): read guides/EDIT.txt first and follow it step by step. The user may also type /degistir.
+- The user asks to change the model (modules, entities, attributes, associations, enumerations, microflows, pages
+  (grids, data views, list views, forms), menu items, home pages, roles, user roles, access, renames, deletes): read
+  guides/EDIT.txt first and follow it step by step. The user may also type /degistir.
 - The user changed the model in Studio Pro and asks for a check: read guides/CHECK.txt and follow it (/kontrol).
 - Short commands, run from this folder: {py} mx.py help
 - Full manual (commands, operations, outputs, errors): guides/MANUAL.md. Read it when you are unsure.

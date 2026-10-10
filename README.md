@@ -120,13 +120,17 @@ istemiyorsan export'u `--no-mcp` ile al.
 | Domain model | Entity, attribute (tüm tipler), association, kalıtım (generalization), validation rule, event handler, index, enumeration |
 | Microflow / nanoflow | Oluşturma; retrieve, create, change, commit, delete, call, log, mesaj, değişken, sayfa aç/kapat; **karar (if), döngü (liste / while), break, continue, hata yakalama (error handler)** |
 | Var olan akış | Araya adım ekleme (döngü içine de), **tek bir adımı değiştirme** (XPath, değer, koşul, devre dışı bırakma...) ve **silme** |
-| Sayfa | Bir entity için düzenleme formu (alan tipine göre input, Kaydet/İptal), boş sayfa ya da widget listesinden sayfa: layout grid, container, metin/başlık, data grid (klasik ya da projedeki bir Data grid 2'den kopya), seçili satırı gösteren data view (listenTo), list view, butonlar, input'lar; menü öğesi ve ana sayfa (rol bazlı da) |
-| Güvenlik | Modül rolü, erişim kuralı, microflow/nanoflow/sayfa erişimi |
+| Sayfa | Bir entity için düzenleme formu (alan tipine göre input, Kaydet/İptal), boş sayfa ya da widget listesinden sayfa: layout grid, container, metin/başlık, data grid (klasik ya da projedeki bir Data grid 2'den kopya), seçili satırı gösteren data view (listenTo), list view (master-detail için data view içinde), butonlar, input'lar; menü öğesi ve ana sayfa (rol bazlı da) |
+| Modül | Yeni modül (domain model, modül güvenliği ve ayarlarıyla, Studio Pro'nun oluşturduğu gibi) ve modül rolleri |
+| Güvenlik | Modül rolü, erişim kuralı, microflow/nanoflow/sayfa erişimi verme ve geri alma |
+| Kullanıcı rolü | Yeni kullanıcı rolü (modül rolleriyle, `System.User` dahil), var olan kullanıcı rolüne modül rolü ekleme (ör. Administrator'a yeni modülün rolü) |
+| Demo kullanıcı | Bir ya da birkaç kullanıcı rolüyle demo kullanıcı; entity'si diğer demo kullanıcılarınki gibi |
+| Güvenlik seviyesi | Off / Prototype / Production, demo kullanıcıları açma/kapama, misafir (anonymous) erişimi |
 | Diğer | Constant, scheduled event, basit published REST operasyonu, doküman taşıma, yeniden adlandırma (modül dahil), silme |
 
 Yapamadıkları (Studio Pro'da ya da SDK script'iyle): mevcut sayfa/snippet/layout'taki widget'ları düzenleme, listede
-olmayan widget'lar (tab container, gallery ve Data grid 2 dışındaki pluggable widget'lar), modül ve kullanıcı rolü
-oluşturma, import/export mapping, JSON structure, consumed REST, workflow, nesne gövdeli REST operasyonları.
+olmayan widget'lar (tab container, gallery ve Data grid 2 dışındaki pluggable widget'lar), import/export mapping,
+JSON structure, consumed REST, workflow, nesne gövdeli REST operasyonları.
 
 **Bir kere yapılır:**
 
@@ -143,8 +147,9 @@ oluşturma, import/export mapping, JSON structure, consumed REST, workflow, nesn
    ```
    node C:\tools\dump-it\mxlocal\mxlocal.js selftest --project "C:\Projeler\BenimProje"
    ```
-   35'ten fazla işlemi dener ve 7 kontrol yapar: kayıpsız kayıt, her işlemin modelde görünmesi, **Studio Pro'nun bu
-   projede yazdığı yapıyla aynı yapı**, modül yeniden adlandırma, byte byte okuma/yazma, SDK ile yeniden açma.
+   50 kadar işlemi dener ve 11 kontrol yapar: kayıpsız kayıt, her işlemin modelde görünmesi, **Studio Pro'nun bu
+   projede yazdığı yapıyla aynı yapı**, yeni modül ve güvenlik (kullanıcı rolü, demo kullanıcı), dashboard sayfası ve
+   menü, Data grid 2 kopyası, modül yeniden adlandırma, byte byte okuma/yazma, SDK ile yeniden açma.
    Bütün satırlar `OK` demeli. 2. veya 3. adımda `FAIL` varsa model değiştirmeyi **kullanma**, çıktıyı bana gönder.
    `Note: first use` satırındaki tipler projende hiç yok; bunları Studio Pro'da görmek için `--keep` ekle, kopyayı
    Studio Pro'da aç ve Errors paneline bak.

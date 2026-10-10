@@ -108,26 +108,53 @@ Dashboard page (grid + read-only detail of the selected row, in the menu), an ed
     "actions": [ { "action": "showPage", "page": "Sales.Order_Edit", "args": { "Order": "$Order" } } ] }
 ] }
   Page widgets: layoutGrid, container, text, dataGrid, dataView (listenTo a grid), listView, actionButton, input
-  (fields: @PY@ mx.py ops createPage). A data grid is classic; "kind": "datagrid2" copies a Data grid 2 from this
-  project's pages. The first Warnings line says which grid was made: show it to the user.
+  (fields of one: @PY@ mx.py ops dataGrid; all: @PY@ mx.py ops createPage). A data grid is classic; "kind": "datagrid2"
+  copies a Data grid 2 from this project's pages. The first Warnings line says which grid was made: show it to the user.
+
+The module does not exist yet: create it first, in the same file (then its roles for the user roles):
+{ "ops": [
+  { "op": "createModule", "name": "Onboarding", "roles": ["User", "HR"] },
+  { "op": "createEntity", "module": "Onboarding", "name": "Employee", "attributes": [ { "name": "FullName", "type": "String(200)" }, { "name": "FirstDay", "type": "DateTime" } ] },
+  { "op": "addAccessRule", "entity": "Onboarding.Employee", "roles": ["Onboarding.User", "Onboarding.HR"], "access": "ReadWrite", "create": true },
+  { "op": "addModuleRoles", "userRole": "User", "moduleRoles": ["Onboarding.User"] },
+  { "op": "createUserRole", "name": "HR", "moduleRoles": ["Onboarding.HR", "System.User"] },
+  { "op": "createPage", "module": "Onboarding", "name": "Employee_List", "entity": "Onboarding.Employee", "roles": ["Onboarding.User", "Onboarding.HR"], "menu": "Responsive",
+    "widgets": [ { "widget": "dataGrid", "columns": ["FullName", "FirstDay"] }, { "widget": "dataView", "listenTo": "dataGrid", "editable": false } ] }
+] }
+
+Master-detail (selected customer + its orders): a list view INSIDE the listening data view, xpath over the association:
+{ "ops": [ { "op": "createPage", "module": "Sales", "name": "Customer_Orders", "entity": "Sales.Customer", "roles": ["Sales.User"],
+  "widgets": [ { "widget": "dataGrid", "columns": ["Name", "City"] },
+               { "widget": "dataView", "listenTo": "dataGrid", "editable": false, "fields": ["Name"],
+                 "widgets": [ { "widget": "listView", "entity": "Sales.Order", "fields": ["Number", "Total"], "xpath": "[Sales.Order_Customer = '[%CurrentObject%]']" } ] } ] } ] }
+
+Menu item for ONE role: a menu item has no roles; it shows for the user roles that may open the page. So:
+{ "ops": [
+  { "op": "grantAccess", "document": "Sales.Order_List", "roles": ["Sales.Manager"] },
+  { "op": "revokeAccess", "document": "Sales.Order_List", "roles": ["Sales.User"] },
+  { "op": "addMenuItem", "page": "Sales.Order_List", "caption": "Orders" }
+] }
+  The dry-run line ends with "seen by: <user roles>": check it says what the user asked.
 
 Security:
 { "ops": [
   { "op": "createModuleRole", "module": "Sales", "name": "Manager" },
   { "op": "grantAccess", "document": "Sales.ACT_Order_Close", "roles": ["Sales.Manager"] },
   { "op": "addAccessRule", "entity": "Sales.Order", "roles": ["Sales.Manager"], "access": "ReadWrite", "create": true, "delete": true },
-  { "op": "createUserRole", "name": "SalesManager", "moduleRoles": ["Sales.Manager", "Administration.User"] },
+  { "op": "createUserRole", "name": "SalesManager", "moduleRoles": ["Sales.Manager", "System.User"] },
   { "op": "addModuleRoles", "userRole": "Administrator", "moduleRoles": ["Sales.Manager"] },
   { "op": "createDemoUser", "userName": "demo_salesmanager", "userRoles": ["SalesManager"] }
 ] }
 
-More domain and app operations (see @PY@ mx.py ops for fields): setGeneralization, addValidationRule,
-addEventHandler, addIndex, createConstant, createScheduledEvent, publishRest, moveDocument, rename of a module,
-addMenuItem (menu item for a page), setHomePage (home page, also per user role).
+More domain and app operations (see @PY@ mx.py ops for fields): createModule, setSecurity, setGeneralization,
+addValidationRule, addEventHandler, addIndex, createConstant, createScheduledEvent, publishRest, moveDocument, rename
+of a module, addMenuItem (menu item for a page), setHomePage (home page, also per user role).
 
 ERRORS AND FIXES
 - "not found in the model. Did you mean: X" -> use X (check with find).
-- "unknown field 'a'. Did you mean: b" -> rename the field to b.
+- "unknown field 'a'. Did you mean: b" -> rename the field to b. No suggestion: the message or HINT lists the fields.
+- "Module 'X' not found. Create it first" -> add { "op": "createModule", "name": "X" } as the first operation.
+- "'X' needs its module: M.X?" -> write the full name M.X.
 - "needs 'x'" -> add field x (see ops).
 - "already exists" -> it is done already: remove that operation, or use another name.
 - "no variable 'V' before this action" -> the variable must be a parameter or be created by an earlier action.

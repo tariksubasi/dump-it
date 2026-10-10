@@ -30,6 +30,15 @@ function suggest(word, options, n = 5) {
         .map(x => x.o);
 }
 
+// A Mendix name: ASCII letters, digits and _, no leading digit. Suggests an ASCII form (Çalışan Listesi -> Calisan_Listesi).
+const TR = { ç: "c", ğ: "g", ı: "i", İ: "I", ö: "o", ş: "s", ü: "u", Ç: "C", Ğ: "G", Ö: "O", Ş: "S", Ü: "U" };
+function validName(name, what = "name") {
+    const s = String(name === undefined || name === null ? "" : name);
+    if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(s)) return s;
+    const ascii = s.replace(/[çğıİöşüÇĞÖŞÜ]/g, c => TR[c]).normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().replace(/[^A-Za-z0-9_]+/g, "_").replace(/^(\d)/, "_$1");
+    throw new Error(`'${s}' is not a valid Mendix ${what} (letters, digits, _; no spaces, no leading digit)` + (ascii && ascii !== s ? `. Use e.g. ${ascii}` : ""));
+}
+
 function fail(msg, word, options) {
     const s = word !== undefined && options ? suggest(word, options) : [];
     throw new Error(msg + (s.length ? `. Did you mean: ${s.join(", ")}?` : ""));
@@ -67,4 +76,4 @@ function setIfAvailable(obj, prop, value) {
     }
 }
 
-module.exports = { setIfAvailable, ATTRIBUTE_TYPES, DATA_TYPES, distance, suggest, fail, validate, bool, noDollar, enumValue };
+module.exports = { validName, setIfAvailable, ATTRIBUTE_TYPES, DATA_TYPES, distance, suggest, fail, validate, bool, noDollar, enumValue };

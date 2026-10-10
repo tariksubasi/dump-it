@@ -14,7 +14,17 @@ const { lostProperties } = require("./lost");
 function plans(mod, T, userRole, grid2) {
     const role = `${mod}.ZzRole`;
     const E = `${mod}.${T}`;
+    const M = `${T}Mod`; // a new module with its own roles, user role, demo user and page
     const phase1 = { ops: [
+        { op: "createModule", name: M, roles: ["User", "HR"] },
+        { op: "createEntity", module: M, name: "Onboarding", attributes: [{ name: "FullName", type: "String(200)" }, { name: "WFH", type: "Boolean" }] },
+        { op: "addAccessRule", entity: `${M}.Onboarding`, roles: [`${M}.User`, `${M}.HR`], access: "ReadWrite", create: true, delete: true },
+        { op: "createUserRole", name: "ZzHR", moduleRoles: [`${M}.HR`] },
+        ...(userRole ? [{ op: "addModuleRoles", userRole, moduleRoles: [`${M}.User`] }] : []),
+        { op: "createDemoUser", userName: "zz_demo_hr", userRoles: ["ZzHR"] },
+        { op: "setSecurity", demoUsers: true },
+        { op: "createPage", module: M, name: "Dashboard", entity: `${M}.Onboarding`, roles: [`${M}.User`, `${M}.HR`],
+            widgets: [{ widget: "dataGrid", columns: ["FullName", "WFH"] }, { widget: "dataView", listenTo: "dataGrid", editable: false }] },
         { op: "createEnumeration", module: mod, name: `${T}Status`, values: ["Open", { name: "Done", caption: "Done!" }] },
         { op: "createEntity", module: mod, name: T, attributes: [
             { name: "Title", type: "String(100)" }, { name: "Count", type: "Integer" }, { name: "Big", type: "Long" },
@@ -71,6 +81,8 @@ function plans(mod, T, userRole, grid2) {
         { op: "createMicroflow", module: mod, name: `${T}_Rest`, folder: "ZzTest", parameters: [{ name: "Id", type: "Long" }], returns: "String", returnValue: "'ok'" },
         { op: "publishRest", module: mod, service: `${T}API`, resource: "items", method: "Get", path: "{Id}", microflow: `${E}_Rest`, roles: [role], folder: "ZzTest" },
         { op: "grantAccess", document: `${E}_Sub`, roles: [role] },
+        { op: "grantAccess", document: `${E}_Rest`, roles: [role] },
+        { op: "revokeAccess", document: `${E}_Rest`, roles: [role] },
         // dashboard: grid + read-only data view listening to it (side by side), texts, a layout grid with a list view and
         // its data view, buttons, a menu item and home pages
         { op: "createPage", module: mod, name: `${T}_Dash`, entity: E, folder: "ZzTest", roles: [role], menu: "Responsive", widgets: [
@@ -91,7 +103,32 @@ function plans(mod, T, userRole, grid2) {
         ...(userRole ? [{ op: "setHomePage", page: `${E}_Home`, roles: [userRole] }] : []),
         { op: "moveDocument", document: `${E}_Job`, folder: "ZzTest/Moved" }
     ] };
-    return { phase1, role, E };
+    return { phase1, role, E, M };
+}
+
+// The new module and security as stored: module security with its roles, the user role and demo user in project
+// security, Administrator (or the first user role) with the new role, and revokeAccess undone in the flow.
+function securityProblems(project, M, E, role, userRole) {
+    const r = [];
+    let ps = null, ms = null, rest = null;
+    const mod = [...project.units.values()].find(u => /^Projects\$Module/.test(project.read(u.id).$Type) && project.read(u.id).Name === M);
+    if (!mod) return [`module ${M} missing`];
+    for (const id of project.units.keys()) {
+        const u = project.read(id);
+        if (u.$Type === "Security$ProjectSecurity") ps = u;
+        if (u.$Type === "Security$ModuleSecurity" && project.units.get(id).containerId === mod.id) ms = u;
+        if (u.$Type === "Microflows$Microflow" && `${E}_Rest`.endsWith("." + u.Name)) rest = u;
+    }
+    if (!ms || ["User", "HR"].some(n => !ms.ModuleRoles.some(x => x.Name === n))) r.push(`${M} has no module security with roles User and HR`);
+    const ur = ps && ps.UserRoles.find(x => x.Name === "ZzHR");
+    if (!ur || !ur.ModuleRoles.includes(`${M}.HR`) || !ur.GUID) r.push("user role ZzHR missing, without its module role or GUID");
+    const admin = userRole && ps && ps.UserRoles.find(x => x.Name === userRole);
+    if (userRole && (!admin || !admin.ModuleRoles.includes(`${M}.User`))) r.push(`${userRole} lacks ${M}.User`);
+    const demo = ps && ps.DemoUsers.find(x => x.UserName === "zz_demo_hr");
+    if (!demo || !demo.UserRoles.includes("ZzHR") || !demo.Entity) r.push("demo user zz_demo_hr missing or without role/entity");
+    if (!ps || !ps.EnableDemoUsers) r.push("demo users are not on");
+    if (!rest || (rest.AllowedModuleRoles || []).includes(role)) r.push(`${E}_Rest still allows ${role} after revokeAccess`);
+    return r;
 }
 
 const walkPlain = (o, fn) => {
@@ -121,9 +158,11 @@ function dashboardProblems(project, mod, T, userRole) {
         const t = named.get(dv.DataSource.ListenTarget);
         if (!t || !/^Forms\$(DataGrid|ListView)$/.test(t.$Type)) r.push(`${dv.Name} listens to '${dv.DataSource.ListenTarget}', which is no grid or list view`);
         walkPlain(dv.Widgets, o => {
-            if (/^Forms\$(TextBox|TextArea|CheckBox|DatePicker|DropDown)$/.test(o.$Type) && o.SourceVariable !== null) r.push(`${o.Name} in ${dv.Name} has a SourceVariable (Studio Pro writes null)`);
+            if (/^Forms\$(TextBox|TextArea|CheckBox|DatePicker|RadioButtonGroup|DropDown)$/.test(o.$Type) && o.SourceVariable !== null) r.push(`${o.Name} in ${dv.Name} has a SourceVariable (Studio Pro writes null)`);
         });
     }
+    if (!all.some(o => o.$Type === "Forms$RadioButtonGroup" && o.Name === "radioButtons1" && o.RenderHorizontal)) r.push("the enumeration Status has no radio buttons radioButtons1 (horizontal)");
+    if (page.Title.Items.length !== 1) r.push(`the page title is stored in ${page.Title.Items.length} languages (Studio Pro: the default language only)`);
     const grid = all.find(o => o.$Type === "Forms$DataGrid");
     if (!grid || grid.Columns.length !== 5 || grid.DataSource.$Type !== "Forms$GridXPathSource") r.push("no 5-column grid with an XPath source");
     const prof = nav && nav.Profiles.find(p => p.Kind === "Responsive");
@@ -237,7 +276,7 @@ async function selftest(mpr, keep, { out, relevant }) {
         const userRoles = sec ? (await sec.load()).userRoles.map(u => u.name) : [];
         const userRole = userRoles.includes("Administrator") ? "Administrator" : userRoles[0];
         const grid2 = require("./pluggable").exemplars(s1.ctx.project, "com.mendix.widget.web.datagrid.Datagrid");
-        const { phase1, E } = plans(mod, T, userRole, grid2.exemplars.length > 0);
+        const { phase1, E, M, role } = plans(mod, T, userRole, grid2.exemplars.length > 0);
         // pages copy a layout from the project's own pages; a project without any cannot get pages
         const layouts = new Set(s1.model.allLayouts().map(l => l.qualifiedName));
         const pageable = [...s1.ctx.project.units.keys()].some(id => {
@@ -285,6 +324,8 @@ async function selftest(mpr, keep, { out, relevant }) {
         let s2 = await reopen(copy);
         const failed = await s2.ops.checkPlan({ ops: [...phase1.ops, ...phase2.ops] });
         check("saved model shows every op", !failed.length, failed.join("; "));
+        const secp = securityProblems(s2.ctx.project, M, E, role, userRole);
+        check("new module, user role, demo user, addModuleRoles, revokeAccess stored", !secp.length, secp.join("; "));
         if (pageable) {
             const dash = dashboardProblems(s2.ctx.project, mod, T, web ? userRole : null);
             check("dashboard stored like Studio Pro (listen target, inputs, menu, home pages)", !dash.length, dash.join("; "));

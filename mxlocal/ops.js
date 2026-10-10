@@ -4,14 +4,14 @@
 const sdk = require("mendixmodelsdk");
 
 const { domainmodels: dm, microflows: mf, datatypes, enumerations, texts, security, projects, constants, scheduledevents, rest } = sdk;
-const { ATTRIBUTE_TYPES, DATA_TYPES, suggest, fail, validate, bool, noDollar, enumValue } = require("./ops-util");
+const { ATTRIBUTE_TYPES, DATA_TYPES, suggest, fail, validate, bool, noDollar, enumValue, validName } = require("./ops-util");
 
 
 // ---------------------------------------------------------------- op catalog (also the 'ops' help text)
 
 
 const { makeFlows, ACTIONS, CONTROL, COMMON } = require("./ops-flows");
-const { makePages, PAGE_FIELDS, MENU_FIELDS, HOME_FIELDS } = require("./ops-pages");
+const { makePages, PAGE_FIELDS, MENU_FIELDS, HOME_FIELDS, widgetFields, NO_MENU_ROLES } = require("./ops-pages");
 const { makeSecurity, SECURITY_OPS } = require("./ops-security");
 
 const OPS = {
@@ -111,8 +111,11 @@ function help(name) {
             if (/actions/.test(Object.keys(table[hit].fields).join(" "))) lines.push("  actions: see ops <action name>, e.g. ops retrieve; list all with: ops");
             return (table === OPS ? "op " : "action ") + lines.join("\n");
         }
+        const widget = widgetFields(name);
+        if (widget) return widget;
         const all = groups.flatMap(([, t]) => Object.keys(t));
-        throw new Error(`No operation or action '${name}'. Did you mean: ${suggest(name, all, 3).join(", ")}? All names: ops`);
+        const s = suggest(name, all, 3);
+        throw new Error(`No operation or action '${name}'.${s.length ? ` Did you mean: ${s.join(", ")}?` : ""} All names: ops (widget fields: ops createPage)`);
     }
     const lines = ["change.json: { \"ops\": [ { \"op\": \"<name>\", ...fields } ] }. Fields of one: ops <name> (all at once: ops all)"];
     for (const [title, table] of groups) {
@@ -168,15 +171,26 @@ function bind(model, client) {
 
     function moduleNamed(name) {
         const m = model.allModules().find(x => x.name === name);
-        if (!m) fail(`Module '${name}' not found`, name, model.allModules().map(x => x.name));
-        return m;
+        if (m) return m;
+        const mods = model.allModules().map(x => x.name);
+        const s = suggest(name, mods);
+        if (s.length) throw new Error(`Module '${name}' not found. Did you mean: ${s.join(", ")}?`);
+        const own = model.allModules().filter(x => !x.fromAppStore).map(x => x.name);
+        throw new Error(`Module '${name}' not found. Create it first: { "op": "createModule", "name": "${name}" } (modules here: ${(own.length ? own : mods).join(", ")})`);
     }
 
     // Any document or element by qualified name, loaded and ready to change.
     async function get(qn) {
         if (typeof qn !== "string" || !qn.trim()) throw new Error(`Expected a qualified name like "Module.Name", got ${JSON.stringify(qn)}`);
         qn = qn.trim();
-        if (!qn.includes(".")) return moduleNamed(qn);
+        if (!qn.includes(".")) {
+            if (model.allModules().some(x => x.name === qn)) return moduleNamed(qn);
+            // a document or entity without its module (weak models drop it): name the full name
+            const full = allNames().filter(n => n.split(".").length === 2 && n.split(".")[1].toLowerCase() === qn.toLowerCase());
+            if (full.length) throw new Error(`'${qn}' needs its module: ${full.slice(0, 3).join(" or ")}?`);
+            const s = suggest(qn, model.allModules().map(x => x.name));
+            throw new Error(`'${qn}' not found: write the full name Module.Name (check it with: find ${qn})` + (s.length ? `; a module? Did you mean: ${s.join(", ")}?` : ""));
+        }
         const unit = model.allUnits().find(u => {
             try {
                 return u.qualifiedName === qn;
@@ -377,12 +391,13 @@ function bind(model, client) {
     }
 
     const flows = makeFlows({ model, get, entity, text, dataType, attributeChain, loadParents });
-    const pageOps = makePages({ model, client, get, exists, entity, text, folder, attributeChain, loadParents, grantAccess: o => impl.grantAccess(o) });
+    const pageOps = makePages({ model, client, get, exists, entity, text, folder, attributeChain, loadParents, persistable, grantAccess: o => impl.grantAccess(o) });
     const securityOps = makeSecurity({ model, get });
 
     // ------------------------------------------------ operations
 
     async function createFlowOp(o, nano) {
+        validName(o.name, `${nano ? "nanoflow" : "microflow"} name`);
         const qn = `${o.module}.${o.name}`;
         if (await exists(qn)) throw new Error(`${qn} already exists`);
         const { count } = await flows.createFlow(o, nano, folder(o.module, o.folder));
@@ -422,6 +437,7 @@ function bind(model, client) {
 
     const impl = {
         async createEntity(o) {
+            validName(o.name, "entity name");
             fresh.add(`${o.module}.${o.name}`);
             const d = await domainModel(o.module);
             if (d.entities.some(e => e.name === o.name)) throw new Error(`${o.module}.${o.name} already exists`);
@@ -444,6 +460,7 @@ function bind(model, client) {
             fresh.add(`${o.entity}.${o.name}`);
             const e = loaded || (await entity(o.entity));
             if (!o.name || !o.type) throw new Error(`addAttribute needs name and type (${o.entity})`);
+            validName(o.name, "attribute name");
             if (e.attributes.some(a => a.name === o.name)) throw new Error(`${o.entity}.${o.name} already exists`);
             const a = dm.Attribute.createIn(e);
             a.name = o.name;
@@ -481,6 +498,7 @@ function bind(model, client) {
             return `${o.from.split(".")[0]}.${name}: ${o.from} -> ${o.to}`;
         },
         async createEnumeration(o) {
+            validName(o.name, "enumeration name");
             const qn = `${o.module}.${o.name}`;
             if (await exists(qn)) throw new Error(`${qn} already exists`);
             const en = enumerations.Enumeration.createIn(folder(o.module, o.folder));
@@ -503,7 +521,8 @@ function bind(model, client) {
             return `${o.enumeration}.${o.name}`;
         },
         async createModule(o) {
-            if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(o.name)) throw new Error(`'${o.name}' is not a valid module name (letters, digits, _; no spaces)`);
+            validName(o.name, "module name");
+            for (const r of [].concat(o.roles || [])) validName(r, "module role name");
             if (model.allModules().some(m => m.name === o.name)) throw new Error(`module ${o.name} already exists`);
             const m = projects.Module.createIn(model.allProjects()[0]);
             m.name = o.name;
@@ -517,6 +536,7 @@ function bind(model, client) {
             return o.name + (o.roles && o.roles.length ? ` (roles ${[].concat(o.roles).join(", ")})` : "");
         },
         async createModuleRole(o) {
+            validName(o.name, "module role name");
             const s = await moduleSecurity(o.module);
             if (s.moduleRoles.some(r => r.name === o.name)) throw new Error(`${o.module}.${o.name} already exists`);
             const r = security.ModuleRole.createIn(s);
@@ -667,6 +687,7 @@ function bind(model, client) {
             return `${o.entity}(${o.attributes.map(a => (typeof a === "string" ? a : a.name)).join(", ")})`;
         },
         async createConstant(o) {
+            validName(o.name, "constant name");
             const qn = `${o.module}.${o.name}`;
             if (await exists(qn)) throw new Error(`${qn} already exists`);
             const allowed = ["string", "integer", "long", "decimal", "boolean", "datetime"];
@@ -679,6 +700,7 @@ function bind(model, client) {
             return qn;
         },
         async createScheduledEvent(o) {
+            validName(o.name, "scheduled event name");
             const qn = `${o.module}.${o.name}`;
             if (await exists(qn)) throw new Error(`${qn} already exists`);
             const target = await get(o.microflow);
@@ -800,7 +822,7 @@ function bind(model, client) {
         async rename(o) {
             const el = await get(o.target);
             if (!("name" in el)) throw new Error(`'${o.target}' cannot be renamed`);
-            if (/[^A-Za-z0-9_]/.test(o.newName) || /^\d/.test(o.newName)) throw new Error(`'${o.newName}' is not a valid Mendix name (letters, digits, _; no leading digit)`);
+            validName(o.newName);
             el.name = o.newName;
             return `${o.target} -> ${o.newName}`;
         },
@@ -809,7 +831,8 @@ function bind(model, client) {
             const users = client.referencesTo(o.target);
             const loss = isFresh(o.target) ? null : dataLoss(el);
             el.delete();
-            return `${o.target}` + (users.length ? `\n      STILL USED BY (fix these, or Studio Pro shows errors): ${users.join(", ")}` : "") +
+            const nav = users.some(u => u.startsWith("Navigation")) ? `\n      NOTE: a menu item or home page still opens ${o.target}; no operation removes those: remove them in Studio Pro (App > Navigation)` : "";
+            return `${o.target}` + (users.length ? `\n      STILL USED BY (fix these, or Studio Pro shows errors): ${users.join(", ")}` : "") + nav +
                 (loss ? `\n      DATA LOSS: ${loss}` : "");
         },
         ...securityOps.impl
@@ -966,6 +989,7 @@ function bind(model, client) {
         if (!o || typeof o !== "object") throw new Error(`${where}: each op must be an object { "op": ... }`);
         const name = Object.keys(OPS).find(k => k.toLowerCase() === String(o.op).toLowerCase());
         if (!name) fail(`${where}: unknown op '${o.op}'`, o.op, Object.keys(OPS));
+        if (name === "addMenuItem" && o.roles !== undefined) throw new Error(`${where} (addMenuItem): ${NO_MENU_ROLES(o.page)}`);
         validate("op", name, OPS[name], o, where);
         return { name, where };
     }

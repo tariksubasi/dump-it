@@ -218,14 +218,14 @@ The default of an `Enum` attribute is the value name, e.g. `"default": "Open"`.
 
 | Op | Fields | Notes |
 |---|---|---|
-| `createModule` | **name**, roles `["RoleName"]` | New module with its domain model, module security and settings (as Studio Pro makes them). Then `addModuleRoles` to give its roles to user roles |
+| `createModule` | **name**, roles `["RoleName"]` | New module with its domain model, module security and settings (as Studio Pro makes them). Then `addModuleRoles` to give its roles to user roles. A plan that needs a module that does not exist yet starts with this op |
 | `createModuleRole` | **module**, **name**, description | |
 | `grantAccess` | **document** (microflow, nanoflow or page), **roles** `["Module.Role"]` | Adds to the allowed roles; existing roles stay |
 | `addAccessRule` | **entity**, **roles**, access (`ReadWrite`/`ReadOnly`/`None`, default `ReadOnly`), members `{"Attr":"ReadWrite"}`, create, delete, xpath | Every attribute and owned association gets a member right. AutoNumber and calculated attributes are never more than ReadOnly |
 | `revokeAccess` | **document**, **roles** | The opposite of `grantAccess` |
-| `createUserRole` | **name**, **moduleRoles** `["Module.Role"]`, description, manageAllRoles | Project-level role that users get. Gets its own GUID, checks security |
+| `createUserRole` | **name**, **moduleRoles** `["Module.Role"]`, description, manageAllRoles | Project-level role that users get. Gets its own GUID, checks security. `System.User` / `System.Administrator` are accepted (written by name, as Studio Pro stores them) |
 | `addModuleRoles` | **userRole** (e.g. `Administrator`), **moduleRoles** | Typical after a new module role: give it to the user roles that need it |
-| `createDemoUser` | **userName**, **userRoles** `["UserRole"]`, entity, password | Entity defaults to the one the other demo users use. Says so when demo users are off |
+| `createDemoUser` | **userName**, **userRoles** `["UserRole"]`, entity, password | Entity defaults to the one the other demo users use (`System.User` when there are none). Says so when demo users are off |
 | `setSecurity` | level (`Off`/`Prototype`/`Production`), demoUsers, guestRole (`""` = guest access off) | At least one field |
 
 ### Microflows and nanoflows
@@ -297,7 +297,7 @@ Mendix expressions as text: `"'Hello'"`, `"$Order/Total * 2"`, `"empty"`, `"[%Cu
 | Op | Fields | Notes |
 |---|---|---|
 | `createPage` | **module**, **name**, title, entity, fields `["Attr"]`, buttons (default true), widgets, arrange, menu, layout, folder, roles | Without `widgets`: with `entity` an edit form (page parameter, data view, an input per attribute, Save/Cancel), without `entity` an empty page. With `widgets`: the page content from the widget list below; `entity` is then the default entity of grids and data views. `menu` (`"Responsive"` or `{profile, caption, parent}`) adds a menu item, `roles` lets module roles open the page. The layout is the one the project's own pages use most |
-| `addMenuItem` | **page**, profile (default Responsive), caption (default: the page title), parent (caption of an existing menu item) | Only pages without parameters. A page is in a menu once. New items go at the end |
+| `addMenuItem` | **page**, profile (default Responsive), caption (default: the page title), parent (caption of an existing menu item) | Only pages without parameters. A page is in a menu once. New items go at the end. A menu item has no roles of its own: it shows for the user roles that may open the page (change that with `grantAccess` / `revokeAccess` on the page). The dry-run line ends with `seen by: <user roles>` |
 | `setHomePage` | **page** or **microflow**, profile (default Responsive), roles (user roles, e.g. `["Administrator"]`) | Without roles: the default home page. Only pages/microflows without parameters |
 
 Widgets in `"widgets": [ { "widget": "<kind>", ... } ]`, top to bottom. Every widget takes `name` (default as
@@ -307,26 +307,67 @@ Studio Pro: `grid1`, `dataGrid2_1`, `dataView1`, ...). Full field list: `python 
 |---|---|---|
 | `layoutGrid` | columns `[8, 4]` or `[{"weight": 8, "widgets": [...]}]`, or rows `[{"columns": [...]}]`, width | Weights 1-12 or `"auto"`; `tablet`/`phone` weights per column |
 | `container` | widgets, class | |
-| `text` | **text**, style (`Text`, `Paragraph`, `H1`-`H6`) | Inside a data view or list view, `{Attribute}` shows the value |
-| `dataGrid` | entity, columns (`"Attr"` or `{attribute, caption, width}`), xpath, search, selection (default Single), selectFirst, rows, kind | Database (XPath) source. `kind`: `classic` (default; search bar), `datagrid2` (a Data grid 2 copied from one on this project's pages; refused when the project has none or its widget differs from `widgets/*.mpk`), `auto` (datagrid2 when possible, else classic) |
-| `dataView` | entity, source (`parameter`/`listen`), listenTo, editable (default true), fields, buttons, widgets, footer | `listenTo`: the name of a grid or list view, or `dataGrid` / `listView` when the page has exactly one. Without `listenTo`: a page parameter of the entity, with Save/Cancel when editable |
-| `listView` | entity, xpath, fields, widgets, pageSize | A data view can listen to it |
-| `actionButton` | **action** (`save`, `cancel`, `close`, `delete`, `showPage`, `callMicroflow`, `callNanoflow`), caption, page, microflow, nanoflow, style, closePage | Passes only the object of the data view or list view it is in (target with that one parameter or none) |
-| `input`, `textBox`, `textArea`, `checkBox`, `datePicker`, `dropDown` | **attribute**, label | Inside a data view; `input` picks the widget by attribute type |
+| `text` | **text**, style (`Text`, `Paragraph`, `H1`-`H6`) | Inside a data view or list view, `{Attribute}` shows the value. `{1}` is refused (a Mendix placeholder). `"widget": "heading"` = a text with style H2 |
+| `dataGrid` | entity, columns (`"Attr"` or `{attribute, caption, width}`), xpath, search, selection (default Single), selectFirst, rows, kind | Database (XPath) source: the entity must be persistable. `kind`: `classic` (default; search bar), `datagrid2` (a Data grid 2 copied from one on this project's pages; refused when the project has none or its widget differs from `widgets/*.mpk`), `auto` (datagrid2 when possible, else classic; also classic when a column type does not fit a Data grid 2). `width`: whole numbers (weights, 100 in total) |
+| `dataView` | entity, source (`parameter`/`listen`), listenTo, editable (default true), fields, buttons, widgets, footer | `listenTo`: the name of a grid or list view, or `dataGrid` / `listView` when the page has exactly one (a Data grid 2 needs selection Single). Without `listenTo`: a page parameter of the entity, with Save/Cancel when editable. An editable data view without a save button gets a warning |
+| `listView` | entity, xpath, fields, widgets, pageSize (whole number) | Persistable entity. A data view can listen to it |
+| `actionButton` | **action** (`save`, `cancel`, `close`, `delete`, `showPage`, `callMicroflow`, `callNanoflow`), caption, page, microflow, nanoflow, style, closePage | Passes only the object of the data view or list view it is in (target with that one parameter or none). save/cancel `closePage` default: true in a parameter data view, false in a listening one (the dashboard stays open; Studio Pro's own default is true). `close` = `closePageButton1` "Close page" |
+| `input`, `textBox`, `textArea`, `checkBox`, `datePicker`, `radioButtons`, `dropDown` | **attribute**, label | Inside a data view; `input` picks the widget by attribute type (an enumeration gets radio buttons, as on Studio Pro's pages) |
 
 A grid followed by the data view that listens to it is placed side by side (layout grid 8/4); `"arrange": "rows"`
 stacks them. The dry run's `Warnings` start with the grid kind that was used, then lint lines: a grid with 0
-columns, a listened grid whose selection is None or Multi, page roles that are in no user role, belong to another
-module or have no access rule on the shown entity, user roles that will not see the menu item, texts to translate.
-A wrong or ambiguous `listenTo` is an error that lists the grids and list views on the page.
+columns, a listened classic grid whose selection is None or Multi, an editable data view without a save button,
+page roles that are in no user role (with the `addModuleRoles` to fix it), belong to another module or have no
+access rule on the shown entity, user roles that will not see the menu item, texts that exist only in the default
+language. A wrong or ambiguous `listenTo` is an error that lists the grids and list views on the page.
 
-Dashboard: a grid, a read-only detail of the selected row next to it, a menu item, two roles:
+`xpath` of a grid or list view is checked lightly: it must be in brackets, and the first step of every path must be
+an attribute or association of the entity (`Did you mean`). Inside a data view, `'[%CurrentObject%]'` is the data
+view's object. Deeper path steps and functions are not checked: look at the page in Studio Pro.
+
+Dashboard in a new module: the module with two roles, the entity and its access rules, a user role HR, the new roles
+for the existing user roles, and the page (a grid, a read-only detail of the selected row next to it, a menu item):
 
 ```json
-{ "ops": [ { "op": "createPage", "module": "EmployeeOnboarding", "name": "Dashboard", "entity": "EmployeeOnboarding.EmployeeOnboarding",
-  "widgets": [ { "widget": "dataGrid", "columns": ["FullName", "WFH", "FirstDay", "PhoneModel", "LaptopModel"] },
-               { "widget": "dataView", "listenTo": "dataGrid", "editable": false } ],
-  "menu": "Responsive", "roles": ["EmployeeOnboarding.User", "EmployeeOnboarding.HR"] } ] }
+{ "ops": [
+  { "op": "createModule", "name": "EmployeeOnboarding", "roles": ["User", "HR"] },
+  { "op": "createEntity", "module": "EmployeeOnboarding", "name": "EmployeeOnboarding", "attributes": [
+      { "name": "FullName", "type": "String(200)" }, { "name": "WFH", "type": "Boolean" }, { "name": "FirstDay", "type": "DateTime" },
+      { "name": "PhoneModel", "type": "String(200)" }, { "name": "LaptopModel", "type": "String(200)" } ] },
+  { "op": "addAccessRule", "entity": "EmployeeOnboarding.EmployeeOnboarding", "roles": ["EmployeeOnboarding.User"], "access": "ReadOnly" },
+  { "op": "addAccessRule", "entity": "EmployeeOnboarding.EmployeeOnboarding", "roles": ["EmployeeOnboarding.HR"], "access": "ReadWrite", "create": true, "delete": true },
+  { "op": "createUserRole", "name": "HR", "moduleRoles": ["EmployeeOnboarding.HR", "System.User"] },
+  { "op": "addModuleRoles", "userRole": "User", "moduleRoles": ["EmployeeOnboarding.User"] },
+  { "op": "addModuleRoles", "userRole": "Administrator", "moduleRoles": ["EmployeeOnboarding.HR"] },
+  { "op": "createPage", "module": "EmployeeOnboarding", "name": "Dashboard", "entity": "EmployeeOnboarding.EmployeeOnboarding",
+    "widgets": [ { "widget": "dataGrid", "columns": ["FullName", "WFH", "FirstDay", "PhoneModel", "LaptopModel"] },
+                 { "widget": "dataView", "listenTo": "dataGrid", "editable": false } ],
+    "menu": "Responsive", "roles": ["EmployeeOnboarding.User", "EmployeeOnboarding.HR"] }
+] }
+```
+
+Master-detail: customers in a grid; the selected customer's details and, inside that data view, a list of its orders
+(`Sales.Order_Customer` goes from Order to Customer):
+
+```json
+{ "ops": [ { "op": "createPage", "module": "Sales", "name": "Customer_Orders", "entity": "Sales.Customer", "roles": ["Sales.User"],
+  "widgets": [
+    { "widget": "dataGrid", "columns": ["Name", "City"] },
+    { "widget": "dataView", "listenTo": "dataGrid", "editable": false, "fields": ["Name", "Email"],
+      "widgets": [ { "widget": "text", "text": "Orders", "style": "H4" },
+                   { "widget": "listView", "entity": "Sales.Order", "fields": ["Number", "Total"],
+                     "xpath": "[Sales.Order_Customer = '[%CurrentObject%]']" } ] } ] } ] }
+```
+
+A page in the menu for one role only: the menu item shows for the user roles that may open the page, so give the page
+that role and take the others away:
+
+```json
+{ "ops": [
+  { "op": "grantAccess", "document": "Sales.Order_List", "roles": ["Sales.Manager"] },
+  { "op": "revokeAccess", "document": "Sales.Order_List", "roles": ["Sales.User"] },
+  { "op": "addMenuItem", "page": "Sales.Order_List", "caption": "Orders" }
+] }
 ```
 
 Layout grid, heading, list view with an editable detail and buttons, a Data grid 2, menu item and home page:
@@ -359,8 +400,12 @@ What pages cannot do yet (use Studio Pro, and `python mx.py gap "<what>"`):
 - Data views: only a page parameter or a listened grid/list view (no microflow, nanoflow or association source).
 - Buttons: no parameter mappings, no create-object action; conditional visibility, styling (design properties) and
   on-change events are not set.
-- Menus: web profiles only (native profiles are refused); no reordering. Texts are written as given in every project
-  language (translate them in Studio Pro).
+- Menus: web profiles only (native profiles are refused); no reordering, and no op removes a menu item or home page
+  (deleting a page that one opens says so).
+- Texts (labels, titles, captions, headers, menu captions) are written in the default language only, as Studio Pro
+  does; the dry run counts them so they can be translated in Studio Pro. Studio Pro's own button captions (Save,
+  Cancel, Search, Delete, Close page) also get their Dutch text when the project has nl_NL.
+- Attributes inherited from System entities (e.g. `Name` of `Administration.Account`) cannot be shown.
 
 ### Constants, scheduled events, REST
 
@@ -473,7 +518,7 @@ refuses them.
 
 Operations cannot do these things: changing existing pages, snippets or layouts (widgets can only be placed when
 `createPage` creates the page), widgets outside the `createPage` list (tab containers, galleries and other pluggable
-widgets; only a Data grid 2 copied from the project), modules and user roles (App Security), import/export mappings,
+widgets; only a Data grid 2 copied from the project), import/export mappings,
 JSON structures, consumed REST services, workflows, REST operations with object bodies or results, inheritance
 splits, and setting attributes inherited from System entities (for example `System.User.Name`). For these, write
 `edits/<name>.js` with the Mendix Model SDK, or give the user Studio Pro steps. Prefer Studio Pro steps when the

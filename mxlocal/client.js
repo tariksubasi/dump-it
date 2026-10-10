@@ -510,6 +510,7 @@ class LocalClient {
             }
             if (p.name) names.unshift(p.name);
             else if (p.type === "DomainModels$DomainModel") names.unshift("(domain model)");
+            else if (p.type === "Navigation$NavigationDocument") names.unshift("Navigation (menu item / home page)");
             if (/^Projects\$Module/.test(p.type)) break;
             id = u.containerId;
         }
