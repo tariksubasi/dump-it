@@ -12,6 +12,7 @@ const { ATTRIBUTE_TYPES, DATA_TYPES, suggest, fail, validate, bool, noDollar, en
 
 const { makeFlows, ACTIONS, CONTROL, COMMON } = require("./ops-flows");
 const { makePages, PAGE_FIELDS } = require("./ops-pages");
+const { makeSecurity, SECURITY_OPS } = require("./ops-security");
 
 const OPS = {
     createEntity: {
@@ -28,6 +29,7 @@ const OPS = {
     addEnumerationValue: { doc: "Add a value to an enumeration.", fields: { enumeration: "R Module.Enumeration", name: "R value name", caption: "optional caption (default the name)" } },
     createModuleRole: { doc: "Create a module role.", fields: { module: "R module name", name: "R role name", description: "optional" } },
     grantAccess: { doc: "Allow module roles to run a microflow/nanoflow or open a page.", fields: { document: "R Module.Microflow or Module.Page", roles: "R [ \"Module.Role\" ]" } },
+    ...SECURITY_OPS,
     addAccessRule: {
         doc: "Add an entity access rule. Members not listed in 'members' get 'access'.",
         fields: { entity: "R Module.Entity", roles: "R [ \"Module.Role\" ]", access: "optional ReadWrite | ReadOnly | None (default ReadOnly)", members: "optional { \"Attribute\": \"ReadWrite\", \"Module.Assoc\": \"ReadOnly\" }", create: "optional true/false", delete: "optional true/false", xpath: "optional XPath, e.g. [Owner = '[%CurrentUser%]']" }
@@ -373,6 +375,7 @@ function bind(model, client) {
 
     const flows = makeFlows({ model, get, entity, text, dataType, attributeChain, loadParents });
     const pageOps = makePages({ model, client, get, exists, entity, text, folder, attributeChain, loadParents });
+    const securityOps = makeSecurity({ model, get });
 
     // ------------------------------------------------ operations
 
@@ -793,7 +796,8 @@ function bind(model, client) {
             el.delete();
             return `${o.target}` + (users.length ? `\n      STILL USED BY (fix these, or Studio Pro shows errors): ${users.join(", ")}` : "") +
                 (loss ? `\n      DATA LOSS: ${loss}` : "");
-        }
+        },
+        ...securityOps.impl
     };
 
     // ------------------------------------------------ checks (run after apply on a freshly loaded model)
@@ -933,7 +937,8 @@ function bind(model, client) {
         },
         async delete(o) {
             return (await exists(o.target)) ? [`${o.target} still exists`] : [];
-        }
+        },
+        ...securityOps.checks
     };
 
     function opOf(o, i) {
@@ -969,7 +974,9 @@ function bind(model, client) {
             const later = rest.some(x => ["rename", "delete"].includes(x.op));
             const qn = o.module && o.name ? `${o.module}.${o.name}` : null;
             const edited = qn && rest.some(x => ["addActions", "changeAction", "deleteAction"].includes(x.op) && x.microflow === qn);
-            if ((later && name !== "rename" && name !== "delete") || edited) continue;
+            const opposite = { grantAccess: "revokeAccess", revokeAccess: "grantAccess" }[name];
+            const undone = opposite && rest.some(x => x.op === opposite && x.document === o.document);
+            if ((later && name !== "rename" && name !== "delete") || edited || undone) continue;
             try {
                 failed.push(...(await checks[name](o)).map(f => `${i + 1}. ${name}: ${f}`));
             } catch (e) {

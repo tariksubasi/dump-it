@@ -109,7 +109,10 @@ Security:
 { "ops": [
   { "op": "createModuleRole", "module": "Sales", "name": "Manager" },
   { "op": "grantAccess", "document": "Sales.ACT_Order_Close", "roles": ["Sales.Manager"] },
-  { "op": "addAccessRule", "entity": "Sales.Order", "roles": ["Sales.Manager"], "access": "ReadWrite", "create": true, "delete": true }
+  { "op": "addAccessRule", "entity": "Sales.Order", "roles": ["Sales.Manager"], "access": "ReadWrite", "create": true, "delete": true },
+  { "op": "createUserRole", "name": "SalesManager", "moduleRoles": ["Sales.Manager", "Administration.User"] },
+  { "op": "addModuleRoles", "userRole": "Administrator", "moduleRoles": ["Sales.Manager"] },
+  { "op": "createDemoUser", "userName": "demo_salesmanager", "userRoles": ["SalesManager"] }
 ] }
 
 More domain and app operations (see @PY@ mx.py ops for fields): setGeneralization, addValidationRule,

@@ -221,6 +221,11 @@ The default of an `Enum` attribute is the value name, e.g. `"default": "Open"`.
 | `createModuleRole` | **module**, **name**, description | |
 | `grantAccess` | **document** (microflow, nanoflow or page), **roles** `["Module.Role"]` | Adds to the allowed roles; existing roles stay |
 | `addAccessRule` | **entity**, **roles**, access (`ReadWrite`/`ReadOnly`/`None`, default `ReadOnly`), members `{"Attr":"ReadWrite"}`, create, delete, xpath | Every attribute and owned association gets a member right. AutoNumber and calculated attributes are never more than ReadOnly |
+| `revokeAccess` | **document**, **roles** | The opposite of `grantAccess` |
+| `createUserRole` | **name**, **moduleRoles** `["Module.Role"]`, description, manageAllRoles | Project-level role that users get. Gets its own GUID, checks security |
+| `addModuleRoles` | **userRole** (e.g. `Administrator`), **moduleRoles** | Typical after a new module role: give it to the user roles that need it |
+| `createDemoUser` | **userName**, **userRoles** `["UserRole"]`, entity, password | Entity defaults to the one the other demo users use. Says so when demo users are off |
+| `setSecurity` | level (`Off`/`Prototype`/`Production`), demoUsers, guestRole (`""` = guest access off) | At least one field |
 
 ### Microflows and nanoflows
 
