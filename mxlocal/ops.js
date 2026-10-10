@@ -73,7 +73,7 @@ const OPS = {
         doc: "Run a microflow (without parameters) on a schedule.",
         fields: { module: "R module name", name: "R event name", microflow: "R Module.Microflow", every: "R Minute | Hour | Day | Week", interval: "optional number for Minute/Hour (default 1)", at: "optional time HH:MM for Day/Week, minutes MM for Hour (default 00:00)", days: "Week: [ \"Monday\", ... ]", enabled: "optional true/false (default false)", timeZone: "optional UTC | Server (default UTC)", onOverlap: "optional DelayNext | SkipNext (default DelayNext)", folder: "optional folder path" }
     },
-    createPage: { doc: "Create a page: an edit form for an entity (inputs by attribute type, Save/Cancel), an empty page, or a page from widgets (layout grids, texts, data grids, data views that listen to a grid, list views, buttons, inputs), optionally with a menu item. Uses the layout the project's other pages use.", fields: PAGE_FIELDS },
+    createPage: { doc: "Create a page: an edit form for an entity (inputs by attribute type, Save/Cancel), an empty page, or a page from widgets (layout grids, containers, texts, data grids (classic, or a Data grid 2 copied from the project's pages), data views that listen to a grid, list views, buttons, inputs), optionally with a menu item. Uses the layout the project's other pages use.", fields: PAGE_FIELDS },
     addMenuItem: { doc: "Add a menu item that opens a page to a navigation profile's menu.", fields: MENU_FIELDS },
     setHomePage: { doc: "Set the home page (or home microflow) of a navigation profile, for everyone or for some user roles.", fields: HOME_FIELDS },
     publishRest: {

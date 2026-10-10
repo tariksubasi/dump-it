@@ -42,6 +42,13 @@ class LocalClient {
         this.warnings = new Set();
         this.log = [];
         this.warn = w => this.warnings.add(w);
+        // lines the reader must see first (e.g. which grid kind a page got), in the order given
+        this.front = 0;
+        this.warnFirst = w => {
+            const rest = [...this.warnings].filter(x => x !== w);
+            rest.splice(Math.min(this.front++, rest.length), 0, w);
+            this.warnings = new Set(rest);
+        };
     }
 
     async open() {

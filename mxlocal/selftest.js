@@ -11,7 +11,7 @@ const { Project } = require("./mpr");
 const { LocalClient, loadProject } = require("./client");
 const { lostProperties } = require("./lost");
 
-function plans(mod, T, userRole) {
+function plans(mod, T, userRole, grid2) {
     const role = `${mod}.ZzRole`;
     const E = `${mod}.${T}`;
     const phase1 = { ops: [
@@ -82,6 +82,10 @@ function plans(mod, T, userRole) {
                 { weight: 6, widgets: [{ widget: "dataView", listenTo: "listView", fields: ["Title", "Amount"], widgets: [{ widget: "text", text: "Count: {Count}" }],
                     footer: [{ widget: "actionButton", action: "save", closePage: false }, { widget: "actionButton", action: "callNanoflow", nanoflow: `${E}_NF`, caption: "Check" }] }] }] },
             { widget: "container", widgets: [{ widget: "actionButton", action: "showPage", page: `${E}_Home`, caption: "Home" }] }] },
+        // Data grid 2 copied from the project's own pages, with a data view listening to it
+        ...(grid2 ? [{ op: "createPage", module: mod, name: `${T}_Dash2`, entity: E, folder: "ZzTest", roles: [role], widgets: [
+            { widget: "dataGrid", kind: "datagrid2", columns: ["Title", "Count", "Big", "Amount", "Flag", "When", "Status", { attribute: "No", caption: "Number" }], xpath: "[Count > 0]", rows: 15 },
+            { widget: "dataView", listenTo: "dataGrid", editable: false }] }] : []),
         { op: "addMenuItem", page: `${E}_Home`, caption: "Zz home" },
         { op: "setHomePage", page: `${E}_Dash` },
         ...(userRole ? [{ op: "setHomePage", page: `${E}_Home`, roles: [userRole] }] : []),
@@ -130,6 +134,44 @@ function dashboardProblems(project, mod, T, userRole) {
     if (prof.HomePage.Page !== `${mod}.${T}_Dash`) r.push(`home page is ${prof.HomePage.Page}`);
     if (userRole && !(prof.HomeItems || []).some(h => h.UserRole === userRole && h.Page === `${mod}.${T}_Home`)) r.push(`no home page for ${userRole}`);
     return r;
+}
+
+// The copied Data grid 2: type = installed .mpk, Single selection, the listening data view, 8 columns on the test
+// entity, and no reference left to what the original showed (other entities, pages, flows, filter widgets).
+function grid2Problems(project, mod, T) {
+    const pluggable = require("./pluggable");
+    const r = [];
+    let page = null;
+    for (const id of project.units.keys()) {
+        const u = project.read(id);
+        if (u.$Type === "Forms$Page" && u.Name === `${T}_Dash2`) page = u;
+    }
+    if (!page) return ["page missing"];
+    let grid = null, dv = null;
+    walkPlain(page, o => {
+        if (o.$Type === "CustomWidgets$CustomWidget" && o.Type.WidgetId === "com.mendix.widget.web.datagrid.Datagrid") grid = o;
+        if (o.$Type === "Forms$DataView") dv = o;
+    });
+    if (!grid) return ["no Data grid 2 on the page"];
+    const def = pluggable.installed(project.dir).get(grid.Type.WidgetId);
+    const diff = def ? pluggable.typeDiff(grid.Type, def) : ["no .mpk"];
+    if (diff.length) r.push(`type differs from widgets/*.mpk: ${diff[0]}`);
+    const key = new Map();
+    walkPlain(grid.Type, x => x.$Type === "CustomWidgets$WidgetPropertyType" && key.set(x.$ID, x.PropertyKey));
+    const prop = (obj, k) => obj.Properties.find(p => key.get(p.TypePointer) === k).Value;
+    if (prop(grid.Object, "itemSelection").Selection !== "Single") r.push("selection is not Single");
+    if (prop(grid.Object, "columns").Objects.length !== 8) r.push(`${prop(grid.Object, "columns").Objects.length} columns, expected 8`);
+    const ds = prop(grid.Object, "datasource").DataSource;
+    if (!ds || ds.EntityRef.Entity !== `${mod}.${T}` || ds.XPathConstraint !== "[Count > 0]") r.push("data source is not the test entity with its XPath");
+    if (!dv || !dv.DataSource || dv.DataSource.ListenTarget !== grid.Name) r.push(`the data view does not listen to ${grid.Name}`);
+    walkPlain(grid.Object, o => {
+        if (o.$Type === "DomainModels$AttributeRef" && !o.Attribute.startsWith(`${mod}.${T}.`)) r.push(`refers to ${o.Attribute}`);
+        if (o.$Type === "DomainModels$DirectEntityRef" && o.Entity !== `${mod}.${T}`) r.push(`refers to ${o.Entity}`);
+        if (/^(Forms|CustomWidgets)\$/.test(o.$Type) && o.Name !== undefined && o !== grid) r.push(`still holds widget ${o.Name}`);
+        for (const k of ["Form", "Microflow", "Nanoflow", "Image"]) if (o.$Type === "CustomWidgets$WidgetValue" && o[k]) r.push(`still opens ${o[k]}`);
+        if (o.$Type === "CustomWidgets$WidgetValue" && o.Action && o.Action.$Type !== "Forms$NoAction") r.push(`still has action ${o.Action.$Type}`);
+    });
+    return [...new Set(r)];
 }
 
 // Keys and BSON kinds Studio Pro writes per type, from this project's own data (before the change).
@@ -183,6 +225,7 @@ async function selftest(mpr, keep, { out, relevant }) {
     try {
         fs.copyFileSync(src.mpr, path.join(tmp, path.basename(src.mpr)));
         fs.cpSync(src.contents, path.join(tmp, "mprcontents"), { recursive: true });
+        if (fs.existsSync(path.join(src.dir, "widgets"))) fs.cpSync(path.join(src.dir, "widgets"), path.join(tmp, "widgets"), { recursive: true });
         const copy = path.join(tmp, path.basename(src.mpr));
         const T = "ZzMxlocalTest";
 
@@ -193,7 +236,8 @@ async function selftest(mpr, keep, { out, relevant }) {
         const sec = s1.model.allProjectSecurities()[0];
         const userRoles = sec ? (await sec.load()).userRoles.map(u => u.name) : [];
         const userRole = userRoles.includes("Administrator") ? "Administrator" : userRoles[0];
-        const { phase1, E } = plans(mod, T, userRole);
+        const grid2 = require("./pluggable").exemplars(s1.ctx.project, "com.mendix.widget.web.datagrid.Datagrid");
+        const { phase1, E } = plans(mod, T, userRole, grid2.exemplars.length > 0);
         // pages copy a layout from the project's own pages; a project without any cannot get pages
         const layouts = new Set(s1.model.allLayouts().map(l => l.qualifiedName));
         const pageable = [...s1.ctx.project.units.keys()].some(id => {
@@ -244,6 +288,10 @@ async function selftest(mpr, keep, { out, relevant }) {
         if (pageable) {
             const dash = dashboardProblems(s2.ctx.project, mod, T, web ? userRole : null);
             check("dashboard stored like Studio Pro (listen target, inputs, menu, home pages)", !dash.length, dash.join("; "));
+            if (grid2.exemplars.length) {
+                const g2 = grid2Problems(s2.ctx.project, mod, T);
+                check(`Data grid 2 ${grid2.def.version} copy (type = .mpk, Single selection, listened to, no old references)`, !g2.length, g2.slice(0, 5).join("; "));
+            } else results.push(`SKIP Data grid 2 page: ${grid2.reason}`);
         }
 
         // phase 3: attribute rename + module rename
