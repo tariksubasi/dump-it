@@ -398,9 +398,15 @@ module.exports = async ({ model, sdk, ops, log }) => {
 };
 ```
 
-- Before using a type, run `python mx.py api <Type>`. Use only the listed properties. Properties under
-  `NOT IN THIS MENDIX VERSION` fail.
+- Before using a type, run `python mx.py api <Type>`. It answers for this project's Mendix version. Use only the
+  listed properties and create functions. Anything under `NOT IN MENDIX <version>` fails; the line names the
+  replacement, for example `GridDatabaseSource` → `GridXPathSource` (removed in 10.5) and `DataView.editable` →
+  `editability` (removed in 10.7). `NOTE:` lines say how to fill a property, for example `listenTarget` takes a widget
+  name, not an entity.
 - Too many create functions are listed? Add a filter word: `python mx.py api ObjectType MicroflowParameterObject`.
+- A dry run fails with `can no longer be instantiated`, `is not yet available`, `illegal ... "createIn"`,
+  `is not a function` or `Cannot encode value`? Its `HINT:` line names the replacement or the valid create
+  functions. Apply it, then check with `python mx.py api <Type>`.
 - Microflow objects go in `mf.objectCollection`. Flows go in `mf.flows` (`SequenceFlow` with `origin`,
   `destination`).
 - The same dry run, approval and apply steps apply. Fix the script until the dry run shows no `NOT STORED` lines.

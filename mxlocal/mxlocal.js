@@ -8,7 +8,13 @@ const path = require("path");
 const bson = require("./bson");
 const { Project, backups, restore, BACKUP_DIR } = require("./mpr");
 const { toPlain, fromPlain, toSdk, fromSdk } = require("./convert");
-const { LocalClient, loadProject } = require("./client");
+// The Model SDK loads in ~250 ms; api does not need it, so client.js loads on first use.
+const loadProject = mpr => require("./client").loadProject(mpr);
+class LocalClient {
+    constructor(ctx) {
+        return new (require("./client").LocalClient)(ctx);
+    }
+}
 const pending = require("./pending");
 const { lostProperties } = require("./lost");
 const inspect = require("./inspect");
@@ -23,7 +29,9 @@ const USAGE = `mxlocal - Mendix Model SDK offline on a local .mpr (v2)
         Writes the change of the last dry run (Studio Pro closed). CODE comes from that dry run.
   node mxlocal.js restore --project <app.mpr|folder> [--backup <name>]
         Undoes the last (or the given) apply.
-  node mxlocal.js api <Type>            SDK type: properties, enum values, createIn functions
+  node mxlocal.js api <Type> [word] --project <app.mpr|folder>
+                                        SDK type for the project's Mendix version: properties, enum values,
+                                        createIn functions, what replaced removed types/properties
   node mxlocal.js find <text> --project <app.mpr|folder>
                                         model elements whose qualified name contains <text>
   node mxlocal.js steps <Module.Flow> --project <app.mpr|folder>
@@ -288,7 +296,8 @@ async function main() {
     if (cmd === "ops") return out(require("./ops").help());
     if (cmd === "api") {
         if (!a._[1]) throw new Error("api needs a type name, e.g. api Attribute");
-        const version = a.project ? new Project(findMpr(a.project)).version : a.version || "10.24.0";
+        const version = a.project ? new Project(findMpr(a.project)).version : require("./versions").normalize(a.version);
+        if (!version) throw new Error("--project <app.mpr|folder> is required: api answers for the project's Mendix version (or give --version 10.24.0)");
         return out(inspect.api(a._.slice(1).join(" "), version));
     }
     const mpr = findMpr(a.project);
@@ -317,11 +326,22 @@ async function main() {
     if (!["verify", "open"].includes(cmd)) process.stderr.write(`(${((Date.now() - started) / 1000).toFixed(1)}s)\n`);
 }
 
+// Mendix version of --project for version hints (null when unknown)
+function argVersion() {
+    try {
+        return new Project(findMpr(args(process.argv.slice(2)).project)).version;
+    } catch (e) {
+        return null;
+    }
+}
+const versionHint = fallback => m => require("./versions").hintFor(m, argVersion()) || fallback;
+
 // Known SDK/script errors -> what to do. Weak models fix errors much faster with a concrete next step.
 const HINTS = [
+    [/can no longer be instantiated|is not yet available in Mendix|illegal on instances of .* "createIn"|not available in this (Mendix )?version|Cannot encode value/, versionHint("Not in this Mendix version. Check with: api <Type>")],
     [/Please provide a container or model/, "createIn(parent) got undefined: the lookup before it found nothing. Check the name with: find <name>"],
     [/Cannot read propert(y|ies) of (undefined|null)/, "A lookup returned nothing (wrong name, or the unit is not loaded). Check names with find; use await ops.get(\"Module.Name\")."],
-    [/is not a function/, "That function does not exist on this type. Check with: api <Type>"],
+    [/is not a function/, versionHint("That function does not exist on this type. Check with: api <Type>")],
     [/is not available offline/, "Team Server, file and lock calls do not work locally. Remove that call."],
     [/Property '.*' of .* cannot be stored/, "This Mendix version has no such property. Check with: api <Type>"],
     [/not loaded|isLoaded|load\(\)/i, "Load the document first: const d = await ops.get(\"Module.Name\") (it loads for you)."],
@@ -337,7 +357,7 @@ function report(e, file) {
     if (own) lines.push("  at " + own.trim().replace(/^at /, ""));
     else if (!/^(No |Nothing |Code |The model|apply needs|run needs|Studio Pro|Expected|--project|Only|This project|Unknown command|Op \d)/.test(msg)) lines.push(...stack.slice(0, 4).map(l => "  " + l.trim()));
     const hint = HINTS.find(([re]) => re.test(msg));
-    if (hint) lines.push("HINT: " + hint[1]);
+    if (hint) lines.push("HINT: " + (typeof hint[1] === "function" ? hint[1](msg) : hint[1]));
     return lines.join("\n") + "\n";
 }
 

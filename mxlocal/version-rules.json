@@ -1,0 +1,31 @@
+{
+"about": "Hand-written rewrites for Model SDK types and properties that Mendix removed (most removals carry no message in the SDK) or that are easy to misuse. Key: <namespace>.<Type> or <namespace>.<DeclaringType>.<property>. removedIn must equal the SDK runtime metadata (selftest checks it, and that every name in 'use' exists). use: what to write instead; note: how. kind 'name': the property takes a name (text), not an element. Writable projects are Mendix 10.18+, so these mostly correct stale SDK knowledge in scripts and plans.",
+"rules": {
+  "pages.GridDatabaseSource": { "removedIn": "10.5.0", "use": "pages.GridXPathSource", "note": "same entityRef (domainmodels.DirectEntityRef) and sortBar; xPathConstraint \"\" means all objects, or e.g. \"[Status = 'Open']\"" },
+  "pages.ListViewDatabaseSource": { "removedIn": "10.5.0", "use": "pages.ListViewXPathSource", "note": "same entityRef and sortBar; xPathConstraint \"\" means all objects" },
+  "pages.SelectorDatabaseSource": { "removedIn": "10.5.0", "use": "pages.SelectorXPathSource", "note": "xPathConstraint \"\" means all objects" },
+  "pages.DatabaseSourceBase": { "removedIn": "10.5.0", "use": "pages.GridXPathSource (data grid), pages.ListViewXPathSource (list view), pages.SelectorXPathSource (selector)", "note": "the XPath sources do the same with xPathConstraint \"\" (all objects)" },
+  "customwidgets.CustomWidgetDatabaseSource": { "removedIn": "10.5.0", "use": "customwidgets.CustomWidgetXPathSource", "note": "xPathConstraint \"\" means all objects" },
+  "pages.DatabaseConstraint": { "removedIn": "10.5.0", "use": "pages.XPathSourceBase.xPathConstraint", "note": "one XPath text on the XPath source, e.g. \"[Status = 'Open' and Amount > 0]\"" },
+  "pages.DataView.editable": { "removedIn": "10.7.0", "use": "pages.DataView.editability", "note": "dv.editability = sdk.pages.EditableEnum.Never (read-only), Always, or Conditional (with conditionalEditabilitySettings)" },
+  "pages.DataViewSource.pageParameter": { "removedIn": "10.2.0", "use": "pages.EntityPathSource.sourceVariable", "note": "a data view on a page parameter: const v = sdk.pages.PageVariable.createInEntityPathSourceUnderSourceVariable(src); v.pageParameter = param" },
+  "pages.DataViewSource.snippetParameter": { "removedIn": "10.2.0", "use": "pages.EntityPathSource.sourceVariable", "note": "const v = sdk.pages.PageVariable.createInEntityPathSourceUnderSourceVariable(src); v.snippetParameter = param" },
+  "pages.AttributeWidgetWithPlaceholder.placeholder": { "removedIn": "10.11.0", "use": "pages.AttributeWidgetWithPlaceholder.placeholderTemplate", "note": "a pages.ClientTemplate: set the text in placeholderTemplate.template (texts.Text)" },
+  "pages.DesignPropertyValue.type": { "removedIn": "10.2.0", "use": "pages.DesignPropertyValue.value", "note": "a typed value: pages.ToggleDesignPropertyValue (on), pages.OptionDesignPropertyValue (option = \"...\"), pages.CustomDesignPropertyValue (value = \"...\"), pages.CompoundDesignPropertyValue" },
+  "pages.DesignPropertyValue.stringValue": { "removedIn": "10.2.0", "use": "pages.DesignPropertyValue.value", "note": "pages.OptionDesignPropertyValue (option = \"...\") or pages.CustomDesignPropertyValue (value = \"...\")" },
+  "pages.DesignPropertyValue.booleanValue": { "removedIn": "10.2.0", "use": "pages.DesignPropertyValue.value", "note": "pages.ToggleDesignPropertyValue (present = on; leave the design property out for off)" },
+  "pages.PageSettings.location": { "removedIn": "8.0.0", "use": null, "note": "no replacement: the target page's layout decides (a popup layout opens as a popup)" },
+  "pages.PageSettings.formTitle": { "removedIn": "8.12.0", "use": "pages.PageSettings.titleOverride", "note": "a microflows.TextTemplate, or null to keep the page's own title" },
+  "documenttemplates.DataGridColumn": { "use": "pages.GridColumn", "note": "document templates (PDF/Word export) only; a column of a data grid on a page is pages.GridColumn" },
+  "pages.ListenTargetSource": { "use": null, "note": "data source of a data view that shows the selected row of another widget on the same page: set listenTarget to that widget's name; inputs inside leave sourceVariable null" },
+  "pages.ListenTargetSource.listenTarget": { "kind": "name", "use": null, "note": "the NAME (text) of a data grid / list view / gallery on the same page, e.g. \"dataGrid1\"; not an entity or widget object" },
+  "pages.AttributeWidget.sourceVariable": { "use": null, "note": "leave null for inputs inside a data view (also a listening one): the input uses the data view's object (Studio Pro writes SourceVariable: null)" },
+  "pages.AssociationWidget.sourceVariable": { "use": null, "note": "leave null for inputs inside a data view (also a listening one): the input uses the data view's object (Studio Pro writes SourceVariable: null)" },
+  "microflows.SequenceFlow.caseValue": { "removedIn": "10.15.0", "use": "microflows.SequenceFlow.caseValues", "note": "a list: sdk.microflows.EnumerationCase.createInSequenceFlowUnderCaseValues(flow).value = \"true\" (or an enumeration value name); NoCase for the default" },
+  "microflows.Flow.originBezierVector": { "removedIn": "10.16.0", "use": "microflows.Flow.line", "note": "leave the default line (Studio Pro routes it); microflows.BezierCurve or microflows.OrthogonalPath" },
+  "microflows.Flow.destinationBezierVector": { "removedIn": "10.16.0", "use": "microflows.Flow.line", "note": "leave the default line (Studio Pro routes it); microflows.BezierCurve or microflows.OrthogonalPath" },
+  "microflows.Flow.lineType": { "removedIn": "10.16.0", "use": "microflows.Flow.line", "note": "microflows.BezierCurve or microflows.OrthogonalPath; usually leave the default" },
+  "settings.ConstantValue.value": { "removedIn": "10.9.0", "use": "settings.ConstantValue.sharedOrPrivateValue", "note": "a settings.SharedValue (value = \"...\") or a settings.PrivateValue" },
+  "microflows.EmailMessage.subject": { "removedIn": "11.13.0", "use": "microflows.EmailMessage.subjectTemplate", "note": "a microflows.StringTemplate: text with {1} placeholders plus arguments" }
+}
+}

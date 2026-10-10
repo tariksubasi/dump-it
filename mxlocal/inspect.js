@@ -1,167 +1,134 @@
 "use strict";
 // Lookups for an agent that does not know the Model SDK by heart:
-//   api <Type>   properties, value types, enum values and createIn functions of an SDK type, for this Mendix version
-//   find <text>  elements of the project whose qualified name contains the text, with their SDK type
-const fs = require("fs");
-const path = require("path");
+//   api <Type> [word]  properties, value types, enum values and createIn functions of an SDK type for the project's
+//                      Mendix version (versions.js: SDK runtime metadata + version-rules.json)
+//   find <text>        elements of the project whose qualified name contains the text, with their SDK type
+const versions = require("./versions");
 
-const GEN = path.join(path.dirname(require.resolve("mendixmodelsdk/package.json")), "src", "gen");
+const { state, inWindow, short } = versions;
+const nsOf = key => key.split(".")[0];
+const win = (start, end) => (start && end ? `${start}-${end}` : start ? `from ${start}` : `to ${end}`);
 
-// { "<ns>.<Class>": { ns, name, ext, props: [{name, type, notes}], creates: [signature], enumValues? } } from the .d.ts files
-let declCache = null;
-function declarations() {
-    if (declCache) return declCache;
-    declCache = new Map();
-    for (const file of fs.readdirSync(GEN).filter(f => f.endsWith(".d.ts"))) {
-        const ns = file.replace(".d.ts", "");
-        const lines = fs.readFileSync(path.join(GEN, file), "utf8").split(/\r?\n/);
-        let cur = null;
-        let notes = [];
-        for (const raw of lines) {
-            const line = raw.trim();
-            const cls = /^(?:export )?(?:declare )?(?:abstract )?class (\w+)(?:<[^>]*>)? extends ([\w.]+)/.exec(line);
-            if (cls) {
-                cur = { ns, name: cls[1], ext: cls[2], props: [], creates: [], enumValues: [] };
-                declCache.set(`${ns}.${cls[1]}`, cur);
-                notes = [];
-                continue;
-            }
-            if (!cur) continue;
-            const note = /^\*\s+(In version .*)$/.exec(line);
-            if (note) {
-                notes.push(note[1]);
-                continue;
-            }
-            const get = /^get (\w+)\(\): (.+);$/.exec(line);
-            if (get && !get[1].startsWith("containerAs") && !["qualifiedName", "model"].includes(get[1])) {
-                cur.props.push({ name: get[1], type: get[2], notes });
-            }
-            const create = /^static (create\w*)\((.*)\): \w+;$/.exec(line);
-            if (create) cur.creates.push({ fn: create[1], args: create[2], notes });
-            const ev = /^static (\w+): (\w+);$/.exec(line);
-            if (ev && ev[2] === cur.name) cur.enumValues.push({ name: ev[1], notes });
-            if (!line.startsWith("*") && !line.startsWith("/**") && !line.startsWith("*/")) notes = [];
-            if (line === "}") cur = null;
-        }
-    }
-    return declCache;
-}
-
-const versionTuple = v => v.split(".").map(Number);
-function cmpVersion(a, b) {
-    for (let i = 0; i < 3; i++) if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) - (b[i] || 0);
-    return 0;
-}
-
-// Available in this Mendix version, judged from "In version X: introduced/deleted" notes.
-function available(notes, version) {
-    const v = versionTuple(version);
-    let ok = true;
-    const events = notes
-        .map(n => /In version ([\d.]+): (introduced|deleted)/.exec(n))
-        .filter(Boolean)
-        .map(m => ({ v: versionTuple(m[1]), what: m[2] }))
-        .sort((a, b) => cmpVersion(a.v, b.v));
-    for (const e of events) if (cmpVersion(v, e.v) >= 0) ok = e.what === "introduced";
-    if (events.length && events[0].what === "introduced" && cmpVersion(v, events[0].v) < 0) ok = false;
-    return ok;
-}
-
-function resolveDecl(name, ns) {
-    const d = declarations();
-    const clean = name.replace(/^internal\./, "").replace(/\s*\|\s*null$/, "");
-    if (clean.includes(".")) return d.get(clean.replace(/^(\w+)\./, (m, n) => n.toLowerCase() + "."));
-    return d.get(`${ns}.${clean}`);
-}
-
-function subtypes(decl) {
-    const out = [];
-    const target = `${decl.ns}.${decl.name}`;
-    for (const [key, c] of declarations()) {
-        let cur = c;
-        for (let i = 0; i < 10 && cur; i++) {
-            const parent = resolveDecl(cur.ext, cur.ns);
-            if (!parent) break;
-            if (`${parent.ns}.${parent.name}` === target) {
-                out.push(key);
-                break;
-            }
-            cur = parent;
-        }
-    }
-    return out;
-}
-
-// Accepts "Attribute", "domainmodels.Attribute", "DomainModels$Attribute"; returns matching declaration keys.
-function lookup(query) {
-    const d = declarations();
-    const q = query.replace("$", ".").toLowerCase();
-    const exact = [...d.keys()].filter(k => k.toLowerCase() === q || k.split(".")[1].toLowerCase() === q);
-    if (exact.length) return { exact };
-    const words = q.split(/[\s.]+/).filter(Boolean);
-    const near = [...d.keys()].filter(k => words.every(w => k.toLowerCase().includes(w)));
-    return { exact: [], near };
+// Type list relative to namespace home; long lists grouped by namespace
+function oneOf(keys, home) {
+    if (keys.length <= 16) return keys.map(k => (nsOf(k) === home ? short(k) : k)).join(", ");
+    const groups = new Map();
+    for (const k of keys) (groups.get(nsOf(k)) || groups.set(nsOf(k), []).get(nsOf(k))).push(short(k));
+    return `${keys.length} types: ` + [...groups].map(([n, names]) => `${n}: ${names.join(", ")}`).join("; ");
 }
 
 // query: "<Type> [filter]"; the filter word narrows long CREATE lists (e.g. "ObjectType Microflow").
 function api(query, version) {
+    const v = versions.normalize(version);
+    if (!v) throw new Error(`api needs the project's Mendix version, got '${version}'`);
     const [typeName, ...rest] = query.trim().split(/\s+/);
     const filter = rest.join(" ").toLowerCase();
-    const { exact, near } = lookup(typeName);
+    const cat = versions.catalog();
+    const live = k => state(cat.types[k].l, v) === "ok";
+    const head = versions.cmp(v, cat.max) > 0 ? `(Mendix ${v} is newer than this Model SDK (up to ${cat.max}); it cannot change this project)\n` : "";
+    const { exact, near } = versions.lookup(typeName);
     if (!exact.length) {
-        if (!near.length) return `No SDK type matches '${query}'. Try a shorter word, e.g. api Retrieve.`;
-        return `No exact type '${query}'. Types containing it:\n` + near.slice(0, 60).map(k => "  " + k).join("\n");
+        const hits = near.filter(live), gone = near.filter(k => !live(k)).slice(0, 8);
+        const out = [];
+        if (hits.length) out.push(`No exact type '${typeName}'. Types containing it in Mendix ${v}:`, ...hits.slice(0, 60).map(k => "  " + k), ...(hits.length > 60 ? [`  ... ${hits.length - 60} more; use a longer word`] : []));
+        else {
+            const s = [...new Set(require("./ops-util").suggest(typeName, Object.keys(cat.types).filter(live).map(short), 5))];
+            out.push(`No SDK type '${typeName}' in Mendix ${v}.` + (s.length ? ` Did you mean: ${s.join(", ")}?` : " Try a shorter word, e.g. api Retrieve."));
+        }
+        for (const k of gone) {
+            const l = cat.types[k].l, r = versions.rewrite(k);
+            out.push(`NOT IN MENDIX ${v}: ${k} (${state(l, v) === "removed" ? `removed in ${l[1]}${r && r.use ? "; use " + r.use : ""}` : `from ${l[0]}`})`);
+        }
+        return head + out.join("\n");
     }
-    return exact.map(k => describe(k, version, filter)).join("\n\n");
+    const rank = k => (live(k) ? 0 : 2) + (nsOf(k) === "pages" ? 0 : 1); // available first, pages before documenttemplates
+    return head + exact.sort((a, b) => rank(a) - rank(b)).map(k => describe(k, v, filter)).join("\n\n");
 }
 
-function describe(key, version, filter) {
-    const decl = declarations().get(key);
+function describe(key, v, filter) {
+    const cat = versions.catalog();
+    const t = cat.types[key];
     const out = [];
-    const chain = [];
-    let cur = decl;
-    const props = [];
-    const creates = decl.creates.filter(c => available(c.notes, version));
-    for (let i = 0; i < 10 && cur; i++) {
-        chain.push(cur.name);
-        for (const p of cur.props) if (!props.some(x => x.name === p.name)) props.push({ ...p, from: cur });
-        cur = resolveDecl(cur.ext, cur.ns);
-    }
-    const isEnum = decl.enumValues.length > 0;
-    out.push(`sdk.${key}   (Mendix ${version}; extends ${chain.slice(1).join(" > ") || decl.ext})`);
-    if (isEnum) {
-        out.push("ENUM values: " + decl.enumValues.filter(v => available(v.notes, version)).map(v => `${key}.${v.name}`).join(", "));
+    if (t.e) {
+        out.push(`sdk.${key}   (Mendix ${v}; enumeration)`);
+        out.push("ENUM values: " + t.e.filter(e => state(e.slice(1), v) === "ok").map(e => `${key}.${e[0]}`).join(", "));
+        const gone = t.e.filter(e => state(e.slice(1), v) !== "ok").map(e => `${e[0]} (${state(e.slice(1), v) === "removed" ? "removed in " + e[2] : "from " + e[1]})`);
+        if (gone.length) out.push(`NOT IN MENDIX ${v}: ${gone.join(", ")}`);
         return out.join("\n");
     }
-    const subs = subtypes(decl);
-    if (subs.length) out.push("ABSTRACT? use one of these subtypes: " + subs.slice(0, 40).join(", "));
-    if (creates.length) {
-        out.push("CREATE:");
-        const shown = creates.filter(c => !filter || c.fn === "create" || `${c.fn}(${c.args})`.toLowerCase().includes(filter));
+    const chain = versions.chain(key);
+    out.push(`sdk.${key}   (Mendix ${v}; extends ${chain.slice(1).map(short).join(" > ") || "Element"})`);
+    const s = state(t.l, v);
+    if (s !== "ok") {
+        const r = versions.rewrite(key);
+        const use = r && r.use && /\b[a-z]+\.([A-Z]\w*)/.exec(r.use);
+        if (s === "removed") out.push(`NOT IN MENDIX ${v}: removed in ${t.l[1]}. ${versions.advice(r) || "No replacement is recorded."}`);
+        else out.push(`NOT IN MENDIX ${v}: introduced in ${t.l[0]}.`);
+        out.push(`Do not create or assign it.${use ? ` See: api ${use[1]}` : ""}`);
+        return out.join("\n");
+    }
+    const rule = versions.rewrite(key);
+    if (rule && rule.note && !rule.removedIn) out.push("NOTE: " + rule.note);
+    else if (nsOf(key) === "documenttemplates") out.push("NOTE: document templates (PDF/Word export) only, not pages.");
+    const subs = versions.concrete(key, v).filter(k => k !== key);
+    if (!t.c.length && subs.length) out.push(`ABSTRACT: create one of these instead: ${oneOf(subs, nsOf(key))}`);
+    else if (subs.length) out.push(`SUBTYPES: ${oneOf(subs, nsOf(key))}`);
+    if (t.c.length) {
+        const match = c => !filter || `${c[0]}(${c[1]})`.toLowerCase().includes(filter);
+        const ok = t.c.filter(c => c[0] !== "create" && inWindow(c[2], c[3], v) && match(c));
         const max = filter ? 40 : 6;
-        for (const c of shown.slice(0, max)) out.push(`  sdk.${key}.${c.fn}(${c.args})`);
-        if (shown.length > max) out.push(`  ... ${shown.length - max} more. Narrow it: api ${decl.name} <parent word>, or use create(model) and assign: parent.prop = x`);
+        out.push(`CREATE (Mendix ${v}):`);
+        for (const c of ok.slice(0, max)) out.push(`  sdk.${key}.${c[0]}(${c[1]})`);
+        if (ok.length > max) out.push(`  ... ${ok.length - max} more. Narrow it: api ${short(key)} <parent word>, or use create(model) and assign: parent.prop = x`);
+        if (t.c.some(c => c[0] === "create")) out.push(`  sdk.${key}.create(model)`);
+        const no = t.c.filter(c => !inWindow(c[2], c[3], v) && match(c)).map(c => `${c[0]} [${win(c[2], c[3])}]`);
+        if (no.length) out.push(`  NOT IN MENDIX ${v} (do not call): ${no.slice(0, filter ? 40 : 4).join(", ")}${no.length > (filter ? 40 : 4) ? `, +${no.length - (filter ? 40 : 4)} more` : ""}`);
     }
-    const missing = [];
+    const seen = new Set(), lists = new Map(), removed = [], quiet = [], later = [];
     out.push("PROPERTIES:");
-    for (const p of props) {
-        if (!available(p.notes, version)) {
-            missing.push(p.name);
-            continue;
+    for (const k of chain) {
+        for (const p of cat.types[k].p) {
+            if (seen.has(p[0])) continue;
+            seen.add(p[0]);
+            const life = p.length > 2 ? p.slice(2) : null;
+            const st = state(life, v);
+            const r = versions.rewrite(`${k}.${p[0]}`);
+            if (st === "removed") {
+                const adv = versions.advice(r);
+                if (adv) removed.push(`  ${p[0]}: removed in ${life[1]}. ${adv}`);
+                else quiet.push(`${p[0]} (${life[1]})`);
+            } else if (st === "new") later.push(`${p[0]} (${life[0]})`);
+            else {
+                out.push(propLine(k, p, v, lists));
+                if (r && r.note && !r.removedIn) out.push(`    NOTE: ${r.note}`);
+            }
         }
-        let line = `  ${p.name}: ${p.type}`;
-        const listOf = /IList<(.+)>/.exec(p.type);
-        const t = resolveDecl(listOf ? listOf[1] : p.type, p.from.ns);
-        if (t && t.enumValues.length) line += "  = " + t.enumValues.filter(v => available(v.notes, version)).map(v => v.name).join(" | ");
-        else if (t) {
-            const s = subtypes(t);
-            if (s.length) line += "  (one of: " + s.slice(0, 12).map(x => x.split(".")[1]).join(", ") + (s.length > 12 ? ", ..." : "") + ")";
-        }
-        if (listOf) line += "  [list: .push(x) / .remove(x)]";
-        out.push(line);
     }
-    if (missing.length) out.push("NOT IN THIS MENDIX VERSION (do not use): " + missing.join(", "));
+    if (removed.length || quiet.length) out.push(`NOT IN MENDIX ${v} (do not use):`, ...removed);
+    if (quiet.length) out.push(`  also removed: ${quiet.join(", ")}`);
+    if (later.length) out.push(`NOT YET IN MENDIX ${v} (added later): ${later.join(", ")}`);
     return out.join("\n");
+}
+
+// "  name: type  = A | B" / "(one of: ...)" / "[list ...]"; one-of lists come from the createIn functions valid at v
+function propLine(declKey, p, v, lists) {
+    const [name, type] = p;
+    let line = `  ${name}: ${type}`;
+    const listOf = /IList<(.+)>/.exec(type);
+    const tk = versions.resolve(listOf ? listOf[1] : type, nsOf(declKey));
+    const tt = tk && versions.catalog().types[tk];
+    if (tt && tt.e) line += "  = " + tt.e.filter(e => state(e.slice(1), v) === "ok").map(e => e[0]).join(" | ");
+    else if (tt) {
+        let opts = versions.placement(declKey, name, v);
+        if (!opts.length) opts = versions.concrete(tk, v);
+        if (opts.length > 1 || (opts.length === 1 && opts[0] !== tk)) {
+            const text = oneOf(opts, nsOf(declKey));
+            line += lists.has(text) ? `  (one of: same as ${lists.get(text)})` : `  (one of: ${text})`;
+            if (!lists.has(text)) lists.set(text, name);
+        }
+    }
+    if (listOf) line += "  [list: .push(x) / .remove(x)]";
+    return line;
 }
 
 // Every named element: units (Module.Doc) and elements inside them (Module.Entity, Module.Entity.Attribute, ...).
