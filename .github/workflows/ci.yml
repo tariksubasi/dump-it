@@ -1,0 +1,28 @@
+name: CI
+
+# Agent docs check, export smoke test and the mxlocal selftest on 16 public Mendix projects (Mendix 10.22 - 11.14).
+on:
+  push:
+    branches: [main, "feature/**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  selftest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Cache test projects
+        uses: actions/cache@v4
+        with:
+          path: .ci-projects
+          key: ci-projects-${{ hashFiles('scripts/ci.sh') }}
+      - name: Run CI
+        run: bash scripts/ci.sh

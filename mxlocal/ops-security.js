@@ -119,7 +119,10 @@ function makeSecurity(h) {
             if (ps.demoUsers.some(x => x.userName === o.userName)) throw new Error(`demo user ${o.userName} already exists`);
             const roles = [].concat(o.userRoles || []).map(n => userRole(ps, n));
             if (!roles.length) throw new Error("createDemoUser needs at least one user role in 'userRoles'");
-            const entityName = o.entity || (ps.demoUsers.length && ps.demoUsers[0].entityQualifiedName) || "System.User";
+            // default: the entity the other demo users use, when it still exists (a removed Administration module
+            // leaves demo users pointing at Administration.Account); else System.User
+            let entityName = o.entity || (ps.demoUsers.length && ps.demoUsers[0].entityQualifiedName) || "System.User";
+            if (!o.entity && entityName !== "System.User") entityName = await get(entityName).then(() => entityName, () => "System.User");
             const e = entityName === "System.User" ? null : await get(entityName);
             if (e && !(e instanceof dm.Entity)) throw new Error(`'${entityName}' is not an entity`);
             const d = security.DemoUser.createIn(ps);

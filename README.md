@@ -344,6 +344,13 @@ isteği düz yazıyla yaz (örnek: `Değişikliğimi kontrol et, guides/CHECK.tx
 
 ---
 
+## Otomatik test (CI)
+
+Her push'ta GitHub Actions `scripts/ci.sh` çalıştırır: doküman örnekleri (`doccheck`), 16 herkese açık Mendix
+projesinin (10.22 – 11.14) export'u ve her birinde `mxlocal selftest`. Projeler sabit commit'lere bağlıdır; kırmızı bir
+çalışma her zaman dump-it'teki bir değişiklik demektir. Yerelde: `bash scripts/ci.sh` (projeleri `.ci-projects`
+klasörüne indirir, ~1 GB).
+
 ## Lisanslar
 
 - `mxlocal/node_modules/mendixmodelsdk`: Mendix Model SDK, MIT lisansı.
