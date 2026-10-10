@@ -11,7 +11,7 @@ const { Project } = require("./mpr");
 const { LocalClient, loadProject } = require("./client");
 const { lostProperties } = require("./lost");
 
-function plans(mod, T) {
+function plans(mod, T, userRole) {
     const role = `${mod}.ZzRole`;
     const E = `${mod}.${T}`;
     const phase1 = { ops: [
@@ -71,9 +71,65 @@ function plans(mod, T) {
         { op: "createMicroflow", module: mod, name: `${T}_Rest`, folder: "ZzTest", parameters: [{ name: "Id", type: "Long" }], returns: "String", returnValue: "'ok'" },
         { op: "publishRest", module: mod, service: `${T}API`, resource: "items", method: "Get", path: "{Id}", microflow: `${E}_Rest`, roles: [role], folder: "ZzTest" },
         { op: "grantAccess", document: `${E}_Sub`, roles: [role] },
+        // dashboard: grid + read-only data view listening to it (side by side), texts, a layout grid with a list view and
+        // its data view, buttons, a menu item and home pages
+        { op: "createPage", module: mod, name: `${T}_Dash`, entity: E, folder: "ZzTest", roles: [role], menu: "Responsive", widgets: [
+            { widget: "text", text: "Dashboard", style: "H2" },
+            { widget: "dataGrid", columns: ["Title", "Count", "Status", "When", "Flag"] },
+            { widget: "dataView", listenTo: "dataGrid", editable: false },
+            { widget: "layoutGrid", columns: [
+                { weight: 6, widgets: [{ widget: "listView", fields: ["Title"] }] },
+                { weight: 6, widgets: [{ widget: "dataView", listenTo: "listView", fields: ["Title", "Amount"], widgets: [{ widget: "text", text: "Count: {Count}" }],
+                    footer: [{ widget: "actionButton", action: "save", closePage: false }, { widget: "actionButton", action: "callNanoflow", nanoflow: `${E}_NF`, caption: "Check" }] }] }] },
+            { widget: "container", widgets: [{ widget: "actionButton", action: "showPage", page: `${E}_Home`, caption: "Home" }] }] },
+        { op: "addMenuItem", page: `${E}_Home`, caption: "Zz home" },
+        { op: "setHomePage", page: `${E}_Dash` },
+        ...(userRole ? [{ op: "setHomePage", page: `${E}_Home`, roles: [userRole] }] : []),
         { op: "moveDocument", document: `${E}_Job`, folder: "ZzTest/Moved" }
     ] };
     return { phase1, role, E };
+}
+
+const walkPlain = (o, fn) => {
+    if (Array.isArray(o)) return o.forEach(x => walkPlain(x, fn));
+    if (!o || typeof o !== "object" || Buffer.isBuffer(o)) return;
+    if (o.$Type) fn(o);
+    for (const v of Object.values(o)) if (v && typeof v === "object") walkPlain(v, fn);
+};
+
+// The dashboard as stored: listening data views point at a grid/list view by name, their inputs have SourceVariable
+// null (as Studio Pro writes them), the grid has an XPath source, and the menu and home pages open the new pages.
+function dashboardProblems(project, mod, T, userRole) {
+    const r = [];
+    let page = null, nav = null;
+    for (const id of project.units.keys()) {
+        const u = project.read(id);
+        if (u.$Type === "Forms$Page" && u.Name === `${T}_Dash`) page = u;
+        if (u.$Type === "Navigation$NavigationDocument") nav = u;
+    }
+    if (!page) return ["page missing"];
+    const all = [];
+    walkPlain(page, o => all.push(o));
+    const named = new Map(all.filter(o => o.Name).map(o => [o.Name, o]));
+    const listens = all.filter(o => o.$Type === "Forms$DataView" && o.DataSource && o.DataSource.$Type === "Forms$ListenTargetSource");
+    if (listens.length !== 2) r.push(`${listens.length} listening data views, expected 2`);
+    for (const dv of listens) {
+        const t = named.get(dv.DataSource.ListenTarget);
+        if (!t || !/^Forms\$(DataGrid|ListView)$/.test(t.$Type)) r.push(`${dv.Name} listens to '${dv.DataSource.ListenTarget}', which is no grid or list view`);
+        walkPlain(dv.Widgets, o => {
+            if (/^Forms\$(TextBox|TextArea|CheckBox|DatePicker|DropDown)$/.test(o.$Type) && o.SourceVariable !== null) r.push(`${o.Name} in ${dv.Name} has a SourceVariable (Studio Pro writes null)`);
+        });
+    }
+    const grid = all.find(o => o.$Type === "Forms$DataGrid");
+    if (!grid || grid.Columns.length !== 5 || grid.DataSource.$Type !== "Forms$GridXPathSource") r.push("no 5-column grid with an XPath source");
+    const prof = nav && nav.Profiles.find(p => p.Kind === "Responsive");
+    if (!prof) return r.concat("no Responsive navigation profile");
+    const items = [];
+    walkPlain(prof.Menu, o => o.$Type === "Forms$FormAction" && items.push(o.FormSettings.Form));
+    for (const p of [`${T}_Dash`, `${T}_Home`]) if (!items.includes(`${mod}.${p}`)) r.push(`menu has no item for ${p}`);
+    if (prof.HomePage.Page !== `${mod}.${T}_Dash`) r.push(`home page is ${prof.HomePage.Page}`);
+    if (userRole && !(prof.HomeItems || []).some(h => h.UserRole === userRole && h.Page === `${mod}.${T}_Home`)) r.push(`no home page for ${userRole}`);
+    return r;
 }
 
 // Keys and BSON kinds Studio Pro writes per type, from this project's own data (before the change).
@@ -134,16 +190,24 @@ async function selftest(mpr, keep, { out, relevant }) {
         let s1 = await reopen(copy);
         const custom = s1.model.allModules().filter(m => !m.fromAppStore);
         const mod = (custom.find(m => m.name === "MyFirstModule") || custom[0] || s1.model.allModules()[0]).name;
-        const { phase1, E } = plans(mod, T);
+        const sec = s1.model.allProjectSecurities()[0];
+        const userRoles = sec ? (await sec.load()).userRoles.map(u => u.name) : [];
+        const userRole = userRoles.includes("Administrator") ? "Administrator" : userRoles[0];
+        const { phase1, E } = plans(mod, T, userRole);
         // pages copy a layout from the project's own pages; a project without any cannot get pages
         const layouts = new Set(s1.model.allLayouts().map(l => l.qualifiedName));
         const pageable = [...s1.ctx.project.units.keys()].some(id => {
             const p = s1.ctx.project.read(id);
             return p.$Type === "Forms$Page" && p.FormCall && layouts.has(p.FormCall.Form);
         });
+        const web = s1.model.allNavigationDocuments().length && (await s1.model.allNavigationDocuments()[0].load()).profiles.some(p => p instanceof require("mendixmodelsdk").navigation.NavigationProfile && p.name === "Responsive");
         if (!pageable) {
-            phase1.ops = phase1.ops.filter(o => o.op !== "createPage" && o.name !== `${T}_Open`);
-            results.push("SKIP pages: this project has no page with a layout to copy");
+            phase1.ops = phase1.ops.filter(o => !["createPage", "addMenuItem", "setHomePage"].includes(o.op) && o.name !== `${T}_Open`);
+            results.push("SKIP pages and dashboard: this project has no page with a layout to copy");
+        } else if (!web) {
+            phase1.ops = phase1.ops.filter(o => !["addMenuItem", "setHomePage"].includes(o.op));
+            phase1.ops.forEach(o => delete o.menu);
+            results.push("SKIP menu and home page: this project has no Responsive navigation profile");
         }
         const layout = ownLayout(s1.ctx.catalog);
         const lint = await s1.ops.runPlan(phase1, () => {});
@@ -177,6 +241,10 @@ async function selftest(mpr, keep, { out, relevant }) {
         let s2 = await reopen(copy);
         const failed = await s2.ops.checkPlan({ ops: [...phase1.ops, ...phase2.ops] });
         check("saved model shows every op", !failed.length, failed.join("; "));
+        if (pageable) {
+            const dash = dashboardProblems(s2.ctx.project, mod, T, web ? userRole : null);
+            check("dashboard stored like Studio Pro (listen target, inputs, menu, home pages)", !dash.length, dash.join("; "));
+        }
 
         // phase 3: attribute rename + module rename
         const phase3 = { ops: [{ op: "rename", target: `${E}.Flag`, newName: "Active" }, { op: "rename", target: mod, newName: `${mod}Zz` }] };

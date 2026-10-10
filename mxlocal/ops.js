@@ -11,7 +11,7 @@ const { ATTRIBUTE_TYPES, DATA_TYPES, suggest, fail, validate, bool, noDollar, en
 
 
 const { makeFlows, ACTIONS, CONTROL, COMMON } = require("./ops-flows");
-const { makePages, PAGE_FIELDS } = require("./ops-pages");
+const { makePages, PAGE_FIELDS, MENU_FIELDS, HOME_FIELDS } = require("./ops-pages");
 
 const OPS = {
     createEntity: {
@@ -73,7 +73,9 @@ const OPS = {
         doc: "Run a microflow (without parameters) on a schedule.",
         fields: { module: "R module name", name: "R event name", microflow: "R Module.Microflow", every: "R Minute | Hour | Day | Week", interval: "optional number for Minute/Hour (default 1)", at: "optional time HH:MM for Day/Week, minutes MM for Hour (default 00:00)", days: "Week: [ \"Monday\", ... ]", enabled: "optional true/false (default false)", timeZone: "optional UTC | Server (default UTC)", onOverlap: "optional DelayNext | SkipNext (default DelayNext)", folder: "optional folder path" }
     },
-    createPage: { doc: "Create a page: an edit form for an entity (inputs by attribute type, Save/Cancel), or an empty page. Uses the layout the project's other pages use.", fields: PAGE_FIELDS },
+    createPage: { doc: "Create a page: an edit form for an entity (inputs by attribute type, Save/Cancel), an empty page, or a page from widgets (layout grids, texts, data grids, data views that listen to a grid, list views, buttons, inputs), optionally with a menu item. Uses the layout the project's other pages use.", fields: PAGE_FIELDS },
+    addMenuItem: { doc: "Add a menu item that opens a page to a navigation profile's menu.", fields: MENU_FIELDS },
+    setHomePage: { doc: "Set the home page (or home microflow) of a navigation profile, for everyone or for some user roles.", fields: HOME_FIELDS },
     publishRest: {
         doc: "Publish a microflow as a REST operation (creates the service and resource when missing). Microflow parameters become path parameters when the path has {Name}, otherwise query parameters. Object parameters/results need mappings: do those in Studio Pro.",
         fields: { module: "R module name", service: "R service name, e.g. OrderAPI", resource: "R resource name, e.g. orders", method: "R Get | Post | Put | Patch | Delete", microflow: "R Module.Microflow", path: "optional operation path, e.g. {OrderId} (default empty)", servicePath: "optional base path for a new service (default rest/<service>/v1)", authentication: "optional [ \"Basic\" | \"Session\" | \"Microflow\" | \"None\" ] for a new service (default [\"Basic\"])", roles: "optional [ \"Module.Role\" ] allowed to call the service", folder: "optional folder path for a new service" }
@@ -337,7 +339,7 @@ function bind(model, client) {
     }
 
     const flows = makeFlows({ model, get, entity, text, dataType, attributeChain, loadParents });
-    const pageOps = makePages({ model, client, get, exists, entity, text, folder, attributeChain, loadParents });
+    const pageOps = makePages({ model, client, get, exists, entity, text, folder, attributeChain, loadParents, grantAccess: o => impl.grantAccess(o) });
 
     // ------------------------------------------------ operations
 
@@ -667,11 +669,9 @@ function bind(model, client) {
             } else fail(`'every' must be Minute | Hour | Day | Week, got '${o.every}'`, o.every, ["Minute", "Hour", "Day", "Week"]);
             return `${qn}: every ${unit === "minute" || unit === "hour" ? interval + " " : ""}${unit}${unit === "day" || unit === "week" ? " at " + String(hour).padStart(2, "0") + ":" + String(minute).padStart(2, "0") : ""} -> ${o.microflow}${ev.enabled ? "" : " (disabled)"}`;
         },
-        createPage: async o => {
-            const r = await pageOps.createPage(o);
-            if (o.roles) await impl.grantAccess({ document: `${o.module}.${o.name}`, roles: o.roles });
-            return r;
-        },
+        createPage: o => pageOps.createPage(o), // grants o.roles, adds o.menu
+        addMenuItem: o => pageOps.addMenuItem(o),
+        setHomePage: o => pageOps.setHomePage(o),
         async publishRest(o) {
             const mfl = await get(o.microflow);
             if (!(mfl instanceof mf.Microflow)) throw new Error(`'${o.microflow}' is not a microflow`);
@@ -858,12 +858,9 @@ function bind(model, client) {
             const ev = await get(`${o.module}.${o.name}`);
             return ev.microflowQualifiedName === o.microflow && ev.schedule ? [] : [`${o.module}.${o.name} is incomplete`];
         },
-        async createPage(o) {
-            const page = await get(`${o.module}.${o.name}`);
-            const r = [];
-            if (o.entity && !page.parameters.length) r.push(`${o.module}.${o.name} has no page parameter`);
-            return r;
-        },
+        createPage: o => pageOps.checks.createPage(o),
+        addMenuItem: o => pageOps.checks.addMenuItem(o),
+        setHomePage: o => pageOps.checks.setHomePage(o),
         async publishRest(o) {
             const svc = await get(`${o.module}.${o.service}`);
             const res = svc.resources.find(x => x.name === o.resource);
