@@ -105,7 +105,9 @@ senin onayını ister.
 
 `mxlocal`, resmi **Mendix Model SDK**'yı internetsiz, doğrudan yerel `.mpr` dosyası üzerinde çalıştırır. OpenCode
 kod yazmaz; hazır ve test edilmiş **işlemlerden** bir değişiklik dosyası doldurur. Mendix 10 / 11 (MPR v2) projeleri
-için. Ek kurulum yok: gerekli her şey `C:\tools\dump-it\mxlocal` içinde gelir.
+için. Ek kurulum yok: gerekli her şey `C:\tools\dump-it\mxlocal` içinde gelir. İlk komut bütün modeli okur ve
+`.mxlocal-backup\cache.bin` önbelleğini yazar; sonraki komutlar sadece değişen dokümanları yeniden okur (Mendix 11.6
+örnek projede dry run ~2,2 sn → ~0,6 sn).
 
 | Alan | Yapabildikleri |
 |---|---|
