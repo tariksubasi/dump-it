@@ -202,6 +202,10 @@ async function selftest(mpr, keep, { out, relevant }) {
         }
         await s3.model.flushChanges();
         check("reopen with the Model SDK", !errors.length && !s3.client.log.length, errors.length ? errors[0] : s3.client.log.length ? `${s3.client.log.length} deltas on open` : "");
+        const vr = require("./versions").checkRules();
+        const dv = require("./inspect").api("DataView", src.version);
+        const apiOk = /editability/.test(dv) && /ListenTargetSource/.test(dv) && !/^\s+editable: boolean/m.test(dv);
+        check(`api for Mendix ${src.version} + version rules`, !vr.problems.length && apiOk, vr.problems.length ? vr.problems.slice(0, 5).join("; ") : apiOk ? `${vr.rules} rules match the SDK` : "api DataView lacks editability/ListenTargetSource");
 
         out(`Self test on a copy (module ${mod}, Mendix ${src.meta._ProductVersion}):`);
         out(results.map(r => "  " + r).join("\n"));

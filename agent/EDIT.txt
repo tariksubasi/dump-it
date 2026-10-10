@@ -140,7 +140,9 @@ SDK SCRIPTS (only in folders exported with --allow-scripts; otherwise mx.py refu
     };
   Before using a type, read its properties and create functions for this Mendix version:
     @PY@ mx.py api <Type> [parent word]       e.g. @PY@ mx.py api ObjectType MicroflowParameterObject
-  Use only properties listed there; "NOT IN THIS MENDIX VERSION" ones fail.
+  Use only what is listed there. "NOT IN MENDIX <version>" lines fail and name the replacement
+  (GridDatabaseSource -> GridXPathSource, DataView.editable -> editability). Follow the NOTE lines
+  (listenTarget = a widget NAME, not an entity). Version errors in a dry run end with a HINT naming the fix.
   Microflow objects go in mf.objectCollection, flows in mf.flows (SequenceFlow origin/destination).
   The dry run reports NOT STORED values: fix the script until there are none.
 
