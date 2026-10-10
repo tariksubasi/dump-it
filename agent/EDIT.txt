@@ -7,22 +7,24 @@ R3. Write change files only in edits/. Never edit other files in this folder: th
 
 STEP 1 - FIND THE NAMES
   Find the exact names of everything you will touch (case matters):
-    @PY@ mx.py find <part of a name>          (or tool mx_find)
+    @PY@ mx.py find <part of a name>          (or the find tool)
   Read the related files in modules/ when you need the current logic.
   To change or delete ONE existing step of a microflow/nanoflow, get the step ids first:
-    @PY@ mx.py steps <Module.Flow>             (or tool mx_steps)
+    @PY@ mx.py steps <Module.Flow>             (or the steps tool)
 
 STEP 2 - WRITE THE CHANGE FILE
   Pick the operations (one line each), then read the fields of the ones you use:
-    @PY@ mx.py ops                            (or tool mx_ops)
+    @PY@ mx.py ops                            (or the ops tool)
     @PY@ mx.py ops <name>                     e.g. @PY@ mx.py ops createPage
   Write edits/<short-name>.json. Use ONLY operations and fields from that output. Several operations in one file are
   fine; they run in order. Never delete a change file that worked: it is the record of what was applied.
-  No operation fits: run @PY@ mx.py gap "<what the user wants>" (or tool mx_gap), then give the user the exact
+  No operation fits: run @PY@ mx.py gap "<what the user wants>" (or the gap tool), then give the user the exact
   Studio Pro steps. Do not write a .js script unless this folder allows scripts (see SDK SCRIPTS).
 
 STEP 3 - DRY RUN (writes nothing)
-    @PY@ mx.py dryrun <short-name>            (or tool mx_dryrun)
+    @PY@ mx.py dryrun <short-name>            (or the dryrun tool)
+  FASTEST: the plan tool does STEP 2 and STEP 3 in one call: give it the short name and the ops list; it saves
+  edits/<short-name>.json and dry-runs it.
   If it prints ERROR: read the HINT line, fix the file, run again. After 5 failed tries: stop, show the user the
   last error and ask for help.
   If it prints EXPRESSION CHECK lines: fix the names in the change file and run again (Studio Pro would show errors).

@@ -116,6 +116,8 @@ AGENT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent")
 KEEP = {".git", "edits", ".opencode", ".claude"}  # survive re-exports: history, change files, agents' own files
 # mx.py commands an agent may run without asking: lookups, dry runs and the export's own history. apply/undo always ask.
 SAFE_MX_COMMANDS = ("help", "refresh", "find", "steps", "ops", "api", "dryrun", "rerun", "gap", "check", "ok", "selftest")
+# Tools of the mxlocal MCP server (mxlocal/serve.js) that may run without asking: none of them writes the model.
+MCP_TOOLS = ("find", "steps", "ops", "api", "plan", "dryrun", "gap")
 # git commands that could rewrite the export history, touch the Mendix project's repo (-C) or send data out.
 GIT_DENY = ("-C", "push", "remote", "reset", "clean", "checkout", "restore", "switch", "rebase", "stash", "rm",
             "filter-branch", "update-ref", "config", "gc", "reflog", "submodule", "worktree", "commit --amend")
@@ -128,6 +130,8 @@ def parse_args():
     ap.add_argument("--include-marketplace", action="store_true", help="also export marketplace modules in detail")
     ap.add_argument("--show-constant-values", action="store_true", help="write constant default values (may contain secrets)")
     ap.add_argument("--no-opencode-tools", action="store_true", help="do not write OpenCode custom tools (.opencode/tools)")
+    ap.add_argument("--no-mcp", action="store_true",
+                    help="do not register the mxlocal MCP server (OpenCode gets its slower custom tools instead)")
     ap.add_argument("--allow-scripts", action="store_true",
                     help="let the agent dry-run .js Model SDK scripts (they run with full rights before approval)")
     return ap.parse_args()
@@ -248,6 +252,7 @@ class Exporter:
         flags = [flag for flag, on in (("--include-marketplace", self.args.include_marketplace),
                                        ("--show-constant-values", self.args.show_constant_values),
                                        ("--no-opencode-tools", self.args.no_opencode_tools),
+                                       ("--no-mcp", self.args.no_mcp),
                                        ("--allow-scripts", self.args.allow_scripts)) if on]
         config = {"mxcontext": os.path.abspath(__file__), "mpr": os.path.abspath(self.project.mpr),
                   "export_flags": flags, "mxlocal": mxlocal, "mx_exe": self._mx_exe(),
@@ -264,7 +269,12 @@ class Exporter:
             if name == "degistir.md" and not can_edit or name == "geri-al.md" and not can_edit:
                 continue
             self._write(".opencode/commands/" + name, fill(self._agent_template("commands", name)))
-        if not self.args.no_opencode_tools:
+        # The MCP server keeps the model loaded (dry run in a fraction of a second). Without it, OpenCode gets custom
+        # tools that start Python and Node per call.
+        mcp = can_edit and not self.args.no_mcp
+        node = shutil.which("node") or "node"
+        serve = [node, mxlocal, "serve", "--project", os.path.abspath(self.project.mpr), "--edits", os.path.join(self.out, "edits")]
+        if not self.args.no_opencode_tools and not mcp:
             exe = sys.executable
             self._write(".opencode/tools/mx.js", self._agent_template("tools", "mx.js").replace("@PYTHON_JSON@", json.dumps(exe)))
 
@@ -280,16 +290,22 @@ class Exporter:
                     "instructions": ["AI_GUIDE.txt"],
                     "permission": {"edit": edit, "bash": bash},
                     "agent": {"build": {"temperature": 0.1}, "plan": {"temperature": 0.1}}}
+        if mcp:
+            settings["mcp"] = {"mendix": {"type": "local", "command": serve, "enabled": True}}
+            self._write(".mcp.json", json.dumps({"mcpServers": {"mendix": {"command": serve[0], "args": serve[1:]}}}, indent=2) + "\n")
         self._write("opencode.json", json.dumps(settings, indent=2) + "\n")
 
         # Claude Code: same gate. apply/undo ask the user; the agent cannot loosen its own rules or rewrite history.
         mx = lambda c: "Bash(%s mx.py %s:*)" % (py, c)  # noqa: E731
         claude = {"permissions": {
-            "allow": [mx(c) for c in SAFE_MX_COMMANDS] + ["Edit(edits/**)", "Write(edits/**)"],
+            "allow": [mx(c) for c in SAFE_MX_COMMANDS] + ["Edit(edits/**)", "Write(edits/**)"] +
+                     (["mcp__mendix__%s" % t for t in MCP_TOOLS] if mcp else []),
             "ask": [mx("apply"), mx("undo")],
             "deny": ["Bash(git %s:*)" % c for c in GIT_DENY] +
                     ["%s(%s)" % (tool, f) for tool in ("Edit", "Write") for f in
-                     (".claude/**", "opencode.json", ".opencode/**", "mx.py", "AI_GUIDE.txt", "CLAUDE.md", "guides/**")]}}
+                     (".claude/**", "opencode.json", ".opencode/**", ".mcp.json", "mx.py", "AI_GUIDE.txt", "CLAUDE.md", "guides/**")]}}
+        if mcp:
+            claude["enabledMcpjsonServers"] = ["mendix"]
         self._write(".claude/settings.json", json.dumps(claude, indent=2) + "\n")
 
     def _stage_history(self, git):
@@ -309,7 +325,7 @@ class Exporter:
             with open(exclude, "a+", encoding="utf-8") as f:
                 f.seek(0)
                 present = f.read().split()
-                f.write("".join(p + "\n" for p in ("edits/", ".opencode/", ".claude/") if p not in present))
+                f.write("".join(p + "\n" for p in ("edits/", ".opencode/", ".claude/", ".mcp.json") if p not in present))
             run("add", "-A")
             if fresh:
                 run("commit", "-q", "-m", "baseline")

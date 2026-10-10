@@ -25,7 +25,8 @@ const pending = require("./pending");
 const { lostProperties } = require("./lost");
 const inspect = require("./inspect");
 
-const out = s => process.stdout.write(s + "\n");
+let out = s => process.stdout.write(s + "\n");
+const setOutput = fn => (out = fn); // serve.js collects the output of a command instead of printing it
 
 const USAGE = `mxlocal - Mendix Model SDK offline on a local .mpr (v2)
 
@@ -44,6 +45,8 @@ const USAGE = `mxlocal - Mendix Model SDK offline on a local .mpr (v2)
   node mxlocal.js steps <Module.Flow> --project <app.mpr|folder>
                                         the steps of a microflow/nanoflow with ids (for changeAction/deleteAction)
   node mxlocal.js ops [name]            the operations a change.json can use (with a name: its fields)
+  node mxlocal.js serve --project ... --edits <dir> [--allow-apply]
+                                        MCP server (stdio) with these commands as tools; keeps the project loaded
   node mxlocal.js verify --project ...  read-only self check (byte roundtrip + SDK mapping)
   node mxlocal.js open --project ...    load every unit through the Model SDK, report problems
   node mxlocal.js selftest --project ... [--keep]
@@ -216,9 +219,10 @@ function loadChange(file, allowJs) {
     return { fn };
 }
 
-async function run(file, mpr, allowJs) {
+// ctx: an already loaded project (serve.js keeps one in memory); otherwise it is loaded here.
+async function run(file, mpr, allowJs, ctx) {
     const change = loadChange(file, allowJs);
-    const ctx = await loadProject(mpr);
+    ctx = ctx || (await loadProject(mpr));
     const fingerprint = ctx.project.fingerprint();
     const client = new LocalClient(ctx);
     const model = await client.open();
@@ -244,7 +248,8 @@ async function run(file, mpr, allowJs) {
     for (const x of s.renames) say("  rename " + x);
     if (!s.created.length && !s.updated.length && !s.deleted.length && !s.moved.length) {
         pending.clear(client.project.dir);
-        return out("Nothing to write.");
+        out("Nothing to write.");
+        return { client };
     }
     const enc = client.encode();
     const lost = lostProperties(client, model, enc);
@@ -257,6 +262,7 @@ async function run(file, mpr, allowJs) {
         content: fs.readFileSync(path.resolve(file), "utf8") });
     out(`Dry run: nothing written. Approval code: ${code}`);
     out(`After the user approves (Studio Pro closed): apply --code ${code}`);
+    return { client, code };
 }
 
 async function apply(mpr, code) {
@@ -367,6 +373,7 @@ async function main() {
     if (cmd === "verify") ok = await verify(mpr);
     else if (cmd === "open") ok = await open(mpr);
     else if (cmd === "selftest") ok = await require("./selftest").selftest(mpr, a.keep === true, { out, relevant });
+    else if (cmd === "serve") return require("./serve").serve(mpr, path.resolve(a.edits && a.edits !== true ? a.edits : "edits"), a["allow-apply"] === true);
     else if (cmd === "run") {
         if (!a._[1]) throw new Error("run needs a change file (.json or .js)");
         if (a.apply) throw new Error("run only does a dry run now. Apply with: apply --code <CODE> (the code is printed by the dry run)");
@@ -420,13 +427,15 @@ function report(e, file) {
     const stack = (e && e.stack ? e.stack : "").split("\n").slice(1);
     const own = file && stack.find(l => l.includes(path.resolve(file)));
     if (own) lines.push("  at " + own.trim().replace(/^at /, ""));
-    else if (!/^(No |Nothing |Code |The model|apply needs|run needs|Studio Pro|Expected|--project|Only|This project|Unknown command|Op \d)|is a script\. Scripts are off/.test(msg)) lines.push(...stack.slice(0, 4).map(l => "  " + l.trim()));
+    else if (!/^(No |Nothing |Code |The model|apply needs|run needs|Studio Pro|Expected|--project|Only|This project|Unknown command|Unknown tool|Op \d|ops must be|name: )|is a script\. Scripts are off|is not a tool here/.test(msg)) lines.push(...stack.slice(0, 4).map(l => "  " + l.trim()));
     const hint = HINTS.find(([re]) => re.test(full)); // the full text: the type names may be past the cut
     if (hint) lines.push("HINT: " + (typeof hint[1] === "function" ? hint[1](full) : hint[1]));
     return lines.join("\n") + "\n";
 }
 
-main()
+module.exports = { run, apply, restoreCmd, report, setOutput, findMpr, loadChange, USAGE };
+
+if (require.main === module) main()
     .catch(e => {
         const a = args(process.argv.slice(2));
         process.stderr.write(report(e, a._[0] === "run" ? a._[1] : null));

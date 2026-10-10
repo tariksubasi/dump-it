@@ -71,9 +71,12 @@ Run all of these from the export folder.
 | `python mx.py ok "<summary>"` | Saves the current export as the checked state (git commit) | no |
 | `python mx.py selftest` | Runs every operation on a temporary copy of the project and checks the result | no |
 
-In OpenCode the same read-only commands also exist as tools: `mx_find`, `mx_steps`, `mx_ops`, `mx_api`,
-`mx_dryrun`, `mx_rerun`, `mx_gap`, `mx_refresh`. Use the tool or the command; the result is the same. `apply` and
-`undo` exist only as commands, so OpenCode (and Claude Code) asks the user before they run. Commands are lowercase.
+The same lookups also exist as tools of the `mendix` MCP server (in OpenCode: `mendix_find`, in Claude Code:
+`mcp__mendix__find`): `find`, `steps`, `ops`, `api`, `dryrun`, `gap` and **`plan`**. `plan` takes a short name and the
+ops list, saves `edits/<name>.json` and dry-runs it in one call; the server keeps the model loaded, so this takes a
+fraction of a second. Use the tool or the command; the result is the same. `apply` and `undo` exist only as commands,
+so OpenCode (and Claude Code) asks the user before they run. Commands are lowercase. (Folders exported with
+`--no-mcp` have OpenCode tools named `mx_find`, `mx_ops`, ... instead.)
 
 Every dry run, apply, undo and gap is logged in `edits/journal.jsonl`. Never delete a change file that worked: after
 an undo, fix it and run `python mx.py rerun <file>`.

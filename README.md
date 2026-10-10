@@ -109,6 +109,12 @@ için. Ek kurulum yok: gerekli her şey `C:\tools\dump-it\mxlocal` içinde gelir
 `.mxlocal-backup\cache.bin` önbelleğini yazar; sonraki komutlar sadece değişen dokümanları yeniden okur (Mendix 11.6
 örnek projede dry run ~2,2 sn → ~0,6 sn).
 
+**MCP sunucusu (en hızlısı):** export, OpenCode'a ve Claude Code'a `mendix` adında bir MCP sunucusu kaydeder
+(`opencode.json`, `.mcp.json`). Sunucu modeli bellekte açık tutar: bir dry run ~0,2 sn sürer. Yapay zeka `plan` aracıyla
+değişikliği tek çağrıda yazar ve dener. Modeli **yazan** araç yoktur: uygulama yine senin onayınla
+`python mx.py apply <KOD>` ile olur. Claude Code ilk açılışta `mendix` sunucusunu onaylamanı ister: onayla. Sunucu
+istemiyorsan export'u `--no-mcp` ile al.
+
 | Alan | Yapabildikleri |
 |---|---|
 | Domain model | Entity, attribute (tüm tipler), association, kalıtım (generalization), validation rule, event handler, index, enumeration |
@@ -291,6 +297,7 @@ Onay workflow'unda "Yönetici onayı" task'ı neden bazı kullanıcılara düşm
 | `--include-marketplace` | Marketplace modüllerini de detaylı döker |
 | `--show-constant-values` | Constant değerlerini de yazar (içinde şifre/API key olabilir, dikkat) |
 | `--no-opencode-tools` | OpenCode'a özel araçları (`.opencode/tools`) yazmaz. OpenCode açılışta takılırsa kullan |
+| `--no-mcp` | MCP sunucusunu kaydetmez; OpenCode daha yavaş, komut başına başlayan araçları kullanır |
 | `--allow-scripts` | Ajanın Model SDK script'i (`.js`) çalıştırmasına izin verir. Script onaydan önce tam yetkiyle çalışır; sadece güvendiğin bir modelle kullan |
 
 ---
