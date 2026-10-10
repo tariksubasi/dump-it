@@ -12,7 +12,7 @@ function dir(projectDir) {
     return path.join(projectDir, BACKUP_DIR, PENDING);
 }
 
-// enc: Project.encode() result; info: { fingerprint, source, summary: [lines], plan? }
+// enc: Project.encode() result; info: { fingerprint, source, summary: [lines], plan?, content? (the change file text) }
 function save(projectDir, enc, info) {
     const d = dir(projectDir);
     fs.rmSync(d, { recursive: true, force: true });
@@ -34,7 +34,8 @@ function save(projectDir, enc, info) {
         deleted: enc.deleted,
         moved: enc.moved || [],
         summary: info.summary,
-        plan: info.plan || null
+        plan: info.plan || null,
+        content: info.content
     };
     fs.writeFileSync(path.join(d, "manifest.json"), JSON.stringify(manifest, null, 1));
     return code;

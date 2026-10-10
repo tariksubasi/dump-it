@@ -164,11 +164,12 @@ class Project {
 
 const KEEP_BACKUPS = 20;
 
-// Keep the newest KEEP_BACKUPS backups (restored or not) so the folder does not grow forever.
+// Keep the oldest backup (the model before the first apply) and the newest KEEP_BACKUPS, restored or not, so the
+// folder does not grow forever but the starting point is never lost.
 function prune(dir) {
     const root = path.join(dir, BACKUP_DIR);
     const all = fs.readdirSync(root).filter(n => /^\d{4}-/.test(n)).sort();
-    for (const name of all.slice(0, Math.max(0, all.length - KEEP_BACKUPS))) fs.rmSync(path.join(root, name), { recursive: true, force: true });
+    for (const name of all.slice(1, Math.max(1, all.length - KEEP_BACKUPS))) fs.rmSync(path.join(root, name), { recursive: true, force: true });
 }
 
 function backups(dir) {

@@ -113,7 +113,12 @@ CHANGING OR CHECKING THE MODEL
 """
 
 AGENT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent")
-KEEP = {".git", "edits", ".opencode"}  # survive re-exports: history, the agent's change files, OpenCode's own files
+KEEP = {".git", "edits", ".opencode", ".claude"}  # survive re-exports: history, change files, agents' own files
+# mx.py commands an agent may run without asking: lookups, dry runs and the export's own history. apply/undo always ask.
+SAFE_MX_COMMANDS = ("help", "refresh", "find", "steps", "ops", "api", "dryrun", "rerun", "gap", "check", "ok", "selftest")
+# git commands that could rewrite the export history, touch the Mendix project's repo (-C) or send data out.
+GIT_DENY = ("-C", "push", "remote", "reset", "clean", "checkout", "restore", "switch", "rebase", "stash", "rm",
+            "filter-branch", "update-ref", "config", "gc", "reflog", "submodule", "worktree", "commit --amend")
 
 
 def parse_args():
@@ -123,6 +128,8 @@ def parse_args():
     ap.add_argument("--include-marketplace", action="store_true", help="also export marketplace modules in detail")
     ap.add_argument("--show-constant-values", action="store_true", help="write constant default values (may contain secrets)")
     ap.add_argument("--no-opencode-tools", action="store_true", help="do not write OpenCode custom tools (.opencode/tools)")
+    ap.add_argument("--allow-scripts", action="store_true",
+                    help="let the agent dry-run .js Model SDK scripts (they run with full rights before approval)")
     return ap.parse_args()
 
 
@@ -240,9 +247,11 @@ class Exporter:
 
         flags = [flag for flag, on in (("--include-marketplace", self.args.include_marketplace),
                                        ("--show-constant-values", self.args.show_constant_values),
-                                       ("--no-opencode-tools", self.args.no_opencode_tools)) if on]
+                                       ("--no-opencode-tools", self.args.no_opencode_tools),
+                                       ("--allow-scripts", self.args.allow_scripts)) if on]
         config = {"mxcontext": os.path.abspath(__file__), "mpr": os.path.abspath(self.project.mpr),
-                  "export_flags": flags, "mxlocal": mxlocal, "mx_exe": self._mx_exe()}
+                  "export_flags": flags, "mxlocal": mxlocal, "mx_exe": self._mx_exe(),
+                  "allow_scripts": bool(self.args.allow_scripts)}
         script = self._agent_template("mx.py").replace(
             "CONFIG = None  # filled in by mxcontext.py",
             "CONFIG = json.loads(%r)  # written by mxcontext.py" % json.dumps(config))
@@ -260,16 +269,28 @@ class Exporter:
             self._write(".opencode/tools/mx.js", self._agent_template("tools", "mx.js").replace("@PYTHON_JSON@", json.dumps(exe)))
 
         edits = os.path.join(self.out, "edits")
+        # Allow-list: only the read-only and dry-run mx.py commands run without asking. Anything else, including
+        # apply/undo in any spelling, falls back to "*": ask. Later rules win, so the git denials come last.
         bash = {"*": "ask", "git *": "allow", "grep *": "allow", "rg *": "allow", "ls *": "allow", "dir *": "allow",
-                "cat *": "allow", "type *": "allow", "head *": "allow", "tail *": "allow",
-                py + " mx.py *": "allow", py + " mx.py apply*": "ask", py + " mx.py undo*": "ask",
-                "git remote*": "deny", "git push*": "deny"}
+                "cat *": "allow", "type *": "allow", "head *": "allow", "tail *": "allow"}
+        bash.update({"%s mx.py %s*" % (py, c): "allow" for c in SAFE_MX_COMMANDS})
+        bash.update({"git %s*" % c: "deny" for c in GIT_DENY})
         edit = {"*": "deny", "edits/*": "allow", edits + os.sep + "*": "allow", edits.replace("\\", "/") + "/*": "allow"}
         settings = {"$schema": "https://opencode.ai/config.json",
                     "instructions": ["AI_GUIDE.txt"],
                     "permission": {"edit": edit, "bash": bash},
                     "agent": {"build": {"temperature": 0.1}, "plan": {"temperature": 0.1}}}
         self._write("opencode.json", json.dumps(settings, indent=2) + "\n")
+
+        # Claude Code: same gate. apply/undo ask the user; the agent cannot loosen its own rules or rewrite history.
+        mx = lambda c: "Bash(%s mx.py %s:*)" % (py, c)  # noqa: E731
+        claude = {"permissions": {
+            "allow": [mx(c) for c in SAFE_MX_COMMANDS] + ["Edit(edits/**)", "Write(edits/**)"],
+            "ask": [mx("apply"), mx("undo")],
+            "deny": ["Bash(git %s:*)" % c for c in GIT_DENY] +
+                    ["%s(%s)" % (tool, f) for tool in ("Edit", "Write") for f in
+                     (".claude/**", "opencode.json", ".opencode/**", "mx.py", "AI_GUIDE.txt", "CLAUDE.md", "guides/**")]}}
+        self._write(".claude/settings.json", json.dumps(claude, indent=2) + "\n")
 
     def _stage_history(self, git):
         """Keep the export in a local git repo: the first run commits a baseline, later runs stage the changes so an
@@ -288,7 +309,7 @@ class Exporter:
             with open(exclude, "a+", encoding="utf-8") as f:
                 f.seek(0)
                 present = f.read().split()
-                f.write("".join(p + "\n" for p in ("edits/", ".opencode/") if p not in present))
+                f.write("".join(p + "\n" for p in ("edits/", ".opencode/", ".claude/") if p not in present))
             run("add", "-A")
             if fresh:
                 run("commit", "-q", "-m", "baseline")

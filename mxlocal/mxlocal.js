@@ -21,14 +21,15 @@ const USAGE = `mxlocal - Mendix Model SDK offline on a local .mpr (v2)
         Dry run: computes the change, writes nothing, prints it and an approval code.
   node mxlocal.js apply --code <CODE> --project <app.mpr|folder>
         Writes the change of the last dry run (Studio Pro closed). CODE comes from that dry run.
-  node mxlocal.js restore --project <app.mpr|folder> [--backup <name>]
-        Undoes the last (or the given) apply.
+  node mxlocal.js restore --project <app.mpr|folder> [--backup <name>] [--force]
+        Undoes the last (or the given) apply. Refuses when the model changed after that apply (it would erase
+        that work) unless --force.
   node mxlocal.js api <Type>            SDK type: properties, enum values, createIn functions
   node mxlocal.js find <text> --project <app.mpr|folder>
                                         model elements whose qualified name contains <text>
   node mxlocal.js steps <Module.Flow> --project <app.mpr|folder>
                                         the steps of a microflow/nanoflow with ids (for changeAction/deleteAction)
-  node mxlocal.js ops                   the operations a change.json can use
+  node mxlocal.js ops [name]            the operations a change.json can use (with a name: its fields)
   node mxlocal.js verify --project ...  read-only self check (byte roundtrip + SDK mapping)
   node mxlocal.js open --project ...    load every unit through the Model SDK, report problems
   node mxlocal.js selftest --project ... [--keep]
@@ -180,7 +181,7 @@ function relevant(warnings, enc) {
     });
 }
 
-function loadChange(file) {
+function loadChange(file, allowJs) {
     const full = path.resolve(file);
     if (full.endsWith(".json")) {
         let plan;
@@ -193,14 +194,16 @@ function loadChange(file) {
         if (!plan || !Array.isArray(plan.ops)) throw new Error(`${file} must contain { "ops": [ ... ] }`);
         return { plan };
     }
+    // A script runs with full Node rights before any approval, so it needs an explicit switch from the user.
+    if (!allowJs) throw new Error(`${path.basename(file)} is a script. Scripts are off: use operations (ops). If no operation fits, record the gap and give the user the Studio Pro steps.`);
     delete require.cache[full];
     const fn = require(full);
     if (typeof fn !== "function") throw new Error(`${file} must export an async function`);
     return { fn };
 }
 
-async function run(file, mpr) {
-    const change = loadChange(file);
+async function run(file, mpr, allowJs) {
+    const change = loadChange(file, allowJs);
     const ctx = await loadProject(mpr);
     const fingerprint = ctx.project.fingerprint();
     const client = new LocalClient(ctx);
@@ -236,7 +239,8 @@ async function run(file, mpr) {
     if (lost.length) say("NOT STORED (the script set these, but this Mendix version does not keep them; use api <Type>):\n" + lost.map(w => "  ! " + w).join("\n"));
     if (s.leftovers.length) say("OLD NAME STILL USED (rename does not update expressions, XPath, Java; fix these too):\n" + s.leftovers.map(w => "  ! " + w).join("\n"));
     if (warnings.length) say("Warnings:\n" + warnings.map(w => "  ! " + w).join("\n"));
-    const code = pending.save(client.project.dir, enc, { fingerprint, source: path.resolve(file), summary: lines, plan: change.plan });
+    const code = pending.save(client.project.dir, enc, { fingerprint, source: path.resolve(file), summary: lines, plan: change.plan,
+        content: fs.readFileSync(path.resolve(file), "utf8") });
     out(`Dry run: nothing written. Approval code: ${code}`);
     out(`After the user approves (Studio Pro closed): apply --code ${code}`);
 }
@@ -253,7 +257,10 @@ async function apply(mpr, code) {
         throw new Error("The model changed since the dry run (Studio Pro save, pull or other apply). Run the dry run again.");
     }
     const r = project.writeEncoded({ files: p.files, created: p.created, deleted: p.deleted, moved: p.moved || [] });
+    // The change itself goes into the backup, so it can be run again after an undo even if edits/ was cleaned.
     fs.writeFileSync(path.join(r.backup, "change.txt"), `Source: ${p.source}\n${p.summary.join("\n")}\n`);
+    if (p.content !== undefined) fs.writeFileSync(path.join(r.backup, "change" + path.extname(p.source || ".json")), p.content);
+    fs.writeFileSync(path.join(r.backup, "after.json"), JSON.stringify({ fingerprint: project.fingerprint(), units: unitHashes(project) }));
     pending.clear(project.dir);
     out(`Saved ${r.written} unit file(s), deleted ${r.deleted}${r.moved ? `, moved ${r.moved}` : ""}. Backup: ${path.relative(project.dir, r.backup)}`);
     if (p.plan) {
@@ -267,17 +274,66 @@ async function apply(mpr, code) {
     }
 }
 
-function restoreCmd(mpr, name) {
+// UnitID -> ContentsHash of the saved model.
+function unitHashes(project) {
+    const fresh = new Project(project.mpr);
+    return Object.fromEntries([...fresh.units.values()].map(u => [u.id, u.hash]));
+}
+
+// Units that differ between two unitHashes() results, as "Type Name" lines.
+function changedUnits(project, before, now) {
+    const ids = new Set([...Object.keys(before), ...Object.keys(now)]);
+    const label = id => {
+        try {
+            const u = project.read(id);
+            const unit = project.units.get(id);
+            const owner = unit && unit.containerId && project.units.has(unit.containerId) ? project.read(unit.containerId).Name : null;
+            return `${u.$Type} ${u.Name || (owner ? "of " + owner : id)}`;
+        } catch {
+            return `unit ${id}`;
+        }
+    };
+    const lines = [];
+    for (const id of ids) {
+        if (before[id] === now[id]) continue;
+        lines.push(!(id in before) ? `new: ${label(id)}` : !(id in now) ? `deleted: unit ${id}` : `changed: ${label(id)}`);
+    }
+    return lines;
+}
+
+function restoreCmd(mpr, name, force) {
     const dir = path.dirname(mpr);
     const all = backups(dir);
     const pick = name && name !== true ? name : all[all.length - 1];
     if (!pick) throw new Error("Nothing to undo: no applied change is left to restore (all were undone, or none was applied).");
     if (!all.includes(pick)) throw new Error(`No backup '${pick}' in ${path.join(dir, BACKUP_DIR)}. Backups: ${all.join(", ") || "(none)"}`);
     if (fs.existsSync(mpr + ".lock")) throw new Error("Studio Pro has this project open. Close it first.");
-    const m = restore(dir, path.join(dir, BACKUP_DIR, pick));
+    const backup = path.join(dir, BACKUP_DIR, pick);
+    const project = new Project(mpr);
+    const afterFile = path.join(backup, "after.json");
+    if (fs.existsSync(afterFile)) {
+        const after = JSON.parse(fs.readFileSync(afterFile, "utf8"));
+        if (after.fingerprint !== project.fingerprint() && force !== true) {
+            const lines = changedUnits(project, after.units, unitHashes(project));
+            throw new Error(`The model changed after this apply (Studio Pro save, pull or a later apply). Undo would erase that work:\n` +
+                lines.slice(0, 15).map(l => "  " + l).join("\n") + (lines.length > 15 ? `\n  ... ${lines.length - 15} more` : "") +
+                `\nUndo the later changes first (newest first), or ask the user whether to undo anyway with --force (that loses the changes above).`);
+        }
+    }
+    const before = new Set(project.units.keys());
+    const m = restore(dir, backup);
+    // Units created after this apply (e.g. by a Studio Pro save) lose their row; move their files aside, never delete.
+    const restored = new Project(mpr).units;
+    const orphans = [...before].filter(id => !restored.has(id) && fs.existsSync(project.unitFile(id)));
+    for (const id of orphans) {
+        const rel = path.relative(dir, project.unitFile(id));
+        fs.mkdirSync(path.dirname(path.join(backup, "orphans", rel)), { recursive: true });
+        fs.renameSync(project.unitFile(id), path.join(backup, "orphans", rel));
+    }
     pending.clear(dir);
-    fs.renameSync(path.join(dir, BACKUP_DIR, pick), path.join(dir, BACKUP_DIR, pick + ".restored"));
-    out(`Restored ${pick}: ${m.restore.length} unit file(s) put back, ${m.remove.length} removed, ${m.mpr} restored.`);
+    fs.renameSync(backup, backup + ".restored");
+    out(`Restored ${pick}: ${m.restore.length} unit file(s) put back, ${m.remove.length} removed, ${m.mpr} restored.` +
+        (orphans.length ? ` ${orphans.length} unit file(s) of later changes moved to ${path.relative(dir, backup)}.restored/orphans.` : ""));
 }
 
 async function main() {
@@ -285,7 +341,7 @@ async function main() {
     const a = args(process.argv.slice(2));
     const cmd = a._[0];
     if (!cmd || a.help) return out(USAGE);
-    if (cmd === "ops") return out(require("./ops").help());
+    if (cmd === "ops") return out(require("./ops").help(a._[1]));
     if (cmd === "api") {
         if (!a._[1]) throw new Error("api needs a type name, e.g. api Attribute");
         const version = a.project ? new Project(findMpr(a.project)).version : a.version || "10.24.0";
@@ -299,9 +355,9 @@ async function main() {
     else if (cmd === "run") {
         if (!a._[1]) throw new Error("run needs a change file (.json or .js)");
         if (a.apply) throw new Error("run only does a dry run now. Apply with: apply --code <CODE> (the code is printed by the dry run)");
-        await run(a._[1], mpr);
+        await run(a._[1], mpr, a["allow-js"] === true);
     } else if (cmd === "apply") await apply(mpr, a.code);
-    else if (cmd === "restore") restoreCmd(mpr, a.backup);
+    else if (cmd === "restore") restoreCmd(mpr, a.backup, a.force);
     else if (cmd === "steps") {
         if (!a._[1]) throw new Error("steps needs a microflow or nanoflow, e.g. steps Module.ACT_Save");
         const ctx = await loadProject(mpr);
@@ -329,13 +385,16 @@ const HINTS = [
     [/unknown op|unknown field|unknown action|needs '/i, "List the operations and their fields with: ops"]
 ];
 
+const MAX_MESSAGE = 400; // long SDK messages cost a weak model a whole turn and hide the useful first line
+
 function report(e, file) {
-    const msg = e && e.message ? e.message : String(e);
+    let msg = e && e.message ? e.message : String(e);
+    if (msg.length > MAX_MESSAGE) msg = msg.slice(0, MAX_MESSAGE) + ` ... (${msg.length - MAX_MESSAGE} more characters)`;
     const lines = ["ERROR: " + msg];
     const stack = (e && e.stack ? e.stack : "").split("\n").slice(1);
     const own = file && stack.find(l => l.includes(path.resolve(file)));
     if (own) lines.push("  at " + own.trim().replace(/^at /, ""));
-    else if (!/^(No |Nothing |Code |The model|apply needs|run needs|Studio Pro|Expected|--project|Only|This project|Unknown command|Op \d)/.test(msg)) lines.push(...stack.slice(0, 4).map(l => "  " + l.trim()));
+    else if (!/^(No |Nothing |Code |The model|apply needs|run needs|Studio Pro|Expected|--project|Only|This project|Unknown command|Op \d)|is a script\. Scripts are off/.test(msg)) lines.push(...stack.slice(0, 4).map(l => "  " + l.trim()));
     const hint = HINTS.find(([re]) => re.test(msg));
     if (hint) lines.push("HINT: " + hint[1]);
     return lines.join("\n") + "\n";

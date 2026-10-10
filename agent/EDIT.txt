@@ -13,10 +13,13 @@ STEP 1 - FIND THE NAMES
     @PY@ mx.py steps <Module.Flow>             (or tool mx_steps)
 
 STEP 2 - WRITE THE CHANGE FILE
-  Write edits/<short-name>.json with operations. See all operations and fields:
+  Pick the operations (one line each), then read the fields of the ones you use:
     @PY@ mx.py ops                            (or tool mx_ops)
-  Use ONLY operations and fields from that list. Use a .js file only when no operation fits (see SDK SCRIPTS).
-  Several operations in one file are fine; they run in order.
+    @PY@ mx.py ops <name>                     e.g. @PY@ mx.py ops createPage
+  Write edits/<short-name>.json. Use ONLY operations and fields from that output. Several operations in one file are
+  fine; they run in order. Never delete a change file that worked: it is the record of what was applied.
+  No operation fits: run @PY@ mx.py gap "<what the user wants>" (or tool mx_gap), then give the user the exact
+  Studio Pro steps. Do not write a .js script unless this folder allows scripts (see SDK SCRIPTS).
 
 STEP 3 - DRY RUN (writes nothing)
     @PY@ mx.py dryrun <short-name>            (or tool mx_dryrun)
@@ -43,7 +46,9 @@ STEP 6 - REPORT
   (or that it did not run). Fix OLD NAME / STILL USED lines with a new change (back to STEP 2).
   Tell the user: open the app in Studio Pro, look at the Errors pane, run the app, then commit as usual.
   Wrong result: ask the user to close Studio Pro, then run "@PY@ mx.py undo". It restores the model from before
-  the apply.
+  the apply. If undo says "The model changed after this apply", show the user the listed changes; use
+  "@PY@ mx.py undo --force" only when the user says they may be lost.
+  After an undo, fix the change file and run "@PY@ mx.py rerun <file>" (a gone file comes back from the backup).
 
 EXAMPLES (copy the shape, change the names)
 
@@ -121,8 +126,10 @@ ERRORS AND FIXES
 - "needs an import mapping" / "export mapping" -> publishRest supports only simple parameters/results; do it in Studio Pro.
 - "has no attribute 'A' (in $V/A). Did you mean: B" -> use B in that expression.
 - "Studio Pro has this project open" -> ask the user to close Studio Pro, then run the same command again.
+- "is a script. Scripts are off" -> use operations; if none fits: @PY@ mx.py gap "<what>" + Studio Pro steps.
+- "Unknown command 'APPLY'" -> commands are lowercase.
 
-SDK SCRIPTS (only when no operation fits)
+SDK SCRIPTS (only in folders exported with --allow-scripts; otherwise mx.py refuses .js files)
   Write edits/<name>.js:
     module.exports = async ({ model, sdk, ops, log }) => {
       const entity = await ops.get("Sales.Order");          // any document or element by qualified name, loaded

@@ -83,26 +83,39 @@ const OPS = {
     delete: { doc: "Delete a document, entity, attribute, association, enumeration value or module role. Lists what still uses it.", fields: { target: "R qualified name" } }
 };
 
-function help() {
-    const lines = ["OPERATIONS for change.json: { \"ops\": [ { \"op\": \"<name>\", ...fields } ] }   (R = required)", ""];
-    for (const [name, o] of Object.entries(OPS)) {
-        lines.push(`${name}: ${o.doc}`);
-        for (const [f, d] of Object.entries(o.fields)) lines.push(`    ${f}: ${d}`);
+// Without a name: one line per operation (short, so a small model reads it every time). With a name: the fields of
+// that operation, action or flow control kind.
+function help(name) {
+    const groups = [["OPERATIONS", OPS], ["ACTIONS (inside \"actions\")", ACTIONS], ["FLOW CONTROL (inside \"actions\")", CONTROL]];
+    const detail = (n, o) => [`${n}: ${o.doc}`, ...Object.entries(o.fields).map(([f, d]) => `    ${f}: ${d}`)];
+    if (name && name !== true) {
+        if (name === "all") {
+            const lines = ["change.json: { \"ops\": [ { \"op\": \"<name>\", ...fields } ] }   (R = required)"];
+            for (const [title, table] of groups) {
+                lines.push("", title + ":");
+                for (const [n, o] of Object.entries(table)) lines.push(...detail(n, o));
+            }
+            lines.push("Every action also takes:", ...Object.entries(COMMON).map(([f, d]) => `    ${f}: ${d}`));
+            return lines.join("\n");
+        }
+        for (const [title, table] of groups) {
+            const hit = Object.keys(table).find(n => n.toLowerCase() === String(name).toLowerCase());
+            if (!hit) continue;
+            const lines = detail(hit, table[hit]);
+            if (table === ACTIONS) lines.push("  also: " + Object.entries(COMMON).map(([f, d]) => `${f} (${d})`).join("; "));
+            if (/actions/.test(Object.keys(table[hit].fields).join(" "))) lines.push("  actions: see ops <action name>, e.g. ops retrieve; list all with: ops");
+            return (table === OPS ? "op " : "action ") + lines.join("\n");
+        }
+        const all = groups.flatMap(([, t]) => Object.keys(t));
+        throw new Error(`No operation or action '${name}'. Did you mean: ${suggest(name, all, 3).join(", ")}? All names: ops`);
     }
-    lines.push("", "ACTIONS (inside \"actions\": [ { \"action\": \"<name>\", ...fields } ]):");
-    for (const [name, o] of Object.entries(ACTIONS)) {
-        lines.push(`${name}: ${o.doc}`);
-        for (const [f, d] of Object.entries(o.fields)) lines.push(`    ${f}: ${d}`);
-    }
-    lines.push("Every action above also takes:");
-    for (const [f, d] of Object.entries(COMMON)) lines.push(`    ${f}: ${d}`);
-    lines.push("", "FLOW CONTROL (also inside \"actions\"):");
-    for (const [name, o] of Object.entries(CONTROL)) {
-        lines.push(`${name}: ${o.doc}`);
-        for (const [f, d] of Object.entries(o.fields)) lines.push(`    ${f}: ${d}`);
+    const lines = ["change.json: { \"ops\": [ { \"op\": \"<name>\", ...fields } ] }. Fields of one: ops <name> (all at once: ops all)"];
+    for (const [title, table] of groups) {
+        lines.push("", title + ":");
+        for (const [n, o] of Object.entries(table)) lines.push(`  ${n.padEnd(20)} ${o.doc.split(/(?<=\.) /)[0]}`);
     }
     lines.push("", "Expressions are Mendix expressions as text: \"'Hello'\", \"$Order/Total * 2\", \"empty\", \"[%CurrentDateTime%]\".");
-    lines.push("Anything not covered here: write a change.js with the Model SDK (use: api <Type>).");
+    lines.push("No operation fits: record the gap (mx.py gap \"<what>\") and give the user the Studio Pro steps.");
     return lines.join("\n");
 }
 

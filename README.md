@@ -179,9 +179,16 @@ Bilinmesi gerekenler:
    - `> Modül.Doküman -> Modül/Klasör`: doküman başka klasöre taşınıyor.
 3. Var olan bir microflow'un tek adımını değiştirmek için OpenCode önce adımların kimliklerini (id) listeler
    (`python mx.py steps Modül.Microflow`), sonra o id ile değiştirir ya da siler.
-4. İşlemlerle yapılamayan değişiklikler için OpenCode Model SDK script'i (`.js`) yazar. Aynı dry run, onay ve kontrol
-   adımları geçerlidir.
+4. Hiçbir işlem uymuyorsa OpenCode bunu `edits/gaps.jsonl`'e **eksik** olarak kaydeder (`python mx.py gap "..."`) ve
+   sana Studio Pro adımlarını verir. Model SDK script'leri (`.js`) **varsayılan olarak kapalıdır**: bir script, onayından
+   önce bilgisayarında her şeyi yapabilir. Güçlü bir modelle (ör. Claude) bilerek açmak için export'u
+   `--allow-scripts` ile al.
 5. Son söz Studio Pro'nundur: Errors paneli temiz değilse `/geri-al`.
+6. **Geri alma güvenlidir:** uygulamadan sonra Studio Pro'da kaydettiysen `/geri-al` bunu silmez; neyin kaybolacağını
+   listeler ve durur. Kabul edersen `python mx.py undo --force`. Sonradan gelen dosyalar silinmez, yedeğe taşınır.
+7. **Değişiklik dosyaları kaybolmaz:** her uygulama değişikliğin kendisini de yedekler. Geri aldıktan sonra
+   `python mx.py rerun` aynı değişikliği yeniden dener; dosya `edits/` içinden silinmişse yedekten geri getirir.
+   Her dry run, uygulama ve geri alma `edits/journal.jsonl` içinde kayıtlıdır.
 
 ### OpenCode'a öğretmek
 
@@ -282,6 +289,7 @@ Onay workflow'unda "Yönetici onayı" task'ı neden bazı kullanıcılara düşm
 | `--include-marketplace` | Marketplace modüllerini de detaylı döker |
 | `--show-constant-values` | Constant değerlerini de yazar (içinde şifre/API key olabilir, dikkat) |
 | `--no-opencode-tools` | OpenCode'a özel araçları (`.opencode/tools`) yazmaz. OpenCode açılışta takılırsa kullan |
+| `--allow-scripts` | Ajanın Model SDK script'i (`.js`) çalıştırmasına izin verir. Script onaydan önce tam yetkiyle çalışır; sadece güvendiğin bir modelle kullan |
 
 ---
 
@@ -315,7 +323,9 @@ Onay workflow'unda "Yönetici onayı" task'ı neden bazı kullanıcılara düşm
 | OpenCode açılırken uzun süre bekliyor | İnternet yoksa OpenCode `.opencode` için paket indirmeyi dener. Export'u `--no-opencode-tools` ile çalıştır |
 
 **Claude Code kullanıyorsan:** klasördeki `CLAUDE.md` rehberi otomatik yükler. `/kontrol` gibi komutlar yerine aynı
-isteği düz yazıyla yaz (örnek: `Değişikliğimi kontrol et, guides/CHECK.txt'ye göre`).
+isteği düz yazıyla yaz (örnek: `Değişikliğimi kontrol et, guides/CHECK.txt'ye göre`). Export klasöre
+`.claude/settings.json` da yazar: `apply` ve `undo` senden onay ister; ajan kendi izin dosyalarını değiştiremez,
+`git push` / `reset` / `checkout` gibi geçmişi bozan komutları çalıştıramaz.
 
 ---
 
