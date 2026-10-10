@@ -1,6 +1,7 @@
 // OpenCode custom tools for an mxcontext export folder (written there by mxcontext.py).
 // Read-only lookups and the dry run only: apply and undo stay shell commands, so OpenCode asks the user first.
-// Arguments use plain JSON Schema, so no npm package is needed.
+// Arguments use plain JSON Schema, so no npm package is needed. OpenCode makes every such argument required, so
+// optional ones take "" for "none".
 import { execFile } from "node:child_process";
 import path from "node:path";
 
@@ -34,9 +35,10 @@ export const steps = {
 };
 
 export const ops = {
-    description: "List the operations (and their fields) that a change file edits/<name>.json can use.",
-    args: {},
-    execute: (args, context) => mx(context, ["ops"])
+    description: "Without a name: one line per operation a change file edits/<name>.json can use. With a name " +
+        "(e.g. createPage, retrieve): the fields of that operation or action.",
+    args: { name: text("an operation or action name, or \"\" for the list of all") },
+    execute: (args, context) => mx(context, ["ops", ...(args.name ? [String(args.name)] : [])])
 };
 
 export const api = {
@@ -47,7 +49,7 @@ export const api = {
 };
 
 export const dryrun = {
-    description: "Dry run of a change file in edits/ (.json or .js): shows what would change and the approval code. " +
+    description: "Dry run of a change file in edits/: shows what would change and the approval code. " +
         "Writes nothing to the model.",
     args: { file: text("file name in edits/, e.g. add-note.json") },
     execute: (args, context) => mx(context, ["dryrun", args.file])
@@ -57,4 +59,17 @@ export const refresh = {
     description: "Re-export the Mendix model and list the files that changed since the last checked state.",
     args: {},
     execute: (args, context) => mx(context, ["refresh"])
+};
+
+export const rerun = {
+    description: "Dry run a change file again, e.g. after an undo. Without a file: the last applied change. A file " +
+        "that is gone from edits/ is brought back from the backup.",
+    args: { file: text("file name in edits/, or \"\" for the last applied change") },
+    execute: (args, context) => mx(context, ["rerun", ...(args.file ? [String(args.file)] : [])])
+};
+
+export const gap = {
+    description: "Record a change that no operation can do yet. Then give the user the Studio Pro steps instead.",
+    args: { need: text("what the user wants, in one sentence") },
+    execute: (args, context) => mx(context, ["gap", args.need])
 };

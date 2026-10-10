@@ -60,18 +60,23 @@ Run all of these from the export folder.
 | `python mx.py refresh` | Re-exports the model and lists files changed since the last checked state | no |
 | `python mx.py find <text>` | Lists elements whose qualified name contains `<text>`, with their SDK type | no |
 | `python mx.py steps <Module.Flow>` | Lists the steps of a microflow/nanoflow with stable ids (for `changeAction`, `deleteAction`, `addActions` `after`) | no |
-| `python mx.py ops` | Lists all operations and fields for change files | no |
+| `python mx.py ops [name]` | One line per operation; with a name (`ops createPage`, `ops retrieve`): its fields. `ops all`: everything | no |
 | `python mx.py api <Type> [word]` | SDK type reference for this Mendix version (for `.js` files only) | no |
 | `python mx.py dryrun <file>` | Computes a change from `edits/<file>`. Writes nothing. Prints an approval code | no |
+| `python mx.py rerun [file]` | Dry run a change file again (after an undo). A file gone from `edits/` comes back from the backup | no |
+| `python mx.py gap "<what>"` | Records a change no operation can do yet (`edits/gaps.jsonl`). Then give the user Studio Pro steps | no |
 | `python mx.py apply <CODE>` | Writes the last dry run, re-exports, lists changed files, runs `mx check` when installed | **yes** |
-| `python mx.py undo` | Restores the model from before the last apply, then re-exports | **yes** |
+| `python mx.py undo [--force]` | Restores the model from before the last apply, then re-exports. Refuses when the model changed after that apply; `--force` only when the user accepts losing the listed changes | **yes** |
 | `python mx.py check` | Runs Studio Pro's `mx check` (only when `mx.exe` is installed) | no |
 | `python mx.py ok "<summary>"` | Saves the current export as the checked state (git commit) | no |
 | `python mx.py selftest` | Runs every operation on a temporary copy of the project and checks the result | no |
 
 In OpenCode the same read-only commands also exist as tools: `mx_find`, `mx_steps`, `mx_ops`, `mx_api`,
-`mx_dryrun`, `mx_refresh`. Use the tool or the command; the result is the same. `apply` and `undo` exist only as commands, so
-OpenCode asks the user before they run.
+`mx_dryrun`, `mx_rerun`, `mx_gap`, `mx_refresh`. Use the tool or the command; the result is the same. `apply` and
+`undo` exist only as commands, so OpenCode (and Claude Code) asks the user before they run. Commands are lowercase.
+
+Every dry run, apply, undo and gap is logged in `edits/journal.jsonl`. Never delete a change file that worked: after
+an undo, fix it and run `python mx.py rerun <file>`.
 
 The user can type these slash commands:
 
@@ -123,8 +128,9 @@ Follow these steps in order. Do not skip one.
 python mx.py find Order
 ```
 
-**Step 2: Write the change file** `edits/<short-name>.json`. Use only operations and fields from section 7.
-Several operations in one file run in order.
+**Step 2: Write the change file** `edits/<short-name>.json`. Use only operations and fields from section 7
+(`python mx.py ops <name>` shows the live fields). Several operations in one file run in order. If no operation
+fits, run `python mx.py gap "<what>"` and give the user Studio Pro steps (section 8).
 
 **Step 3: Dry run.**
 
@@ -140,7 +146,7 @@ python mx.py dryrun <short-name>
 ```
 PLAN: <1-5 bullets: what changes and why>
 DRY RUN: <the numbered op lines and the "Changes:" lines>
-ATTENTION: <every EXPRESSION CHECK / NOT STORED / OLD NAME STILL USED / STILL USED BY / Warnings line, or "none">
+ATTENTION: <every DATA LOSS line first, then every EXPRESSION CHECK / NOT STORED / OLD NAME STILL USED / STILL USED BY / Warnings line, or "none">
 To apply: close Studio Pro and answer "yes <CODE>".
 ```
 
@@ -155,7 +161,8 @@ If it says `does not match the last dry run` or `model changed since the dry run
 **Step 6: Report.** Report the `Checked:` (or `CHECK FAILED`) line, the changed export files, and the `mx check`
 result (or that it did not run). Fix `OLD NAME` / `STILL USED BY` lines with a new change (back to step 2). Tell
 the user to open Studio Pro, look at the Errors pane, run the app and then commit. If the result is wrong: the user
-closes Studio Pro, you run `python mx.py undo`.
+closes Studio Pro, you run `python mx.py undo`, fix the change file and run `python mx.py rerun <file>`. If undo
+says `The model changed after this apply`, show the user the listed changes and use `undo --force` only if they agree.
 
 ---
 
@@ -379,7 +386,12 @@ Security:
 
 ---
 
-## 8. When no operation fits: SDK scripts
+## 8. When no operation fits: gap, Studio Pro steps, or (if allowed) SDK scripts
+
+First run `python mx.py gap "<what the user wants>"`. It records the missing operation so it can be added later.
+Then give the user exact Studio Pro steps. SDK scripts (`edits/<name>.js`) run only in folders exported with
+`--allow-scripts`, because a script runs with full rights before the user approves anything; otherwise `dryrun`
+refuses them.
 
 Operations cannot do these things: page changes other than creating a form/empty page (editing widgets, list
 views, data grids, pluggable widgets), import/export mappings, JSON structures, consumed REST services, workflows,
@@ -398,9 +410,15 @@ module.exports = async ({ model, sdk, ops, log }) => {
 };
 ```
 
-- Before using a type, run `python mx.py api <Type>`. Use only the listed properties. Properties under
-  `NOT IN THIS MENDIX VERSION` fail.
+- Before using a type, run `python mx.py api <Type>`. It answers for this project's Mendix version. Use only the
+  listed properties and create functions. Anything under `NOT IN MENDIX <version>` fails; the line names the
+  replacement, for example `GridDatabaseSource` → `GridXPathSource` (removed in 10.5) and `DataView.editable` →
+  `editability` (removed in 10.7). `NOTE:` lines say how to fill a property, for example `listenTarget` takes a widget
+  name, not an entity.
 - Too many create functions are listed? Add a filter word: `python mx.py api ObjectType MicroflowParameterObject`.
+- A dry run fails with `can no longer be instantiated`, `is not yet available`, `illegal ... "createIn"`,
+  `is not a function` or `Cannot encode value`? Its `HINT:` line names the replacement or the valid create
+  functions. Apply it, then check with `python mx.py api <Type>`.
 - Microflow objects go in `mf.objectCollection`. Flows go in `mf.flows` (`SequenceFlow` with `origin`,
   `destination`).
 - The same dry run, approval and apply steps apply. Fix the script until the dry run shows no `NOT STORED` lines.
@@ -418,6 +436,7 @@ Changes: 0 created, 1 updated, 0 deleted unit(s)           <- documents that wil
 EXPRESSION CHECK ...                                       <- wrong $Var/Attribute in an expression: fix the file
 NOT STORED ...                                             <- a value this Mendix version does not keep: fix the script
 OLD NAME STILL USED ...                                    <- rename left old names in expressions/XPath/Java
+      DATA LOSS: the column A and its values are dropped ...  <- deleting/retyping stored data: tell the user first
 Warnings:
   > Module.Doc -> Module/Folder                              <- a document moved to another folder
   ! ... first use in this project ...                      <- first element of this type: ask the user to check it in Studio Pro
@@ -461,6 +480,10 @@ mx check: NOT RUN (mx.exe not found) ...                          <- say this to
 | `Code ... does not match the last dry run` | Use the code of the latest dry run (show it to the user again) |
 | `The model changed since the dry run` | Run the dry run again and ask for the new code |
 | `Nothing to undo` | There is no applied change left to undo |
+| `The model changed after this apply ... Undo would erase that work` | Show the user the listed changes. Undo newer changes first, or `undo --force` only if the user agrees to lose them |
+| `is a script. Scripts are off` | Use operations. If none fits: `python mx.py gap "<what>"` and Studio Pro steps |
+| `Unknown command 'APPLY'` | Commands are lowercase |
+| `No operation or action 'x'. Did you mean: y` | Use y. List all: `python mx.py ops` |
 | `MPR v1 format` | This project cannot be changed by mxlocal. Give Studio Pro steps |
 | `Model editing is not available` | Node.js 22.13+ is missing. Give Studio Pro steps |
 | `ERROR` with `at ... edits/<name>.js:<line>` | The script failed at that line. Read the HINT |

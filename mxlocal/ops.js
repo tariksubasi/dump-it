@@ -85,27 +85,62 @@ const OPS = {
     delete: { doc: "Delete a document, entity, attribute, association, enumeration value or module role. Lists what still uses it.", fields: { target: "R qualified name" } }
 };
 
-function help() {
-    const lines = ["OPERATIONS for change.json: { \"ops\": [ { \"op\": \"<name>\", ...fields } ] }   (R = required)", ""];
-    for (const [name, o] of Object.entries(OPS)) {
-        lines.push(`${name}: ${o.doc}`);
-        for (const [f, d] of Object.entries(o.fields)) lines.push(`    ${f}: ${d}`);
+// Without a name: one line per operation (short, so a small model reads it every time). With a name: the fields of
+// that operation, action or flow control kind.
+function help(name) {
+    const groups = [["OPERATIONS", OPS], ["ACTIONS (inside \"actions\")", ACTIONS], ["FLOW CONTROL (inside \"actions\")", CONTROL]];
+    const detail = (n, o) => [`${n}: ${o.doc}`, ...Object.entries(o.fields).map(([f, d]) => `    ${f}: ${d}`)];
+    if (name && name !== true) {
+        if (name === "all") {
+            const lines = ["change.json: { \"ops\": [ { \"op\": \"<name>\", ...fields } ] }   (R = required)"];
+            for (const [title, table] of groups) {
+                lines.push("", title + ":");
+                for (const [n, o] of Object.entries(table)) lines.push(...detail(n, o));
+            }
+            lines.push("Every action also takes:", ...Object.entries(COMMON).map(([f, d]) => `    ${f}: ${d}`));
+            return lines.join("\n");
+        }
+        for (const [title, table] of groups) {
+            const hit = Object.keys(table).find(n => n.toLowerCase() === String(name).toLowerCase());
+            if (!hit) continue;
+            const lines = detail(hit, table[hit]);
+            if (table === ACTIONS) lines.push("  also: " + Object.entries(COMMON).map(([f, d]) => `${f} (${d})`).join("; "));
+            if (/actions/.test(Object.keys(table[hit].fields).join(" "))) lines.push("  actions: see ops <action name>, e.g. ops retrieve; list all with: ops");
+            return (table === OPS ? "op " : "action ") + lines.join("\n");
+        }
+        const all = groups.flatMap(([, t]) => Object.keys(t));
+        throw new Error(`No operation or action '${name}'. Did you mean: ${suggest(name, all, 3).join(", ")}? All names: ops`);
     }
-    lines.push("", "ACTIONS (inside \"actions\": [ { \"action\": \"<name>\", ...fields } ]):");
-    for (const [name, o] of Object.entries(ACTIONS)) {
-        lines.push(`${name}: ${o.doc}`);
-        for (const [f, d] of Object.entries(o.fields)) lines.push(`    ${f}: ${d}`);
-    }
-    lines.push("Every action above also takes:");
-    for (const [f, d] of Object.entries(COMMON)) lines.push(`    ${f}: ${d}`);
-    lines.push("", "FLOW CONTROL (also inside \"actions\"):");
-    for (const [name, o] of Object.entries(CONTROL)) {
-        lines.push(`${name}: ${o.doc}`);
-        for (const [f, d] of Object.entries(o.fields)) lines.push(`    ${f}: ${d}`);
+    const lines = ["change.json: { \"ops\": [ { \"op\": \"<name>\", ...fields } ] }. Fields of one: ops <name> (all at once: ops all)"];
+    for (const [title, table] of groups) {
+        lines.push("", title + ":");
+        for (const [n, o] of Object.entries(table)) lines.push(`  ${n.padEnd(20)} ${o.doc.split(/(?<=\.) /)[0]}`);
     }
     lines.push("", "Expressions are Mendix expressions as text: \"'Hello'\", \"$Order/Total * 2\", \"empty\", \"[%CurrentDateTime%]\".");
-    lines.push("Anything not covered here: write a change.js with the Model SDK (use: api <Type>).");
+    lines.push("No operation fits: record the gap (mx.py gap \"<what>\") and give the user the Studio Pro steps.");
     return lines.join("\n");
+}
+
+// Deleting a stored entity, attribute or association drops database data when the app next starts.
+function persistable(entity) {
+    try {
+        let e = entity;
+        for (let i = 0; e && i < 20; i++) {
+            const g = e.generalization;
+            if (g instanceof dm.NoGeneralization) return g.persistable;
+            e = g && g.generalization;
+        }
+    } catch {
+        // parent entity in a document that is not loaded: assume stored, the safe side for a warning
+    }
+    return true;
+}
+
+function dataLoss(el) {
+    if (el instanceof dm.Entity && persistable(el)) return `the table of ${el.name} and all its rows are dropped when the app next starts`;
+    if (el instanceof dm.Attribute && persistable(el.containerAsEntity)) return `the column ${el.name} and its values are dropped when the app next starts`;
+    if (el instanceof dm.AssociationBase) return `the links stored in ${el.name} are dropped when the app next starts`;
+    return null;
 }
 
 // ---------------------------------------------------------------- bound operations
@@ -377,8 +412,13 @@ function bind(model, client) {
         return out;
     }
 
+    // Entities, attributes and associations created by this plan: deleting or retyping them loses no stored data.
+    const fresh = new Set();
+    const isFresh = qn => [...fresh].some(f => qn === f || qn.startsWith(f + "."));
+
     const impl = {
         async createEntity(o) {
+            fresh.add(`${o.module}.${o.name}`);
             const d = await domainModel(o.module);
             if (d.entities.some(e => e.name === o.name)) throw new Error(`${o.module}.${o.name} already exists`);
             const e = dm.Entity.createIn(d);
@@ -397,6 +437,7 @@ function bind(model, client) {
             return `${o.module}.${o.name}`;
         },
         async addAttribute(o, loaded) {
+            fresh.add(`${o.entity}.${o.name}`);
             const e = loaded || (await entity(o.entity));
             if (!o.name || !o.type) throw new Error(`addAttribute needs name and type (${o.entity})`);
             if (e.attributes.some(a => a.name === o.name)) throw new Error(`${o.entity}.${o.name} already exists`);
@@ -410,12 +451,14 @@ function bind(model, client) {
             const a = await get(o.attribute);
             if (!(a instanceof dm.Attribute)) throw new Error(`'${o.attribute}' is not an attribute`);
             if (o.type === undefined && o.default === undefined) throw new Error("changeAttribute needs 'type' and/or 'default'");
+            const before = a.type.structureTypeName;
             if (o.type !== undefined) {
                 const dflt = await attributeType(a, o.type);
                 if (o.default === undefined) setDefault(a, dflt);
             }
             if (o.default !== undefined) setDefault(a, o.default);
-            return o.attribute;
+            const changed = a.type.structureTypeName !== before && persistable(a.containerAsEntity) && !isFresh(o.attribute);
+            return o.attribute + (changed ? `\n      DATA LOSS: existing values are converted on the next app start; values that do not convert to ${o.type} are lost` : "");
         },
         async addAssociation(o) {
             const from = await entity(o.from);
@@ -430,6 +473,7 @@ function bind(model, client) {
             a.child = to;
             a.type = enumValue(dm.AssociationType, o.type || "Reference", "association type");
             a.owner = enumValue(dm.AssociationOwner, o.owner || "Default", "association owner");
+            fresh.add(`${o.from.split(".")[0]}.${name}`);
             return `${o.from.split(".")[0]}.${name}: ${o.from} -> ${o.to}`;
         },
         async createEnumeration(o) {
@@ -745,8 +789,10 @@ function bind(model, client) {
         async delete(o) {
             const el = await get(o.target);
             const users = client.referencesTo(o.target);
+            const loss = isFresh(o.target) ? null : dataLoss(el);
             el.delete();
-            return `${o.target}` + (users.length ? `\n      STILL USED BY (fix these, or Studio Pro shows errors): ${users.join(", ")}` : "");
+            return `${o.target}` + (users.length ? `\n      STILL USED BY (fix these, or Studio Pro shows errors): ${users.join(", ")}` : "") +
+                (loss ? `\n      DATA LOSS: ${loss}` : "");
         }
     };
 

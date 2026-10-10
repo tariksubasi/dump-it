@@ -5,17 +5,23 @@ Copied into the export folder by mxcontext.py with CONFIG filled in, so the agen
     python mx.py refresh              re-export the model and show what changed since the last checked state
     python mx.py find <text>          model elements whose name contains <text>
     python mx.py steps <Module.Flow>  steps of a microflow/nanoflow with ids (for changeAction / deleteAction)
-    python mx.py ops                  the operations a change file can use
+    python mx.py ops [name]           the operations a change file can use; with a name: its fields
     python mx.py api <Type> [word]    Model SDK type details (for .js change files)
-    python mx.py dryrun <file>        compute a change from edits/<file> (.json or .js); writes nothing
+    python mx.py dryrun <file>        compute a change from edits/<file>; writes nothing
+    python mx.py rerun [file]         dry run a change file again (after undo); brings it back from the backup if gone
+    python mx.py gap "<what>"         record a change no operation can do yet (then give the user Studio Pro steps)
     python mx.py apply <CODE>         write the last dry run (user approved, Studio Pro closed), re-export, check
-    python mx.py undo                 restore the model from before the last apply (Studio Pro closed), re-export
+    python mx.py undo [--force]       restore the model from before the last apply (Studio Pro closed), re-export;
+                                      --force only when the user agrees to lose later changes it lists
     python mx.py check                run Studio Pro's mx check on the project (when mx.exe is installed)
     python mx.py ok "<summary>"       mark the current export as the checked state (git commit)
     python mx.py selftest             run every operation on a temporary copy of the project
 """
+import datetime
+import glob
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -31,6 +37,8 @@ for stream in (sys.stdout, sys.stderr):
     except (AttributeError, ValueError):
         pass
 EDITS = os.path.join(HERE, "edits")
+COMMANDS = ("refresh", "find", "steps", "ops", "api", "dryrun", "rerun", "gap", "apply", "undo", "check", "ok", "selftest")
+last_output = ""
 
 
 def say(text):
@@ -40,8 +48,9 @@ def say(text):
 
 def run(cmd, cwd=HERE):
     """Run a command, print its output, return its exit code."""
+    global last_output
     p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace")
-    out = (p.stdout or "") + (p.stderr or "")
+    out = last_output = (p.stdout or "") + (p.stderr or "")
     lines = [line for line in out.splitlines() if "ExperimentalWarning" not in line and "--trace-warnings" not in line]
     if lines:
         say("\n".join(lines))
@@ -90,6 +99,71 @@ def mx_check():
     return run([exe, "check", CONFIG["mpr"]])
 
 
+def journal(**entry):
+    """edits/journal.jsonl: every dry run, apply, undo and gap, so work can be found again after an undo."""
+    os.makedirs(EDITS, exist_ok=True)
+    entry = dict(time=datetime.datetime.now().isoformat(timespec="seconds"), **entry)
+    with open(os.path.join(EDITS, "journal.jsonl"), "a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+def backup_root():
+    return os.path.join(os.path.dirname(CONFIG["mpr"]), ".mxlocal-backup")
+
+
+def dryrun(path):
+    if path.endswith(".js") and not CONFIG.get("allow_scripts"):
+        say("ERROR: %s is a script, and scripts are off in this folder (they run with full rights before the user "
+            "approves anything).\nUse operations: python mx.py ops. If no operation fits: python mx.py gap \"<what is "
+            "missing>\", then give the user the Studio Pro steps.\n(The user can switch scripts on by exporting with "
+            "--allow-scripts.)" % os.path.basename(path))
+        return 1
+    code = mxlocal("run", path, *(["--allow-js"] if path.endswith(".js") else []))
+    m = re.search(r"Approval code: (\w+)", last_output)
+    journal(cmd="dryrun", file=os.path.relpath(path, HERE), code=m.group(1) if m else None, ok=code == 0)
+    return code
+
+
+def rerun(name):
+    """Dry run a change file again. Without a name: the change of the newest backup (the last apply, undone or not).
+    A file that is gone from edits/ is written back from the backup first."""
+    if name:
+        for c in [os.path.join(EDITS, name), os.path.join(EDITS, name + ".json"), os.path.join(EDITS, name + ".js")]:
+            if os.path.isfile(c):
+                return dryrun(c)
+    for b in sorted(glob.glob(os.path.join(backup_root(), "[0-9]*")), reverse=True):
+        source = os.path.join(b, "change.txt")
+        saved = [f for f in glob.glob(os.path.join(b, "change.*")) if not f.endswith(".txt")]
+        if not saved or not os.path.isfile(source):
+            continue
+        with open(source, encoding="utf-8") as f:
+            original = f.readline().partition("Source: ")[2].strip()
+        base = os.path.basename(original) or os.path.basename(saved[0])
+        if name and os.path.splitext(base)[0] != os.path.splitext(name)[0]:
+            continue
+        target = os.path.join(EDITS, base)
+        if not os.path.isfile(target):
+            os.makedirs(EDITS, exist_ok=True)
+            shutil.copyfile(saved[0], target)
+            say("Brought back edits/%s from backup %s." % (base, os.path.basename(b)))
+        return dryrun(target)
+    say("No change file '%s' in edits/ or in the backups." % name if name else "No applied change found in the backups.")
+    return 1
+
+
+def gap(text):
+    os.makedirs(EDITS, exist_ok=True)
+    gaps = os.path.join(EDITS, "gaps.jsonl")
+    n = sum(1 for _ in open(gaps, encoding="utf-8")) + 1 if os.path.isfile(gaps) else 1
+    with open(gaps, "a", encoding="utf-8") as f:
+        f.write(json.dumps({"time": datetime.datetime.now().isoformat(timespec="seconds"), "need": text},
+                           ensure_ascii=False) + "\n")
+    journal(cmd="gap", need=text)
+    say("Recorded as gap #%d in edits/gaps.jsonl. Tell the user that no operation does this yet and give the exact "
+        "Studio Pro steps (menu names, which document, which property)." % n)
+    return 0
+
+
 def change_file(name):
     candidates = [name, os.path.join(EDITS, name)]
     if not os.path.splitext(name)[1]:
@@ -110,7 +184,11 @@ def main(argv):
     if not argv or argv[0] in ("-h", "--help", "help"):
         say(__doc__)
         return 0
-    cmd, rest = argv[0].lower(), argv[1:]
+    cmd, rest = argv[0], argv[1:]
+    if cmd not in COMMANDS:
+        hint = " Commands are lowercase: python mx.py %s" % cmd.lower() if cmd.lower() in COMMANDS else ""
+        say("Unknown command '%s'.%s\n%s" % (cmd, hint, __doc__))
+        return 1
     if cmd == "refresh":
         return refresh()
     if cmd == "find":
@@ -124,7 +202,7 @@ def main(argv):
             return 1
         return mxlocal("steps", rest[0])
     if cmd == "ops":
-        return mxlocal("ops", project=False)
+        return mxlocal("ops", *rest[:1], project=False)
     if cmd == "api":
         if not rest:
             say("Usage: python mx.py api <Type> [filter word], e.g. python mx.py api Attribute")
@@ -134,12 +212,21 @@ def main(argv):
         if not rest:
             say("Usage: python mx.py dryrun <file in edits/>")
             return 1
-        return mxlocal("run", change_file(rest[0]))
+        return dryrun(change_file(rest[0]))
+    if cmd == "rerun":
+        return rerun(rest[0] if rest else None)
+    if cmd == "gap":
+        if not rest:
+            say('Usage: python mx.py gap "<what the user wants that no operation can do>"')
+            return 1
+        return gap(" ".join(rest))
     if cmd == "apply":
         if not rest:
             say("Usage: python mx.py apply <CODE>  (the code from the dry run, after the user approved it)")
             return 1
         code = mxlocal("apply", "--code", rest[0])
+        m = re.search(r"Backup: (\S+)", last_output)
+        journal(cmd="apply", code=rest[0], backup=m.group(1) if m else None, ok=code == 0)
         if code:
             return code
         say("")
@@ -148,7 +235,8 @@ def main(argv):
         mx_check()
         return 0
     if cmd == "undo":
-        code = mxlocal("restore")
+        code = mxlocal("restore", *(["--force"] if "--force" in rest else []))
+        journal(cmd="undo", ok=code == 0)
         if code:
             return code
         return refresh()

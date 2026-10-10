@@ -212,7 +212,12 @@ function propClasses(p) {
 }
 
 // Mendix renamed Form to Page; storage keys kept the old word.
-const words = s => s.replace(/^_+/, "").replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase().split(" ").map(w => (w === "form" ? "page" : w));
+const wordCache = new Map(); // calibration asks for the same names thousands of times
+const words = s => {
+    let w = wordCache.get(s);
+    if (!w) wordCache.set(s, (w = s.replace(/^_+/, "").replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase().split(" ").map(x => (x === "form" ? "page" : x))));
+    return w;
+};
 
 // 0+ = extra words when one name's words contain the other's, 1.5 = one word swapped, null = unrelated.
 function wordDistance(a, b) {

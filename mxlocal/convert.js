@@ -112,7 +112,17 @@ function leafFromPlain(value, d, hint) {
         if (d.k === 0x12 || Number.isInteger(value)) return { k: 0x12, v: BigInt(value) };
         return { k: 0x01, v: value };
     }
-    throw new Error("Cannot encode value " + String(value));
+    throw new Error("Cannot encode value " + describe(value) + ": this property takes a plain value (text, number, true/false), not a model element");
+}
+
+// Short text for a value in an error message (String() of an SDK element dumps hundreds of lines).
+function describe(value) {
+    if (value && typeof value === "object") {
+        if (value.structureTypeName) return `<${value.structureTypeName} ${value.qualifiedName || value.name || value.id}>`;
+        const s = JSON.stringify(value) || String(value);
+        return s.length > 80 ? s.slice(0, 80) + "..." : s;
+    }
+    return String(value);
 }
 
 // ---------- catalog: what BSON kind does (storageType, key) use in this project ----------
