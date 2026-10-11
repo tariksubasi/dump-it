@@ -48,7 +48,8 @@ function checkActions(list, where, problems) {
         } catch (e) {
             problems.push(e.message);
         }
-        for (const k of ["actions", "then", "else"]) if (Array.isArray(a[k])) checkActions(a[k], `${w}.${k}`, problems);
+        for (const k of ["actions", "then", "else", "other", "empty"]) if (Array.isArray(a[k])) checkActions(a[k], `${w}.${k}`, problems);
+        if (a.cases && typeof a.cases === "object") for (const [k, list] of Object.entries(a.cases)) if (Array.isArray(list)) checkActions(list, `${w}.cases.${k}`, problems);
         if (a.onError && Array.isArray(a.onError.actions)) checkActions(a.onError.actions, `${w}.onError`, problems);
     }
 }

@@ -10,7 +10,7 @@ const { ATTRIBUTE_TYPES, DATA_TYPES, suggest, fail, validate, bool, noDollar, en
 // ---------------------------------------------------------------- op catalog (also the 'ops' help text)
 
 
-const { makeFlows, ACTIONS, CONTROL, COMMON } = require("./ops-flows");
+const { makeFlows, ACTIONS, CONTROL, COMMON, CREATES } = require("./ops-flows");
 const { makePages, PAGE_FIELDS, MENU_FIELDS, HOME_FIELDS, widgetFields, NO_MENU_ROLES } = require("./ops-pages");
 const { makeSecurity, SECURITY_OPS } = require("./ops-security");
 
@@ -53,11 +53,15 @@ const OPS = {
             microflow: "R Module.Microflow or Module.Nanoflow", id: "R step id from 'steps', e.g. 3f2a9c1b",
             xpath: "retrieve: new XPath", first: "retrieve: true/false", entity: "retrieve: Module.Entity",
             set: "create/change: { \"Attr\": \"expression\" } (adds or replaces)", unset: "create/change: [ \"Attr\" ] to remove",
-            commit: "create/change: true/false", refresh: "change/commit: true/false", events: "commit: true/false",
-            args: "call: { \"Param\": \"expression\" }", message: "log: text", level: "log: level", text: "message: text",
-            type: "message: Information | Warning | Error", blocking: "message: true/false", value: "variable/set/end: expression",
-            condition: "decision: expression", caption: "decision or action: caption", disabled: "action: true/false",
-            while: "while loop: expression", over: "list loop: list variable"
+            commit: "create/change: true/false; callRest/importWithMapping (import mapping): yes | no | withoutEvents", refresh: "change/commit/rollback: true/false", events: "commit: true/false",
+            args: "call/callJava/callJavaScript: { \"Param\": \"expression\" }; validationFeedback: [\"expression\"]", message: "log/validationFeedback: text", level: "log: level", text: "message: text",
+            type: "message: Information | Warning | Error; changeList: add | remove | replace | clear", blocking: "message: true/false",
+            value: "variable/set/end/changeList: expression; listOperation find/filter: value", condition: "decision: expression", caption: "decision, ifType or action: caption",
+            disabled: "action: true/false", while: "while loop: expression", over: "list loop: list variable",
+            function: "aggregateList: count | sum | average | minimum | maximum | all | any", attribute: "aggregateList: attribute", expression: "aggregateList, listOperation find/filter by expression: expression",
+            other: "listOperation: second list or object variable", offset: "listOperation range: expression", limit: "listOperation range: expression",
+            showInBrowser: "downloadFile: true/false", url: "callRest: location text", urlArgs: "callRest: [\"expression\"]", method: "callRest: Get | Post | ...",
+            headers: "callRest: { \"Name\": \"expression\" } (replaces all)", timeout: "callRest: seconds", body: "callRest: body text", bodyArgs: "callRest: [\"expression\"]"
         }
     },
     deleteAction: { doc: "Delete one action or loop from a flow and reconnect the line. Get its id with: steps Module.Flow.", fields: { microflow: "R Module.Microflow or Module.Nanoflow", id: "R step id from 'steps'" } },
@@ -405,14 +409,16 @@ function bind(model, client) {
         return `${qn} (${count} action(s))`;
     }
 
+    // The nested action lists of one spec: if branches, loop body, ifType cases, error handler.
+    const nested = sp => [sp.then, sp.else, sp.actions, ...(sp.cases && typeof sp.cases === "object" ? Object.values(sp.cases) : []), sp.other, sp.empty, sp.onError && sp.onError.actions].filter(Array.isArray);
+
     // Activities (boxes) a list of action specs creates, including nested branches, loops and error handlers.
     function countActivities(specs) {
         let n = 0;
         for (const sp of specs || []) {
             if (!sp || typeof sp !== "object") continue;
-            if (sp.action === "if") n += countActivities(sp.then) + countActivities(sp.else);
-            else if (sp.action === "loop") n += countActivities(sp.actions);
-            else if (ACTIONS[sp.action]) n += 1 + (sp.onError && sp.onError.actions ? countActivities(sp.onError.actions) : 0);
+            if (ACTIONS[sp.action]) n++;
+            for (const list of nested(sp)) n += countActivities(list);
         }
         return n;
     }
@@ -420,13 +426,9 @@ function bind(model, client) {
     function createdVariables(specs, out = []) {
         for (const sp of specs || []) {
             if (!sp || typeof sp !== "object") continue;
-            if (["retrieve", "create", "call"].includes(sp.action) && sp.variable) out.push(sp.variable);
-            if (sp.action === "variable") out.push(sp.name);
+            if (CREATES[sp.action] && sp[CREATES[sp.action]]) out.push(sp[CREATES[sp.action]]);
             if (sp.action === "loop" && sp.over) out.push(sp.item || `${noDollar(sp.over)}Item`);
-            createdVariables(sp.then, out);
-            createdVariables(sp.else, out);
-            createdVariables(sp.actions, out);
-            if (sp.onError && sp.onError.actions) createdVariables(sp.onError.actions, out);
+            for (const list of nested(sp)) createdVariables(list, out);
         }
         return out;
     }

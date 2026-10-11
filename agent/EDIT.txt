@@ -92,6 +92,20 @@ Decision, loops and an error handler (if / loop / onError / end / continue):
         { "action": "call", "microflow": "Sales.SUB_Order_Pay", "args": { "Order": "$Order" },
           "onError": { "rollback": false, "actions": [ { "action": "log", "message": "pay failed", "level": "Error" }, { "action": "continue" } ] } } ] } ] } ] }
 
+Lists, a REST call, a Java action and an object type decision (fields of one action: @PY@ mx.py ops callRest):
+{ "ops": [ { "op": "createMicroflow", "module": "Sales", "name": "ACT_Customer_Sync", "parameters": [ { "name": "Party", "type": "Sales.Party" } ],
+  "actions": [
+    { "action": "retrieve", "variable": "Orders", "entity": "Sales.Order", "xpath": "[Paid = false()]" },
+    { "action": "aggregateList", "variable": "OpenTotal", "list": "Orders", "function": "sum", "attribute": "Total" },
+    { "action": "listOperation", "variable": "Newest", "operation": "sort", "list": "Orders", "sort": [ { "attribute": "Date", "descending": true } ] },
+    { "action": "callRest", "url": "https://api.example.com/customers/{1}", "urlArgs": ["$Party/Code"], "variable": "Json" },
+    { "action": "importWithMapping", "mapping": "Sales.IMM_Customer", "source": "Json", "variable": "Remote" },
+    { "action": "callJava", "javaAction": "Sales.JA_Hash", "args": { "Text": "$Json" }, "variable": "Hash" },
+    { "action": "ifType", "variable": "Party", "cases": { "Sales.Company": [ { "action": "cast", "variable": "Company" },
+        { "action": "change", "variable": "Company", "set": { "Hash": "$Hash" }, "commit": true } ] } } ] } ] }
+  More actions: createList, changeList, validationFeedback, rollback, downloadFile, showHomePage, callJavaScript
+  (nanoflows only). Write variable names without $ in variable/list/other/source.
+
 Change and delete existing steps (ids from: @PY@ mx.py steps Sales.ACT_Orders_Process):
 { "ops": [
   { "op": "changeAction", "microflow": "Sales.ACT_Orders_Process", "id": "3f2a9c1b", "xpath": "[Paid = false() and Total > 0]" },
