@@ -113,7 +113,8 @@ function check(req, mpr, ctx) {
     const files = walk(ctx).map(f => [path.relative(ctx, f).replace(/\\/g, "/"), f]);
     for (const [pathRe, textRe] of Object.entries(c.files || {})) {
         const hits = files.filter(([rel]) => new RegExp(pathRe).test(rel));
-        if (!hits.some(([, f]) => new RegExp(textRe).test(fs.readFileSync(f, "utf8")))) fails.push(`no ${pathRe} contains /${textRe}/`);
+        const re = textRe.startsWith("(?s)") ? new RegExp(textRe.slice(4), "s") : new RegExp(textRe); // (?s): . matches newlines
+        if (!hits.some(([, f]) => re.test(fs.readFileSync(f, "utf8")))) fails.push(`no ${pathRe} contains /${textRe}/`);
     }
     return fails;
 }

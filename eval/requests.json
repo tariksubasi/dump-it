@@ -17,7 +17,7 @@
     { "id": "enum", "text": "Order için Status enumeration'ı ekle (Open, Paid, Cancelled) ve Order'a Status attribute'u olarak bağla, varsayılanı Open olsun.",
       "checks": { "find": ["MyFirstModule.Order.Status"], "files": { "_module\\.txt$": "Open.*Paid.*Cancelled" } } },
     { "id": "microflow", "text": "Bir Order alıp Paid'i true yapan, commit eden ve 'Ödeme alındı' mesajı gösteren ACT_Order_Pay microflow'unu yaz. User rolü çalıştırabilsin.",
-      "checks": { "find": ["MyFirstModule.ACT_Order_Pay"], "files": { "ACT_Order_Pay\\.txt$": "(?s)Paid.*[Cc]ommit.*Ödeme alındı" } } },
+      "checks": { "find": ["MyFirstModule.ACT_Order_Pay"], "files": { "ACT_Order_Pay\\.txt$": "(?s)^(?=.*COMMIT)(?=.*Paid = true).*Ödeme alındı" } } },
     { "id": "dashboard", "text": "Siparişler için bir dashboard sayfası yap: solda Number, Total ve Paid kolonlu bir tablo, sağda seçilen siparişin salt okunur detayı olsun. Menüye ekle, User rolü görsün.",
       "checks": { "files": { "pages/.*\\.txt$": "(?s)(DataGrid|Datagrid).*DataView", "overview\\.txt$": "menu \"" } } },
     { "id": "security", "text": "HR adında bir modül rolü ve HRManager adında bir kullanıcı rolü oluştur; Administrator kullanıcı rolü de HR'yi alsın. demo_hr adında bir demo kullanıcı ekle.",
