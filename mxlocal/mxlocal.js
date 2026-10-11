@@ -44,6 +44,9 @@ const USAGE = `mxlocal - Mendix Model SDK offline on a local .mpr (v2)
                                         model elements whose qualified name contains <text>
   node mxlocal.js steps <Module.Flow> --project <app.mpr|folder>
                                         the steps of a microflow/nanoflow with ids (for changeAction/deleteAction)
+  node mxlocal.js widgets <Module.Page> --project <app.mpr|folder>
+                                        the widget tree of a page or snippet: names, kinds, entity, where new
+                                        widgets can go (for addWidgets/changeWidget/deleteWidget/moveWidget)
   node mxlocal.js ops [name]            the operations a change.json can use (with a name: its fields)
   node mxlocal.js serve --project ... --edits <dir> [--allow-apply]
                                         MCP server (stdio) with these commands as tools; keeps the project loaded
@@ -392,6 +395,12 @@ async function main() {
         const client = new LocalClient(ctx);
         const model = await client.open();
         out(await require("./ops").bind(model, client).steps(a._[1]));
+    } else if (cmd === "widgets") {
+        if (!a._[1]) throw new Error("widgets needs a page or snippet, e.g. widgets Module.Customer_Edit");
+        const ctx = await loadProject(mpr);
+        const client = new LocalClient(ctx);
+        const model = await client.open();
+        out(await require("./ops").bind(model, client).widgets(a._[1]));
     } else if (cmd === "find") {
         if (!a._[1]) throw new Error("find needs a text, e.g. find Customer");
         const ctx = await loadProject(mpr);
@@ -443,7 +452,7 @@ function report(e, file) {
     const stack = (e && e.stack ? e.stack : "").split("\n").slice(1);
     const own = file && stack.find(l => l.includes(path.resolve(file)));
     if (own) lines.push("  at " + own.trim().replace(/^at /, ""));
-    else if (!/^(No |Nothing |Code |The model|apply needs|run needs|Studio Pro|Expected|--project|Only|This project|Unknown command|Unknown tool|Op \d|ops must be|name: )|is a script\. Scripts are off|is not a tool here/.test(msg)) lines.push(...stack.slice(0, 4).map(l => "  " + l.trim()));
+    else if (!/^(No |Nothing |Code |The model|apply needs|run needs|Studio Pro|Expected|--project|Only|This project|Unknown command|Unknown tool|Op \d|ops must be|name: |widgets: )|is a script\. Scripts are off|is not a tool here/.test(msg)) lines.push(...stack.slice(0, 4).map(l => "  " + l.trim()));
     const hint = HINTS.find(([re]) => re.test(full)); // the full text: the type names may be past the cut
     if (hint) lines.push("HINT: " + (typeof hint[1] === "function" ? hint[1](full) : hint[1]));
     return lines.join("\n") + "\n";

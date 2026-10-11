@@ -11,6 +11,8 @@ STEP 1 - FIND THE NAMES
   Read the related files in modules/ when you need the current logic.
   To change or delete ONE existing step of a microflow/nanoflow, get the step ids first:
     @PY@ mx.py steps <Module.Flow>             (or the steps tool)
+  To change an existing page or snippet, get its widget names first (names, [into] places, {Entity} of data views):
+    @PY@ mx.py widgets <Module.Page>           (or the widgets tool)
 
 STEP 2 - WRITE THE CHANGE FILE
   Pick the operations (one line each), then read the fields of the ones you use:
@@ -125,6 +127,17 @@ Dashboard page (grid + read-only detail of the selected row, in the menu), an ed
   (fields of one: @PY@ mx.py ops dataGrid; all: @PY@ mx.py ops createPage). A data grid is classic; "kind": "datagrid2"
   copies a Data grid 2 from this project's pages. The first Warnings line says which grid was made: show it to the user.
 
+Existing page (names from: @PY@ mx.py widgets Sales.Order_Edit): add an input into the data view, a button in its
+footer, make a field read-only, move a button, delete a widget:
+{ "ops": [
+  { "op": "addWidgets", "page": "Sales.Order_Edit", "into": "dataView1", "after": "textBox2", "widgets": [ { "widget": "input", "attribute": "Note" } ] },
+  { "op": "addWidgets", "page": "Sales.Order_Edit", "into": "dataView1", "slot": "footer", "widgets": [ { "widget": "actionButton", "action": "close" } ] },
+  { "op": "changeWidget", "page": "Sales.Order_Edit", "widget": "textBox1", "editable": false, "label": "Order number" },
+  { "op": "moveWidget", "page": "Sales.Order_Edit", "widget": "actionButton2", "before": "actionButton1" },
+  { "op": "deleteWidget", "page": "Sales.Order_Edit", "widget": "datePicker1" }
+] }
+  Only the named widgets change. Never recreate an existing page with createPage to change it.
+
 The module does not exist yet: create it first, in the same file (then its roles for the user roles):
 { "ops": [
   { "op": "createModule", "name": "Onboarding", "roles": ["User", "HR"] },
@@ -177,6 +190,8 @@ ERRORS AND FIXES
 - "'x' cannot be changed on ..." -> the message lists the fields this kind of step accepts.
 - "is only allowed inside a loop" / "unreachable" -> break/continue only in loops; nothing may follow end/break/continue.
 - "unknown widget 'x'. Supported: ..." -> use a listed widget; other widgets: gap + Studio Pro steps.
+- "no widget 'x' on Module.Page (widgets here: ...)" -> use a listed name (all: @PY@ mx.py widgets Module.Page).
+- "shows or uses the object of dataView1" -> that widget can move only inside dataView1.
 - "listenTo 'x' is no grid or list view on this page (...)" / "is ambiguous" -> use a name the message lists.
 - "datagrid2 ... is not possible here" -> use "kind": "classic" (or leave kind out).
 - "needs an import mapping" / "export mapping" -> publishRest supports only simple parameters/results; do it in Studio Pro.

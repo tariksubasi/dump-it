@@ -34,6 +34,13 @@ export const steps = {
     execute: (args, context) => mx(context, ["steps", args.flow])
 };
 
+export const widgets = {
+    description: "Widget tree of a page or snippet: widget names, kinds, the entity of each data view and list view, " +
+        "and where new widgets can go. Use the names in addWidgets, changeWidget, deleteWidget and moveWidget.",
+    args: { page: text("qualified name of the page or snippet, e.g. Sales.Customer_Edit") },
+    execute: (args, context) => mx(context, ["widgets", args.page])
+};
+
 export const ops = {
     description: "Without a name: one line per operation a change file edits/<name>.json can use. With a name " +
         "(e.g. createPage, retrieve): the fields of that operation or action.",
