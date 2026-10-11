@@ -118,7 +118,8 @@ istemiyorsan export'u `--no-mcp` ile al.
 | Alan | Yapabildikleri |
 |---|---|
 | Domain model | Entity, attribute (tüm tipler), association, kalıtım (generalization), validation rule, event handler, index, enumeration |
-| Microflow / nanoflow | Oluşturma; retrieve, create, change, commit, delete, call, log, mesaj, değişken, sayfa aç/kapat; **karar (if), döngü (liste / while), break, continue, hata yakalama (error handler)** |
+| Microflow / nanoflow | Oluşturma; retrieve, create, change, commit, delete, rollback, call, log, mesaj, değişken, sayfa aç/kapat, ana sayfa; **karar (if), nesne tipi kararı + cast, döngü (liste / while), break, continue, hata yakalama (error handler)** |
+| Liste ve diğer aksiyonlar | Liste oluşturma/değiştirme (ekle, çıkar, değiştir, temizle), aggregate (count, sum, average, min, max, all, any), liste işlemleri (union, intersect, subtract, contains, equals, head, tail, find, filter, sort, range), validation feedback, Java action ve JavaScript action çağırma (parametreleri kontrol edilerek), REST çağrısı (URL şablonu, method, header, timeout, metin ya da export mapping gövdesi; cevap yok / String / import mapping), import mapping ile içe aktarma, dosya indirme. Test projelerindeki aksiyonların ~%99'u |
 | Var olan akış | Araya adım ekleme (döngü içine de), **tek bir adımı değiştirme** (XPath, değer, koşul, devre dışı bırakma...) ve **silme** |
 | Sayfa | Bir entity için düzenleme formu (alan tipine göre input, Kaydet/İptal), boş sayfa ya da widget listesinden sayfa: layout grid, container, metin/başlık, data grid (klasik ya da projedeki bir Data grid 2'den kopya), seçili satırı gösteren data view (listenTo), list view (master-detail için data view içinde), butonlar, input'lar; menü öğesi ve ana sayfa (rol bazlı da) |
 | Modül | Yeni modül (domain model, modül güvenliği ve ayarlarıyla, Studio Pro'nun oluşturduğu gibi) ve modül rolleri |
@@ -129,8 +130,9 @@ istemiyorsan export'u `--no-mcp` ile al.
 | Diğer | Constant, scheduled event, basit published REST operasyonu, doküman taşıma, yeniden adlandırma (modül dahil), silme |
 
 Yapamadıkları (Studio Pro'da ya da SDK script'iyle): mevcut sayfa/snippet/layout'taki widget'ları düzenleme, listede
-olmayan widget'lar (tab container, gallery ve Data grid 2 dışındaki pluggable widget'lar), import/export mapping,
-JSON structure, consumed REST, workflow, nesne gövdeli REST operasyonları.
+olmayan widget'lar (tab container, gallery ve Data grid 2 dışındaki pluggable widget'lar), import/export mapping
+dokümanının kendisi, JSON structure, consumed REST servisi, workflow, nesne gövdeli REST operasyonları; REST
+çağrısında kimlik doğrulama, proxy, form-data/binary gövde; export with mapping ve reduce aggregate.
 
 **Bir kere yapılır:**
 

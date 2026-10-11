@@ -257,12 +257,26 @@ Actions (inside `"actions": [ { "action": "<name>", ... } ]`). Every action also
 | `set` | **name**, **value** | |
 | `showPage` | **page**, args `{"PageParameter":"$Var"}` | Every page parameter needs an arg |
 | `closePage` | count | |
+| `showHomePage` | | Microflows only |
+| `createList` | **variable**, **entity** | An empty list |
+| `changeList` | **list**, type (`add`/`remove`/`replace`/`clear`), value (object or list expression; not for clear) | type = add |
+| `aggregateList` | **variable**, **list**, **function** (`count`/`sum`/`average`/`minimum`/`maximum`/`all`/`any`), attribute or expression | count takes neither; the others one of them. sum/average need a number attribute, minimum/maximum a number or date, all/any a Boolean. expression uses `$currentObject`, e.g. `$currentObject/Price * $currentObject/Quantity`. `reduce` is refused |
+| `listOperation` | **variable**, **operation**, **list**, other, attribute + value, expression, sort, offset, limit | `union`/`intersect`/`subtract`/`equals` (Boolean): other = second list; `contains` (Boolean): other = object; `head`/`tail`; `find` (one object)/`filter` (a list): attribute (or `Module.Assoc`) + value, or expression on `$currentObject`; `sort`: `["Attr", {"attribute":"B","descending":true}]`; `range`: limit, offset (default 0) |
+| `validationFeedback` | **variable** (object), **member** (attribute or `Module.Assoc`), **message** (`{1}` = args), args | Text in the default language |
+| `rollback` | **variable** (object or list), refresh | refresh = false |
+| `callJava` | **javaAction** (`Module.JavaAction`), args `{"Param":"expr"}`, variable | Microflows only. Every required parameter needs an arg (`"empty"` for none); an entity type parameter takes `"Module.Entity"`. variable only when the action returns something. Parameters that take a microflow, mapping or file are refused |
+| `callJavaScript` | **jsAction** (`Module.JSAction`), args, variable | Nanoflows only; same rules as `callJava` |
+| `callRest` | **url** (`{1}` = urlArgs), urlArgs, method (default `Get`), headers `{"Name":"expr"}`, timeout (s, default 300), body (`{1}` = bodyArgs) or exportMapping + exportObject, response (`none`/`string`/`Module.ImportMapping`), variable, commit | Microflows only. Write the body as plain text, e.g. `{"name": "{1}"}`: braces are escaped for Mendix. response defaults to `string` with variable, else `none`. An import mapping response gets an object or list of the mapping's root entity; commit `yes`/`no`/`withoutEvents` (default). Authentication, proxy, form data and binary bodies: Studio Pro |
+| `importWithMapping` | **mapping** (`Module.ImportMapping`), **source** (String variable with JSON/XML), variable, commit | Microflows only. Mappings that take a parameter are refused |
+| `downloadFile` | **variable** (object of a `System.FileDocument` specialization), showInBrowser | Microflows only. showInBrowser = false |
+| `cast` | **variable** | Only as the first action of an `ifType` case: the object as that case's entity |
 
 Flow control (also inside `"actions"`):
 
 | Action | Fields | Notes |
 |---|---|---|
 | `if` | **condition**, then `[...]`, else `[...]`, caption | A branch may end with `end`, `break` or `continue`; open branches join again after the decision |
+| `ifType` | **variable** (object), **cases** `{"Module.Specialization": [...]}`, other `[...]`, empty `[...]`, caption | Object type decision. One path per specialization in cases, `other` for any other type (the variable's own entity), `empty` when there is no object. Start a case with `cast` to use the object as that entity. `currentUser` works as variable (`System.User`) |
 | `loop` | **actions** + either over (list variable), item (default `<List>Item`) or while (expression) | |
 | `end` | value | Required `value` when the flow returns something. Not inside loops |
 | `break` / `continue` | | Only inside a loop |
@@ -284,11 +298,22 @@ Inside a loop a handler must end with `break`, `continue` or `error`.
 | log | message, level, args |
 | message | text, type, blocking |
 | variable / set | value |
+| callJava / callJavaScript | args |
+| validationFeedback | message, args |
+| rollback | refresh |
+| changeList | type, value |
+| aggregateList | function, attribute, expression |
+| listOperation | value (find/filter on an attribute), expression (find/filter by expression), other, offset, limit |
+| callRest | url, urlArgs, method, headers (replaces all), timeout, body, bodyArgs, commit |
+| importWithMapping | commit |
+| downloadFile | showInBrowser |
 | decision (`IF`) | condition, caption |
+| object type decision (`IF TYPE OF`) | caption |
 | loop | while (while loop), over (list loop) |
 | end | value |
 
-Variable names are written without `$` in `variable`, `from`, `over`, `item`, `after` and `name`. Expressions are
+Variable names are written without `$` in `variable`, `list`, `other`, `source`, `exportObject`, `from`, `over`,
+`item`, `after` and `name`. Expressions are
 Mendix expressions as text: `"'Hello'"`, `"$Order/Total * 2"`, `"empty"`, `"[%CurrentDateTime%]"`,
 `"Module.Enum.Value"`. String literals need single quotes inside the JSON string.
 
@@ -494,6 +519,54 @@ Insert a step and rename:
   { "op": "addActions", "microflow": "Sales.ACT_Order_Save", "after": "Customer",
     "actions": [ { "action": "log", "message": "Customer {1} saved", "args": ["$Customer/Name"] } ] },
   { "op": "rename", "target": "Sales.Order.Note", "newName": "Remark" }
+] }
+```
+
+Lists and aggregates:
+
+```json
+{ "ops": [ { "op": "createMicroflow", "module": "Sales", "name": "SUB_Order_Summary",
+  "parameters": [ { "name": "Customer", "type": "Sales.Customer" } ], "returns": "Decimal", "returnValue": "$Total",
+  "actions": [
+    { "action": "retrieve", "variable": "Orders", "entity": "Sales.Order", "xpath": "[Sales.Order_Customer = $Customer]" },
+    { "action": "aggregateList", "variable": "Total", "list": "Orders", "function": "sum", "attribute": "Total" },
+    { "action": "aggregateList", "variable": "Open", "list": "Orders", "function": "count" },
+    { "action": "listOperation", "variable": "Big", "operation": "filter", "list": "Orders", "expression": "$currentObject/Total > 1000" },
+    { "action": "listOperation", "variable": "Newest", "operation": "sort", "list": "Big", "sort": [ { "attribute": "Date", "descending": true } ] },
+    { "action": "listOperation", "variable": "Top", "operation": "range", "list": "Newest", "limit": "5" },
+    { "action": "createList", "variable": "ToMail", "entity": "Sales.Order" },
+    { "action": "changeList", "list": "ToMail", "value": "$Top" } ] } ] }
+```
+
+REST call, import mapping, Java action and validation feedback (microflow):
+
+```json
+{ "ops": [ { "op": "createMicroflow", "module": "Sales", "name": "ACT_Customer_Check",
+  "parameters": [ { "name": "Customer", "type": "Sales.Customer" } ],
+  "actions": [
+    { "action": "callJava", "javaAction": "Sales.JA_ValidateEmail", "args": { "Email": "$Customer/Email" }, "variable": "EmailOk" },
+    { "action": "if", "condition": "not($EmailOk)", "then": [
+        { "action": "validationFeedback", "variable": "Customer", "member": "Email", "message": "Not a valid e-mail address" },
+        { "action": "end" } ] },
+    { "action": "callRest", "url": "https://api.example.com/customers/{1}", "urlArgs": ["$Customer/Code"],
+      "headers": { "Accept": "'application/json'" }, "timeout": 30, "variable": "Json",
+      "onError": { "actions": [ { "action": "log", "message": "lookup failed", "level": "Error" } ] } },
+    { "action": "importWithMapping", "mapping": "Sales.IMM_Customer", "source": "Json", "variable": "Remote" },
+    { "action": "callRest", "method": "Post", "url": "https://api.example.com/audit", "body": "{\"customer\": \"{1}\"}", "bodyArgs": ["$Customer/Code"], "response": "none" } ] } ] }
+```
+
+Object type decision with cast, and a nanoflow with a JavaScript action:
+
+```json
+{ "ops": [
+  { "op": "createMicroflow", "module": "Sales", "name": "ACT_Party_Open", "parameters": [ { "name": "Party", "type": "Sales.Party" } ],
+    "actions": [ { "action": "ifType", "variable": "Party",
+      "cases": { "Sales.Company": [ { "action": "cast", "variable": "Company" }, { "action": "showPage", "page": "Sales.Company_Edit", "args": { "Company": "$Company" } } ] },
+      "other": [ { "action": "showPage", "page": "Sales.Party_Edit", "args": { "Party": "$Party" } } ],
+      "empty": [ { "action": "message", "text": "Nothing selected", "type": "Warning" } ] } ] },
+  { "op": "createNanoflow", "module": "Sales", "name": "NF_Order_Remember", "parameters": [ { "name": "Order", "type": "Sales.Order" } ],
+    "actions": [ { "action": "callJavaScript", "jsAction": "Sales.JS_SetStorageItem", "args": { "Key": "'lastOrder'", "Value": "$Order/Number" } },
+                 { "action": "rollback", "variable": "Order" } ] }
 ] }
 ```
 
