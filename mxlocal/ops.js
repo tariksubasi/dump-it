@@ -13,6 +13,7 @@ const { ATTRIBUTE_TYPES, DATA_TYPES, suggest, fail, validate, bool, noDollar, en
 const { makeFlows, ACTIONS, CONTROL, COMMON } = require("./ops-flows");
 const { makePages, PAGE_FIELDS, MENU_FIELDS, HOME_FIELDS, widgetFields, NO_MENU_ROLES } = require("./ops-pages");
 const { makeSecurity, SECURITY_OPS } = require("./ops-security");
+const { makeMappings, MAPPING_OPS } = require("./ops-mappings");
 
 const OPS = {
     createEntity: {
@@ -79,6 +80,7 @@ const OPS = {
     createPage: { doc: "Create a page: an edit form for an entity (inputs by attribute type, Save/Cancel), an empty page, or a page from widgets (layout grids, containers, texts, data grids (classic, or a Data grid 2 copied from the project's pages), data views that listen to a grid, list views, buttons, inputs), optionally with a menu item. Uses the layout the project's other pages use.", fields: PAGE_FIELDS },
     addMenuItem: { doc: "Add a menu item that opens a page to a navigation profile's menu.", fields: MENU_FIELDS },
     setHomePage: { doc: "Set the home page (or home microflow) of a navigation profile, for everyone or for some user roles.", fields: HOME_FIELDS },
+    ...MAPPING_OPS,
     publishRest: {
         doc: "Publish a microflow as a REST operation (creates the service and resource when missing). Microflow parameters become path parameters when the path has {Name}, otherwise query parameters. Object parameters/results need mappings: do those in Studio Pro.",
         fields: { module: "R module name", service: "R service name, e.g. OrderAPI", resource: "R resource name, e.g. orders", method: "R Get | Post | Put | Patch | Delete", microflow: "R Module.Microflow", path: "optional operation path, e.g. {OrderId} (default empty)", servicePath: "optional base path for a new service (default rest/<service>/v1)", authentication: "optional [ \"Basic\" | \"Session\" | \"Microflow\" | \"None\" ] for a new service (default [\"Basic\"])", roles: "optional [ \"Module.Role\" ] allowed to call the service", folder: "optional folder path for a new service" }
@@ -393,6 +395,7 @@ function bind(model, client) {
     const flows = makeFlows({ model, get, entity, text, dataType, attributeChain, loadParents });
     const pageOps = makePages({ model, client, get, exists, entity, text, folder, attributeChain, loadParents, persistable, grantAccess: o => impl.grantAccess(o) });
     const securityOps = makeSecurity({ model, get });
+    const mappingOps = makeMappings({ model, get, exists, entity, folder, attributeChain, loadParents, impl: () => impl });
 
     // ------------------------------------------------ operations
 
@@ -420,7 +423,7 @@ function bind(model, client) {
     function createdVariables(specs, out = []) {
         for (const sp of specs || []) {
             if (!sp || typeof sp !== "object") continue;
-            if (["retrieve", "create", "call"].includes(sp.action) && sp.variable) out.push(sp.variable);
+            if (["retrieve", "create", "call", "importWithMapping", "exportWithMapping"].includes(sp.action) && sp.variable) out.push(sp.variable);
             if (sp.action === "variable") out.push(sp.name);
             if (sp.action === "loop" && sp.over) out.push(sp.item || `${noDollar(sp.over)}Item`);
             createdVariables(sp.then, out);
@@ -835,7 +838,8 @@ function bind(model, client) {
             return `${o.target}` + (users.length ? `\n      STILL USED BY (fix these, or Studio Pro shows errors): ${users.join(", ")}` : "") + nav +
                 (loss ? `\n      DATA LOSS: ${loss}` : "");
         },
-        ...securityOps.impl
+        ...securityOps.impl,
+        ...mappingOps.impl
     };
 
     // ------------------------------------------------ checks (run after apply on a freshly loaded model)
@@ -981,7 +985,8 @@ function bind(model, client) {
         async delete(o) {
             return (await exists(o.target)) ? [`${o.target} still exists`] : [];
         },
-        ...securityOps.checks
+        ...securityOps.checks,
+        ...mappingOps.checks
     };
 
     function opOf(o, i) {

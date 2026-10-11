@@ -3,6 +3,7 @@
 // laid out like Studio Pro does, list their steps with stable ids, and change or delete single steps.
 const sdk = require("mendixmodelsdk");
 const { DATA_TYPES, suggest, fail, validate, bool, noDollar, enumValue } = require("./ops-util");
+const { MAPPING_ACTIONS, mappingAction } = require("./ops-mappings");
 
 const { microflows: mf, domainmodels: dm, datatypes, pages } = sdk;
 
@@ -27,7 +28,8 @@ const ACTIONS = {
     variable: { doc: "Create a variable.", fields: { name: "R variable name", type: "R " + DATA_TYPES, value: "R initial value expression, e.g. 0 or 'text' or empty" } },
     set: { doc: "Change a variable.", fields: { name: "R variable name (no $)", value: "R expression" } },
     showPage: { doc: "Open a page.", fields: { page: "R Module.Page", args: "optional { \"PageParameter\": \"$Variable\" } (every page parameter needs one)" } },
-    closePage: { doc: "Close the current page.", fields: { count: "optional number of pages to close" } }
+    closePage: { doc: "Close the current page.", fields: { count: "optional number of pages to close" } },
+    ...MAPPING_ACTIONS
 };
 const COMMON = { caption: "optional caption on the box (default: generated)", onError: ON_ERROR };
 
@@ -114,6 +116,8 @@ function makeFlows(h) {
             if (o instanceof mf.MicroflowParameterObject) out.set(o.name, o);
             else if (o instanceof mf.ActionActivity && o.action) {
                 for (const key of ["outputVariableName", "variableName"]) if (o.action[key]) out.set(o.action[key], o);
+                const named = o.action.resultHandling || o.action.outputMethod; // import/export with mapping
+                if (named && named.outputVariableName) out.set(named.outputVariableName, o);
             } else if (o instanceof mf.LoopedActivity && o.loopSource instanceof mf.IterableList && o.loopSource.variableName) out.set(o.loopSource.variableName, o);
         });
         return out;
@@ -131,6 +135,7 @@ function makeFlows(h) {
             if (a.entity) return a.entityQualifiedName;
             if (a.variableType && a.variableType.entity) return a.variableType.entityQualifiedName;
             if (a.retrieveSource && a.retrieveSource.entity) return a.retrieveSource.entityQualifiedName;
+            if (a.resultHandling && a.resultHandling.variableType && a.resultHandling.variableType.entity) return a.resultHandling.variableType.entityQualifiedName;
             if (a.retrieveSource && a.retrieveSource.association) {
                 const assoc = a.retrieveSource.association;
                 if (assoc instanceof dm.Association || assoc instanceof dm.CrossAssociation) {
@@ -299,6 +304,10 @@ function makeFlows(h) {
             case "closePage":
                 a = mf.CloseFormAction.createIn(act);
                 a.numberOfPagesToClose = spec.count === undefined ? "" : String(spec.count);
+                break;
+            case "importWithMapping":
+            case "exportWithMapping":
+                a = await mappingAction(h, f, act, spec, where);
                 break;
         }
         a.errorHandlingType = errorDefault(f);
@@ -596,6 +605,13 @@ function makeFlows(h) {
         else if (a instanceof mf.ChangeVariableAction) s = `SET $${a.changeVariableName} = ${a.value}`;
         else if (a instanceof mf.ShowPageAction) s = `SHOW PAGE ${a.pageSettings ? a.pageSettings.pageQualifiedName : "?"}`;
         else if (a instanceof mf.CloseFormAction) s = "CLOSE PAGE";
+        else if (a instanceof mf.ImportXmlAction) {
+            const rh = a.resultHandling;
+            s = `IMPORT $${a.xmlDocumentVariableName} WITH ${rh && rh.importMappingCall ? rh.importMappingCall.mappingQualifiedName : "?"}${rh && rh.storeInVariable ? " -> $" + rh.outputVariableName : ""}`;
+        } else if (a instanceof mf.ExportXmlAction) {
+            const rh = a.resultHandling;
+            s = `EXPORT $${rh ? rh.mappingArgumentVariableName : "?"} WITH ${rh ? rh.mappingQualifiedName : "?"}${a.outputMethod && a.outputMethod.outputVariableName ? " -> $" + a.outputMethod.outputVariableName : ""}`;
+        }
         else s = t.replace(/Action$/, "").toUpperCase();
         return s + off;
     }
