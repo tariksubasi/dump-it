@@ -351,6 +351,17 @@ projesinin (10.22 – 11.14) export'u ve her birinde `mxlocal selftest`. Projele
 çalışma her zaman dump-it'teki bir değişiklik demektir. Yerelde: `bash scripts/ci.sh` (projeleri `.ci-projects`
 klasörüne indirir, ~1 GB).
 
+## Eval (doğal dil testleri)
+
+`eval/requests.json` içindeki Türkçe istekleri gerçek bir ajana yaptırır ve sonucu kontrol eder. Her istek temiz bir
+kopyada çalışır: ajan dry run'a kadar gider, sonra script uygular, export'u yeniler ve beklenen isimlere ve metinlere
+bakar. Başarı, tur sayısı ve süre raporlanır.
+```
+node eval/run.js --project C:\Projeler\Kopya\App.mpr --agent opencode --model deepseek/deepseek-chat
+node eval/run.js --project ~/proje/App.mpr --agent claude --only attr,dashboard
+```
+Eval kendi kopyalarında çalışır; projene dokunmaz. DeepSeek ile çalıştırırsan kopyalanan model DeepSeek'e gider.
+
 ## Lisanslar
 
 - `mxlocal/node_modules/mendixmodelsdk`: Mendix Model SDK, MIT lisansı.
