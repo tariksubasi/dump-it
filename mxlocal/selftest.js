@@ -106,6 +106,174 @@ function plans(mod, T, userRole, grid2) {
     return { phase1, role, E, M };
 }
 
+// One flow per family of the newer actions: lists, object type decision + cast, validation feedback, rollback, home
+// page (microflow and nanoflow), REST calls with text/String and, when the project has them, mappings, Java and
+// JavaScript actions and a file document. t = callTargets(); a missing target leaves its action out (SKIP line).
+function actionPlans(mod, T, t) {
+    const E = `${mod}.${T}`;
+    const lists = [
+        { action: "retrieve", variable: "All", entity: E },
+        { action: "createList", variable: "Picked", entity: E },
+        { action: "changeList", list: "Picked", value: "$Item" },
+        { action: "changeList", list: "Picked", type: "remove", value: "$Item" },
+        { action: "changeList", list: "Picked", type: "clear" },
+        { action: "aggregateList", variable: "N", list: "All", function: "count" },
+        { action: "aggregateList", variable: "Total", list: "All", function: "sum", attribute: "Amount" },
+        { action: "aggregateList", variable: "Weighted", list: "All", function: "sum", expression: "$currentObject/Amount * $currentObject/Count" },
+        { action: "listOperation", variable: "Both", operation: "union", list: "All", other: "Picked" },
+        { action: "listOperation", variable: "Common", operation: "intersect", list: "All", other: "Picked" },
+        { action: "listOperation", variable: "Others", operation: "subtract", list: "All", other: "Picked" },
+        { action: "listOperation", variable: "Same", operation: "equals", list: "All", other: "Picked" },
+        { action: "listOperation", variable: "Has", operation: "contains", list: "All", other: "Item" },
+        { action: "listOperation", variable: "First", operation: "head", list: "All" },
+        { action: "listOperation", variable: "Rest", operation: "tail", list: "All" },
+        { action: "listOperation", variable: "Found", operation: "find", list: "All", attribute: "Title", value: "'x'" },
+        { action: "listOperation", variable: "Small", operation: "find", list: "All", expression: "$currentObject/Count < 10" },
+        { action: "listOperation", variable: "Flagged", operation: "filter", list: "All", attribute: "Flag", value: "true" },
+        { action: "listOperation", variable: "Big", operation: "filter", list: "All", expression: "$currentObject/Count > 10" },
+        { action: "listOperation", variable: "Sorted", operation: "sort", list: "All", sort: ["Title", { attribute: "Count", descending: true }] },
+        { action: "listOperation", variable: "Top", operation: "range", list: "Sorted", limit: "10" },
+        { action: "validationFeedback", variable: "Item", member: "Title", message: "Title {1} is taken", args: ["$Item/Title"] },
+        { action: "rollback", variable: "Item" }
+    ];
+    const ops = [
+        { op: "createMicroflow", module: mod, name: `${T}_Lists`, folder: "ZzTest", parameters: [{ name: "Item", type: E }, { name: "Base", type: `${E}Base` }], actions: [...lists,
+            { action: "ifType", variable: "Base", cases: { [`${E}Line`]: [{ action: "cast", variable: "Line" }, { action: "change", variable: "Line", set: { Text: "'cast'" } }] }, empty: [{ action: "showHomePage" }] }] },
+        { op: "createNanoflow", module: mod, name: `${T}_NFLists`, folder: "ZzTest", parameters: [{ name: "Item", type: E }, { name: "Base", type: `${E}Base` }], actions: [
+            ...lists,
+            { action: "ifType", variable: "Base", cases: { [`${E}Line`]: [{ action: "cast", variable: "Line" }] }, other: [{ action: "closePage" }] },
+            ...(t.js ? [{ action: "callJavaScript", jsAction: t.js.name, args: t.js.args, ...(t.js.returns ? { variable: "JsResult" } : {}) }] : [])] }
+    ];
+    const params = [{ name: "Item", type: E }];
+    const calls = [
+        { action: "callRest", url: "https://api.example.com/items/{1}", urlArgs: ["$Item/Title"], headers: { Accept: "'application/json'" }, variable: "Body" },
+        { action: "callRest", method: "Post", url: "https://api.example.com/items", body: "{\"title\": \"{1}\"}", bodyArgs: ["$Item/Title"], timeout: 30, onError: "continue" }
+    ];
+    if (t.importMapping) {
+        calls.push({ action: "callRest", url: "https://api.example.com/import", response: t.importMapping, variable: "Imported", commit: "no" });
+        calls.push({ action: "importWithMapping", mapping: t.importMapping, source: "Body", variable: "Parsed" });
+    }
+    if (t.exportMapping) {
+        params.push({ name: "Out", type: t.exportMapping.entity });
+        calls.push({ action: "callRest", method: "Post", url: "https://api.example.com/export", exportMapping: t.exportMapping.name, exportObject: "Out" });
+    }
+    if (t.java) calls.push({ action: "callJava", javaAction: t.java.name, args: t.java.args, ...(t.java.returns ? { variable: "JavaResult" } : {}) });
+    if (t.file) {
+        params.push({ name: "File", type: t.file });
+        calls.push({ action: "downloadFile", variable: "File", showInBrowser: true });
+    }
+    ops.push({ op: "createMicroflow", module: mod, name: `${T}_Calls`, folder: "ZzTest", parameters: params, actions: calls });
+    return ops;
+}
+
+// Java and JavaScript actions whose parameters ops can fill (values and entity types), import and export mappings
+// with a root object, and an entity that is a file document: the first of each in the project, or null.
+async function callTargets(model, E) {
+    const sdk = require("mendixmodelsdk");
+    const { codeactions, datatypes: dt } = sdk;
+    const sample = p => {
+        if (p.actionParameterType instanceof codeactions.EntityTypeParameterType) return E;
+        const t = p.actionParameterType.type;
+        if (t instanceof codeactions.StringType) return "'x'";
+        if (t instanceof codeactions.IntegerType) return "1";
+        if (t instanceof codeactions.DecimalType) return "1.5";
+        if (t instanceof codeactions.BooleanType) return "true";
+        if (t instanceof codeactions.DateTimeType) return "[%CurrentDateTime%]";
+        return "empty";
+    };
+    const code = async list => {
+        for (const x of list.filter(u => !u.qualifiedName.startsWith("System.")).sort((a, b) => (a.qualifiedName < b.qualifiedName ? -1 : 1))) {
+            const d = await x.load();
+            const ps = [...d.actionParameters];
+            if (d.platform && d.platform.name === "Native") continue;
+            if (!ps.every(p => p.actionParameterType instanceof codeactions.BasicParameterType || p.actionParameterType instanceof codeactions.EntityTypeParameterType)) continue;
+            return { name: d.qualifiedName, args: Object.fromEntries(ps.map(p => [p.name, sample(p)])), returns: !(d.actionReturnType instanceof codeactions.VoidType) };
+        }
+        return null;
+    };
+    const mapping = async (list, ok) => {
+        for (const x of list.sort((a, b) => (a.qualifiedName < b.qualifiedName ? -1 : 1))) {
+            const d = await x.load();
+            const root = d.rootMappingElements[0];
+            if (root && root.entity && ok(d, root)) return { name: d.qualifiedName, entity: root.entityQualifiedName };
+        }
+        return null;
+    };
+    const noParam = d => !d.parameterType || d.parameterType instanceof dt.UnknownType || d.parameterType instanceof dt.VoidType;
+    const im = await mapping(model.allImportMappings(), noParam);
+    let file = null;
+    for (const d of model.allDomainModels()) {
+        if (file) break;
+        for (const e of (await d.load()).entities) {
+            const g = e.generalization;
+            if (g instanceof sdk.domainmodels.Generalization && /^System\.(FileDocument|Image)$/.test(g.generalizationQualifiedName)) {
+                file = e.qualifiedName;
+                break;
+            }
+        }
+    }
+    return {
+        java: await code(model.allJavaActions()),
+        js: await code(model.allJavaScriptActions()),
+        importMapping: im && im.name,
+        exportMapping: await mapping(model.allExportMappings(), (d, root) => root.maxOccurs !== -1),
+        file
+    };
+}
+
+// Storage keys Mendix uses (its reflection metamodel; equal to every Studio Pro sample in the test projects) for the
+// types the newer actions write, also when this project never used them.
+const ACTION_KEYS = {
+    "Microflows$ListOperationsAction": "ErrorHandlingType NewOperation ResultVariableName",
+    "Microflows$Union": "ListName SecondListOrObjectName", "Microflows$Intersect": "ListName SecondListOrObjectName", "Microflows$Subtract": "ListName SecondListOrObjectName",
+    "Microflows$ListEquals": "ListName SecondListOrObjectName", "Microflows$Contains": "ListName SecondListOrObjectName", "Microflows$Filter": "Association Attribute Expression ListName", "Microflows$FindByExpression": "Expression ListName",
+    "Microflows$Head": "ListName", "Microflows$Tail": "ListName", "Microflows$Find": "Association Attribute Expression ListName",
+    "Microflows$FilterByExpression": "Expression ListName", "Microflows$Sort": "ListName Sortings", "Microflows$ListRange": "CustomRange ListName",
+    "Microflows$AggregateAction": "AggregateFunction AggregateVariableName Attribute ErrorHandlingType Expression ReduceInitialValueExpression ReduceReturnDataType UseExpression VariableName",
+    "Microflows$CreateListAction": "Entity ErrorHandlingType VariableName", "Microflows$ChangeListAction": "ChangeVariableName ErrorHandlingType Type Value",
+    "Microflows$CastAction": "ErrorHandlingType VariableName", "Microflows$InheritanceSplit": "Caption Documentation RelativeMiddlePoint Size SplitVariableName",
+    "Microflows$ValidationFeedbackAction": "Association Attribute ErrorHandlingType FeedbackTemplate ValidationVariableName",
+    "Microflows$RollbackAction": "ErrorHandlingType RefreshInClient RollbackVariableName", "Microflows$ShowHomePageAction": "ErrorHandlingType",
+    "Microflows$JavaActionCallAction": "ErrorHandlingType JavaAction ParameterMappings QueueSettings ResultVariableName UseReturnVariable", "Microflows$JavaActionParameterMapping": "Parameter Value",
+    "Microflows$JavaScriptActionCallAction": "ErrorHandlingType JavaScriptAction OutputVariableName ParameterMappings UseReturnVariable", "Microflows$JavaScriptActionParameterMapping": "Parameter ParameterValue",
+    "Microflows$RestCallAction": "ErrorHandlingType ErrorResultHandlingType HttpConfiguration ProxyConfiguration RequestHandling RequestHandlingType RequestProxyType ResultHandling ResultHandlingType TimeOutExpression UseRequestTimeOut",
+    "Microflows$HttpConfiguration": "ClientCertificate CustomLocation CustomLocationTemplate HttpAuthenticationPassword HttpAuthenticationUserName HttpHeaderEntries HttpMethod OverrideLocation UseHttpAuthentication",
+    "Microflows$CustomRequestHandling": "Template", "Microflows$MappingRequestHandling": "ContentType MappingId MappingVariableName", "Microflows$ResultHandling": "Bind ImportMappingCall ResultVariableName VariableType",
+    "Microflows$ImportMappingCall": "Commit ContentType ForceSingleOccurrence ObjectHandlingBackup ParameterVariableName Range ReturnValueMapping",
+    "Microflows$ImportXmlAction": "ErrorHandlingType IsValidationRequired ResultHandling XmlDocumentVariableName", "Microflows$DownloadFileAction": "ErrorHandlingType FileDocumentVariableName ShowFileInBrowser"
+};
+
+// The newer actions as stored: Mendix's keys for each type, every action of the plans present, the object type
+// decision with one flow per case (specialization, the entity itself, empty) and Abort error handling in the nanoflow.
+function actionProblems(project, T, plannedActions) {
+    const r = [];
+    const flows = {};
+    for (const id of project.units.keys()) {
+        const u = project.read(id);
+        if (/^Microflows\$(Microflow|Nanoflow)$/.test(u.$Type) && u.Name.startsWith(`${T}_`)) flows[u.Name.slice(T.length + 1)] = u;
+    }
+    const seen = new Map();
+    for (const name of ["Lists", "NFLists", "Calls"]) {
+        const u = flows[name];
+        if (!u) {
+            r.push(`${T}_${name} missing`);
+            continue;
+        }
+        walkPlain(u, o => {
+            seen.set(o.$Type, (seen.get(o.$Type) || 0) + 1);
+            const want = ACTION_KEYS[o.$Type];
+            const have = Object.keys(o).filter(k => k[0] !== "$").sort().join(" ");
+            if (want && have !== want) r.push(`${o.$Type} has keys [${have}], Mendix stores [${want}]`);
+            if (name === "NFLists" && o.ErrorHandlingType && o.ErrorHandlingType !== "Abort") r.push(`${o.$Type} in a nanoflow has ErrorHandlingType ${o.ErrorHandlingType}`);
+        });
+        const cases = [];
+        walkPlain(u.Flows, o => o.$Type === "Microflows$InheritanceCase" && cases.push(o.Value));
+        if (name !== "Calls" && cases.length !== 3) r.push(`${T}_${name}: ${cases.length} object type cases, expected 3`);
+    }
+    for (const t of plannedActions) if (!seen.has(t)) r.push(`no ${t} stored`);
+    return [...new Set(r)];
+}
+
 // The new module and security as stored: module security with its roles, the user role and demo user in project
 // security, Administrator (or the first user role) with the new role, and revokeAccess undone in the flow.
 function securityProblems(project, M, E, role, userRole) {
@@ -213,6 +381,47 @@ function grid2Problems(project, mod, T) {
     return [...new Set(r)];
 }
 
+// A named data view of a page with a text box of a project attribute in it (not in a deeper data container): { dv, attr }
+function dataViewIn(widgets) {
+    let hit = null;
+    const inside = (o, dv) => {
+        if (hit || !o || typeof o !== "object") return;
+        if (Array.isArray(o)) return o.forEach(x => inside(x, dv));
+        if (o.$Type === "Forms$TextBox" && o.AttributeRef && /^[^.]+\.[^.]+\.[^.]+$/.test(o.AttributeRef.Attribute || "") && !o.AttributeRef.Attribute.startsWith("System.")) hit = { dv, attr: o.AttributeRef.Attribute.split(".").pop() };
+        else for (const [k, v] of Object.entries(o)) if (k !== "FooterWidgets" && v && typeof v === "object" && !(v.$Type && v.DataSource && v !== o)) inside(v, dv);
+    };
+    const find = o => {
+        if (hit || !o || typeof o !== "object") return;
+        if (Array.isArray(o)) return o.forEach(find);
+        if (o.$Type === "Forms$DataView" && o.Name) inside(o.Widgets, o.Name);
+        for (const v of Object.values(o)) if (v && typeof v === "object") find(v);
+    };
+    find(widgets);
+    return hit;
+}
+
+// A page Studio Pro saved (not one of the test's) with a layout grid in its placeholder: { id, qn, grid, column, cls, dv },
+// pages with a data view (dv: for inputs) first, then the test module's own pages.
+function editablePage(project, mod, T, M) {
+    const pick = [];
+    for (const id of project.units.keys()) {
+        const u = project.read(id);
+        if (u.$Type !== "Forms$Page" || u.Name.startsWith(T) || !u.FormCall) continue;
+        let m = project.units.get(id);
+        while (m && !/^Projects\$Module/.test(project.read(m.id).$Type)) m = project.units.get(m.containerId);
+        const modName = m && project.read(m.id).Name;
+        if (!modName || modName === M) continue;
+        for (const arg of u.FormCall.Arguments || []) {
+            const g = (arg.Widgets || []).find(w => w.$Type === "Forms$LayoutGrid" && w.Rows.length && w.Rows[0].Columns.length);
+            if (g) {
+                pick.push({ id, qn: `${modName}.${u.Name}`, grid: g.Name, column: `${g.Name}/row 1/column 1`, cls: g.Appearance.Class, own: modName === mod, dv: dataViewIn(u.FormCall.Arguments) });
+                break;
+            }
+        }
+    }
+    return pick.sort((a, b) => !!b.dv - !!a.dv || b.own - a.own || a.qn.localeCompare(b.qn))[0] || null;
+}
+
 // Keys and BSON kinds Studio Pro writes per type, from this project's own data (before the change).
 function ownLayout(catalog) {
     const layout = new Map();
@@ -247,6 +456,33 @@ function layoutProblems(layout, enc) {
     };
     for (const f of enc.files) walk(bson.decode(f.bytes));
     return { problems: [...problems], checked };
+}
+
+// GetPut for one unit: its bytes before and after are equal once the elements an op may touch (ids; added and
+// removed ones are found here) are cut out of both: list items dropped, parts reduced to their $ID.
+const idOf = n => (n.k === 3 ? ((n.v.find(([k]) => k === "$ID") || [])[1] || {}).v : null);
+const hex = v => (Buffer.isBuffer(v) ? v.toString("hex") : String(v));
+function idsIn(n, out = new Set()) {
+    if (n.k === 3) {
+        const id = idOf(n);
+        if (id !== undefined && id !== null) out.add(hex(id));
+        for (const [, x] of n.v) idsIn(x, out);
+    } else if (n.k === 4) n.v.slice(1).forEach(([, x]) => idsIn(x, out));
+    return out;
+}
+function cut(n, ids) {
+    const gone = x => x.k === 3 && idOf(x) !== undefined && ids.has(hex(idOf(x)));
+    if (n.k === 3) return { k: 3, v: n.v.map(([k, x]) => [k, gone(x) ? { k: 3, v: x.v.filter(([kk]) => kk === "$ID") } : cut(x, ids)]) };
+    if (n.k === 4) return { k: 4, v: [n.v[0], ...n.v.slice(1).filter(([, x]) => !gone(x)).map(([, x], i) => [String(i + 1), cut(x, ids)])] };
+    return n;
+}
+function sameOutside(before, after, ids = new Set()) {
+    const a = bson.decode(before), b = bson.decode(after);
+    const ia = idsIn(a), ib = idsIn(b);
+    const added = [...ib].filter(x => !ia.has(x)), removed = [...ia].filter(x => !ib.has(x));
+    const all = new Set([...ids, ...added, ...removed]);
+    const ca = cut(a, all), cb = cut(b, all);
+    return { same: bson.encode(ca).equals(bson.encode(cb)), compared: idsIn(ca).size, added: added.length, removed: removed.length };
 }
 
 async function reopen(copy) {
@@ -292,22 +528,37 @@ async function selftest(mpr, keep, { out, relevant }) {
             phase1.ops.forEach(o => delete o.menu);
             results.push("SKIP menu and home page: this project has no Responsive navigation profile");
         }
+        // the newer microflow/nanoflow actions; calls to Java/JavaScript actions, mappings and file downloads only
+        // where the project has something to call
+        const targets = await callTargets(s1.model, E);
+        const missing = { java: "callJava (no Java action with value or entity type parameters)", js: "callJavaScript (no such JavaScript action)", importMapping: "importWithMapping and a REST call with an import mapping (no import mapping without parameter)", exportMapping: "a REST call with an export mapping body (no export mapping of one object)", file: "downloadFile (no file document entity)" };
+        for (const [k, what] of Object.entries(missing)) if (!targets[k]) results.push(`SKIP ${what}`);
+        phase1.ops.push(...actionPlans(mod, T, targets));
+        const plannedActions = ["AggregateAction", "ListOperationsAction", "CreateListAction", "ChangeListAction", "ValidationFeedbackAction", "RollbackAction", "CastAction", "InheritanceSplit", "ShowHomePageAction", "RestCallAction", "CustomRequestHandling",
+            "Union", "Intersect", "Subtract", "ListEquals", "Contains", "Head", "Tail", "Find", "FindByExpression", "Filter", "FilterByExpression", "Sort", "ListRange",
+            ...(targets.importMapping ? ["ImportXmlAction", "ImportMappingCall"] : []), ...(targets.exportMapping ? ["MappingRequestHandling"] : []), ...(targets.java ? ["JavaActionCallAction"] : []),
+            ...(targets.js ? ["JavaScriptActionCallAction"] : []), ...(targets.file ? ["DownloadFileAction"] : [])].map(x => "Microflows$" + x);
         const layout = ownLayout(s1.ctx.catalog);
         const lint = await s1.ops.runPlan(phase1, () => {});
-        const main = await s1.ops.get(`${E}_Main`);
         const ids = {};
         const walk = coll => coll.objects.forEach(o => {
             const a = o.action;
             if (a && a.outputVariableName === "List") ids.retrieve = o.id.slice(0, 8);
             if (a && a.changeVariableName === "N") ids.setN = o.id.slice(0, 8);
             if (a && a.structureTypeName === "Microflows$ShowMessageAction" && !ids.message) ids.message = o.id.slice(0, 8);
+            if (a && a.outputVariableName === "Total") ids.total = o.id.slice(0, 8);
+            if (a && a.outputVariableName === "Found") ids.found = o.id.slice(0, 8);
+            if (a && a.structureTypeName === "Microflows$RestCallAction" && !ids.rest) ids.rest = o.id.slice(0, 8);
             if (o.objectCollection) walk(o.objectCollection);
         });
-        walk(main.objectCollection);
+        for (const flow of ["Main", "Lists", "Calls"]) walk((await s1.ops.get(`${E}_${flow}`)).objectCollection);
         const phase2 = { ops: [
             { op: "changeAction", microflow: `${E}_Main`, id: ids.retrieve, xpath: "[Flag = true() and Count > 0]" },
             { op: "changeAction", microflow: `${E}_Main`, id: ids.message, text: "Nothing at all", disabled: true },
-            { op: "deleteAction", microflow: `${E}_Main`, id: ids.setN }
+            { op: "deleteAction", microflow: `${E}_Main`, id: ids.setN },
+            { op: "changeAction", microflow: `${E}_Lists`, id: ids.total, function: "average", attribute: "Count" },
+            { op: "changeAction", microflow: `${E}_Lists`, id: ids.found, value: "'y'" },
+            { op: "changeAction", microflow: `${E}_Calls`, id: ids.rest, url: "https://api.example.com/v2/items/{1}", method: "Put", timeout: 60 }
         ] };
         await s1.ops.runPlan(phase2, () => {});
         await s1.model.flushChanges();
@@ -326,6 +577,8 @@ async function selftest(mpr, keep, { out, relevant }) {
         check("saved model shows every op", !failed.length, failed.join("; "));
         const secp = securityProblems(s2.ctx.project, M, E, role, userRole);
         check("new module, user role, demo user, addModuleRoles, revokeAccess stored", !secp.length, secp.join("; "));
+        const actp = actionProblems(s2.ctx.project, T, plannedActions);
+        check(`newer actions stored with Mendix's keys (${plannedActions.length} kinds: lists, aggregates, object type decision + cast, feedback, rollback, REST${targets.java ? ", Java" : ""}${targets.js ? ", JavaScript" : ""}${targets.importMapping ? ", import mapping" : ""}${targets.file ? ", download" : ""})`, !actp.length, actp.slice(0, 6).join("; "));
         if (pageable) {
             const dash = dashboardProblems(s2.ctx.project, mod, T, web ? userRole : null);
             check("dashboard stored like Studio Pro (listen target, inputs, menu, home pages)", !dash.length, dash.join("; "));
@@ -333,6 +586,54 @@ async function selftest(mpr, keep, { out, relevant }) {
                 const g2 = grid2Problems(s2.ctx.project, mod, T);
                 check(`Data grid 2 ${grid2.def.version} copy (type = .mpk, Single selection, listened to, no old references)`, !g2.length, g2.slice(0, 5).join("; "));
             } else results.push(`SKIP Data grid 2 page: ${grid2.reason}`);
+        }
+
+        // phase 4 + 5: change a page Studio Pro saved (add into a column, change a caption and a class), then move the
+        // text into the new container, delete that and put the class back: the page must be byte for byte what it was
+        const pe = editablePage(s2.ctx.project, mod, T, M);
+        if (!pe) results.push("SKIP page edit: no page of this project has a layout grid in its placeholder");
+        else {
+            const orig = s2.ctx.project.readBytes(pe.id);
+            const phase4 = { ops: [
+                { op: "addWidgets", page: pe.qn, into: pe.column, widgets: [{ widget: "text", text: "Zz edit", style: "H3", name: "zzText" },
+                    { widget: "container", name: "zzBox", widgets: [{ widget: "actionButton", action: "close", name: "zzClose" }] }] },
+                { op: "changeWidget", page: pe.qn, widget: "zzClose", caption: "Zz close", buttonStyle: "Primary" },
+                { op: "changeWidget", page: pe.qn, widget: pe.grid, class: `${pe.cls} zz-edited`.trim() }
+            ] };
+            // in a data view: an input and an {Attribute} text in its entity, read-only and conditionally visible
+            if (pe.dv) phase4.ops.push({ op: "addWidgets", page: pe.qn, into: pe.dv.dv, widgets: [{ widget: "input", attribute: pe.dv.attr, label: "Zz input", name: "zzInput" },
+                { widget: "text", text: `Zz {${pe.dv.attr}}`, name: "zzAttrText" }] },
+            { op: "changeWidget", page: pe.qn, widget: "zzInput", editable: false, visible: `$currentObject/${pe.dv.attr} != empty` });
+            await s2.ops.runPlan(phase4, () => {});
+            await s2.model.flushChanges();
+            enc = s2.client.encode();
+            const lay4 = layoutProblems(layout, enc);
+            const file = enc.files.find(f => f.id === pe.id);
+            const grid = s2.client.project.read(pe.id).FormCall.Arguments.flatMap(a => a.Widgets).find(w => w.Name === pe.grid);
+            const gp = file ? sameOutside(orig, file.bytes, new Set([grid.Appearance.$ID].map(x => require("./convert").guidToBytes(x).toString("hex")))) : { same: false };
+            const lost4 = lostProperties(s2.client, s2.model, enc);
+            s2.client.project.writeEncoded(enc);
+            let s4 = await reopen(copy);
+            const failed4 = await s4.ops.checkPlan(phase4);
+            const ok4 = !lay4.problems.length && gp.same && !failed4.length && !lost4.length;
+            check(`page edit on ${pe.qn}: add into ${pe.column}${pe.dv ? ` and ${pe.dv.dv}` : ""}, change a caption, a class${pe.dv ? ", editable, visible" : ""}: stored like Studio Pro, rest unchanged`, ok4,
+                [...lay4.problems.slice(0, 3), gp.same ? "" : "bytes outside the new widgets and the changed class differ", ...failed4, ...lost4].filter(Boolean).join("; ") || `${gp.added} element(s) added, ${gp.compared} unchanged`);
+            if (!pe.dv) results.push("SKIP page edit in a data view: no page with a layout grid has a data view with a text box");
+            // the move is proven by the delete: zzText is gone only if it was moved into zzBox
+            const phase5 = { ops: [
+                { op: "moveWidget", page: pe.qn, widget: "zzText", into: "zzBox" },
+                { op: "deleteWidget", page: pe.qn, widget: "zzBox" },
+                { op: "changeWidget", page: pe.qn, widget: pe.grid, class: pe.cls },
+                ...(pe.dv ? ["zzInput", "zzAttrText"].map(w => ({ op: "deleteWidget", page: pe.qn, widget: w })) : [])
+            ] };
+            await s4.ops.runPlan(phase5, () => {});
+            await s4.model.flushChanges();
+            s4.client.project.writeEncoded(s4.client.encode());
+            s4 = await reopen(copy);
+            const failed5 = await s4.ops.checkPlan(phase5);
+            const back = s4.ctx.project.readBytes(pe.id).equals(orig);
+            check(`page edit undone by moveWidget + deleteWidget + changeWidget: ${pe.qn} byte for byte as Studio Pro saved it`, back && !failed5.length, back ? failed5.join("; ") : "the page bytes differ from the original");
+            s2 = await reopen(copy);
         }
 
         // phase 3: attribute rename + module rename
@@ -378,4 +679,4 @@ async function selftest(mpr, keep, { out, relevant }) {
     }
 }
 
-module.exports = { selftest };
+module.exports = { selftest, sameOutside, layoutProblems, ownLayout };
