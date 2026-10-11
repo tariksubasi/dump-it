@@ -1,0 +1,11 @@
+{
+    "ops": [
+        {
+            "op": "addMenuItem",
+            "page": "Builder.LectureDashboard",
+            "profile": "BuilderProfile",
+            "caption": "Lecture Dashboard",
+            "parent": "Builder.Home"
+        }
+    ]
+}

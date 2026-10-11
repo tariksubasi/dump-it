@@ -1,0 +1,67 @@
+{
+  "ops": [
+    {
+      "op": "createMicroflow",
+      "module": "Builder",
+      "name": "DB_GetDashboardCounts",
+      "folder": "",
+      "parameters": [],
+      "returns": {
+        "type": "Integer",
+        "isList": false
+      },
+      "returnValue": "1",
+      "actions": [
+        {
+          "id": "1",
+          "action": "RetrieveListAction",
+          "objectType": "Builder.School",
+          "xpath": "",
+          "resultVariable": "schools"
+        },
+        {
+          "id": "2",
+          "action": "RetrieveListAction",
+          "objectType": "Builder.Course",
+          "xpath": "",
+          "resultVariable": "courses"
+        },
+        {
+          "id": "3",
+          "action": "RetrieveListAction",
+          "objectType": "Builder.Lecture",
+          "xpath": "",
+          "resultVariable": "lectures"
+        },
+        {
+          "id": "4",
+          "action": "SubMicroflowAction",
+          "microflow": "System.Count",
+          "input": {
+            "List": "$schools"
+          },
+          "resultVariable": "schoolCount"
+        },
+        {
+          "id": "5",
+          "action": "SubMicroflowAction",
+          "microflow": "System.Count",
+          "input": {
+            "List": "$courses"
+          },
+          "resultVariable": "courseCount"
+        },
+        {
+          "id": "6",
+          "action": "SubMicroflowAction",
+          "microflow": "System.Count",
+          "input": {
+            "List": "$lectures"
+          },
+          "resultVariable": "lectureCount"
+        }
+      ],
+      "roles": []
+    }
+  ]
+}
