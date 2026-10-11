@@ -12,6 +12,7 @@ const { ATTRIBUTE_TYPES, DATA_TYPES, suggest, fail, validate, bool, noDollar, en
 
 const { makeFlows, ACTIONS, CONTROL, COMMON } = require("./ops-flows");
 const { makePages, PAGE_FIELDS, MENU_FIELDS, HOME_FIELDS, widgetFields, NO_MENU_ROLES } = require("./ops-pages");
+const { makePageEdit, PAGE_EDIT_OPS, PAGE_EDIT_NAMES, FIELD_SYNONYMS } = require("./ops-page-edit");
 const { makeSecurity, SECURITY_OPS } = require("./ops-security");
 
 const OPS = {
@@ -77,6 +78,7 @@ const OPS = {
         fields: { module: "R module name", name: "R event name", microflow: "R Module.Microflow", every: "R Minute | Hour | Day | Week", interval: "optional number for Minute/Hour (default 1)", at: "optional time HH:MM for Day/Week, minutes MM for Hour (default 00:00)", days: "Week: [ \"Monday\", ... ]", enabled: "optional true/false (default false)", timeZone: "optional UTC | Server (default UTC)", onOverlap: "optional DelayNext | SkipNext (default DelayNext)", folder: "optional folder path" }
     },
     createPage: { doc: "Create a page: an edit form for an entity (inputs by attribute type, Save/Cancel), an empty page, or a page from widgets (layout grids, containers, texts, data grids (classic, or a Data grid 2 copied from the project's pages), data views that listen to a grid, list views, buttons, inputs), optionally with a menu item. Uses the layout the project's other pages use.", fields: PAGE_FIELDS },
+    ...PAGE_EDIT_OPS,
     addMenuItem: { doc: "Add a menu item that opens a page to a navigation profile's menu.", fields: MENU_FIELDS },
     setHomePage: { doc: "Set the home page (or home microflow) of a navigation profile, for everyone or for some user roles.", fields: HOME_FIELDS },
     publishRest: {
@@ -392,6 +394,7 @@ function bind(model, client) {
 
     const flows = makeFlows({ model, get, entity, text, dataType, attributeChain, loadParents });
     const pageOps = makePages({ model, client, get, exists, entity, text, folder, attributeChain, loadParents, persistable, grantAccess: o => impl.grantAccess(o) });
+    const pageEdit = makePageEdit({ model, client, get, text, attributeChain, persistable }, pageOps.internals);
     const securityOps = makeSecurity({ model, get });
 
     // ------------------------------------------------ operations
@@ -754,6 +757,10 @@ function bind(model, client) {
             return `${qn}: every ${unit === "minute" || unit === "hour" ? interval + " " : ""}${unit}${unit === "day" || unit === "week" ? " at " + String(hour).padStart(2, "0") + ":" + String(minute).padStart(2, "0") : ""} -> ${o.microflow}${ev.enabled ? "" : " (disabled)"}`;
         },
         createPage: o => pageOps.createPage(o), // grants o.roles, adds o.menu
+        addWidgets: o => pageEdit.addWidgets(o),
+        changeWidget: o => pageEdit.changeWidget(o),
+        deleteWidget: o => pageEdit.deleteWidget(o),
+        moveWidget: o => pageEdit.moveWidget(o),
         addMenuItem: o => pageOps.addMenuItem(o),
         setHomePage: o => pageOps.setHomePage(o),
         async publishRest(o) {
@@ -955,6 +962,7 @@ function bind(model, client) {
             return ev.microflowQualifiedName === o.microflow && ev.schedule ? [] : [`${o.module}.${o.name} is incomplete`];
         },
         createPage: o => pageOps.checks.createPage(o),
+        ...pageEdit.checks,
         addMenuItem: o => pageOps.checks.addMenuItem(o),
         setHomePage: o => pageOps.checks.setHomePage(o),
         async publishRest(o) {
@@ -990,6 +998,7 @@ function bind(model, client) {
         const name = Object.keys(OPS).find(k => k.toLowerCase() === String(o.op).toLowerCase());
         if (!name) fail(`${where}: unknown op '${o.op}'`, o.op, Object.keys(OPS));
         if (name === "addMenuItem" && o.roles !== undefined) throw new Error(`${where} (addMenuItem): ${NO_MENU_ROLES(o.page)}`);
+        for (const [k, hint] of Object.entries(FIELD_SYNONYMS[name] || {})) if (o[k] !== undefined && !OPS[name].fields[k]) throw new Error(`${where} (${name}): unknown field '${k}': ${hint}`);
         validate("op", name, OPS[name], o, where);
         return { name, where };
     }
@@ -1020,7 +1029,11 @@ function bind(model, client) {
             const edited = qn && rest.some(x => ["addActions", "changeAction", "deleteAction"].includes(x.op) && x.microflow === qn);
             const opposite = { grantAccess: "revokeAccess", revokeAccess: "grantAccess" }[name];
             const undone = opposite && rest.some(x => x.op === opposite && x.document === o.document);
-            if ((later && name !== "rename" && name !== "delete") || edited || undone) continue;
+            // a later page edit of the same page that deletes, moves or renames one of this op's widgets (or changes it again)
+            const mine = PAGE_EDIT_NAMES.includes(name) ? pageEdit.touched(o) : [];
+            const undoes = x => ["deleteWidget", "moveWidget"].includes(x.op) || (x.op === "changeWidget" && (x.name !== undefined || name === "changeWidget"));
+            const reworked = mine.length && rest.some(x => x.page === o.page && undoes(x) && pageEdit.touched(x).some(n => mine.includes(n)));
+            if ((later && name !== "rename" && name !== "delete") || edited || undone || reworked) continue;
             try {
                 failed.push(...(await checks[name](o)).map(f => `${i + 1}. ${name}: ${f}`));
             } catch (e) {
@@ -1030,7 +1043,7 @@ function bind(model, client) {
         return failed;
     }
 
-    const api = { get, runPlan, checkPlan, dataType, folder, lintExpressions: () => flows.lintExpressions(), steps: qn => flows.steps(qn) };
+    const api = { get, runPlan, checkPlan, dataType, folder, lintExpressions: () => flows.lintExpressions(), steps: qn => flows.steps(qn), widgets: qn => pageEdit.widgets(qn) };
     for (const name of Object.keys(OPS)) {
         api[name] = o => {
             validate("op", name, OPS[name], o || {}, `ops.${name}`);

@@ -293,8 +293,9 @@ function makePages(h) {
         });
     }
 
-    function names() {
-        const used = new Set();
+    // taken: names already on the page (an existing page keeps its widget names)
+    function names(taken = []) {
+        const used = new Set(taken);
         return {
             reserve(n, where) {
                 if (used.has(n)) throw new Error(`${where}: the name '${n}' is used twice on this page`);
@@ -329,7 +330,7 @@ function makePages(h) {
         const a = chain.attributes.find(x => x.name === name);
         if (a) return a;
         // a parent in a module that is not in the project (System.User, ...): its attributes are unknown here
-        if (!chain.complete) throw new Error(`${where}: '${name}' is not an attribute of ${ent.qualifiedName} itself; attributes inherited from System entities cannot be shown by ops (add that column or input in Studio Pro). Attributes here: ${chain.attributes.map(x => x.name).join(", ") || "none"}`);
+        if (!chain.complete) fail(`${where}: '${name}' is not an attribute of ${ent.qualifiedName} itself; attributes inherited from System entities cannot be shown by ops (add that column or input in Studio Pro). Attributes here: ${chain.attributes.map(x => x.name).join(", ") || "none"}`, name, chain.attributes.map(x => x.name));
         return fail(`${where}: ${ent.qualifiedName} has no attribute '${name}'`, name, chain.attributes.map(x => x.name));
     }
 
@@ -462,8 +463,10 @@ function makePages(h) {
         if (kind === "textArea") for (const k of ["counterMessage", "textTooLongMessage"]) if (w[k]) await h.text(w[k], "");
         if (kind === "checkBox" && w.validation) await h.text(w.validation.message, "");
         await templateAll(w, "labelTemplate", label || humanize(attr.name), ctx, where);
-        // a parameter data view: Studio Pro writes the parameter + data view; a listening data view: SourceVariable null
-        if (dv.source === "parameter") {
+        // a parameter data view: Studio Pro writes the parameter + data view; a listening data view: SourceVariable null.
+        // An existing data view (ops-page-edit) says itself how its inputs refer to its object.
+        if (dv.inputVariable) dv.inputVariable(w);
+        else if (dv.source === "parameter") {
             const v = pages.PageVariable.createInAttributeWidgetUnderSourceVariable(w);
             v.pageParameter = dv.param;
             v.widget = dv.widget;
@@ -474,6 +477,8 @@ function makePages(h) {
 
     async function pageParameter(ent, ctx) {
         if (ctx.params.has(ent.qualifiedName)) return ctx.params.get(ent.qualifiedName);
+        // a new parameter on an existing page would break every button, menu item and flow that opens it
+        if (ctx.existing) throw new Error(`${ctx.qn} has no ${ctx.page instanceof pages.Snippet ? "snippet" : "page"} parameter of ${ent.qualifiedName}, and adding one would break everything that opens it. Give the data view "listenTo" (a grid or list view on the page), or put it inside a data view of ${ent.qualifiedName}`);
         const p = pages.PageParameter.createIn(ctx.page);
         let n = ent.name;
         for (let i = 2; ctx.page.parameters.some(x => x !== p && x.name === n); i++) n = ent.name + i;
@@ -562,6 +567,33 @@ function makePages(h) {
 
     const typeOf = attr => ATTR_TYPES[attr.type.structureTypeName.split("$")[1].replace("AttributeType", "")] || "?";
 
+    // A Data grid 2 attribute column (not attached yet), shaped like pattern (an attribute column of the same grid type).
+    async function dg2Column(colType, pattern, attr, caption, ctx, where) {
+        const col = await blankObject(colType, pattern);
+        const show = valueOf(col, "showContentAs");
+        if (show) show.primitiveValue = "attribute";
+        const ref = dm.AttributeRef.create(model);
+        ref.attribute = attr;
+        valueOf(col, "attribute").attributeRef = ref;
+        const header = valueOf(col, "header");
+        if (header) await templateAll(header, "textTemplate", caption, ctx, where);
+        return col;
+    }
+
+    // A classic grid column at the end of grid.columns; width is a weight (Studio Pro: WidthUnit Weight).
+    async function classicColumn(grid, attr, caption, width, ctx) {
+        const col = pages.GridColumn.create(model);
+        grid.columns.push(col);
+        col.name = ctx.names.next("column");
+        const ref = dm.AttributeRef.create(model);
+        ref.attribute = attr;
+        col.attributeRef = ref;
+        await textAll(col.caption, caption, ctx);
+        await textAll(col.aggregateCaption, "", ctx);
+        col.width = width;
+        return col;
+    }
+
     // Data grid 2 columns { cols: [{ attr, caption }], dropped }: without "columns" every attribute it can show.
     function dg2Cols(node, allowed) {
         const ent = node.ent;
@@ -618,17 +650,7 @@ function makePages(h) {
         const pattern = olds.find(o => (valueOf(o, "showContentAs") || {}).primitiveValue === "attribute") || olds[0] || null;
         if (dropped.length) client.warn(`${ctx.qn}: ${grid.name} leaves out ${dropped.join(", ")}: a Data grid 2 column cannot show that type (give "columns", or "kind": "classic")`);
         const made = [];
-        for (const c of cols) {
-            const col = await blankObject(colType, pattern);
-            const show = valueOf(col, "showContentAs");
-            if (show) show.primitiveValue = "attribute";
-            const ref = dm.AttributeRef.create(model);
-            ref.attribute = c.attr;
-            valueOf(col, "attribute").attributeRef = ref;
-            const header = valueOf(col, "header");
-            if (header) await templateAll(header, "textTemplate", c.caption, ctx, node.where);
-            made.push(col);
-        }
+        for (const c of cols) made.push(await dg2Column(colType, pattern, c.attr, c.caption, ctx, node.where));
         // everything else back to the widget's defaults, without the original's references
         for (const p of grid.object.properties) if (p.type.key !== "columns") await blank(p.value, p.type, null);
         colProp.value.objects.clear();
@@ -820,17 +842,10 @@ function makePages(h) {
             const open = cols.filter(c => c.width === undefined);
             const share = open.length ? Math.max(1, Math.floor(Math.max(100 - given, open.length) / open.length)) : 0;
             for (const [i, c] of cols.entries()) {
-                const col = pages.GridColumn.create(model);
-                grid.columns.push(col);
-                col.name = ctx.names.next("column");
-                const ref = dm.AttributeRef.create(model);
-                ref.attribute = c.attr;
-                col.attributeRef = ref;
-                await textAll(col.caption, c.caption, ctx);
-                await textAll(col.aggregateCaption, "", ctx);
                 const last = open.length && c === open[open.length - 1];
-                col.width = c.width !== undefined ? Number(c.width) : last ? Math.max(1, 100 - given - share * (open.length - 1)) : share;
-                if (!(col.width > 0)) throw new Error(`${node.where} column ${i + 1}: width must be a number > 0`);
+                const width = c.width !== undefined ? Number(c.width) : last ? Math.max(1, 100 - given - share * (open.length - 1)) : share;
+                if (!(width > 0)) throw new Error(`${node.where} column ${i + 1}: width must be a number > 0`);
+                await classicColumn(grid, c.attr, c.caption, width, ctx);
             }
             // search: Studio Pro's generated grids have a Search button and one search field per text/number/enum column
             let fields = 0;
@@ -909,7 +924,8 @@ function makePages(h) {
             target.push(b);
             b.name = node.name || ctx.names.next(action === "close" ? "closePageButton" : "actionButton");
             b.buttonStyle = choice(pages.ButtonStyle, s.style || (action === "save" ? "Success" : "Default"), "style", node.where);
-            const dvParam = node.container && node.container.source === "parameter";
+            // closes the page by default, except in a data view that listens to a grid (it stays on the page)
+            const dvParam = node.container && node.container.kind === "dataView" && node.container.source !== "listen";
             let what = action;
             if (action === "save" || action === "cancel") {
                 const cls = action === "save" ? pages.SaveChangesClientAction : pages.CancelChangesClientAction;
@@ -1286,7 +1302,10 @@ function makePages(h) {
         }
     };
 
-    return { createPage, addMenuItem, setHomePage, checks };
+    // the builders and lookups ops-page-edit.js uses on existing pages
+    const internals = { scan, build, gridKind, entityOf, attributeOf, names, textAll, templateAll, noPlaceholder, checkXPath, dg2Info,
+        isGrid2, valueOf, humanize, languages, shown, listenTarget, classicColumn, dg2Column, typeOf, isA, list, unitNamed };
+    return { createPage, addMenuItem, setHomePage, checks, internals };
 }
 
-module.exports = { makePages, PAGE_FIELDS, MENU_FIELDS, HOME_FIELDS, WIDGETS, widgetKind, widgetFields, NO_MENU_ROLES };
+module.exports = { makePages, PAGE_FIELDS, MENU_FIELDS, HOME_FIELDS, WIDGETS, INPUTS, PREFIX, MASTER_DETAIL, DATAGRID2, widgetKind, widgetFields, NO_MENU_ROLES };

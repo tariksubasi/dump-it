@@ -5,6 +5,8 @@ Copied into the export folder by mxcontext.py with CONFIG filled in, so the agen
     python mx.py refresh              re-export the model and show what changed since the last checked state
     python mx.py find <text>          model elements whose name contains <text>
     python mx.py steps <Module.Flow>  steps of a microflow/nanoflow with ids (for changeAction / deleteAction)
+    python mx.py widgets <Module.Page> widgets of a page or snippet: names, kinds, entity, where new ones go
+                                      (for addWidgets / changeWidget / deleteWidget / moveWidget)
     python mx.py ops [name]           the operations a change file can use; with a name: its fields
     python mx.py api <Type> [word]    Model SDK type details (for .js change files)
     python mx.py dryrun <file>        compute a change from edits/<file>; writes nothing
@@ -37,7 +39,8 @@ for stream in (sys.stdout, sys.stderr):
     except (AttributeError, ValueError):
         pass
 EDITS = os.path.join(HERE, "edits")
-COMMANDS = ("refresh", "find", "steps", "ops", "api", "dryrun", "rerun", "gap", "apply", "undo", "check", "ok", "selftest")
+COMMANDS = ("refresh", "find", "steps", "widgets", "ops", "api", "dryrun", "rerun", "gap", "apply", "undo", "check", "ok",
+            "selftest")
 last_output = ""
 
 
@@ -201,6 +204,11 @@ def main(argv):
             say("Usage: python mx.py steps <Module.Microflow>")
             return 1
         return mxlocal("steps", rest[0])
+    if cmd == "widgets":
+        if not rest:
+            say("Usage: python mx.py widgets <Module.Page or Module.Snippet>")
+            return 1
+        return mxlocal("widgets", rest[0])
     if cmd == "ops":
         return mxlocal("ops", *rest[:1], project=False)
     if cmd == "api":

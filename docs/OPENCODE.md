@@ -60,6 +60,7 @@ Run all of these from the export folder.
 | `python mx.py refresh` | Re-exports the model and lists files changed since the last checked state | no |
 | `python mx.py find <text>` | Lists elements whose qualified name contains `<text>`, with their SDK type | no |
 | `python mx.py steps <Module.Flow>` | Lists the steps of a microflow/nanoflow with stable ids (for `changeAction`, `deleteAction`, `addActions` `after`) | no |
+| `python mx.py widgets <Module.Page>` | Lists the widget tree of a page or snippet: names, kinds, entity of each data view / list view, and where new widgets can go (`[into]`, layout grid column paths). For `addWidgets`, `changeWidget`, `deleteWidget`, `moveWidget` | no |
 | `python mx.py ops [name]` | One line per operation; with a name (`ops createPage`, `ops retrieve`): its fields. `ops all`: everything | no |
 | `python mx.py api <Type> [word]` | SDK type reference for this Mendix version (for `.js` files only) | no |
 | `python mx.py dryrun <file>` | Computes a change from `edits/<file>`. Writes nothing. Prints an approval code | no |
@@ -72,7 +73,7 @@ Run all of these from the export folder.
 | `python mx.py selftest` | Runs every operation on a temporary copy of the project and checks the result | no |
 
 The same lookups also exist as tools of the `mendix` MCP server (in OpenCode: `mendix_find`, in Claude Code:
-`mcp__mendix__find`): `find`, `steps`, `ops`, `api`, `dryrun`, `gap` and **`plan`**. `plan` takes a short name and the
+`mcp__mendix__find`): `find`, `steps`, `widgets`, `ops`, `api`, `dryrun`, `gap` and **`plan`**. `plan` takes a short name and the
 ops list, saves `edits/<name>.json` and dry-runs it in one call; the server keeps the model loaded, so this takes a
 fraction of a second. Use the tool or the command; the result is the same. `apply` and `undo` exist only as commands,
 so OpenCode (and Claude Code) asks the user before they run. Commands are lowercase. (Folders exported with
@@ -298,6 +299,10 @@ Mendix expressions as text: `"'Hello'"`, `"$Order/Total * 2"`, `"empty"`, `"[%Cu
 |---|---|---|
 | `createPage` | **module**, **name**, title, entity, fields `["Attr"]`, buttons (default true), widgets, arrange, menu, layout, folder, roles | Without `widgets`: with `entity` an edit form (page parameter, data view, an input per attribute, Save/Cancel), without `entity` an empty page. With `widgets`: the page content from the widget list below; `entity` is then the default entity of grids and data views. `menu` (`"Responsive"` or `{profile, caption, parent}`) adds a menu item, `roles` lets module roles open the page. The layout is the one the project's own pages use most |
 | `addMenuItem` | **page**, profile (default Responsive), caption (default: the page title), parent (caption of an existing menu item) | Only pages without parameters. A page is in a menu once. New items go at the end. A menu item has no roles of its own: it shows for the user roles that may open the page (change that with `grantAccess` / `revokeAccess` on the page). The dry-run line ends with `seen by: <user roles>` |
+| `addWidgets` | **page**, **widgets**, into, slot, after, before, entity | Adds `createPage` widgets (list below) to an existing page or snippet. `into`: a container, data view, list view, group box, tab page, the placeholder (`Main`) or a layout grid column `"layoutGrid1/row 1/column 2"`; `"slot": "footer"` = a data view's footer. `after`/`before`: a widget name in that list (default: at the end). Inputs and `{Attribute}` texts use the entity of the data view or list view around them. New names as Studio Pro gives them (`text3`, `actionButton2`). A new data view listens to a grid or list view (`listenTo`, also one already on the page) or shows the page's own parameter; no op adds a page parameter |
+| `changeWidget` | **page**, **widget**, caption, text, label, placeholder, editable, visible, class, style, textStyle, buttonStyle, columns, xpath, name | Only the given fields change. `editable`: true/false, or (inputs) an expression or `{"attribute": "Status", "values": ["Open"]}`; `visible`: true, false, an expression `"$currentObject/Active"` or `{"attribute": ...}`. `columns`: `{"add": [...], "remove": [...]}` of a classic grid or Data grid 2. `name` renames; data views listening to it follow. Texts change in the default language only (the dry run warns about other languages) |
+| `deleteWidget` | **page**, **widget** | Deletes the widget with everything in it (also a classic grid column, grid button or tab page). Refused while a data view listens to it or a widget elsewhere refers to it by name |
+| `moveWidget` | **page**, **widget**, into, slot, after, before | Same page only. A widget that shows attributes or acts on the object stays in the same data view or list view |
 | `setHomePage` | **page** or **microflow**, profile (default Responsive), roles (user roles, e.g. `["Administrator"]`) | Without roles: the default home page. Only pages/microflows without parameters |
 
 Widgets in `"widgets": [ { "widget": "<kind>", ... } ]`, top to bottom. Every widget takes `name` (default as
@@ -324,6 +329,29 @@ language. A wrong or ambiguous `listenTo` is an error that lists the grids and l
 `xpath` of a grid or list view is checked lightly: it must be in brackets, and the first step of every path must be
 an attribute or association of the entity (`Did you mean`). Inside a data view, `'[%CurrentObject%]'` is the data
 view's object. Deeper path steps and functions are not checked: look at the page in Studio Pro.
+
+Existing pages and snippets: first `python mx.py widgets Sales.Customer_Edit` (or the `widgets` tool). It prints one
+line per widget, indented by nesting: `name  kind, details  [into]  {Entity}`. Use those names in `widget`, `after`,
+`before` and `into`; a layout grid column is named by its path (`layoutGrid1/row 1/column 2`). A wrong name is an
+error that lists the page's widget names (`Did you mean`). Only what an op touches changes: every other byte of the
+page stays as Studio Pro saved it.
+
+Add an input and a button to the data view of an edit page, rename a label, hide a field for closed orders, move a
+button, delete a widget, and add a column to a grid:
+
+```json
+{ "ops": [
+  { "op": "addWidgets", "page": "Sales.Order_Edit", "into": "dataView1", "after": "textBox2",
+    "widgets": [ { "widget": "input", "attribute": "Note", "label": "Remark" }, { "widget": "text", "text": "Order {Number}", "style": "H4" } ] },
+  { "op": "addWidgets", "page": "Sales.Order_Edit", "into": "dataView1", "slot": "footer",
+    "widgets": [ { "widget": "actionButton", "action": "callMicroflow", "microflow": "Sales.ACT_Order_Close", "caption": "Close order" } ] },
+  { "op": "changeWidget", "page": "Sales.Order_Edit", "widget": "textBox1", "label": "Order number", "editable": false },
+  { "op": "changeWidget", "page": "Sales.Order_Edit", "widget": "textBox3", "visible": { "attribute": "Status", "values": ["Open"] } },
+  { "op": "moveWidget", "page": "Sales.Order_Edit", "widget": "actionButton2", "before": "actionButton1" },
+  { "op": "deleteWidget", "page": "Sales.Order_Edit", "widget": "datePicker1" },
+  { "op": "changeWidget", "page": "Sales.Order_Overview", "widget": "dataGrid1", "columns": { "add": ["Status"], "remove": ["Note"] }, "xpath": "[Status != 'Cancelled']" }
+] }
+```
 
 Dashboard in a new module: the module with two roles, the entity and its access rules, a user role HR, the new roles
 for the existing user roles, and the page (a grid, a read-only detail of the selected row next to it, a menu item):
@@ -390,7 +418,12 @@ Layout grid, heading, list view with an editable detail and buttons, a Data grid
 ```
 
 What pages cannot do yet (use Studio Pro, and `python mx.py gap "<what>"`):
-- Change an existing page, snippet or layout: add, move, remove or edit widgets there.
+- Layouts (only pages and snippets are edited), page parameters, page titles, and widgets inside a pluggable widget
+  (Data grid 2 columns only through `changeWidget` `columns`) or a template grid.
+- `changeWidget`: no change of a button's action, a data source (other than `xpath`), an input's attribute, design
+  properties, on-change events or the visibility by module role. `moveWidget`: within one page; a widget that shows
+  attributes stays in its data view or list view. Renaming a widget does not change `$widgetName` in expressions
+  (the dry run lists them).
 - Widgets other than the ones above: tab container, group box, snippet call, image, reference selector, combo box,
   gallery and every other pluggable widget, except a Data grid 2 copied from the project.
 - Data grid 2: columns show attributes only; no filters, default sorting, custom content, export, personalization or
@@ -516,8 +549,9 @@ Then give the user exact Studio Pro steps. SDK scripts (`edits/<name>.js`) run o
 `--allow-scripts`, because a script runs with full rights before the user approves anything; otherwise `dryrun`
 refuses them.
 
-Operations cannot do these things: changing existing pages, snippets or layouts (widgets can only be placed when
-`createPage` creates the page), widgets outside the `createPage` list (tab containers, galleries and other pluggable
+Operations cannot do these things: changing layouts, page parameters, button actions or data sources of existing
+widgets (pages and snippets take `addWidgets`, `changeWidget`, `deleteWidget`, `moveWidget`), widgets outside the
+`createPage` list (tab containers, galleries and other pluggable
 widgets; only a Data grid 2 copied from the project), import/export mappings,
 JSON structures, consumed REST services, workflows, REST operations with object bodies or results, inheritance
 splits, and setting attributes inherited from System entities (for example `System.User.Name`). For these, write
@@ -602,6 +636,9 @@ mx check: NOT RUN (mx.exe not found) ...                          <- say this to
 | `it has an error handler` | `deleteAction` refuses this step; give Studio Pro steps |
 | `unknown widget 'x'. Supported: ...` | Use a listed widget kind. For other widgets: `python mx.py gap "<what>"` and Studio Pro steps |
 | `listenTo 'x' is no grid or list view on this page (...)` / `is ambiguous` | Use one of the grid or list view names the message lists |
+| `no widget 'x' on Module.Page (widgets here: ...)` | Use a listed name; all of them: `python mx.py widgets Module.Page` |
+| `shows or uses the object of dataView1` | That widget can move only inside dataView1 (`moveWidget`) |
+| `has no page parameter of ...` | `addWidgets` adds no page parameter: give the new data view `listenTo`, or put it in an existing data view |
 | `"kind": "datagrid2" is not possible here` | Use `"kind": "classic"` (or leave `kind` out) |
 | `has a page parameter; a menu item can only open a page without parameters` | Open that page from a button or microflow instead |
 | `needs an import mapping` / `export mapping` | `publishRest` supports simple parameters and results only; give Studio Pro steps |
