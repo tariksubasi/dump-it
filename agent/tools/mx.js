@@ -41,6 +41,16 @@ export const widgets = {
     execute: (args, context) => mx(context, ["widgets", args.page])
 };
 
+export const texts = {
+    description: "Translatable texts (page titles, widget captions/labels, messages, enumeration and menu captions) " +
+        "with their text in every project language. Use the listed where [part] in setTranslations.",
+    args: {
+        scope: text("Module, Module.Document or menu; \"\" for the project's own modules and menus"),
+        missing: text("language code such as tr_TR to list only texts without it, or \"\" for all")
+    },
+    execute: (args, context) => mx(context, ["texts", ...(args.scope ? [String(args.scope)] : []), ...(args.missing ? ["--missing", String(args.missing)] : [])])
+};
+
 export const ops = {
     description: "Without a name: one line per operation a change file edits/<name>.json can use. With a name " +
         "(e.g. createPage, retrieve): the fields of that operation or action.",

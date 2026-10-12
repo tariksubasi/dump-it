@@ -47,6 +47,9 @@ const USAGE = `mxlocal - Mendix Model SDK offline on a local .mpr (v2)
   node mxlocal.js widgets <Module.Page> --project <app.mpr|folder>
                                         the widget tree of a page or snippet: names, kinds, entity, where new
                                         widgets can go (for addWidgets/changeWidget/deleteWidget/moveWidget)
+  node mxlocal.js texts [Module|Module.Doc|menu] [--missing <lang>] --project <app.mpr|folder>
+                                        translatable texts (titles, captions, labels, messages, enumeration and menu
+                                        captions) in every project language (for setTranslations)
   node mxlocal.js ops [name]            the operations a change.json can use (with a name: its fields)
   node mxlocal.js serve --project ... --edits <dir> [--allow-apply]
                                         MCP server (stdio) with these commands as tools; keeps the project loaded
@@ -401,6 +404,11 @@ async function main() {
         const client = new LocalClient(ctx);
         const model = await client.open();
         out(await require("./ops").bind(model, client).widgets(a._[1]));
+    } else if (cmd === "texts") {
+        const ctx = await loadProject(mpr);
+        const client = new LocalClient(ctx);
+        const model = await client.open();
+        out(await require("./ops").bind(model, client).texts(a._[1], a.missing));
     } else if (cmd === "find") {
         if (!a._[1]) throw new Error("find needs a text, e.g. find Customer");
         const ctx = await loadProject(mpr);

@@ -17,7 +17,7 @@ const inspect = require("./inspect");
 const PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 
 const INSTRUCTIONS = `Mendix model tools for one local project (Studio Pro app).
-Change protocol: 1) find the exact names (find; widget names of a page: widgets); 2) pick operations (ops, then ops with a name for its fields);
+Change protocol: 1) find the exact names (find; widget names of a page: widgets; texts to translate: texts); 2) pick operations (ops, then ops with a name for its fields);
 3) plan = write the change and dry-run it (nothing is written; it returns an approval code);
 4) show the user the dry run (every DATA LOSS / EXPRESSION CHECK / Warnings line) and ask them to close Studio Pro and
 answer "yes <CODE>"; 5) only then apply with that code. Never invent operations or fields. No operation fits: gap,
@@ -33,6 +33,8 @@ function tools(allowApply) {
             inputSchema: { type: "object", properties: { flow: str("qualified name, e.g. Sales.ACT_Order_Save") }, required: ["flow"] } },
         { name: "widgets", description: "Widget tree of a page or snippet: names, kinds, entity of each data view / list view, and where new widgets can go ([into]). Use before addWidgets, changeWidget, deleteWidget, moveWidget.",
             inputSchema: { type: "object", properties: { page: str("qualified name, e.g. Sales.Customer_Edit") }, required: ["page"] } },
+        { name: "texts", description: "Translatable texts (page titles, widget captions/labels, messages, enumeration and menu captions) with their text in every project language. Use before setTranslations; missing lists only texts without that language.",
+            inputSchema: { type: "object", properties: { scope: str("optional Module, Module.Document or menu (default: the project's own modules and menus)"), missing: str("optional language code, e.g. tr_TR: only texts without it") } } },
         { name: "ops", description: "Without a name: one line per operation. With a name (e.g. createPage, addAttribute, retrieve): its fields. Use only these operations and fields.",
             inputSchema: { type: "object", properties: { name: str("optional operation or action name") } } },
         { name: "api", description: "Model SDK type reference for this project's Mendix version (only for SDK scripts).",
@@ -137,6 +139,17 @@ class Server {
                     const model = await client.open();
                     try {
                         lines.push(await require("./ops").bind(model, client).widgets(String(a.page || "")));
+                    } finally {
+                        this.settle(client);
+                    }
+                    break;
+                }
+                case "texts": {
+                    const ctx = await this.project();
+                    const client = new LocalClient(ctx);
+                    const model = await client.open();
+                    try {
+                        lines.push(await require("./ops").bind(model, client).texts(a.scope ? String(a.scope) : "", a.missing ? String(a.missing) : null));
                     } finally {
                         this.settle(client);
                     }
