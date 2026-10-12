@@ -6,9 +6,9 @@
 // with names Studio Pro would give. Only what an op touches changes: every other byte of the page stays as it was
 // (selftest: add + change + delete on one of the project's own pages gives the page back byte for byte).
 const sdk = require("mendixmodelsdk");
-const { fail, suggest, bool, setIfAvailable, enumValue, validName } = require("./ops-util");
+const { fail, bool, setIfAvailable, enumValue, validName } = require("./ops-util");
 
-const { pages, domainmodels: dm, customwidgets: cw, datatypes, enumerations, texts } = sdk;
+const { pages, domainmodels: dm, customwidgets: cw, datatypes, texts } = sdk;
 
 const PLACE = {
     into: "optional where: a container, data view, list view, group box or tab page name, a layout grid column \"layoutGrid1/row 1/column 2\", or the placeholder (\"Main\"). Default: the list of after/before, else the page's only placeholder (or the snippet)",
@@ -80,6 +80,8 @@ const NO_WIDGETS = [cw.CustomWidgetType, texts.Text, pages.ClientTemplate, pages
 // a data container with one of these sources shows its own objects, whatever is around it
 const CONTEXT_FREE = ["ListenTargetSource", "GridXPathSource", "ListViewXPathSource", "CustomWidgetXPathSource"];
 
+// friendly names of pluggable widgets ops makes
+const PLUGGABLE_NAMES = { "com.mendix.widget.web.combobox.Combobox": "combo box", "com.mendix.widget.web.gallery.Gallery": "gallery" };
 const short = s => (s.length > 60 ? s.slice(0, 57) + "..." : s);
 // the data source of a pluggable widget (Data grid 2, gallery, ...), or null
 function cwSource(el) {
@@ -160,7 +162,7 @@ function makePageEdit(h, I) {
     function kindOf(el) {
         if (el instanceof cw.CustomWidget) {
             const id = el.type ? el.type.widgetId : "";
-            return I.isGrid2(el) ? "Data grid 2" : `pluggable widget ${id.split(".").pop() || "?"}`;
+            return I.isGrid2(el) ? "Data grid 2" : PLUGGABLE_NAMES[id] || `pluggable widget ${id.split(".").pop() || "?"}`;
         }
         if (el instanceof pages.LayoutCallArgument) return "placeholder";
         const hit = KIND_NAMES.find(([c]) => el instanceof c);
@@ -272,7 +274,9 @@ function makePageEdit(h, I) {
         const like = sv || own;
         return w => {
             if (!like) return;
-            const v = pages.PageVariable.createInAttributeWidgetUnderSourceVariable(w);
+            let v = null;
+            if (w instanceof pages.AttributeWidget) v = pages.PageVariable.createInAttributeWidgetUnderSourceVariable(w);
+            else w.sourceVariable = v = pages.PageVariable.create(model);
             for (const k of ["pageParameter", "snippetParameter", "localVariable", "widget"]) if (like[k]) v[k] = like[k];
             if (like.useAllPages) v.useAllPages = true;
         };
@@ -432,79 +436,7 @@ function makePageEdit(h, I) {
         await setText(ct.template, text, ctx, where);
     }
 
-    // ------------------------------------------------ conditions (visible / editable)
-
-    function exprCheck(expr, dc, where) {
-        const e = String(expr);
-        if (!e.trim()) throw new Error(`${where}: the expression is empty`);
-        if (/\$currentObject/i.test(e) && !dc) throw new Error(`${where}: $currentObject is the object of the data view or list view around the widget, and it is in none`);
-        if (!dc) return;
-        const chain = h.attributeChain(dc.ent);
-        const d = dc.ent.containerAsDomainModel;
-        const assocs = [...d.associations, ...d.crossAssociations].map(a => a.qualifiedName);
-        for (const m of e.matchAll(/\$currentObject\/([A-Za-z_][\w.]*)/gi)) {
-            const step = m[1];
-            if (step.includes(".")) {
-                if (!step.startsWith("System.") && !model.findAssociationBaseByQualifiedName(step)) fail(`${where}: no association '${step}'`, step, assocs);
-            } else if (!chain.attributes.some(a => a.name === step)) {
-                const s = suggest(step, chain.attributes.map(a => a.name), 3);
-                if (!chain.complete) client.warn(`${where}: '${step}' is no attribute of ${dc.ent.qualifiedName} itself (inherited from a System entity?${s.length ? ` or did you mean ${s.join(", ")}?` : ""}); check the expression in Studio Pro`);
-                else fail(`${where}: ${dc.ent.qualifiedName} has no attribute '${step}' (in $currentObject/${step})`, step, chain.attributes.map(a => a.name));
-            }
-        }
-    }
-
-    // { attribute (dm.Attribute|null), values: [[value, on]], expression } of a visible/editable spec; text = for messages
-    async function condition(spec, dc, where, what) {
-        if (typeof spec === "string") {
-            exprCheck(spec, dc, where);
-            return { attribute: null, values: [], expression: spec, text: `${what} if ${spec}` };
-        }
-        if (!spec || typeof spec !== "object" || Array.isArray(spec)) throw new Error(`${where}: ${what} is true, false, an expression "$currentObject/Active", or { "attribute": "Status", "values": ["Open"] }`);
-        for (const k of Object.keys(spec)) if (!["attribute", "values", "expression"].includes(k)) fail(`${where}: unknown field '${k}' in ${what}`, k, ["attribute", "values", "expression"]);
-        if (spec.expression !== undefined) {
-            if (spec.attribute !== undefined) throw new Error(`${where}: ${what}: give attribute or expression, not both`);
-            return condition(String(spec.expression), dc, where, what);
-        }
-        if (spec.attribute === undefined) throw new Error(`${where}: ${what} needs "attribute" (with "values") or "expression"`);
-        if (!dc) throw new Error(`${where}: ${what} by attribute needs a data view or list view around the widget; use an expression`);
-        if (!h.attributeChain(dc.ent).attributes.some(a => a.name === String(spec.attribute)) && !h.attributeChain(dc.ent).complete) {
-            throw new Error(`${where}: '${spec.attribute}' is not an attribute of ${dc.ent.qualifiedName} itself (inherited from a System entity?); use an expression: "$currentObject/${spec.attribute}"`);
-        }
-        const attr = I.attributeOf(dc.ent, String(spec.attribute), where);
-        const t = attr.type;
-        let all;
-        if (t instanceof dm.BooleanAttributeType) all = ["true", "false"];
-        else if (t instanceof dm.EnumerationAttributeType) {
-            const en = t.enumeration.isLoaded ? t.enumeration : await t.enumeration.load();
-            all = en.values.map(v => v.name);
-        } else throw new Error(`${where}: ${what} by attribute needs a Boolean or enumeration attribute; ${attr.name} is ${t.structureTypeName.split("$")[1].replace("AttributeType", "")}. Use an expression, e.g. "$currentObject/${attr.name} != empty"`);
-        let want = spec.values === undefined ? (all[0] === "true" ? ["true"] : null) : [].concat(spec.values).map(String);
-        if (!want) throw new Error(`${where}: ${what}: give "values" of ${attr.name}, e.g. ["${all[0]}"] (values: ${all.join(", ")})`);
-        for (const v of want) if (!all.includes(v)) fail(`${where}: ${what}: '${v}' is no value of ${attr.name}`, v, all);
-        return { attribute: attr, values: all.map(v => [v, want.includes(v)]), expression: "", text: `${what} if ${attr.name} = ${want.join(" or ")}` };
-    }
-
-    const sameCondition = (s, c) => !!s && (s.attributeQualifiedName || null) === (c.attribute ? c.attribute.qualifiedName : null) && s.expression === c.expression &&
-        s.conditions.length === c.values.length && s.conditions.every((x, i) => x.attributeValue === c.values[i][0] && x.editableVisible === c.values[i][1]);
-
-    // Fills ConditionalVisibility/EditabilitySettings s from condition c.
-    function fill(s, c) {
-        if ((s.attributeQualifiedName || null) !== (c.attribute ? c.attribute.qualifiedName : null)) s.attribute = c.attribute;
-        if (s.expression !== c.expression) s.expression = c.expression;
-        // the same values: only the on/off flags change (as when one ticks them in Studio Pro)
-        if (s.conditions.length === c.values.length && s.conditions.every((x, i) => x.attributeValue === c.values[i][0])) {
-            s.conditions.forEach((x, i) => x.editableVisible !== c.values[i][1] && (x.editableVisible = c.values[i][1]));
-            return;
-        }
-        if (s.conditions.length) s.conditions.clear();
-        for (const [value, on] of c.values) {
-            const x = enumerations.Condition.create(model);
-            s.conditions.push(x);
-            x.attributeValue = value;
-            x.editableVisible = on;
-        }
-    }
+    const { condition, sameCondition, fill } = I;
 
     // ------------------------------------------------ changeWidget fields
 
@@ -789,7 +721,7 @@ function makePageEdit(h, I) {
         const slot = place(P, o, where);
         const dc = await builderContext(P, slot.dc, where).catch(e => {
             // an unknown entity matters only for widgets that show attributes; say so when one does
-            const needs = JSON.stringify(o.widgets || []).match(/"(input|textBox|textArea|checkBox|datePicker|radioButtons|dropDown)"|\{[A-Za-z_]\w*\}|"(save|cancel|delete)"/i);
+            const needs = JSON.stringify(o.widgets || []).match(/"(input|textBox|textArea|checkBox|datePicker|radioButtons|dropDown|referenceSelector|comboBox)"|\{[A-Za-z_]\w*\}|"(save|cancel|delete)"|"(visible|editable)":\s*[{"][^tf]/i);
             if (needs) throw e;
             return null;
         });
@@ -803,9 +735,9 @@ function makePageEdit(h, I) {
         for (const p of params) if (!ctx.params.has(p.parameterType.entityQualifiedName)) ctx.params.set(p.parameterType.entityQualifiedName, p);
         const dflt = o.entity || (params.length === 1 ? params[0].parameterType.entityQualifiedName : undefined);
         for (const n of nodes) {
-            if (n.kind !== "dataGrid" && n.kind !== "listView") continue;
+            if (!["dataGrid", "listView", "gallery"].includes(n.kind)) continue;
             n.ent = await I.entityOf(n.spec.entity || dflt, n.where);
-            if (!h.persistable(n.ent)) throw new Error(`${n.where}: ${n.ent.qualifiedName} is non-persistable; a grid or list view over the database needs a persistable entity`);
+            if (!h.persistable(n.ent)) throw new Error(`${n.where}: ${n.ent.qualifiedName} is non-persistable; a grid, list view or gallery over the database needs a persistable entity`);
         }
         for (const n of nodes) if (n.kind === "dataGrid") I.gridKind(n);
         for (const n of nodes) {
@@ -813,7 +745,11 @@ function makePageEdit(h, I) {
             if (P.names.includes(n.name)) throw new Error(`${n.where}: the name '${n.name}' is already used on ${P.qn}`);
             ctx.names.reserve(n.name, n.where);
         }
-        for (const n of nodes) if (!n.name && (n.kind === "dataGrid" || n.kind === "listView")) n.name = ctx.names.next(n.gridKind === "datagrid2" ? "dataGrid2_" : n.kind === "dataGrid" ? "grid" : "listView");
+        for (const n of nodes) for (const t of n.tabs || []) {
+            if (t.name && P.names.includes(t.name)) throw new Error(`${t.where}: the name '${t.name}' is already used on ${P.qn}`);
+            if (t.name) ctx.names.reserve(t.name, t.where);
+        }
+        for (const n of nodes) if (!n.name && ["dataGrid", "listView", "gallery"].includes(n.kind)) n.name = ctx.names.next(n.gridKind === "datagrid2" ? "dataGrid2_" : n.kind === "dataGrid" ? "grid" : n.kind);
         // data views: listen to a grid or list view (new or on the page), or show an existing page parameter
         const existing = nodes.some(n => n.kind === "dataView") ? await listenables(P) : [];
         for (const e of existing) e.ent = e.entQn ? await I.entityOf(e.entQn, where).catch(() => null) : null; // System entities are not in the project
@@ -831,7 +767,7 @@ function makePageEdit(h, I) {
                 if (s.entity && s.entity !== n.target.ent.qualifiedName) throw new Error(`${n.where}: listens to ${n.target.name} (${n.target.ent.qualifiedName}), but entity is ${s.entity}`);
                 n.ent = n.target.ent;
                 const sel = String(n.target.spec.selection || "Single").toLowerCase();
-                if (n.target.gridKind === "datagrid2" && sel !== "single") throw new Error(`${n.where}: listenTo needs a widget with selection Single (${n.target.name} has ${n.target.spec.selection})`);
+                if ((n.target.gridKind === "datagrid2" || n.target.kind === "gallery") && sel !== "single") throw new Error(`${n.where}: listenTo needs a widget with selection Single (${n.target.name} has ${n.target.spec.selection})`);
                 if (n.target.kind === "dataGrid" && sel === "none") client.warn(`${P.qn}: ${n.name || "the data view"} listens to ${n.target.name}, whose selection is None; select Single so it can show a row`);
             } else {
                 if (P.snippet) throw new Error(`${n.where}: on a snippet a new data view can only listen to a grid or list view ("listenTo")`);
@@ -971,6 +907,8 @@ function makePageEdit(h, I) {
             // the attribute it edits (not linked to its own data source) and its label
             const bound = el.object ? el.object.properties.find(p => p.value && p.value.attributeRef && !(p.type && p.type.valueType.dataSourceProperty)) : null;
             if (bound) bits.push(bound.value.attributeRef.attributeQualifiedName.split(".").pop());
+            const assoc = el.object ? el.object.properties.find(p => p.value && p.value.entityRef instanceof dm.IndirectEntityRef && p.value.entityRef.steps.length) : null;
+            if (assoc) bits.push(`reference ${assoc.value.entityRef.steps.map(x => x.associationQualifiedName).join("/")}`);
             if (el.labelTemplate && sysProps(el).includes("Label")) bits.push(`label "${await tmpl(el.labelTemplate)}"`);
             const src = cwSource(el);
             if (src) {
@@ -1013,14 +951,23 @@ function makePageEdit(h, I) {
             if (a && !(a instanceof pages.NoClientAction)) bits.push(a instanceof pages.PageClientAction ? `opens ${a.pageSettings.pageQualifiedName}` : a instanceof pages.MicroflowClientAction ? `calls ${a.microflowSettings.microflowQualifiedName}` : a.structureTypeName.split("$")[1].replace(/ClientAction$/, "").replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase());
         } else if (el instanceof pages.AttributeWidget || el instanceof pages.ReferenceSelector) {
             const ref = prop(el, "attributeRef");
-            if (ref) bits.push(ref.attributeQualifiedName.split(".").pop());
+            const path = ref && ref.entityRef && ref.entityRef.steps ? ref.entityRef.steps.map(x => x.associationQualifiedName.split(".").pop()).join("/") : "";
+            if (ref) bits.push((path ? path + "/" : "") + ref.attributeQualifiedName.split(".").pop());
             if (el.labelTemplate) bits.push(`label "${await tmpl(el.labelTemplate)}"`);
             if (el.editable && el.editable.name !== "Always") bits.push(el.editable.name === "Never" ? "read-only" : "editable (conditional)");
         } else if (el instanceof pages.Label || el instanceof pages.GridColumn || el instanceof pages.TabPage) {
             const cap = prop(el, "caption");
             if (cap instanceof texts.Text) bits.push(`"${short(await textOf(cap))}"`);
             if (el instanceof pages.GridColumn && el.attributeRef) bits.push(el.attributeRef.attributeQualifiedName.split(".").pop());
-        } else if (el instanceof pages.GroupBox && el.caption) bits.push(`"${await tmpl(el.caption)}"`);
+        } else if (el instanceof pages.GroupBox) {
+            if (el.caption) bits.push(`"${await tmpl(el.caption)}"`);
+            if (el.collapsible && el.collapsible.name !== "No") bits.push(el.collapsible.name === "YesInitiallyCollapsed" ? "collapsible (collapsed)" : "collapsible");
+        } else if (el instanceof pages.TabContainer) bits.push(`${el.tabPages.length} tab(s)`);
+        else if (el instanceof pages.StaticImageViewer) bits.push(el.imageQualifiedName || "no image");
+        else if (pages.DynamicImageViewer && el instanceof pages.DynamicImageViewer) {
+            const src = el.dataSource, er = src && prop(src, "entityRef");
+            bits.push(er instanceof dm.IndirectEntityRef ? `image over ${er.steps.map(x => x.associationQualifiedName).join("/")}` : "image of the object around it");
+        }
         else if (el instanceof pages.SnippetCallWidget) bits.push(el.snippetCall ? el.snippetCall.snippetQualifiedName : "?");
         if (el instanceof cw.CustomWidget && sysProps(el).includes("Editability") && el.editable && el.editable.name !== "Always") bits.push(el.editable.name === "Never" ? "read-only" : "editable (conditional)");
         const cv = prop(el, "conditionalVisibilitySettings");

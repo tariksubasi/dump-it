@@ -333,7 +333,11 @@ Mendix expressions as text: `"'Hello'"`, `"$Order/Total * 2"`, `"empty"`, `"[%Cu
 | `setHomePage` | **page** or **microflow**, profile (default Responsive), roles (user roles, e.g. `["Administrator"]`) | Without roles: the default home page. Only pages/microflows without parameters |
 
 Widgets in `"widgets": [ { "widget": "<kind>", ... } ]`, top to bottom. Every widget takes `name` (default as
-Studio Pro: `grid1`, `dataGrid2_1`, `dataView1`, ...). Full field list: `python mx.py ops createPage`.
+Studio Pro: `grid1`, `dataGrid2_1`, `dataView1`, ...) and the common fields `visible` (an expression
+`"$currentObject/Active"`, or `{"attribute": "Status", "values": ["Open"]}` of the data view / list view / gallery
+around it; a Boolean attribute alone = visible when true), `class` and `style` (inline CSS; for `text` and
+`actionButton` `style` is the text / button style unless it contains `:`). Inputs, `referenceSelector` and `comboBox`
+also take `editable` (true, false or a condition like `visible`). Full field list: `python mx.py ops createPage`.
 
 | Widget | Fields | Notes |
 |---|---|---|
@@ -344,7 +348,14 @@ Studio Pro: `grid1`, `dataGrid2_1`, `dataView1`, ...). Full field list: `python 
 | `dataView` | entity, source (`parameter`/`listen`), listenTo, editable (default true), fields, buttons, widgets, footer | `listenTo`: the name of a grid or list view, or `dataGrid` / `listView` when the page has exactly one (a Data grid 2 needs selection Single). Without `listenTo`: a page parameter of the entity, with Save/Cancel when editable. An editable data view without a save button gets a warning |
 | `listView` | entity, xpath, fields, widgets, pageSize (whole number) | Persistable entity. A data view can listen to it |
 | `actionButton` | **action** (`save`, `cancel`, `close`, `delete`, `showPage`, `callMicroflow`, `callNanoflow`), caption, page, microflow, nanoflow, style, closePage | Passes only the object of the data view or list view it is in (target with that one parameter or none). save/cancel `closePage` default: true in a parameter data view, false in a listening one (the dashboard stays open; Studio Pro's own default is true). `close` = `closePageButton1` "Close page" |
-| `input`, `textBox`, `textArea`, `checkBox`, `datePicker`, `radioButtons`, `dropDown` | **attribute**, label | Inside a data view; `input` picks the widget by attribute type (an enumeration gets radio buttons, as on Studio Pro's pages) |
+| `input`, `textBox`, `textArea`, `checkBox`, `datePicker`, `radioButtons`, `dropDown` | **attribute**, label, editable | Inside a data view; `input` picks the widget by attribute type (an enumeration gets radio buttons, as on Studio Pro's pages) |
+| `tabContainer` | **tabs** `[{"caption": "General", "widgets": [...], "name": ...}]` | Tab pages `tabPage1`, ...; addWidgets `into` a tab page by its name |
+| `groupBox` | caption, collapsible (`no`/`expanded`/`collapsed`), headerMode (`Div`, `H1`-`H6`), widgets | `{Attribute}` in the caption inside a data view or list view |
+| `snippetCall` | **snippet** | An existing snippet without parameters (`Did you mean`); snippets with parameters are refused |
+| `image` | image, association, width, height | `image`: a static image `Module.Collection.Image` (`Did you mean`). Without it: the image of the object around it (data view, list view or gallery of an entity that inherits `System.Image`, or over `association`). Size: pixels `200`, `"50%"` or `"auto"` |
+| `referenceSelector` | **association**, attribute, label, xpath, editable | Inside a data view whose entity owns the reference (`Module.Order_Customer` in a data view of Order); `attribute` of the other entity (default: its first String attribute). Reference sets are refused |
+| `comboBox` | attribute or association, captionAttribute, label, editable | Combo box (pluggable) for an enumeration/Boolean attribute or a reference, copied from a Studio Pro-saved combo box of this project whose widget equals `widgets/*.mpk`, every setting back to its default. Otherwise refused with the classic alternative (`referenceSelector`, `dropDown`, `checkBox`) |
+| `gallery` | entity, xpath, widgets (per item), selection (default Single), pageSize, columns (desktop 1-12) | Gallery (pluggable) over the database, copied like `comboBox`; a data view can listen to it (`listenTo`). Without one to copy it is refused: use `listView` |
 
 A grid followed by the data view that listens to it is placed side by side (layout grid 8/4); `"arrange": "rows"`
 stacks them. The dry run's `Warnings` start with the grid kind that was used, then lint lines: a grid with 0
@@ -414,6 +425,28 @@ Master-detail: customers in a grid; the selected customer's details and, inside 
                      "xpath": "[Sales.Order_Customer = '[%CurrentObject%]']" } ] } ] } ] }
 ```
 
+Tabs, a group box, a snippet, a logo, a reference selector, a combo box, a gallery with its selected item next to it,
+and conditional visibility and editability (`Sales.Order_Customer` goes from Order to Customer):
+
+```json
+{ "ops": [ { "op": "createPage", "module": "Sales", "name": "Order_Detail", "entity": "Sales.Order", "roles": ["Sales.User"],
+  "widgets": [
+    { "widget": "image", "image": "Sales.Images.Logo", "width": 120 },
+    { "widget": "dataView", "source": "parameter", "widgets": [
+      { "widget": "tabContainer", "tabs": [
+        { "caption": "General", "widgets": [
+          { "widget": "input", "attribute": "Number", "editable": false },
+          { "widget": "referenceSelector", "association": "Sales.Order_Customer", "attribute": "Name" },
+          { "widget": "comboBox", "attribute": "Status" },
+          { "widget": "input", "attribute": "CancelReason", "visible": { "attribute": "Status", "values": ["Cancelled"] } } ] },
+        { "caption": "Notes", "widgets": [
+          { "widget": "groupBox", "caption": "Internal", "collapsible": "collapsed", "class": "card",
+            "widgets": [ { "widget": "input", "attribute": "Note", "editable": "$currentObject/Status != 'Closed'" } ] } ] } ] },
+      { "widget": "snippetCall", "snippet": "Sales.OrderFooter" } ] },
+    { "widget": "gallery", "entity": "Sales.Product", "columns": 3, "widgets": [ { "widget": "text", "text": "{Name}", "style": "H4" } ] },
+    { "widget": "dataView", "listenTo": "gallery", "editable": false, "fields": ["Name", "Price"] } ] } ] }
+```
+
 A page in the menu for one role only: the menu item shows for the user roles that may open the page, so give the page
 that role and take the others away:
 
@@ -445,21 +478,27 @@ Layout grid, heading, list view with an editable detail and buttons, a Data grid
 ```
 
 What pages cannot do yet (use Studio Pro, and `python mx.py gap "<what>"`):
-- Layouts (only pages and snippets are edited), page parameters, page titles, and widgets inside a pluggable widget
-  (Data grid 2 columns only through `changeWidget` `columns`) or a template grid.
+- Layouts (only pages and snippets are edited), page parameters, page titles, and widgets inside an existing pluggable
+  widget (Data grid 2 columns only through `changeWidget` `columns`; a new gallery gets its item widgets when it is
+  made) or a template grid.
 - `changeWidget`: no change of a button's action, a data source (other than `xpath`), an input's attribute, design
   properties, on-change events or the visibility by module role. `moveWidget`: within one page; a widget that shows
   attributes stays in its data view or list view. Renaming a widget does not change `$widgetName` in expressions
   (the dry run lists them).
-- Widgets other than the ones above: tab container, group box, snippet call, image, reference selector, combo box,
-  gallery and every other pluggable widget, except a Data grid 2 copied from the project.
+- Widgets other than the ones above: template grid, reference set selector, file manager, image uploader, navigation
+  list, scroll container, and every other pluggable widget (only Data grid 2, combo box and gallery, each copied from
+  a Studio Pro-saved one of this project whose widget equals `widgets/*.mpk`).
+- Snippet calls of snippets with parameters; tab pages with visibility, badges or a default tab; images with an on-click
+  action or a default image; design properties (the Atlas toggles); visibility by module role.
+- Combo box: only the context source with an enumeration, Boolean or reference (no database / static source, reference
+  set, custom content, on-change events or footer). Gallery: no filters, sorting, click action, empty message or
+  personalization (left empty).
 - Data grid 2: columns show attributes only; no filters, default sorting, custom content, export, personalization or
   click actions (they are left empty). It needs a Data grid 2 on a page or snippet of this project whose widget equals
   `widgets/*.mpk` (otherwise `kind: datagrid2` is refused; use `classic`).
 - Classic data grid: only the database (XPath) source and a Search button (no New/Edit/Delete buttons in the bar).
 - Data views: only a page parameter or a listened grid/list view (no microflow, nanoflow or association source).
-- Buttons: no parameter mappings, no create-object action; conditional visibility, styling (design properties) and
-  on-change events are not set.
+- Buttons: no parameter mappings, no create-object action, no design properties or on-change events.
 - Menus: web profiles only (native profiles are refused); no reordering, and no op removes a menu item or home page
   (deleting a page that one opens says so).
 - Texts (labels, titles, captions, headers, menu captions) given as plain text are written in the default language
@@ -679,8 +718,8 @@ refuses them.
 
 Operations cannot do these things: changing layouts, page parameters, button actions or data sources of existing
 widgets (pages and snippets take `addWidgets`, `changeWidget`, `deleteWidget`, `moveWidget`), widgets outside the
-`createPage` list (tab containers, galleries and other pluggable
-widgets; only a Data grid 2 copied from the project), import/export mappings,
+`createPage` list (template grids, reference set selectors, file managers and pluggable widgets other than a Data
+grid 2, combo box or gallery copied from the project), snippet calls with parameters, design properties, import/export mappings,
 JSON structures, consumed REST services, workflows, REST operations with object bodies or results, inheritance
 splits, and setting attributes inherited from System entities (for example `System.User.Name`). For these, write
 `edits/<name>.js` with the Mendix Model SDK, or give the user Studio Pro steps. Prefer Studio Pro steps when the

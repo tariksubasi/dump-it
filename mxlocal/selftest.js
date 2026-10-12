@@ -106,6 +106,129 @@ function plans(mod, T, userRole, grid2) {
     return { phase1, role, E, M };
 }
 
+// A page with every newer widget kind (tab container, group box, snippet call, static and dynamic image, reference
+// selector, combo box, gallery) and the common fields (visible, editable, class, style). x: what the project offers
+// ({ snippet, image, imageEntity, combo, gallery }); a missing one leaves its widget out (SKIP line).
+function widgetPlan(mod, T, x) {
+    const E = `${mod}.${T}`;
+    const assoc = `${mod}.${T}Line_${T}`;
+    const box = [
+        { widget: "tabContainer", name: "zzTabs", tabs: [
+            { caption: "Main", widgets: [{ widget: "text", text: "Visible by expression", visible: "1 = 1", class: "zz-text" }] },
+            { caption: "More", name: "zzTabMore", widgets: [{ widget: "container", style: "padding: 4px;", widgets: [] }] }] },
+        ...(x.snippet ? [{ widget: "snippetCall", snippet: x.snippet }] : []),
+        ...(x.image ? [{ widget: "image", image: x.image, width: 120, height: "auto" }] : [])
+    ];
+    return { op: "createPage", module: mod, name: `${T}_Widgets`, entity: E, folder: "ZzTest", widgets: [
+        { widget: "groupBox", name: "zzGroup", caption: "Details", collapsible: "expanded", class: "zz-box", style: "margin-top: 8px;", widgets: box },
+        { widget: "dataView", name: "zzForm", source: "parameter", widgets: [
+            { widget: "text", text: "Flagged: {Title}", visible: { attribute: "Flag" } },
+            { widget: "input", attribute: "Title", editable: { attribute: "Status", values: ["Open"] } },
+            { widget: "input", attribute: "Count", editable: "$currentObject/Flag", visible: { attribute: "Status", values: ["Open", "Done"] } },
+            ...(x.combo ? [{ widget: "comboBox", attribute: "Status", visible: "$currentObject/Flag" }] : [])] },
+        { widget: "dataView", name: "zzLineForm", entity: `${E}Line`, source: "parameter", widgets: [
+            { widget: "referenceSelector", association: assoc, attribute: "Title", editable: "$currentObject/Text != empty" },
+            ...(x.combo ? [{ widget: "comboBox", association: assoc, captionAttribute: "Title", label: "Item" }] : [])] },
+        ...(x.gallery ? [{ widget: "gallery", name: "zzGallery", entity: E, xpath: "[Count > 0]", pageSize: 12, columns: 3, widgets: [{ widget: "text", text: "{Title}" }] },
+            { widget: "dataView", listenTo: "zzGallery", editable: false, fields: ["Title"] }] : []),
+        ...(x.imageEntity ? [{ widget: "dataView", name: "zzPhoto", entity: x.imageEntity, source: "parameter", editable: false, buttons: false, widgets: [{ widget: "image", height: "50%" }] }] : [])
+    ] };
+}
+
+// What the project offers for widgetPlan: a snippet without parameters, an image, a System.Image entity (persistable,
+// outside System), and combo box / gallery copies (pluggable.exemplars).
+async function widgetTargets(model, project) {
+    const sdk = require("mendixmodelsdk");
+    const pl = require("./pluggable");
+    const ops = require("./ops-pages");
+    const out = { snippet: null, image: null, imageEntity: null };
+    for (const sn of [...model.allSnippets()].sort((a, b) => (a.qualifiedName < b.qualifiedName ? -1 : 1))) {
+        if (!(await sn.load()).parameters.length) {
+            out.snippet = sn.qualifiedName;
+            break;
+        }
+    }
+    for (const c of model.allImageCollections()) {
+        const col = await c.load();
+        if (col.images.length) {
+            out.image = `${col.qualifiedName}.${col.images[0].name}`;
+            break;
+        }
+    }
+    for (const d of model.allDomainModels()) {
+        if (out.imageEntity) break;
+        for (const e of (await d.load()).entities) {
+            const g = e.generalization;
+            if (g instanceof sdk.domainmodels.Generalization && g.generalizationQualifiedName === "System.Image") {
+                out.imageEntity = e.qualifiedName;
+                break;
+            }
+        }
+    }
+    out.comboInfo = pl.exemplars(project, ops.COMBOBOX);
+    out.galleryInfo = pl.exemplars(project, ops.GALLERY);
+    out.combo = out.comboInfo.exemplars.length > 0;
+    out.gallery = out.galleryInfo.exemplars.length > 0;
+    return out;
+}
+
+// Storage keys of the newer widget types: the same in every Studio Pro sample of the test projects (10.22-11.13).
+const WIDGET_KEYS = {
+    "Forms$TabControl": "ActivePageAttributeRef ActivePageOnChangeAction ActivePageSourceVariable Appearance ConditionalVisibilitySettings DefaultPagePointer Name TabIndex TabPages",
+    "Forms$TabPage": "Badge Caption ConditionalVisibilitySettings Name RefreshOnShow Widgets",
+    "Forms$GroupBox": "Appearance CaptionTemplate Collapsible ConditionalVisibilitySettings HeaderMode Name TabIndex Widgets",
+    "Forms$SnippetCallWidget": "Appearance FormCall Name TabIndex", "Forms$SnippetCall": "Form ParameterMappings",
+    "Forms$StaticImageViewer": "AlternativeText Appearance ClickAction ConditionalVisibilitySettings Height HeightUnit Image Name NativeAccessibilitySettings Responsive TabIndex Width WidthUnit",
+    "Forms$ImageViewer": "AlternativeText Appearance ClickAction ConditionalVisibilitySettings DataSource DefaultImage Height HeightUnit Name NativeAccessibilitySettings OnClickEnlarge Responsive ShowAsThumbnail TabIndex Width WidthUnit",
+    "Forms$ImageViewerSource": "EntityRef ForceFullObjects SourceVariable",
+    "Forms$ReferenceSelector": "Appearance AttributeRef ConditionalEditabilitySettings ConditionalVisibilitySettings Editable EmptyOptionCaption FormattingInfo GotoFormSettings LabelTemplate Name NativeAccessibilitySettings OnChangeAction PopupFormSettings ReadOnlyStyle RenderMode ScreenReaderLabel SelectorSource SourceVariable TabIndex Validation",
+    "Forms$SelectorXPathSource": "ConstrainedByRefs SortBar XPathConstraint",
+    "Forms$ConditionalVisibilitySettings": "Attribute Conditions Expression IgnoreSecurity ModuleRoles SourceVariable",
+    "Forms$ConditionalEditabilitySettings": "Attribute Conditions Expression SourceVariable"
+};
+
+// The widget page as stored: Studio Pro's keys per type, every planned kind present, the conditions, the pluggable
+// copies typed like widgets/*.mpk, the gallery listened to with Single selection.
+function widgetProblems(project, T, x) {
+    const pluggable = require("./pluggable");
+    const r = [];
+    let page = null;
+    for (const id of project.units.keys()) {
+        const u = project.read(id);
+        if (u.$Type === "Forms$Page" && u.Name === `${T}_Widgets`) page = u;
+    }
+    if (!page) return ["page missing"];
+    const seen = new Map(), all = [];
+    walkPlain(page, o => {
+        all.push(o);
+        seen.set(o.$Type, (seen.get(o.$Type) || 0) + 1);
+        const want = WIDGET_KEYS[o.$Type];
+        const have = Object.keys(o).filter(k => k[0] !== "$").sort().join(" ");
+        if (want && have !== want) r.push(`${o.$Type} has keys [${have}], Studio Pro stores [${want}]`);
+    });
+    const need = ["Forms$TabControl", "Forms$GroupBox", "Forms$ReferenceSelector", "Forms$ConditionalVisibilitySettings", "Forms$ConditionalEditabilitySettings",
+        ...(x.snippet ? ["Forms$SnippetCallWidget"] : []), ...(x.image ? ["Forms$StaticImageViewer"] : []), ...(x.imageEntity ? ["Forms$ImageViewer"] : [])];
+    for (const t of need) if (!seen.has(t)) r.push(`no ${t} stored`);
+    if ((seen.get("Forms$TabPage") || 0) !== 2) r.push(`${seen.get("Forms$TabPage") || 0} tab pages, expected 2`);
+    if ((seen.get("Forms$ConditionalVisibilitySettings") || 0) < 3) r.push("fewer than 3 visibility conditions");
+    const grp = all.find(o => o.$Type === "Forms$GroupBox");
+    if (grp && (grp.Collapsible !== "YesInitiallyExpanded" || grp.Appearance.Class !== "zz-box" || grp.Appearance.Style !== "margin-top: 8px;")) r.push("group box without its collapsible / class / style");
+    const rs = all.find(o => o.$Type === "Forms$ReferenceSelector");
+    if (rs && (!rs.AttributeRef.EntityRef || rs.AttributeRef.EntityRef.Steps.length !== 1 || rs.Editable !== "Conditional")) r.push("reference selector without its association step or conditional editability");
+    const cws = all.filter(o => o.$Type === "CustomWidgets$CustomWidget");
+    for (const [id, want] of [["com.mendix.widget.web.combobox.Combobox", x.combo ? 2 : 0], ["com.mendix.widget.web.gallery.Gallery", x.gallery ? 1 : 0]]) {
+        const ws = cws.filter(o => o.Type.WidgetId === id);
+        if (ws.length !== want) r.push(`${ws.length} ${id.split(".").pop()}, expected ${want}`);
+        const def = pluggable.installed(project.dir).get(id);
+        for (const w of ws) if (!def || pluggable.typeDiff(w.Type, def).length) r.push(`${w.Name}: type differs from widgets/*.mpk`);
+    }
+    if (x.gallery) {
+        const dv = all.find(o => o.$Type === "Forms$DataView" && o.DataSource && o.DataSource.ListenTarget === "zzGallery");
+        if (!dv) r.push("no data view listens to zzGallery");
+    }
+    return [...new Set(r)];
+}
+
 // One flow per family of the newer actions: lists, object type decision + cast, validation feedback, rollback, home
 // page (microflow and nanoflow), REST calls with text/String and, when the project has them, mappings, Java and
 // JavaScript actions and a file document. t = callTargets(); a missing target leaves its action out (SKIP line).
@@ -636,6 +759,8 @@ async function selftest(mpr, keep, { out, relevant }) {
         const userRole = userRoles.includes("Administrator") ? "Administrator" : userRoles[0];
         const grid2 = require("./pluggable").exemplars(s1.ctx.project, "com.mendix.widget.web.datagrid.Datagrid");
         const { phase1, E, M, role } = plans(mod, T, userRole, grid2.exemplars.length > 0);
+        const wt = await widgetTargets(s1.model, s1.ctx.project);
+        phase1.ops.push(widgetPlan(mod, T, wt));
         // pages copy a layout from the project's own pages; a project without any cannot get pages
         const layouts = new Set(s1.model.allLayouts().map(l => l.qualifiedName));
         const pageable = [...s1.ctx.project.units.keys()].some(id => {
@@ -643,9 +768,15 @@ async function selftest(mpr, keep, { out, relevant }) {
             return p.$Type === "Forms$Page" && p.FormCall && layouts.has(p.FormCall.Form);
         });
         const web = s1.model.allNavigationDocuments().length && (await s1.model.allNavigationDocuments()[0].load()).profiles.some(p => p instanceof require("mendixmodelsdk").navigation.NavigationProfile && p.name === "Responsive");
+        if (pageable) {
+            const skips = { snippet: "snippet call (no snippet without parameters)", image: "static image (no image collection)", imageEntity: "dynamic image (no entity inheriting System.Image)" };
+            for (const [k, what] of Object.entries(skips)) if (!wt[k]) results.push(`SKIP ${what}`);
+            if (!wt.combo) results.push(`SKIP combo box: ${wt.comboInfo.reason}`);
+            if (!wt.gallery) results.push(`SKIP gallery: ${wt.galleryInfo.reason}`);
+        }
         if (!pageable) {
             phase1.ops = phase1.ops.filter(o => !["createPage", "addMenuItem", "setHomePage"].includes(o.op) && o.name !== `${T}_Open`);
-            results.push("SKIP pages and dashboard: this project has no page with a layout to copy");
+            results.push("SKIP pages, dashboard and widget page: this project has no page with a layout to copy");
         } else if (!web) {
             phase1.ops = phase1.ops.filter(o => !["addMenuItem", "setHomePage"].includes(o.op));
             phase1.ops.forEach(o => delete o.menu);
@@ -712,6 +843,9 @@ async function selftest(mpr, keep, { out, relevant }) {
                 const g2 = grid2Problems(s2.ctx.project, mod, T);
                 check(`Data grid 2 ${grid2.def.version} copy (type = .mpk, Single selection, listened to, no old references)`, !g2.length, g2.slice(0, 5).join("; "));
             } else results.push(`SKIP Data grid 2 page: ${grid2.reason}`);
+            const wp = widgetProblems(s2.ctx.project, T, wt);
+            const kinds = ["tab container", "group box", "reference selector", wt.snippet && "snippet call", wt.image && "image", wt.imageEntity && "dynamic image", wt.combo && "combo box x2", wt.gallery && "gallery"].filter(Boolean);
+            check(`widget page stored with Studio Pro's keys (${kinds.join(", ")}; visible, editable, class, style)`, !wp.length, wp.slice(0, 5).join("; "));
         }
 
         // phase T: a new language, translations of existing texts (page title, enumeration caption, show-message text,
@@ -765,7 +899,8 @@ async function selftest(mpr, keep, { out, relevant }) {
             const orig = s2.ctx.project.readBytes(pe.id);
             const phase4 = { ops: [
                 { op: "addWidgets", page: pe.qn, into: pe.column, widgets: [{ widget: "text", text: "Zz edit", style: "H3", name: "zzText" },
-                    { widget: "container", name: "zzBox", widgets: [{ widget: "actionButton", action: "close", name: "zzClose" }] }] },
+                    { widget: "groupBox", name: "zzBox", caption: "Zz box", collapsible: "collapsed", class: "zz-edit", widgets: [{ widget: "actionButton", action: "close", name: "zzClose" },
+                        { widget: "tabContainer", name: "zzTabs", tabs: [{ caption: "Zz tab", name: "zzTab", widgets: [{ widget: "text", text: "In a tab", visible: "1 = 1" }] }] }] }] },
                 { op: "changeWidget", page: pe.qn, widget: "zzClose", caption: "Zz close", buttonStyle: "Primary" },
                 { op: "changeWidget", page: pe.qn, widget: pe.grid, class: `${pe.cls} zz-edited`.trim() }
             ] };
@@ -785,7 +920,7 @@ async function selftest(mpr, keep, { out, relevant }) {
             let s4 = await reopen(copy);
             const failed4 = await s4.ops.checkPlan(phase4);
             const ok4 = !lay4.problems.length && gp.same && !failed4.length && !lost4.length;
-            check(`page edit on ${pe.qn}: add into ${pe.column}${pe.dv ? ` and ${pe.dv.dv}` : ""}, change a caption, a class${pe.dv ? ", editable, visible" : ""}: stored like Studio Pro, rest unchanged`, ok4,
+            check(`page edit on ${pe.qn}: add a group box with a tab container into ${pe.column}${pe.dv ? ` and ${pe.dv.dv}` : ""}, change a caption, a class${pe.dv ? ", editable, visible" : ""}: stored like Studio Pro, rest unchanged`, ok4,
                 [...lay4.problems.slice(0, 3), gp.same ? "" : "bytes outside the new widgets and the changed class differ", ...failed4, ...lost4].filter(Boolean).join("; ") || `${gp.added} element(s) added, ${gp.compared} unchanged`);
             if (!pe.dv) results.push("SKIP page edit in a data view: no page with a layout grid has a data view with a text box");
             // the move is proven by the delete: zzText is gone only if it was moved into zzBox

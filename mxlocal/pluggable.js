@@ -69,7 +69,7 @@ function xmlLines(props, prefix = "", group = []) {
             const tr = kid(c, "translations") ? kids(kid(c, "translations"), "translation").map(x => `${x.attrs.lang}=${txt(x)}`) : [];
             out.push(`${prefix}${a.key} ${String(a.type).toLowerCase()} list=${a.isList === "true"} required=${a.required !== "false"} default=${a.defaultValue || ""}` +
                 ` [${group.join("::")}] "${txt(kid(c, "caption"))}" enum=${list("enumerationValues", "enumerationValue", "key")} sel=${list("selectionTypes", "selectionType", "name")}` +
-                ` attr=${list("attributeTypes", "attributeType", "name")} ret=${rt ? rt.attrs.type + (rt.attrs.isList === "true" ? "[]" : "") : ""} ds=${a.dataSource || ""} tr=${tr}`);
+                ` attr=${list("attributeTypes", "attributeType", "name")} ret=${rt ? (rt.attrs.type || "None") + (rt.attrs.isList === "true" ? "[]" : "") : ""} ds=${a.dataSource || ""} tr=${tr}`);
             if (a.type === "object" && kid(c, "properties")) out.push(...xmlLines(kid(c, "properties"), `${prefix}${a.key}/`));
         }
     }
