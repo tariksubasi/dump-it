@@ -22,7 +22,7 @@ const PAGE_EDIT_OPS = {
         fields: { page: "R Module.Page or Module.Snippet", ...PLACE, widgets: "R [ { \"widget\": \"<kind>\", ...fields } ] as in createPage; new names like Studio Pro (text3, actionButton2, ...)", entity: "optional default Module.Entity of new grids, list views and data views (default: the entity of the page's only object parameter)" }
     },
     changeWidget: {
-        doc: "Change one widget of a page or snippet: caption, text, label, placeholder, editable, visible, class, style, text/button style, grid columns, XPath, name. Give only what changes. Names: widgets Module.Page.",
+        doc: "Change one widget of a page or snippet: caption, text, label, placeholder, editable, visible, class, style, text/button style, grid columns, XPath, name, a button's action, on click (Data grid 2, gallery), on change (inputs). Give only what changes. Names: widgets Module.Page.",
         fields: {
             page: "R Module.Page or Module.Snippet", widget: "R widget name (see: widgets Module.Page)",
             caption: "button, tab page, group box, grid button or classic grid column caption; inside a data view or list view {Attribute} shows a value",
@@ -37,7 +37,10 @@ const PAGE_EDIT_OPS = {
             buttonStyle: "Default | Primary | Success | Info | Warning | Danger | Inverse (a button)",
             columns: "{ \"add\": [ \"Attr\" or { \"attribute\": ..., \"caption\": ..., \"width\": 20 } ], \"remove\": [ \"Attr\" or a column caption ] } of a classic data grid or Data grid 2 (width: classic only); added at the end",
             xpath: "XPath constraint of a grid, list view or Data grid 2 with a database source, e.g. [Active = true()] (\"\" = all objects)",
-            name: "new name; data views listening to it follow"
+            name: "new name; data views listening to it follow",
+            action: "a button's action (also a classic grid button): { \"action\": \"showPage\" | \"callMicroflow\" | \"callNanoflow\" | \"save\" | \"cancel\" | \"close\" | \"delete\", \"page\" / \"microflow\" / \"nanoflow\", \"params\" } (replaces the old one)",
+            onClick: "on click of a Data grid 2 or gallery: an action as in \"action\" (the row is passed)",
+            onChange: "on change of an input, reference (set) selector or combo box: an action as in \"action\" (the object around it is passed)"
         }
     },
     deleteWidget: {
@@ -49,7 +52,7 @@ const PAGE_EDIT_OPS = {
         fields: { page: "R Module.Page or Module.Snippet", widget: "R widget name", ...PLACE }
     }
 };
-const CHANGE_FIELDS = ["caption", "text", "label", "placeholder", "editable", "visible", "class", "style", "textStyle", "buttonStyle", "columns", "xpath", "name"];
+const CHANGE_FIELDS = ["caption", "text", "label", "placeholder", "editable", "visible", "class", "style", "textStyle", "buttonStyle", "columns", "xpath", "name", "action", "onClick", "onChange"];
 // fields a weak model takes from elsewhere -> what to write instead (checked before the generic "unknown field")
 const FIELD_SYNONYMS = {
     addWidgets: { in: "use \"into\"", inside: "use \"into\"", target: "use \"into\"", container: "use \"into\"", parent: "use \"into\"", widget: "use \"widgets\": [ { \"widget\": ... } ] (a list)", footer: "use \"into\": \"<data view>\", \"slot\": \"footer\"", position: "use \"after\" or \"before\" (a widget name)" },
@@ -574,6 +577,40 @@ function makePageEdit(h, I) {
             if (src.xPathConstraint !== String(v)) src.xPathConstraint = String(v);
             return String(v) ? `XPath ${v}` : "XPath removed (all objects)";
         },
+        async action(P, node, v, dc, ctx, where) {
+            const w = node.el;
+            if (pages.GridActionButton && w instanceof pages.GridActionButton) {
+                // a classic grid button: the selected row (rows: Multi selection) of its grid
+                const grid = w.container && w.container.container;
+                const gn = P.nodes.find(n => n.el === grid);
+                const { qn } = gn ? await containerEntity(P, gn) : { qn: grid && grid.dataSource && refEntity(prop(grid.dataSource, "entityRef")) };
+                const ent = qn ? await I.entityOf(qn, where) : null;
+                const multi = grid && /Multi/.test(grid.selectionMode.name);
+                const row = { kind: "dataGrid", ent, widget: grid, name: grid.name, existing: true, container: dc, spec: { selection: grid.selectionMode.name } };
+                return I.makeAction(v, { container: row, name: grid.name, selectionList: multi ? ent : null }, ctx, where, a => (w.action = a));
+            }
+            if (!(w instanceof pages.ActionButton)) throw new Error(`${where}: action is for a button; a ${kindOf(w)} has ${w instanceof cw.CustomWidget ? `"onClick"` : isInput(w) ? `"onChange"` : "none"}`);
+            return I.makeAction(v, { container: dc, name: node.name }, ctx, where, a => (w.action = a));
+        },
+        async onClick(P, node, v, dc, ctx, where) {
+            const w = node.el;
+            const p = w instanceof cw.CustomWidget && w.object ? w.object.properties.find(x => x.type && x.type.key === "onClick") : null;
+            if (!p) throw new Error(`${where}: onClick is for a Data grid 2 or gallery${w instanceof pages.ActionButton ? `; a button takes "action"` : ""}`);
+            const { qn } = await containerEntity(P, node);
+            const ent = qn ? await I.entityOf(qn, where) : null;
+            const row = { kind: "pluggable", ent, widget: w, name: node.name, existing: true, container: dc };
+            return I.makeAction(v, { container: row, name: node.name }, ctx, where, a => (p.value.action = a));
+        },
+        async onChange(P, node, v, dc, ctx, where) {
+            const w = node.el;
+            if (w instanceof cw.CustomWidget) {
+                const p = w.object ? w.object.properties.find(x => x.type && x.type.key === "onChangeEvent") : null;
+                if (!p) throw new Error(`${where}: this ${kindOf(w)} has no on change event`);
+                return I.makeAction(v, { container: dc, name: node.name }, ctx, where, a => (p.value.action = a));
+            }
+            if (prop(w, "onChangeAction") === undefined) throw new Error(`${where}: a ${kindOf(w)} has no on change event (inputs, reference selectors and combo boxes have one)`);
+            return I.makeAction(v, { container: dc, name: node.name }, ctx, where, a => (w.onChangeAction = a));
+        },
         async name(P, node, v, dc, ctx, where) {
             const n = validName(v, "widget name");
             const old = node.name;
@@ -784,10 +821,12 @@ function makePageEdit(h, I) {
         if (!fields.length) throw new Error(`${where}: give what to change: ${CHANGE_FIELDS.join(", ")}`);
         const ctx = { ...newCtx(P), lang: await defaultLanguage() };
         // {Attribute} and conditions use the data view or list view around the widget (for a column: around its grid)
-        const needs = ["caption", "text", "label", "placeholder", "visible", "editable", "xpath"].some(k => o[k] !== undefined);
+        const needs = ["caption", "text", "label", "placeholder", "visible", "editable", "xpath", "action", "onClick", "onChange"].some(k => o[k] !== undefined);
+        if (["action", "onClick", "onChange"].some(k => o[k] !== undefined)) ctx.scope = await scopeOf(P, where);
         const dc = needs && node.ctx ? await builderContext(P, node.ctx, where).catch(e => (/\{[A-Za-z_]|currentObject|"attribute"/.test(JSON.stringify(o)) ? Promise.reject(e) : null)) : null;
         const done = [];
         for (const f of fields) done.push(await CHANGE[f](P, node, o[f], dc, ctx, `${where}: ${f}`));
+        for (const f of ctx.after) f(); // parameter mappings
         await untranslatedLint(ctx);
         return `${P.qn}: ${o.widget}: ${done.join("; ")}`;
     }
@@ -1083,6 +1122,14 @@ function makePageEdit(h, I) {
             if (o.xpath !== undefined) {
                 const src = w instanceof cw.CustomWidget ? cwSource(w) : w.dataSource;
                 say(src && src.xPathConstraint === String(o.xpath), "XPath differs");
+            }
+            for (const k of ["action", "onClick", "onChange"]) {
+                if (o[k] === undefined) continue;
+                const a = k === "action" ? w.action : k === "onChange" && !(w instanceof cw.CustomWidget) ? w.onChangeAction : ((w.object.properties.find(p => p.type && p.type.key === (k === "onClick" ? "onClick" : "onChangeEvent")) || {}).value || {}).action;
+                const spec = typeof o[k] === "string" ? { action: o[k] } : o[k] || {};
+                const target = spec.page || spec.microflow || spec.nanoflow;
+                const named = a && (a.pageSettings ? a.pageSettings.pageQualifiedName : a.microflowSettings ? a.microflowSettings.microflowQualifiedName : prop(a, "nanoflowQualifiedName"));
+                say(a && !(a instanceof pages.NoClientAction) && (!target || named === target), `${k} is not ${spec.action}${target ? " " + target : ""}`);
             }
             if (o.columns && Array.isArray(o.columns.add)) {
                 const attrs = [];

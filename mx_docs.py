@@ -168,7 +168,7 @@ def page_var(var):
     for key, prefix in (("PageParameter", "$"), ("SnippetParameter", "$"), ("LocalVariable", "$"), ("Widget", "widget ")):
         if var.get(key):
             if key == "Widget" and _PAGE_WIDGETS:
-                return ("selection of " if _PAGE_WIDGETS.get(var[key]) in _LISTS else "$") + var[key]
+                return ("row (selection) of " if _PAGE_WIDGETS.get(var[key]) in _LISTS else "$") + var[key]
             return prefix + var[key]
     return ""
 
@@ -302,6 +302,8 @@ class PageRenderer:
             out.append("image " + w["Image"])
         if (w.get("Editable") in ("Never", False) or w.get("Editability") == "Never") and w["$Type"] != "Forms$ListView" and not w.get("ConditionalEditabilitySettings"):
             out.append("read-only")
+        if w["$Type"] == "Forms$GridNewButton":
+            out.append("on click: new %s, open page %s" % (w.get("Entity"), (w.get("FormSettings") or {}).get("Form")))
         if w["$Type"] in ("Forms$DataGrid", "Forms$TemplateGrid") and w.get("SelectionMode") not in (None, "Single"):
             out.append("selection " + w["SelectionMode"])
         if w["$Type"] == "Forms$GroupBox" and w.get("Collapsible") not in (None, "No"):

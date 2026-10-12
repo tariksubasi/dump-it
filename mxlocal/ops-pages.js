@@ -12,6 +12,7 @@ const { userRoleNamed } = require("./ops-security");
 const { pages, domainmodels: dm, datatypes, menus, navigation, microflows: mf, customwidgets: cw, enumerations } = sdk;
 
 const PARAMS = "optional { \"<Parameter>\": \"$currentObject\" | \"$<dataView>\" (one around it, or one that listens) | \"$<grid>.selection\" (a List parameter gets a Multi selection) | \"$<PageParameter>\" | an expression for other parameters } (default: the objects around it, as Studio Pro passes them)";
+const ACTION = "{ \"action\": \"showPage\" | \"callMicroflow\" | \"callNanoflow\" (also save | cancel | close | delete), \"page\" / \"microflow\" / \"nanoflow\": ..., \"params\": { ... } as on actionButton }";
 const ASSOC_ONE = "with source association: Module.Assoc (or a path A/B) from the object around it to one object: a reference it owns (Order_Customer in a data view of Order)";
 // source fields of the list kinds (dataGrid, listView, gallery)
 const LIST_SOURCE = {
@@ -21,6 +22,7 @@ const LIST_SOURCE = {
     nanoflow: "with source nanoflow: Module.Nanoflow that returns a list",
     params: "with source microflow / nanoflow: its parameters, " + PARAMS.slice(9)
 };
+const ON_CHANGE = "optional on change " + ACTION + " (the object around it is passed)";
 const EDITABLE = "optional true | false | an expression \"$currentObject/Open\" | { \"attribute\": \"Status\", \"values\": [\"Open\"] } (editable only then)";
 // Widget kinds of createPage "widgets" (also the help text). Every widget also takes "name" and COMMON_FIELDS.
 const WIDGETS = {
@@ -52,7 +54,9 @@ const WIDGETS = {
         fields: {
             entity: "optional Module.Entity (default: the page entity; with association / microflow: what it gives)",
             ...LIST_SOURCE,
-            columns: "optional [ \"Attribute\" or { \"attribute\": ..., \"caption\": ..., \"width\": 25 } ] (default: all attributes; width: classic only)",
+            columns: "optional [ \"Attribute\" or { \"attribute\": ..., \"caption\": ..., \"width\": 25 } ] (default: all attributes; width: classic only); Data grid 2 also { \"dynamicText\": \"{Name} ({Code})\", \"caption\": ... } and { \"widgets\": [ widgets per row ], \"caption\": ... } (custom content)",
+            buttons: "optional, classic only: control bar buttons [ { \"action\": \"new\" | \"edit\", \"page\": \"Module.Page\" } | { \"action\": \"delete\" } | { \"action\": \"callMicroflow\" | \"callNanoflow\", \"microflow\" / \"nanoflow\": ..., \"params\": ... } ], each with optional caption, style, name; a flow gets the selected row (a List parameter: the selected rows with selection Multi)",
+            onClick: "optional, Data grid 2 only: on a row click " + ACTION + "; the row is passed",
             xpath: "optional XPath constraint (source database), e.g. [Active = true()]; inside a data view [Module.Assoc = '[%CurrentObject%]'] shows the committed objects linked to its object (source association also shows new ones)",
             search: "optional true/false: classic only, source database: Search button + search fields for text, number and enumeration columns (default true)",
             selection: "optional Single | SingleAndMaintain | Multi | SimpleMulti | None (default Single; Data grid 2: Single | Multi | None)",
@@ -76,7 +80,7 @@ const WIDGETS = {
             closePage: "optional true/false for save/cancel/delete (default: true in a parameter data view; false in a listening data view, which stays on the page; Studio Pro's own default is true)"
         }
     },
-    input: { doc: "input for an attribute, inside a data view or a list view / gallery item (an editable list): text box, text area, check box, date picker or radio buttons (enumeration) by attribute type (or use textBox, textArea, checkBox, datePicker, radioButtons, dropDown)", fields: { attribute: "R attribute name", label: "optional label (default: the attribute name)", editable: EDITABLE } },
+    input: { doc: "input for an attribute, inside a data view or a list view / gallery item (an editable list): text box, text area, check box, date picker or radio buttons (enumeration) by attribute type (or use textBox, textArea, checkBox, datePicker, radioButtons, dropDown)", fields: { attribute: "R attribute name", label: "optional label (default: the attribute name)", editable: EDITABLE, onChange: ON_CHANGE } },
     tabContainer: { doc: "tabs, each with its own widgets", fields: { tabs: "R [ { \"caption\": \"General\", \"widgets\": [...], \"name\": optional } ]" } },
     groupBox: { doc: "a box with a caption around widgets", fields: { caption: "optional caption; {Attribute} inside a data view or list view", collapsible: "optional no | expanded | collapsed (default no)", headerMode: "optional Div | H1 ... H6 (default as Studio Pro)", widgets: "[ widgets ]" } },
     snippetCall: { doc: "shows an existing snippet; its parameters get the objects around it, or \"params\"", fields: { snippet: "R Module.Snippet", params: "snippet parameters, " + PARAMS.slice(9) } },
@@ -86,15 +90,19 @@ const WIDGETS = {
     },
     referenceSelector: {
         doc: "drop-down to pick the object of a reference (association from the entity of the data view or list item around it)",
-        fields: { association: "R Module.Assoc (a reference from the data view's entity)", attribute: "optional attribute of the other entity to show (default: its first String attribute)", label: "optional label (default: the other entity's name)", xpath: "optional XPath constraint on the selectable objects", editable: EDITABLE }
+        fields: { association: "R Module.Assoc (a reference from the data view's entity)", attribute: "optional attribute of the other entity to show (default: its first String attribute)", label: "optional label (default: the other entity's name)", xpath: "optional XPath constraint on the selectable objects", selectableMicroflow: "optional Module.Microflow that returns the selectable objects (a list of the other entity), instead of xpath", editable: EDITABLE, onChange: ON_CHANGE }
+    },
+    referenceSetSelector: {
+        doc: "picks several objects of a reference set (association the entity of the data view or list item around it owns, or one owned by both)",
+        fields: { association: "R Module.Assoc (a reference set)", attribute: "optional attribute of the other entity to show (default: its first String attribute)", label: "optional label (default: the other entity's name)", xpath: "optional XPath constraint on the selectable objects", selectableMicroflow: "optional Module.Microflow that returns the selectable objects, instead of xpath", editable: EDITABLE, onChange: ON_CHANGE }
     },
     comboBox: {
         doc: "Combo box (pluggable, copied from the project's own pages like Data grid 2) for an enumeration or Boolean attribute, or a reference (association + caption attribute), inside a data view. Without a Studio Pro-saved combo box matching widgets/*.mpk it is refused: use referenceSelector (association) or dropDown / radioButtons (enumeration)",
-        fields: { attribute: "enumeration or Boolean attribute (or use association)", association: "Module.Assoc reference from the data view's entity", captionAttribute: "optional with association: String attribute of the other entity (default: its first)", label: "optional label", editable: EDITABLE }
+        fields: { attribute: "enumeration or Boolean attribute (or use association)", association: "Module.Assoc reference from the data view's entity", captionAttribute: "optional with association: String attribute of the other entity (default: its first)", label: "optional label", editable: EDITABLE, onChange: ON_CHANGE }
     },
     gallery: {
         doc: "Gallery (pluggable, copied from the project's own pages like Data grid 2): objects (database, association or microflow/nanoflow, as listView) as tiles, each item with its own widgets; a data view can listen to it. Without a Studio Pro-saved gallery matching widgets/*.mpk it is refused: use listView",
-        fields: { entity: "optional Module.Entity (default: the page entity)", ...LIST_SOURCE, xpath: "optional XPath constraint", widgets: "optional [ widgets ] per item (default: one text per attribute)", selection: "optional Single | Multi | None (default Single)", pageSize: "optional (default 20)", columns: "optional desktop columns 1-12 (default 1)" }
+        fields: { entity: "optional Module.Entity (default: the page entity)", ...LIST_SOURCE, xpath: "optional XPath constraint", widgets: "optional [ widgets ] per item (default: one text per attribute)", selection: "optional Single | Multi | None (default Single)", pageSize: "optional (default 20)", columns: "optional desktop columns 1-12 (default 1)", onClick: "optional: on an item click " + ACTION + "; the item is passed" }
     }
 };
 // Fields every widget kind takes (style: inline CSS, but for text and actionButton it is the text / button style
@@ -107,7 +115,7 @@ const COMMON_FIELDS = {
 
 const INPUTS = { textBox: "TextBox", textArea: "TextArea", checkBox: "CheckBox", datePicker: "DatePicker", radioButtons: "RadioButtonGroup", dropDown: "DropDown" };
 const ALIASES = { button: "actionButton", grid: "dataGrid", datagrid: "dataGrid", datagrid2: "dataGrid", list: "listView", heading: "text", div: "container", radiobuttongroup: "radioButtons",
-    tabs: "tabContainer", tabcontrol: "tabContainer", snippet: "snippetCall", staticimage: "image", dynamicimage: "image", imageviewer: "image", reference: "referenceSelector", combo: "comboBox" };
+    tabs: "tabContainer", tabcontrol: "tabContainer", snippet: "snippetCall", referencesetselector: "referenceSetSelector", inputreferencesetselector: "referenceSetSelector", staticimage: "image", dynamicimage: "image", imageviewer: "image", reference: "referenceSelector", combo: "comboBox" };
 // fields a weak model takes from a neighbouring widget kind -> what to write instead
 const MASTER_DETAIL = `to show objects linked to the selected row, put a listView or dataGrid inside the listening dataView with "source": "association", "association": "Module.Assoc"`;
 const SYNONYMS = {
@@ -124,7 +132,7 @@ const SYNONYMS = {
 };
 const KINDS = [...Object.keys(WIDGETS), ...Object.keys(INPUTS)];
 const PREFIX = { layoutGrid: "layoutGrid", container: "container", text: "text", dataView: "dataView", dataGrid: "grid", listView: "listView", actionButton: "actionButton",
-    tabContainer: "tabControl", groupBox: "groupBox", snippetCall: "snippetCall", referenceSelector: "referenceSelector", comboBox: "comboBox", gallery: "gallery" };
+    tabContainer: "tabControl", groupBox: "groupBox", snippetCall: "snippetCall", referenceSelector: "referenceSelector", referenceSetSelector: "referenceSetSelector", comboBox: "comboBox", gallery: "gallery" };
 // enumValue with the widget location in the message
 function choice(cls, value, field, where) {
     try {
@@ -137,15 +145,16 @@ function choice(cls, value, field, where) {
 const NO_MENU_ROLES = page => `menu items have no roles: who sees one = the user roles that may open ${page} (grantAccess / revokeAccess on the page)`;
 const LISTENABLE = { datagrid: "dataGrid", grid: "dataGrid", listview: "listView", list: "listView", gallery: "gallery" };
 const LISTENS = ["dataGrid", "listView", "gallery"]; // kinds a data view can listen to
-const ITEM_KINDS = ["listView", "gallery", "templateGrid", "pluggable"]; // each item is an object (also existing ones: pluggable)
-const OBJECT_KINDS = ["dataView", "listView", "gallery", "templateGrid"]; // inputs and {Attribute} use their object
+const ITEM_KINDS = ["listView", "gallery", "templateGrid", "pluggable", "dataGrid"]; // dataGrid: a Data grid 2 custom content column // each item is an object (also existing ones: pluggable)
+const OBJECT_KINDS = ["dataView", "listView", "gallery", "templateGrid", "dataGrid"];
+const ROW_KINDS = ["dataGrid", "gallery", "templateGrid", "pluggable"]; // a page opened from a row gets it mapped explicitly (Studio Pro stores Widget = the grid) // inputs and {Attribute} use their object
 const DV_SOURCES = ["parameter", "listen", "context", "association", "microflow", "nanoflow"];
 const LIST_SOURCES = ["database", "association", "microflow", "nanoflow"];
 const DATAGRID2 = "com.mendix.widget.web.datagrid.Datagrid";
 const COMBOBOX = "com.mendix.widget.web.combobox.Combobox";
 const GALLERY = "com.mendix.widget.web.gallery.Gallery";
 // Studio Pro's own captions for buttons it creates, in Dutch (the only other language in the test projects)
-const NL = { Search: "Zoeken", Save: "Opslaan", Cancel: "Annuleren", "Close page": "Pagina sluiten", Delete: "Verwijderen" };
+const NL = { Search: "Zoeken", Save: "Opslaan", Cancel: "Annuleren", "Close page": "Pagina sluiten", Delete: "Verwijderen", New: "Nieuw", Edit: "Bewerken" };
 
 const widgetHelp = () => Object.entries(WIDGETS).map(([k, w]) => `\n        ${k}: ${w.doc}` + Object.entries(w.fields).map(([f, d]) => `\n            ${f}: ${d}`).join("")).join("") +
     "\n        every kind also takes:" + Object.entries(COMMON_FIELDS).map(([f, d]) => `\n            ${f}: ${d}`).join("");
@@ -339,6 +348,10 @@ function makePages(h) {
                     return out;
                 });
             } else if (kind === "container") node.widgets = scan(spec.widgets, `${node.where}.widgets`, container, nodes);
+            else if (kind === "dataGrid" && Array.isArray(spec.columns)) {
+                // Data grid 2 custom content: widgets per row, in the row's object
+                node.colNodes = spec.columns.map((c, ci) => (c && typeof c === "object" && c.widgets !== undefined ? scan(c.widgets, `${node.where} column ${ci + 1}.widgets`, node, nodes) : null));
+            }
             else if (kind === "dataView") {
                 node.widgets = scan(spec.widgets, `${node.where}.widgets`, node, nodes);
                 node.footer = scan(spec.footer, `${node.where}.footer`, node, nodes);
@@ -356,7 +369,7 @@ function makePages(h) {
                     return { caption: String(t.caption), name: t.name !== undefined ? String(t.name) : null, where: at, widgets: scan(t.widgets, `${at}.widgets`, container, nodes) };
                 });
             }
-            if ((INPUTS[kind] || kind === "input" || kind === "referenceSelector" || kind === "comboBox") && (!container || !OBJECT_KINDS.includes(container.kind))) throw new Error(`${node.where}: inputs go inside a dataView (its "widgets" or "fields"), or a listView / gallery item (an editable list)`);
+            if ((INPUTS[kind] || kind === "input" || kind === "referenceSelector" || kind === "referenceSetSelector" || kind === "comboBox") && (!container || !OBJECT_KINDS.includes(container.kind))) throw new Error(`${node.where}: inputs go inside a dataView (its "widgets" or "fields"), or a listView / gallery item (an editable list)`);
             if (kind === "actionButton") {
                 const a = String(spec.action).toLowerCase();
                 if (["save", "cancel"].includes(a) && !around(node, "dataView")) throw new Error(`${node.where}: a ${a} button goes inside a dataView (or a list item inside one)`);
@@ -442,11 +455,11 @@ function makePages(h) {
     function implicitOnly(params, node, what) {
         if (!params.length) return;
         const objs = objectsAround(node);
-        const bad = params.filter(p => !p.entity || !objs.some(o => isA(o.ent, p.entity)));
+        const bad = params.filter(p => !(p.entity && objs.some(o => isA(o.ent, p.entity))) && !(p.list && node.selectionList && isA(node.selectionList, p.list)));
         if (!bad.length) return;
         const list = params.map(p => `${p.name} (${p.type || p.entity || "?"})`).join(", ");
         throw new Error(`${node.where}: ${what} has parameter(s) ${list}. Without "params" only the object of the data view or list item around it is passed` +
-            (objs.length ? ` (${objs.map(o => `${o.name}: ${o.ent.qualifiedName}`).join(", ")})` : " (it is in none)") + `; ${bad[0].entity ? `${bad[0].name} (${bad[0].entity}) matches none of them` : `${bad[0].name} is not an object`}`);
+            (objs.length ? ` (${objs.map(o => `${o.name}: ${o.ent.qualifiedName}`).join(", ")})` : " (it is in none)") + `; ${bad[0].entity ? `${bad[0].name} (${bad[0].entity}) matches none of them` : bad[0].list ? `${bad[0].name} is a List of ${bad[0].list}: give "params": { "${bad[0].name}": "$<grid>.selection" } (a grid of ${short(bad[0].list)} with "selection": "Multi")` : `${bad[0].name} is ${bad[0].type}: give it in "params"`}`);
     }
 
     // ------------------------------------------------ explicit parameter mapping ("params")
@@ -490,7 +503,7 @@ function makePages(h) {
     async function mapParams(given, params, node, ctx, what, target) {
         if (given === undefined) {
             implicitOnly(params, node, what);
-            return [];
+            return rowParams(params, node, target);
         }
         if (!given || typeof given !== "object" || Array.isArray(given)) throw new Error(`${node.where}: params is { "<Parameter>": "$currentObject" | "$dataView1" | "$grid1.selection" | "$Parameter" | expression }`);
         const vars = await reachable(node, ctx);
@@ -527,7 +540,59 @@ function makePages(h) {
         }
         const rest = params.filter(x => !(x.name in given));
         if (rest.length) implicitOnly(rest, node, `${what} (parameters not in "params")`);
-        return out;
+        return [...out, ...rowParams(rest, node, target)];
+    }
+    // A page opened from a grid row or gallery item: Studio Pro stores the row's mapping (Widget = the grid) itself.
+    function rowParams(params, node, target) {
+        const row = node.container;
+        if (target !== "page" || !row || !ROW_KINDS.includes(row.kind)) return [];
+        return params.filter(p => p.entity && row.ent && isA(row.ent, p.entity)).map(p => ({ p, v: { name: "$currentObject", kind: "object", ent: row.ent, node: row }, text: `${p.name} = the row of ${row.name}` }));
+    }
+
+    // A client action from { "action": ..., "page" / "microflow" / "nanoflow", "params", "closePage" } (onClick, onChange,
+    // changeWidget). at: the node whose objects it gets (its container chain); assign(a) attaches the new action.
+    const ACTION_KEYS = ["action", "page", "microflow", "nanoflow", "params", "closePage"];
+    async function makeAction(spec, at, ctx, where, assign) {
+        if (typeof spec === "string") spec = { action: spec };
+        if (!spec || typeof spec !== "object" || Array.isArray(spec)) throw new Error(`${where}: an action is { "action": "showPage", "page": "Module.Page" } or { "action": "callMicroflow", "microflow": "Module.Flow" }`);
+        for (const k of Object.keys(spec)) if (!ACTION_KEYS.includes(k)) fail(`${where}: unknown field '${k}' in the action`, k, ACTION_KEYS);
+        const known = { save: "save", cancel: "cancel", close: "close", delete: "delete", showpage: "showPage", callmicroflow: "callMicroflow", callnanoflow: "callNanoflow" };
+        const action = known[String(spec.action).toLowerCase()];
+        if (!action) fail(`${where}: action '${spec.action}' is not known (use ${Object.values(known).join(" | ")})`, String(spec.action), Object.values(known));
+        const need = { showPage: "page", callMicroflow: "microflow", callNanoflow: "nanoflow" }[action];
+        if (need && !spec[need]) throw new Error(`${where}: action ${action} needs '${need}'`);
+        for (const k of ["page", "microflow", "nanoflow"]) if (spec[k] !== undefined && k !== need) throw new Error(`${where}: '${k}' does not go with action ${action}`);
+        if (spec.params !== undefined && !need) throw new Error(`${where}: params goes with showPage, callMicroflow or callNanoflow`);
+        const node = { where, container: at.container, spec, name: at.name, selectionList: at.selectionList };
+        let a, text;
+        if (action === "save" || action === "cancel" || action === "delete") {
+            a = (action === "save" ? pages.SaveChangesClientAction : action === "cancel" ? pages.CancelChangesClientAction : pages.DeleteClientAction).create(model);
+            assign(a);
+            a.closePage = bool(spec.closePage, false);
+            text = action;
+        } else if (action === "close") {
+            assign((a = pages.ClosePageClientAction.create(model)));
+            text = "close page";
+        } else if (action === "showPage") {
+            const page = await h.get(spec.page);
+            if (!(page instanceof pages.Page)) throw new Error(`${where}: '${spec.page}' is not a page`);
+            const mapped = await mapParams(spec.params, pageParams(page), node, ctx, spec.page, "page");
+            assign((a = pages.PageClientAction.create(model)));
+            a.pageSettings.page = page;
+            writeMappings(a.pageSettings.parameterMappings, mapped, "page", node, ctx);
+            text = `opens ${spec.page}${mapText(mapped)}`;
+        } else {
+            const nano = action === "callNanoflow";
+            const { f, params } = await flowParams(spec[need], nano ? mf.Nanoflow : mf.Microflow, need, node);
+            const mapped = await mapParams(spec.params, params, node, ctx, f.qualifiedName, "flow");
+            assign((a = (nano ? pages.CallNanoflowClientAction : pages.MicroflowClientAction).create(model)));
+            if (nano) a.nanoflow = f;
+            else a.microflowSettings.microflow = f;
+            writeMappings(nano ? a.parameterMappings : a.microflowSettings.parameterMappings, mapped, nano ? "nanoflow" : "microflow", node, ctx);
+            text = `calls ${f.qualifiedName}${mapText(mapped)}`;
+        }
+        a.disabledDuringExecution = false; // as Studio Pro stores on-click / on-change actions
+        return text;
     }
 
     // Writes mappings (from mapParams) into list after every widget exists (a variable may name a widget built later).
@@ -819,10 +884,13 @@ function makePages(h) {
         const asked = { classic: "classic", datagrid: "classic", datagrid1: "classic", datagrid2: "datagrid2", dg2: "datagrid2", auto: "auto" }[raw.toLowerCase().replace(/[\s_-]/g, "")];
         if (!asked) fail(`${node.where}: kind '${raw}' is not known (use classic | datagrid2 | auto)`, raw, ["classic", "datagrid2", "auto"]);
         const cols = Array.isArray(s.columns) ? s.columns : [];
-        const classicOnly = [bool(s.search, false) && "search", cols.some(c => c && typeof c === "object" && c.width !== undefined) && "column width",
+        const dg2Only = [cols.some(c => c && typeof c === "object" && (c.widgets !== undefined || c.dynamicText !== undefined)) && "dynamic text / custom content columns", s.onClick !== undefined && "onClick"].filter(Boolean);
+        const classicOnly = [bool(s.search, false) && "search", cols.some(c => c && typeof c === "object" && c.width !== undefined) && "column width", s.buttons !== undefined && "control bar buttons",
             s.selection !== undefined && !/^(single|multi|none)$/i.test(String(s.selection)) && `selection ${s.selection}`].filter(Boolean);
         node.kindAsked = asked;
         node.gridKind = "classic";
+        if (asked === "classic" && dg2Only.length) throw new Error(`${node.where}: ${dg2Only.join(" and ")} ${dg2Only.length > 1 ? "work" : "works"} only with a Data grid 2 ("kind": "datagrid2"); a classic grid shows attributes and has control bar "buttons"`);
+        if (dg2Only.length && classicOnly.length) throw new Error(`${node.where}: ${dg2Only.join(", ")} (Data grid 2) and ${classicOnly.join(", ")} (classic) do not go together`);
         if (asked === "classic") return;
         const info = dg2Live();
         if (bool(s.selectFirst, false) && info.def && !info.def.lines.some(l => l.startsWith("autoSelect "))) classicOnly.push(`selectFirst (Data grid 2 ${info.def.version} has no autoSelect)`);
@@ -839,6 +907,7 @@ function makePages(h) {
                 classicOnly.push(m ? `column ${m[1]} (${m[2]})` : e.message.slice(node.where.length + 2));
             }
         }
+        if (asked === "auto" && dg2Only.length && !info.exemplars.length) throw new Error(`${node.where}: ${dg2Only.join(" and ")} need a Data grid 2, which is not possible here: ${info.reason}`);
         if (info.exemplars.length && !classicOnly.length) node.gridKind = "datagrid2";
         else node.autoWhy = info.exemplars.length ? `${classicOnly.join(", ")} ${classicOnly.length > 1 ? "are" : "is"} classic only` : info.reason;
     }
@@ -1096,6 +1165,73 @@ function makePages(h) {
         return col;
     }
 
+    // A control bar button of a classic grid: new (opens a page with a new object), edit (the selected row), delete,
+    // or a flow that gets the selected row (a List parameter: the selected rows, selection Multi).
+    const GRID_BUTTONS = { new: ["newButton", "New"], edit: ["editButton", "Edit"], delete: ["deleteButton", "Delete"], callmicroflow: ["microflowButton"], callnanoflow: ["nanoflowButton"] };
+    async function gridButton(grid, b, node, ctx, where) {
+        if (!b || typeof b !== "object" || Array.isArray(b)) throw new Error(`${where}: a grid button is { "action": "new" | "edit" | "delete" | "callMicroflow" | "callNanoflow", ... }`);
+        const keys = ["action", "caption", "style", "name", "page", "microflow", "nanoflow", "params"];
+        for (const k of Object.keys(b)) if (!keys.includes(k)) fail(`${where}: unknown field '${k}' for a grid button`, k, keys);
+        const act = String(b.action).toLowerCase();
+        if (/export|excel|csv/.test(act)) throw new Error(`${where}: export buttons are not supported (no Studio Pro sample in the test projects); add them in Studio Pro`);
+        const def = GRID_BUTTONS[act];
+        if (!def) fail(`${where}: grid button action '${b.action}' is not known (use new | edit | delete | callMicroflow | callNanoflow)`, String(b.action), ["new", "edit", "delete", "callMicroflow", "callNanoflow"]);
+        const caption = b.caption !== undefined ? String(b.caption) : def[1];
+        if (caption === undefined) throw new Error(`${where}: a ${b.action} button needs 'caption'`);
+        if ((act === "new" || act === "edit") && !b.page) throw new Error(`${where}: a ${act} button needs 'page' (a page with a parameter of ${node.ent.qualifiedName})`);
+        if (b.name !== undefined) {
+            validName(b.name, "button name");
+            ctx.names.reserve(String(b.name), where);
+        }
+        const ent = node.ent, multi = /multi/i.test(String(node.spec.selection || ""));
+        let x, text;
+        if (act === "new") {
+            const page = await h.get(b.page);
+            if (!(page instanceof pages.Page)) throw new Error(`${where}: '${b.page}' is not a page`);
+            const ps = pageParams(page);
+            if (b.params !== undefined || ps.length !== 1 || !ps[0].entity || !isA(ent, ps[0].entity)) throw new Error(`${where}: a new button opens a page with one parameter of ${ent.qualifiedName} (it gets the new object); ${b.page} has ${ps.map(p => `${p.name} (${p.type})`).join(", ") || "none"}`);
+            x = pages.GridNewButton.create(model);
+            grid.controlBar.items.push(x);
+            x.entity = ent;
+            x.pageSettings.page = page;
+            text = `new ${ent.name}, opens ${b.page}`;
+        } else {
+            x = pages.GridActionButton.create(model);
+            grid.controlBar.items.push(x);
+            const spec = act === "edit" ? { action: "showPage", page: b.page, ...(b.params ? { params: b.params } : {}) } : act === "delete" ? { action: "delete" } : { action: b.action, [act === "callmicroflow" ? "microflow" : "nanoflow"]: b.microflow || b.nanoflow, ...(b.params ? { params: b.params } : {}) };
+            if (act === "callmicroflow" || act === "callnanoflow") {
+                const { params } = await flowParams(b.microflow || b.nanoflow, act === "callnanoflow" ? mf.Nanoflow : mf.Microflow, act === "callnanoflow" ? "nanoflow" : "microflow", { where });
+                for (const p of params) if (p.entity && multi && isA(ent, p.entity) && !(b.params && p.name in b.params)) throw new Error(`${where}: ${node.name} has selection ${node.spec.selection}: the selected rows are a list; ${p.name} takes one ${p.entity}: make it a List parameter, or "selection": "Single"`);
+            }
+            if (act === "edit" && multi) throw new Error(`${where}: an edit button opens one row; ${node.name} has selection ${node.spec.selection}`);
+            text = await makeAction(spec, { container: node, name: node.name, selectionList: multi ? ent : null }, ctx, where, a => (x.action = a));
+            if (act === "edit" && !grid.controlBar.defaultButton) grid.controlBar.defaultButton = x; // Studio Pro: double-click edits
+            if (act === "delete") text = "delete";
+        }
+        x.name = b.name !== undefined ? String(b.name) : ctx.names.next(def[0]);
+        x.buttonStyle = choice(pages.ButtonStyle, b.style || "Default", "style", where);
+        await templateAll(x, "caption", caption, ctx, where, b.caption === undefined);
+        return `${x.name} (${text})`;
+    }
+
+    // A Data grid 2 dynamic text or custom content column (filled after the copy is checked for leftovers).
+    async function dg2Other(colType, pattern, c, ctx, where) {
+        const col = await blankObject(colType, pattern);
+        const show = valueOf(col, "showContentAs");
+        if (!show || !show.type.enumerationValues.some(e => e.key === c.kind)) throw new Error(`${where}: this Data grid 2 has no ${c.kind} columns`);
+        show.primitiveValue = c.kind;
+        const header = valueOf(col, "header");
+        if (header && c.caption) await templateAll(header, "textTemplate", c.caption, ctx, where);
+        return col;
+    }
+
+    // onClick of a Data grid 2 or gallery: the row / item is passed (a page gets it mapped, as Studio Pro stores it)
+    async function pluggableClick(node, props, ctx) {
+        if (!props.has("onClick")) throw new Error(`${node.where}: this ${node.kind === "gallery" ? "gallery" : "Data grid 2"} has no onClick property`);
+        const v = props.get("onClick").value;
+        return makeAction(node.spec.onClick, { container: node, name: node.name }, ctx, `${node.where}: onClick`, a => (v.action = a));
+    }
+
     // A classic grid column at the end of grid.columns; width is a weight (Studio Pro: WidthUnit Weight).
     async function classicColumn(grid, attr, caption, width, ctx) {
         const col = pages.GridColumn.create(model);
@@ -1116,15 +1252,19 @@ function makePages(h) {
         const ok = attr => !allowed.length || allowed.includes(typeOf(attr));
         if (node.spec.columns === undefined) {
             const attrs = shown(ent).map(n => attributeOf(ent, n, node.where));
-            return { cols: attrs.filter(ok).map(attr => ({ attr, caption: humanize(attr.name) })), dropped: attrs.filter(a => !ok(a)).map(a => `${a.name} (${typeOf(a)})`) };
+            return { cols: attrs.filter(ok).map(attr => ({ kind: "attribute", attr, caption: humanize(attr.name) })), dropped: attrs.filter(a => !ok(a)).map(a => `${a.name} (${typeOf(a)})`) };
         }
         const cols = list(node.spec.columns, `${node.where}.columns`).map((c, i) => {
             const s = typeof c === "string" ? { attribute: c } : c;
-            if (!s || typeof s !== "object" || !s.attribute) throw new Error(`${node.where} column ${i + 1}: use "Attribute" or { "attribute": ..., "caption": ... }`);
-            for (const k of Object.keys(s)) if (!["attribute", "caption"].includes(k)) fail(`${node.where} column ${i + 1}: unknown field '${k}' for a Data grid 2 column`, k, ["attribute", "caption"]);
+            const at = `${node.where} column ${i + 1}`;
+            const shape = s && typeof s === "object" ? ["attribute", "dynamicText", "widgets"].filter(k => s[k] !== undefined) : [];
+            if (shape.length !== 1) throw new Error(`${at}: use "Attribute", { "attribute": ..., "caption": ... }, { "dynamicText": "{Name}", "caption": ... } or { "widgets": [...], "caption": ... }`);
+            for (const k of Object.keys(s)) if (![shape[0], "caption"].includes(k)) fail(`${at}: unknown field '${k}' for a Data grid 2 column`, k, [shape[0], "caption"]);
+            if (shape[0] === "dynamicText") return { kind: "dynamicText", text: s.dynamicText, caption: s.caption !== undefined ? String(s.caption) : "" };
+            if (shape[0] === "widgets") return { kind: "customContent", nodes: (node.colNodes || [])[i] || [], caption: s.caption !== undefined ? String(s.caption) : "" };
             const attr = attributeOf(ent, s.attribute, node.where);
             if (!ok(attr)) throw new Error(`${node.where}: a Data grid 2 column cannot show '${attr.name}' (${typeOf(attr)}); it shows ${allowed.join(", ")}`);
-            return { attr, caption: s.caption !== undefined ? String(s.caption) : humanize(attr.name) };
+            return { kind: "attribute", attr, caption: s.caption !== undefined ? String(s.caption) : humanize(attr.name) };
         });
         return { cols, dropped: [] };
     }
@@ -1191,7 +1331,7 @@ function makePages(h) {
         const pattern = olds.find(o => (valueOf(o, "showContentAs") || {}).primitiveValue === "attribute") || olds[0] || null;
         if (dropped.length) client.warn(`${ctx.qn}: ${grid.name} leaves out ${dropped.join(", ")}: a Data grid 2 column cannot show that type (give "columns", or "kind": "classic")`);
         const made = [];
-        for (const c of cols) made.push(await dg2Column(colType, pattern, c.attr, c.caption, ctx, node.where));
+        for (const c of cols) made.push(c.kind === "attribute" ? await dg2Column(colType, pattern, c.attr, c.caption, ctx, node.where) : await dg2Other(colType, pattern, c, ctx, node.where));
         // everything else back to the widget's defaults, without the original's references
         for (const p of grid.object.properties) if (p.type.key !== "columns") await blank(p.value, p.type, null);
         colProp.value.objects.clear();
@@ -1203,7 +1343,7 @@ function makePages(h) {
         if (!selVal.type.selectionTypes.some(x => x.name === selName)) throw new Error(`${node.where}: this Data grid 2 has no selection ${selName}`);
         selVal.selection = cw.CustomWidgetSelectionType[selName];
         const method = valueOf(grid.object, "itemSelectionMethod");
-        if (selName === "Single" && method && method.type.enumerationValues.some(e => e.key === "rowClick")) method.primitiveValue = "rowClick";
+        if (selName === "Single" && node.spec.onClick === undefined && method && method.type.enumerationValues.some(e => e.key === "rowClick")) method.primitiveValue = "rowClick";
         if (node.spec.rows !== undefined) {
             const n = Number(node.spec.rows);
             if (!Number.isInteger(n) || n < 1) throw new Error(`${node.where}: rows must be a number >= 1`);
@@ -1212,9 +1352,24 @@ function makePages(h) {
         if (bool(node.spec.selectFirst, false)) valueOf(grid.object, "autoSelect").primitiveValue = "true"; // checked in gridKind
         // the copy may refer to nothing but this entity
         leftovers(grid, [ent], node.where, "Data grid 2", `use "kind": "classic"`);
+        // what may refer to widgets, texts and actions: after the leftovers check
+        const extra = [];
+        for (const [i, c] of cols.entries()) {
+            if (c.kind === "dynamicText") {
+                const v = valueOf(made[i], "dynamicText");
+                v.textTemplate = pages.ClientTemplate.create(model);
+                await textTemplate(v.textTemplate, c.text, { where: `${node.where} column ${i + 1}`, container: node }, ctx);
+                extra.push(`dynamic text "${c.text}"`);
+            } else if (c.kind === "customContent") {
+                const inner = [];
+                for (const ch of c.nodes) inner.push(await build(ch, valueOf(made[i], "content").widgets, ctx));
+                extra.push(`custom content [${inner.join(", ")}]`);
+            }
+        }
+        if (node.spec.onClick !== undefined) extra.push("on click: " + (await pluggableClick(node, props, ctx)));
         const why = node.kindAsked === "auto" ? `"kind": "auto"` : `"kind": "datagrid2"`;
         client.warnFirst(`${ctx.qn}: ${grid.name} is a Data grid 2 ${info.def.version} (${why}), copied from ${doc.qualifiedName}.${pick.name} with its filters, actions and personalization left empty; "kind": "classic" for a classic Data grid`);
-        return `${grid.name} (Data grid 2 ${info.def.version}, ${shows}, ${cols.length} column(s), selection ${selName})`;
+        return `${grid.name} (Data grid 2 ${info.def.version}, ${shows}, ${cols.length} column(s), selection ${selName}${extra.length ? "; " + extra.join("; ") : ""})`;
     }
 
     // Light XPath check: brackets, and the first step of each top-level path is an attribute or association of ent.
@@ -1342,7 +1497,7 @@ function makePages(h) {
         return c.text;
     }
 
-    const INPUT_KINDS = ["input", ...Object.keys(INPUTS), "referenceSelector", "comboBox"];
+    const INPUT_KINDS = ["input", ...Object.keys(INPUTS), "referenceSelector", "referenceSetSelector", "comboBox"];
     // "style": inline CSS, except for a text (text style) and a button (button style) unless it holds CSS (a ':')
     const cssOf = node => (node.spec.style !== undefined && (!["text", "actionButton"].includes(node.kind) || /:/.test(String(node.spec.style))) ? String(node.spec.style) : undefined);
 
@@ -1374,6 +1529,49 @@ function makePages(h) {
             if (t) out.push(t);
         }
         return out;
+    }
+
+    // The selectable objects of a reference (set) selector: an XPath, or a microflow that returns them.
+    async function selectable(w, node, other, ctx) {
+        const s = node.spec;
+        if (s.xpath !== undefined && s.selectableMicroflow !== undefined) throw new Error(`${node.where}: give xpath or selectableMicroflow, not both`);
+        if (s.selectableMicroflow === undefined) {
+            if (!(w.selectorSource instanceof pages.SelectorXPathSource)) pages.SelectorXPathSource.createIn(w);
+            if (s.xpath) {
+                checkXPath(node, other);
+                w.selectorSource.xPathConstraint = String(s.xpath);
+            }
+            return s.xpath ? `, XPath ${s.xpath}` : "";
+        }
+        const { f, params } = await flowParams(String(s.selectableMicroflow), mf.Microflow, "microflow", node);
+        const rt = f.microflowReturnType;
+        const re = rt instanceof datatypes.ListType ? await entityOf(rt.entityQualifiedName, node.where) : null;
+        if (!re || !isA(re, other.qualifiedName)) throw new Error(`${node.where}: ${f.qualifiedName} returns ${typeText(rt)}; the selectable objects are a List of ${other.qualifiedName}`);
+        implicitOnly(params, { where: node.where, container: node.container }, f.qualifiedName);
+        const src = pages.SelectorMicroflowSource.createIn(w);
+        src.dataSourceMicroflowSettings.microflow = f;
+        src.dataSourceMicroflowSettings.formValidations = pages.FormValidations.None; // as Studio Pro
+        return `, selectable from ${f.qualifiedName}`;
+    }
+
+    // A reference set the entity (around the selector) owns, or one owned by both: { assoc, other }.
+    async function referenceSet(ent, qn, where, ctx) {
+        const all = await allAssociations(ctx);
+        const sets = all.filter(a => a.type === dm.AssociationType.ReferenceSet && (isA(ent, ends(a).from) || (a.owner === dm.AssociationOwner.Both && isA(ent, ends(a).to))));
+        const a = all.find(x => x.qualifiedName === String(qn));
+        if (!a) return fail(`${where}: no association '${qn}'${sets.length ? ` (reference sets of ${ent.qualifiedName}: ${sets.map(x => x.qualifiedName).join(", ")})` : ` (${ent.qualifiedName} owns no reference set)`}`, String(qn), sets.map(x => x.qualifiedName));
+        if (a.type !== dm.AssociationType.ReferenceSet) throw new Error(`${where}: ${qn} is a reference (one object); use a referenceSelector`);
+        const { from, to } = ends(a);
+        const fwd = isA(ent, from);
+        if (!fwd && !(a.owner === dm.AssociationOwner.Both && isA(ent, to))) throw new Error(`${where}: ${qn} is owned by ${from}; a reference set selector sits in a data view of ${from}` + (sets.length ? `. Reference sets of ${ent.qualifiedName}: ${sets.map(x => x.qualifiedName).join(", ")}` : ""));
+        return { assoc: a, other: await entityOf(fwd ? to : from, where) };
+    }
+
+    // "onChange" of an input or selector: a client action in its OnChangeAction (the object around it is passed)
+    async function onChange(node, w, ctx) {
+        if (node.spec.onChange === undefined) return "";
+        if (!has(w, "onChangeAction")) throw new Error(`${node.where}: a ${node.kind} has no on change event`);
+        return ", on change: " + (await makeAction(node.spec.onChange, node, ctx, `${node.where}: onChange`, a => (w.onChangeAction = a)));
     }
 
     const BUILD = {
@@ -1535,6 +1733,8 @@ function makePages(h) {
                 b.name = ctx.names.next("searchButton");
                 await textAll(b.caption.template, "Search", ctx, true);
             } else if (db) src.searchBar.type = pages.SearchBarTypeEnum.None;
+            const bar = [];
+            for (const [i, b] of list(node.spec.buttons, `${node.where}.buttons`).entries()) bar.push(await gridButton(grid, b, node, ctx, `${node.where} button ${i + 1}`));
             if (!cols.length) client.warn(`${ctx.qn}: ${grid.name} has 0 columns; it shows empty rows (give "columns")`);
             let why = node.kindAsked === "auto" ? `"kind": "auto" picks classic: ${node.autoWhy}` : `"kind": "classic"`;
             if (node.kindAsked === "classic") {
@@ -1542,7 +1742,7 @@ function makePages(h) {
                 if (d2.exemplars.length) why += `; this project uses Data grid 2 (${d2.exemplars.length + d2.stale}x), "kind": "datagrid2" makes one`;
             }
             client.warnFirst(`${ctx.qn}: ${grid.name} is a classic Data grid (${why})`);
-            return `${grid.name} (classic Data grid, ${shows}, ${cols.length} column(s)${fields ? `, ${fields} search field(s)` : ""})`;
+            return `${grid.name} (classic Data grid, ${shows}, ${cols.length} column(s)${fields ? `, ${fields} search field(s)` : ""}${bar.length ? `, buttons: ${bar.join(", ")}` : ""})`;
         },
         async listView(node, target, ctx) {
             const ent = node.ent;
@@ -1727,17 +1927,33 @@ function makePages(h) {
             const st = dm.EntityRefStep.createIn(dm.IndirectEntityRef.createInMemberRefUnderEntityRef(ref));
             st.association = assoc;
             st.destinationEntity = other;
-            if (!(w.selectorSource instanceof pages.SelectorXPathSource)) pages.SelectorXPathSource.createIn(w);
-            if (s.xpath) {
-                checkXPath(node, other);
-                w.selectorSource.xPathConstraint = String(s.xpath);
-            }
+            const sel = await selectable(w, node, other, ctx);
             if (w.validation) await h.text(w.validation.message, ""); // Studio Pro stores one empty text
             if (w.onChangeAction) w.onChangeAction.disabledDuringExecution = false; // as Studio Pro
             await templateAll(w, "labelTemplate", s.label !== undefined ? s.label : humanize(other.name), ctx, node.where);
             inputSource(w, dv);
             ctx.count.inputs++;
-            return `${w.name} (${s.association} -> ${other.name}.${attr.name})`;
+            return `${w.name} (${s.association} -> ${other.name}.${attr.name}${sel}${await onChange(node, w, ctx)})`;
+        },
+        async referenceSetSelector(node, target, ctx) {
+            const s = node.spec, dv = node.container;
+            const { assoc, other } = await referenceSet(dv.ent, s.association, node.where, ctx);
+            const attr = captionAttr(other, s.attribute, node.where, [dm.StringAttributeType, dm.EnumerationAttributeType, dm.IntegerAttributeType, dm.LongAttributeType, dm.DecimalAttributeType, dm.AutoNumberAttributeType, dm.DateTimeAttributeType, dm.BooleanAttributeType]);
+            const w = pages.InputReferenceSetSelector.create(model);
+            target.push(w);
+            w.name = node.name || ctx.names.next("referenceSetSelector");
+            const ref = dm.AttributeRef.create(model);
+            w.attributeRef = ref;
+            ref.attribute = attr;
+            const st = dm.EntityRefStep.createIn(dm.IndirectEntityRef.createInMemberRefUnderEntityRef(ref));
+            st.association = assoc;
+            st.destinationEntity = other;
+            const sel = await selectable(w, node, other, ctx);
+            if (w.onChangeAction) w.onChangeAction.disabledDuringExecution = false; // as Studio Pro
+            await templateAll(w, "labelTemplate", s.label !== undefined ? s.label : humanize(other.name), ctx, node.where);
+            inputSource(w, dv);
+            ctx.count.inputs++;
+            return `${w.name} (reference set ${s.association} -> ${other.name}.${attr.name}${sel}${await onChange(node, w, ctx)})`;
         },
         async comboBox(node, target, ctx) {
             const s = node.spec, dv = node.container;
@@ -1782,8 +1998,14 @@ function makePages(h) {
             if (sysProps(w).includes("Label")) await templateAll(w, "labelTemplate", s.label !== undefined ? s.label : humanize(attr ? attr.name : other.name), ctx, node.where);
             leftovers(w, [dv.ent, ...(other ? [other] : [])], node.where, "combo box", alt);
             ctx.count.inputs++;
+            let oc = "";
+            if (s.onChange !== undefined) {
+                if (!props.has("onChangeEvent")) throw new Error(`${node.where}: Combo box ${info.def.version} has no on change event`);
+                const v = props.get("onChangeEvent").value;
+                oc = ", on change: " + (await makeAction(s.onChange, node, ctx, `${node.where}: onChange`, a => (v.action = a)));
+            }
             client.warnFirst(`${ctx.qn}: ${w.name} is a Combo box ${info.def.version}, copied from ${info.exemplars[0].unitName} with every setting back to its default`);
-            return `${w.name} (Combo box ${info.def.version}, ${attr ? attr.name : `${s.association} -> ${other.name}.${cap.name}`})`;
+            return `${w.name} (Combo box ${info.def.version}, ${attr ? attr.name : `${s.association} -> ${other.name}.${cap.name}`}${oc})`;
         },
         async gallery(node, target, ctx) {
             const s = node.spec, ent = node.ent;
@@ -1816,12 +2038,14 @@ function makePages(h) {
             const inner = [];
             for (const f of fields) inner.push(await build({ kind: "text", spec: { text: `{${f}}` }, where: node.where, container: node }, content, ctx));
             for (const ch of node.widgets) inner.push(await build(ch, content, ctx));
+            const click = s.onClick !== undefined ? `, on click: ${await pluggableClick(node, props, ctx)}` : "";
             client.warnFirst(`${ctx.qn}: ${w.name} is a Gallery ${info.def.version}, copied from ${info.exemplars[0].unitName} with every setting back to its default`);
-            return `${w.name} (Gallery ${info.def.version}, ${shows}, selection ${selName}) [${inner.join(", ")}]`;
+            return `${w.name} (Gallery ${info.def.version}, ${shows}, selection ${selName}${click}) [${inner.join(", ")}]`;
         },
         async input(node, target, ctx) {
             const w = await attrInput(node.kind, target, attributeOf(node.container.ent, node.spec.attribute, node.where), node.container, node.where, ctx, node.spec.label, node.name);
-            return w.name;
+            const oc = await onChange(node, w, ctx);
+            return oc ? `${w.name} (${oc.slice(2)})` : w.name;
         }
     };
     for (const k of Object.keys(INPUTS)) BUILD[k] = BUILD.input;
@@ -2164,12 +2388,12 @@ function makePages(h) {
                 page.traverse(el => {
                     const k = el instanceof pages.DataGrid || isGrid2(el) ? "dataGrid" : el instanceof pages.DataView ? "dataView" : el instanceof pages.ListView ? "listView" : el instanceof pages.ActionButton ? "actionButton" : el instanceof pages.LayoutGrid ? "layoutGrid" :
                         el instanceof pages.TabContainer ? "tabContainer" : el instanceof pages.GroupBox ? "groupBox" : el instanceof pages.SnippetCallWidget ? "snippetCall" : el instanceof pages.StaticImageViewer || el instanceof pages.DynamicImageViewer ? "image" :
-                            el instanceof pages.ReferenceSelector ? "referenceSelector" : isPl(el, COMBOBOX) ? "comboBox" : isPl(el, GALLERY) ? "gallery" : null;
+                            el instanceof pages.ReferenceSelector ? "referenceSelector" : el instanceof pages.InputReferenceSetSelector ? "referenceSetSelector" : isPl(el, COMBOBOX) ? "comboBox" : isPl(el, GALLERY) ? "gallery" : null;
                     if (k) have[k] = (have[k] || 0) + 1;
                     if (el instanceof pages.Widget) names.set(el.name, el);
                     if (el instanceof pages.ListenTargetSource) listens.push(el.listenTarget);
                 });
-                for (const k of ["dataGrid", "dataView", "listView", "layoutGrid", "actionButton", "tabContainer", "groupBox", "snippetCall", "image", "referenceSelector", "comboBox", "gallery"]) if ((have[k] || 0) < (want[k] || 0)) r.push(`${qn} has ${have[k] || 0} ${k}(s), expected at least ${want[k]}`);
+                for (const k of ["dataGrid", "dataView", "listView", "layoutGrid", "actionButton", "tabContainer", "groupBox", "snippetCall", "image", "referenceSelector", "referenceSetSelector", "comboBox", "gallery"]) if ((have[k] || 0) < (want[k] || 0)) r.push(`${qn} has ${have[k] || 0} ${k}(s), expected at least ${want[k]}`);
                 for (const x of namedSources(o.widgets)) {
                     const w = names.get(x.name), got = w && sourceKind(w);
                     if (w && got !== x.source) r.push(`${qn}: ${x.name} has a ${got || "no"} source, expected ${x.source}`);
@@ -2202,7 +2426,7 @@ function makePages(h) {
     // the builders and lookups ops-page-edit.js uses on existing pages
     const internals = { scan, build, gridKind, entityOf, attributeOf, names, textAll, templateAll, noPlaceholder, checkXPath, dg2Info,
         isGrid2, isPl, valueOf, humanize, condition, sameCondition, fill, languages, shown, listenTarget, classicColumn, dg2Column, typeOf, isA, list, unitNamed,
-        prepare, listEntity, resolveSources, sourceKind };
+        prepare, listEntity, resolveSources, sourceKind, makeAction };
     return { createPage, addMenuItem, setHomePage, checks, internals };
 }
 
