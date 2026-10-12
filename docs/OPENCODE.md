@@ -61,6 +61,7 @@ Run all of these from the export folder.
 | `python mx.py find <text>` | Lists elements whose qualified name contains `<text>`, with their SDK type | no |
 | `python mx.py steps <Module.Flow>` | Lists the steps of a microflow/nanoflow with stable ids (for `changeAction`, `deleteAction`, `addActions` `after`) | no |
 | `python mx.py widgets <Module.Page>` | Lists the widget tree of a page or snippet: names, kinds, entity of each data view / list view, and where new widgets can go (`[into]`, layout grid column paths). For `addWidgets`, `changeWidget`, `deleteWidget`, `moveWidget` | no |
+| `python mx.py texts [Module\|Module.Doc\|menu] [--missing <lang>]` | Lists translatable texts (page titles, widget captions/texts/labels/placeholders, enumeration captions, show-message and validation feedback texts, validation messages, menu captions) as `where [part]` with their text in every project language; `--missing tr_TR`: only those without Turkish. For `setTranslations` | no |
 | `python mx.py ops [name]` | One line per operation; with a name (`ops createPage`, `ops retrieve`): its fields. `ops all`: everything | no |
 | `python mx.py api <Type> [word]` | SDK type reference for this Mendix version (for `.js` files only) | no |
 | `python mx.py dryrun <file>` | Computes a change from `edits/<file>`. Writes nothing. Prints an approval code | no |
@@ -73,7 +74,7 @@ Run all of these from the export folder.
 | `python mx.py selftest` | Runs every operation on a temporary copy of the project and checks the result | no |
 
 The same lookups also exist as tools of the `mendix` MCP server (in OpenCode: `mendix_find`, in Claude Code:
-`mcp__mendix__find`): `find`, `steps`, `widgets`, `ops`, `api`, `dryrun`, `gap` and **`plan`**. `plan` takes a short name and the
+`mcp__mendix__find`): `find`, `steps`, `widgets`, `texts`, `ops`, `api`, `dryrun`, `gap` and **`plan`**. `plan` takes a short name and the
 ops list, saves `edits/<name>.json` and dry-runs it in one call; the server keeps the model loaded, so this takes a
 fraction of a second. Use the tool or the command; the result is the same. `apply` and `undo` exist only as commands,
 so OpenCode (and Claude Code) asks the user before they run. Commands are lowercase. (Folders exported with
@@ -460,10 +461,41 @@ What pages cannot do yet (use Studio Pro, and `python mx.py gap "<what>"`):
   on-change events are not set.
 - Menus: web profiles only (native profiles are refused); no reordering, and no op removes a menu item or home page
   (deleting a page that one opens says so).
-- Texts (labels, titles, captions, headers, menu captions) are written in the default language only, as Studio Pro
-  does; the dry run counts them so they can be translated in Studio Pro. Studio Pro's own button captions (Save,
-  Cancel, Search, Delete, Close page) also get their Dutch text when the project has nl_NL.
+- Texts (labels, titles, captions, headers, menu captions) given as plain text are written in the default language
+  only, as Studio Pro does; the dry run counts the ones other project languages lack. Give them per language
+  (`"caption": {"en_US": "Save", "tr_TR": "Kaydet"}`) or translate them later (Languages and translations). Studio
+  Pro's own button captions (Save, Cancel, Search, Delete, Close page) also get their Dutch text when the project has nl_NL.
 - Attributes inherited from System entities (e.g. `Name` of `Administration.Account`) cannot be shown.
+
+### Languages and translations
+
+| Op | Fields | Notes |
+|---|---|---|
+| `addLanguage` | **code** (e.g. `tr_TR`), default (true = make it the default language) | Adds the language as Studio Pro does (Settings > Languages). Existing texts keep their languages: list the untranslated ones with `texts --missing tr_TR`. A wrong code gets a did-you-mean (`Turkish`, `tr` -> `tr_TR`) |
+| `setTranslations` | **translations** `[{"where", "language", "text"}]`, language (for items without one) | `where` as `texts` lists it: `Module.Page [title]`, `Module.Page.widget [caption\|text\|label\|placeholder\|...]`, `Module.Enumeration.Value`, `Module.Flow.<step id>` (show message / validation feedback), `Module.Entity.Attribute [required\|unique\|maxLength\|range\|regex\|equals]` (validation message), `menu:Responsive/Caption/Sub`. The `[part]` may be left out when the place has one text. `{Attribute}` shows the same value as in the default text. `"text": {"tr_TR": ..., "de_DE": ...}` sets several languages at once |
+
+Per-language texts in every op: wherever an op takes a text (captions, titles, texts, labels, placeholders,
+enumeration captions, messages, validation messages, menu captions), it also takes
+`{"en_US": "Save", "tr_TR": "Kaydet"}`. A plain string is the default language, as before. The object needs the
+default language; every language must be a project language (`addLanguage` first, also earlier in the same file).
+Studio Pro stores a translation per language in the text; the order is the order written.
+
+```json
+{ "ops": [
+  { "op": "addLanguage", "code": "tr_TR" },
+  { "op": "createPage", "module": "HR", "name": "Employee_View", "entity": "HR.Employee",
+    "title": { "en_US": "Employee", "tr_TR": "Çalışan" },
+    "widgets": [ { "widget": "dataView", "widgets": [ { "widget": "text", "text": { "en_US": "Name: {FullName}", "tr_TR": "Ad: {FullName}" } } ] } ] },
+  { "op": "setTranslations", "language": "tr_TR", "translations": [
+    { "where": "HR.Status.Active", "text": "Aktif" },
+    { "where": "HR.Employee.Email [required]", "text": "E-posta gerekli" },
+    { "where": "menu:Responsive/Employees", "text": "Çalışanlar" } ] }
+] }
+```
+
+Pluggable widget texts are listed and translated by path, e.g. `Module.Page.dataGrid1 [columns[2].header]`. Not
+supported: removing a language, menu captions of native navigation profiles, system texts (Studio Pro's App >
+Language > System texts) and the date/time formats of a language.
 
 ### Constants, scheduled events, REST
 

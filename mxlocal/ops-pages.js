@@ -182,7 +182,6 @@ function makePages(h) {
 
     let langs = null;
     async function languages() {
-        if (langs) return langs;
         const s = model.allProjectSettings()[0];
         const loaded = s && (await s.load());
         const ls = loaded && loaded.settingsParts.find(p => p instanceof sdk.settings.LanguageSettings);
@@ -198,7 +197,8 @@ function makePages(h) {
         const items = { [ls[0]]: String(value) };
         const own = builtin && NL[value];
         if (own) for (const c of ls) if (c === "nl_NL" || /^en_/.test(c)) items[c] = c === "nl_NL" ? NL[value] : String(value);
-        if (ctx && value !== "" && ls.length > 1 && !own) ctx.untranslated++;
+        const tr = h.translationsOf && h.translationsOf(value);
+        if (ctx && value !== "" && ls.length > 1 && !own && !(tr && ls.slice(1).every(c => c in tr))) ctx.untranslated++;
         return h.text(t, items);
     }
 
@@ -1081,7 +1081,7 @@ function makePages(h) {
             }
             await roleLints(qn, [].concat(o.roles || []), r.ctx.ents);
             const ls = await languages();
-            if (r.ctx.untranslated && ls.length > 1) client.warn(`${qn}: ${r.ctx.untranslated} text(s) exist only in ${ls[0]}; translate them (${ls.slice(1).join(", ")}) in Studio Pro`);
+            if (r.ctx.untranslated && ls.length > 1) client.warn(`${qn}: ${r.ctx.untranslated} text(s) are not in every project language (${ls.join(", ")}); give them per language ({ "${ls[0]}": "...", "${ls[1]}": "..." }) or translate them with setTranslations (texts ${qn} --missing ${ls[1]})`);
             return r.text + extra.map(x => "\n      " + x).join("");
         } catch (e) {
             const p = unitNamed(qn);

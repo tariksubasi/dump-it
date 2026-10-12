@@ -13,6 +13,8 @@ STEP 1 - FIND THE NAMES
     @PY@ mx.py steps <Module.Flow>             (or the steps tool)
   To change an existing page or snippet, get its widget names first (names, [into] places, {Entity} of data views):
     @PY@ mx.py widgets <Module.Page>           (or the widgets tool)
+  To translate texts (titles, captions, labels, messages, enumeration and menu captions), list them with where [part]:
+    @PY@ mx.py texts <Module or Module.Page> --missing tr_TR   (or the texts tool)
 
 STEP 2 - WRITE THE CHANGE FILE
   Pick the operations (one line each), then read the fields of the ones you use:
@@ -173,6 +175,16 @@ Security:
   { "op": "createDemoUser", "userName": "demo_salesmanager", "userRoles": ["SalesManager"] }
 ] }
 
+Languages and translations: a text in any op may be given per language ({ "en_US": ..., "tr_TR": ... }; a plain
+text is the default language); existing texts get translated with setTranslations ("where" as texts lists it):
+{ "ops": [
+  { "op": "addLanguage", "code": "tr_TR" },
+  { "op": "createEnumeration", "module": "Sales", "name": "Priority", "values": [ { "name": "High", "caption": { "en_US": "High", "tr_TR": "Yüksek" } } ] },
+  { "op": "setTranslations", "language": "tr_TR", "translations": [
+    { "where": "Sales.Order_Edit [title]", "text": "Sipariş düzenle" },
+    { "where": "Sales.Order_Edit.saveButton1 [caption]", "text": "Kaydet" } ] }
+] }
+
 More domain and app operations (see @PY@ mx.py ops for fields): createModule, setSecurity, setGeneralization,
 addValidationRule, addEventHandler, addIndex, createConstant, createScheduledEvent, publishRest, moveDocument, rename
 of a module, addMenuItem (menu item for a page), setHomePage (home page, also per user role).
@@ -193,6 +205,8 @@ ERRORS AND FIXES
 - "no widget 'x' on Module.Page (widgets here: ...)" -> use a listed name (all: @PY@ mx.py widgets Module.Page).
 - "shows or uses the object of dataView1" -> that widget can move only inside dataView1.
 - "listenTo 'x' is no grid or list view on this page (...)" / "is ambiguous" -> use a name the message lists.
+- "is not a language of this project ... add it first" -> put { "op": "addLanguage", "code": "<code>" } before it.
+- "no translatable text at 'x'. Did you mean" -> copy the where [part] from @PY@ mx.py texts <Module.Document>.
 - "datagrid2 ... is not possible here" -> use "kind": "classic" (or leave kind out).
 - "needs an import mapping" / "export mapping" -> publishRest supports only simple parameters/results; do it in Studio Pro.
 - "has no attribute 'A' (in $V/A). Did you mean: B" -> use B in that expression.

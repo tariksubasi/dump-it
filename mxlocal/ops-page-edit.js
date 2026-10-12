@@ -391,11 +391,12 @@ function makePageEdit(h, I) {
     async function setText(t, value, ctx, where) {
         const ls = await I.languages();
         const cur = t.translations.find(x => x.languageCode === ls[0]);
-        if (cur && cur.text === String(value)) return false;
+        const tr = (h.translationsOf && h.translationsOf(value)) || {}; // the other languages, when given per language
+        if (cur && cur.text === String(value) && !Object.keys(tr).length) return false;
         await h.text(t, { [ls[0]]: String(value) });
-        const others = t.translations.filter(x => x.languageCode !== ls[0] && x.text);
-        if (others.length) client.warn(`${where}: the ${others.map(x => x.languageCode).join(", ")} text still says "${short(others[0].text)}"; translate it in Studio Pro`);
-        else if (ls.length > 1 && value !== "") ctx.untranslated++;
+        const others = t.translations.filter(x => x.languageCode !== ls[0] && x.text && !(x.languageCode in tr));
+        if (others.length) client.warn(`${where}: the ${others.map(x => x.languageCode).join(", ")} text still says "${short(others[0].text)}"; give the text per language ({ "${ls[0]}": "...", "${others[0].languageCode}": "..." }) or use setTranslations`);
+        else if (ls.length > 1 && value !== "" && !ls.slice(1).every(c => c in tr)) ctx.untranslated++;
         return true;
     }
 
@@ -755,7 +756,7 @@ function makePageEdit(h, I) {
 
     async function untranslatedLint(ctx) {
         const ls = await I.languages();
-        if (ctx.untranslated && ls.length > 1) client.warn(`${ctx.qn}: ${ctx.untranslated} text(s) exist only in ${ls[0]}; translate them (${ls.slice(1).join(", ")}) in Studio Pro`);
+        if (ctx.untranslated && ls.length > 1) client.warn(`${ctx.qn}: ${ctx.untranslated} text(s) are not in every project language (${ls.join(", ")}); give them per language ({ "${ls[0]}": "...", "${ls[1]}": "..." }) or translate them with setTranslations (texts ${ctx.qn} --missing ${ls[1]})`);
     }
 
     // Existing grids / list views / Data grid 2 / galleries a new data view can listen to, as builder nodes.

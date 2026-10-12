@@ -14,6 +14,7 @@ const { makeFlows, ACTIONS, CONTROL, COMMON, CREATES } = require("./ops-flows");
 const { makePages, PAGE_FIELDS, MENU_FIELDS, HOME_FIELDS, widgetFields, NO_MENU_ROLES } = require("./ops-pages");
 const { makePageEdit, PAGE_EDIT_OPS, PAGE_EDIT_NAMES, FIELD_SYNONYMS } = require("./ops-page-edit");
 const { makeSecurity, SECURITY_OPS } = require("./ops-security");
+const { makeTexts, TEXT_OPS } = require("./ops-texts");
 
 const OPS = {
     createEntity: {
@@ -32,6 +33,7 @@ const OPS = {
     createModuleRole: { doc: "Create a module role.", fields: { module: "R module name", name: "R role name", description: "optional" } },
     grantAccess: { doc: "Allow module roles to run a microflow/nanoflow or open a page.", fields: { document: "R Module.Microflow or Module.Page", roles: "R [ \"Module.Role\" ]" } },
     ...SECURITY_OPS,
+    ...TEXT_OPS,
     addAccessRule: {
         doc: "Add an entity access rule. Members not listed in 'members' get 'access'.",
         fields: { entity: "R Module.Entity", roles: "R [ \"Module.Role\" ]", access: "optional ReadWrite | ReadOnly | None (default ReadOnly)", members: "optional { \"Attribute\": \"ReadWrite\", \"Module.Assoc\": \"ReadOnly\" }", create: "optional true/false", delete: "optional true/false", xpath: "optional XPath, e.g. [Owner = '[%CurrentUser%]']" }
@@ -163,17 +165,17 @@ function bind(model, client) {
         if (!names) names = [...new Set(require("./inspect").names(client).map(x => x.qn))];
         return names;
     };
-    const language = (() => {
-        let code = null;
-        return async () => {
-            if (code) return code;
-            const settings = model.allProjectSettings()[0];
-            const loaded = settings && (await settings.load());
-            const lang = loaded && loaded.settingsParts.find(p => p instanceof sdk.settings.LanguageSettings);
-            code = (lang && lang.defaultLanguageCode) || "en_US";
-            return code;
-        };
-    })();
+    // the default language (addLanguage with default: true resets it)
+    let langCode = null;
+    const resetLanguage = () => (langCode = null);
+    async function language() {
+        if (langCode) return langCode;
+        const settings = model.allProjectSettings()[0];
+        const loaded = settings && (await settings.load());
+        const lang = loaded && loaded.settingsParts.find(p => p instanceof sdk.settings.LanguageSettings);
+        langCode = (lang && lang.defaultLanguageCode) || "en_US";
+        return langCode;
+    }
 
     function moduleNamed(name) {
         const m = model.allModules().find(x => x.name === name);
@@ -257,7 +259,8 @@ function bind(model, client) {
     async function text(owner, value) {
         const t = owner instanceof texts.Text ? owner : null;
         if (!t) throw new Error("internal: text() needs a Texts$Text");
-        const items = typeof value === "object" && value ? value : { [await language()]: String(value) };
+        const dflt = await language();
+        const items = textOps.withPending(typeof value === "object" && value ? value : { [dflt]: String(value) }, dflt);
         for (const [code, v] of Object.entries(items)) {
             let tr = t.translations.find(x => x.languageCode === code);
             if (!tr) {
@@ -396,9 +399,11 @@ function bind(model, client) {
         }
     }
 
+    const textOps = makeTexts({ model, client, get, resetLanguage });
+    const translationsOf = textOps.translationsOf;
     const flows = makeFlows({ model, get, entity, text, dataType, attributeChain, loadParents });
-    const pageOps = makePages({ model, client, get, exists, entity, text, folder, attributeChain, loadParents, persistable, grantAccess: o => impl.grantAccess(o) });
-    const pageEdit = makePageEdit({ model, client, get, text, attributeChain, persistable }, pageOps.internals);
+    const pageOps = makePages({ model, client, get, exists, entity, text, translationsOf, folder, attributeChain, loadParents, persistable, grantAccess: o => impl.grantAccess(o) });
+    const pageEdit = makePageEdit({ model, client, get, text, translationsOf, attributeChain, persistable }, pageOps.internals);
     const securityOps = makeSecurity({ model, get });
 
     // ------------------------------------------------ operations
@@ -844,7 +849,8 @@ function bind(model, client) {
             return `${o.target}` + (users.length ? `\n      STILL USED BY (fix these, or Studio Pro shows errors): ${users.join(", ")}` : "") + nav +
                 (loss ? `\n      DATA LOSS: ${loss}` : "");
         },
-        ...securityOps.impl
+        ...securityOps.impl,
+        ...textOps.impl
     };
 
     // ------------------------------------------------ checks (run after apply on a freshly loaded model)
@@ -991,7 +997,8 @@ function bind(model, client) {
         async delete(o) {
             return (await exists(o.target)) ? [`${o.target} still exists`] : [];
         },
-        ...securityOps.checks
+        ...securityOps.checks,
+        ...textOps.checks
     };
 
     function opOf(o, i) {
@@ -1010,7 +1017,7 @@ function bind(model, client) {
         for (const [i, o] of plan.ops.entries()) {
             const { name, where } = opOf(o, i);
             try {
-                const what = await impl[name](o);
+                const what = await impl[name](name === "setTranslations" ? o : await textOps.prepare(o));
                 log(`${i + 1}. ${name} ${what}`);
             } catch (e) {
                 e.message = `${where} (${name}): ${e.message}`;
@@ -1037,7 +1044,7 @@ function bind(model, client) {
             const reworked = mine.length && rest.some(x => x.page === o.page && undoes(x) && pageEdit.touched(x).some(n => mine.includes(n)));
             if ((later && name !== "rename" && name !== "delete") || edited || undone || reworked) continue;
             try {
-                failed.push(...(await checks[name](o)).map(f => `${i + 1}. ${name}: ${f}`));
+                failed.push(...(await checks[name](name === "setTranslations" ? o : await textOps.prepare(o, false))).map(f => `${i + 1}. ${name}: ${f}`));
             } catch (e) {
                 failed.push(`${i + 1}. ${name}: ${e.message}`);
             }
@@ -1045,11 +1052,11 @@ function bind(model, client) {
         return failed;
     }
 
-    const api = { get, runPlan, checkPlan, dataType, folder, lintExpressions: () => flows.lintExpressions(), steps: qn => flows.steps(qn), widgets: qn => pageEdit.widgets(qn) };
+    const api = { get, runPlan, checkPlan, dataType, folder, lintExpressions: () => flows.lintExpressions(), steps: qn => flows.steps(qn), widgets: qn => pageEdit.widgets(qn), texts: (scope, missing) => textOps.list(scope, missing) };
     for (const name of Object.keys(OPS)) {
         api[name] = o => {
             validate("op", name, OPS[name], o || {}, `ops.${name}`);
-            return impl[name](o);
+            return name === "setTranslations" ? impl[name](o) : textOps.prepare(o).then(p => impl[name](p));
         };
     }
     return api;

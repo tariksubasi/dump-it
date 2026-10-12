@@ -127,6 +127,7 @@ istemiyorsan export'u `--no-mcp` ile al.
 | Kullanıcı rolü | Yeni kullanıcı rolü (modül rolleriyle, `System.User` dahil), var olan kullanıcı rolüne modül rolü ekleme (ör. Administrator'a yeni modülün rolü) |
 | Demo kullanıcı | Bir ya da birkaç kullanıcı rolüyle demo kullanıcı; entity'si diğer demo kullanıcılarınki gibi |
 | Güvenlik seviyesi | Off / Prototype / Production, demo kullanıcıları açma/kapama, misafir (anonymous) erişimi |
+| Diller ve çeviriler | Projeye dil ekleme (ör. `tr_TR`, istenirse varsayılan dil), var olan metinleri çevirme (`setTranslations`: sayfa başlığı, widget caption/metin/etiket/placeholder, enumeration caption'ı, mesaj ve validation feedback metni, validation rule mesajı, menü caption'ı), her op'ta dile göre metin (`"caption": {"en_US": "Save", "tr_TR": "Kaydet"}`; düz metin varsayılan dildir), çevrilecek metinleri listeleme (`python mx.py texts Modül --missing tr_TR`) |
 | Diğer | Constant, scheduled event, basit published REST operasyonu, doküman taşıma, yeniden adlandırma (modül dahil), silme |
 
 Yapamadıkları (Studio Pro'da ya da SDK script'iyle): mevcut sayfa/snippet/layout'taki widget'ları düzenleme, listede

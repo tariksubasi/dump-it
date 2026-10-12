@@ -343,6 +343,40 @@ function dashboardProblems(project, mod, T, userRole) {
     return r;
 }
 
+// The translations as stored: the new language like the project's own Texts$Language, every Texts$Translation
+// { LanguageCode, Text } appended after the default one, {Attribute} texts numbered in both languages.
+function textProblems(project, T, d, lang, pageable, others) {
+    const r = [];
+    let settings = null, page = null, en = null;
+    for (const id of project.units.keys()) {
+        const u = project.read(id);
+        if (u.$Type === "Settings$ProjectSettings") settings = u;
+        if (u.$Type === "Forms$Page" && u.Name === `${T}_Tr`) page = u;
+        if (u.$Type === "Enumerations$Enumeration" && u.Name === `${T}Status`) en = u;
+    }
+    const ls = settings && settings.Settings.find(p => p.$Type === "Settings$LanguageSettings");
+    const langs = ls ? ls.Languages.filter(x => x && x.$Type) : [];
+    const added = langs.find(x => x.Code === lang);
+    if (!added) r.push(`${lang} is not in the language settings`);
+    else if (JSON.stringify(Object.keys(added).sort()) !== JSON.stringify(Object.keys(langs[0]).sort()) || added.CheckCompleteness !== false) r.push(`${lang} is stored with other keys than ${langs[0].Code}`);
+    const items = t => (t && t.Items ? t.Items.filter(x => x && x.$Type) : []);
+    const pair = (t, a, b, what) => {
+        const it = items(t);
+        const want = [[d, a], [lang, b], ...others.map(c => [c, `${a} (${c})`])];
+        if (JSON.stringify(it.map(x => [x.LanguageCode, x.Text])) !== JSON.stringify(want) || it.some(x => x.$Type !== "Texts$Translation" || Object.keys(x).length !== 4)) r.push(`${what}: ${JSON.stringify(it.map(x => [x.LanguageCode, x.Text]))}`);
+    };
+    const val = en && en.Values.find(v => v.Name === "Waiting");
+    pair(val && val.Caption, "Waiting", "Bekliyor", "enumeration value Waiting");
+    if (pageable) {
+        if (!page) return r.concat(`${T}_Tr missing`);
+        pair(page.Title, "Translated", "Çevrildi", "page title");
+        let text = null;
+        walkPlain(page, o => o.$Type === "Forms$DynamicText" && (text = o));
+        pair(text && text.Content.Template, "Title: {1}", "Başlık: {1}", "text with {Title}");
+    }
+    return r;
+}
+
 // The copied Data grid 2: type = installed .mpk, Single selection, the listening data view, 8 columns on the test
 // entity, and no reference left to what the original showed (other entities, pages, flows, filter widgets).
 function grid2Problems(project, mod, T) {
@@ -586,6 +620,49 @@ async function selftest(mpr, keep, { out, relevant }) {
                 const g2 = grid2Problems(s2.ctx.project, mod, T);
                 check(`Data grid 2 ${grid2.def.version} copy (type = .mpk, Single selection, listened to, no old references)`, !g2.length, g2.slice(0, 5).join("; "));
             } else results.push(`SKIP Data grid 2 page: ${grid2.reason}`);
+        }
+
+        // phase T: a new language, translations of existing texts (page title, enumeration caption, show-message text,
+        // validation message) and per-language texts in ops (enumeration value, page title, {Attribute} text)
+        {
+            const T_LANG = "tr_TR";
+            const head = (await s2.ops.texts(`${E}Status`)).split("\n")[0];
+            const d = head.match(/languages: (\w+) \(default\)/)[1];
+            const others = [...head.matchAll(/, ([a-z]{2,3}_[A-Z]{2})/g)].map(m => m[1]).filter(c => c !== T_LANG);
+            // a per-language text: the default, Turkish and (as a stand-in) the default text for the project's other languages
+            const per = (dflt, tr) => ({ [d]: dflt, [T_LANG]: tr, ...Object.fromEntries(others.map(c => [c, `${dflt} (${c})`])) });
+            const phaseT = { ops: [
+                { op: "addLanguage", code: T_LANG },
+                { op: "setTranslations", language: T_LANG, translations: [
+                    ...(pageable ? [{ where: `${E}_Edit [title]`, text: "Düzenle" }] : []),
+                    { where: `${E}Status.Done`, text: "Bitti" },
+                    { where: `${E}_Main.${ids.message}`, text: "Hiçbir şey" },
+                    { where: `${E}.Title [required]`, text: "Başlık gerekli" }] },
+                { op: "addEnumerationValue", enumeration: `${E}Status`, name: "Waiting", caption: per("Waiting", "Bekliyor") },
+                ...(pageable ? [{ op: "createPage", module: mod, name: `${T}_Tr`, entity: E, folder: "ZzTest", title: per("Translated", "Çevrildi"),
+                    widgets: [{ widget: "dataView", widgets: [{ widget: "text", text: per("Title: {Title}", "Başlık: {Title}") }] }] }] : [])
+            ] };
+            const warned = [];
+            const before = s2.client.summary().warnings.length;
+            await s2.ops.runPlan(phaseT, () => {});
+            await s2.model.flushChanges();
+            enc = s2.client.encode();
+            const layT = layoutProblems(layout, enc);
+            const lostT = lostProperties(s2.client, s2.model, enc);
+            warned.push(...s2.client.summary().warnings.slice(before).filter(w => /not in every project language|still says/.test(w)));
+            s2.client.project.writeEncoded(enc);
+            s2 = await reopen(copy);
+            const failedT = await s2.ops.checkPlan(phaseT);
+            const tp = textProblems(s2.ctx.project, T, d, T_LANG, pageable, others);
+            const errs = [];
+            for (const u of s2.model.allUnits().filter(u => u.isLoadable && !u.isLoaded)) await s2.model.loadUnitById(u.id, false).catch(e => errs.push(e.message));
+            await s2.model.flushChanges();
+            if (s2.client.log.length) errs.push(`${s2.client.log.length} deltas on open`);
+            const missing = await s2.ops.texts(`${E}Status`, T_LANG);
+            if (!missing.includes(`${E}Status.Open [caption]`) || missing.includes(`${E}Status.Done [caption]`)) errs.push(`texts --missing ${T_LANG} lists the wrong values`);
+            const all = [...layT.problems.slice(0, 3), ...lostT, ...failedT, ...tp, ...warned, ...errs];
+            check(`texts: addLanguage ${T_LANG}, setTranslations (${phaseT.ops[1].translations.length}: ${pageable ? "page title, " : ""}enumeration caption, message, validation message), per-language texts in ops; stored like Studio Pro, reopen 0 errors`, !all.length, all.slice(0, 6).join("; "));
+            s2 = await reopen(copy);
         }
 
         // phase 4 + 5: change a page Studio Pro saved (add into a column, change a caption and a class), then move the
