@@ -166,6 +166,94 @@ function actionPlans(mod, T, t) {
     return ops;
 }
 
+// JSON integration: a structure with every element kind (values of each type, null, a nested object, an array of
+// objects holding an array of strings, a reserved key), an import mapping that creates its entities, an export mapping
+// onto those same entities, and a flow that imports and exports with them.
+const JSON_SNIPPET = '{\n    "orderId": 12,\n    "id": "A-1",\n    "total": 10.50,\n    "paid": true,\n    "placed": "2024-05-01T10:00:00.12Z",\n    "note": null,\n' +
+    '    "customer": { "name": "Ann", "email": "ann@example.com" },\n    "lines": [ { "sku": "S1", "qty": 2, "tags": [ "new", "sale" ] } ]\n}';
+function mappingPlans(mod, T) {
+    const E = `${mod}.${T}`;
+    const names = { entity: `${E}Order`, entities: { customer: `${E}Customer`, lines: `${E}OrderLine`, "lines/tags": `${E}Tag` } };
+    return [
+        { op: "createJsonStructure", module: mod, name: `${T}_Json`, folder: "ZzTest", snippet: JSON_SNIPPET },
+        { op: "createImportMapping", module: mod, name: `${T}_Imm`, folder: "ZzTest", jsonStructure: `${E}_Json`, ...names, keys: ["orderId"], create: true },
+        { op: "createExportMapping", module: mod, name: `${T}_Exm`, folder: "ZzTest", jsonStructure: `${E}_Json`, ...names, skip: ["note"] },
+        { op: "createMicroflow", module: mod, name: `${T}_JsonFlow`, folder: "ZzTest", parameters: [{ name: "Json", type: "String" }], returns: "String", returnValue: "$Out", actions: [
+            { action: "importWithMapping", mapping: `${E}_Imm`, source: "Json", variable: "Order", commit: "no" },
+            { action: "exportWithMapping", mapping: `${E}_Exm`, object: "Order", variable: "Out" }] }
+    ];
+}
+
+// Keys Studio Pro stores for JSON structures and mappings (the same in every sample, Mendix 10.24-11.13); mappings
+// gained MessageDefinition2 in 11.10.
+const MAPPING_KEYS = {
+    "JsonStructures$JsonStructure": "Documentation Elements Excluded ExportLevel JsonSnippet Name",
+    "JsonStructures$JsonElement": "Children ElementType ErrorMessage ExposedItemName ExposedName FractionDigits IsDefaultType MaxLength MaxOccurs MinOccurs Nillable OriginalValue Path PrimitiveType TotalDigits WarningMessage",
+    "ImportMappings$ImportMapping": "Documentation Elements Excluded ExportLevel JsonStructure MappingSourceReference MessageDefinition MessageDefinition2 Name OperationName ParameterType PublicName ServiceName UseSubtransactionsForMicroflows WsdlFile XmlSchema XsdRootElementName",
+    "ExportMappings$ExportMapping": "Documentation Elements Excluded ExportLevel IsHeaderParameter JsonStructure MappingSourceReference MessageDefinition MessageDefinition2 Name NullValueOption OperationName ParameterName PublicName ServiceName WsdlFile XmlSchema XsdRootElementName",
+    "ObjectMappingElement": "Association Children CustomHandlerCall Documentation ElementType Entity ExposedName IsDefaultType JsonPath MaxOccurs MinOccurs Nillable ObjectHandling ObjectHandlingBackup ObjectHandlingBackupAllowOverride XmlPath",
+    "ValueMappingElement": "Attribute Converter Documentation ElementType ExposedName FractionDigits IsContent IsKey IsXmlAttribute JsonPath MaxLength MaxOccurs MinOccurs Nillable OriginalValue TotalDigits Type XmlPath XmlPrimitiveType"
+};
+
+// The structure and mappings as stored: Studio Pro's keys, element names/paths/types as Studio Pro derives them, and
+// each mapping element mirroring its structure element (path, name, occurrence), with entity or attribute.
+function mappingProblems(project, T, version) {
+    const r = [];
+    const docs = {};
+    for (const id of project.units.keys()) {
+        const u = project.read(id);
+        if (/^(JsonStructures|ImportMappings|ExportMappings)\$/.test(u.$Type) && u.Name.startsWith(`${T}_`)) docs[u.Name.slice(T.length + 1)] = u;
+        if (u.$Type === "Microflows$Microflow" && u.Name === `${T}_JsonFlow`) docs.flow = u;
+    }
+    const s = docs.Json;
+    if (!s || !docs.Imm || !docs.Exm || !docs.flow) return ["structure, mappings or flow missing"];
+    const steps = [];
+    walkPlain(docs.flow, o => {
+        if (/^(Microflows\$(ImportXmlAction|ExportXmlAction|ImportMappingCall|MappingRequestHandling|ResultHandling)|ExportXmlAction\$StringExport)$/.test(o.$Type)) steps.push(o.$Type);
+        const want = ACTION_KEYS[o.$Type];
+        const have = Object.keys(o).filter(k => k[0] !== "$").sort().join(" ");
+        if (want && have !== want) r.push(`${o.$Type} has keys [${have}], Mendix stores [${want}]`);
+    });
+    if (steps.length !== 6) r.push(`flow has ${steps.join(", ")}`);
+    delete docs.flow;
+    const md2 = version.split(".").map(Number);
+    const newer = md2[0] > 11 || (md2[0] === 11 && md2[1] >= 10);
+    for (const d of Object.values(docs)) walkPlain(d, o => {
+        const want = MAPPING_KEYS[o.$Type] || MAPPING_KEYS[o.$Type.split("$")[1]];
+        let have = Object.keys(o).filter(k => k[0] !== "$").sort().join(" ");
+        if (want && have !== (newer ? want : want.replace(" MessageDefinition2", ""))) r.push(`${o.$Type} has keys [${have}]`);
+    });
+    const byPath = new Map();
+    walkPlain(s.Elements, e => byPath.set(e.Path, e));
+    const expect = {
+        "(Object)": "Object Root Unknown 1 1", "(Object)|orderId": "Value OrderId Integer 0 1 12", "(Object)|id": "Value _id String 0 1 \"A-1\"",
+        "(Object)|total": "Value Total Decimal 0 1 10.5", "(Object)|paid": "Value Paid Boolean 0 1 true", "(Object)|placed": "Value Placed DateTime 0 1 \"2024-05-01T10:00:00.1200000Z\"",
+        "(Object)|note": "Value Note Unknown 0 1 ", "(Object)|customer": "Object Customer Unknown 0 1", "(Object)|lines": "Array Lines Unknown 0 1",
+        "(Object)|lines|(Object)": "Object LinesItem Unknown 0 -1", "(Object)|lines|(Object)|tags|(Wrapper)": "Wrapper Tag Unknown 0 -1",
+        "(Object)|lines|(Object)|tags|(Wrapper)|(Value)": "Value Value String 0 1 \"new\""
+    };
+    if (byPath.size !== 17) r.push(`structure has ${byPath.size} elements, expected 17`);
+    for (const [p, want] of Object.entries(expect)) {
+        const e = byPath.get(p);
+        const have = e && [e.ElementType, e.ExposedName, e.PrimitiveType, e.MinOccurs, e.MaxOccurs, ...(e.ElementType === "Value" ? [e.OriginalValue] : [])].join(" ");
+        if (have !== want) r.push(`${p}: ${have || "missing"}, expected ${want}`);
+    }
+    for (const [name, imp] of [["Imm", true], ["Exm", false]]) {
+        let values = 0;
+        walkPlain(docs[name].Elements, m => {
+            if (!/MappingElement$/.test(m.$Type)) return;
+            const e = byPath.get(m.JsonPath);
+            if (!e) return r.push(`${name} ${m.JsonPath} is not in the structure`);
+            if (m.ExposedName !== e.ExposedName || m.MinOccurs !== e.MinOccurs || m.MaxOccurs !== e.MaxOccurs || m.ElementType !== e.ElementType) r.push(`${name} ${m.JsonPath} differs from its structure element`);
+            if (/ValueMappingElement$/.test(m.$Type)) values++, m.Attribute || r.push(`${name} ${m.JsonPath} has no attribute`);
+            else if (!m.Entity && m.ElementType !== "Array") r.push(`${name} ${m.JsonPath} has no entity`);
+            if (imp && m.ElementType === "Array") r.push(`import mapping keeps the array container ${m.JsonPath} (Studio Pro maps the item directly)`);
+        });
+        if (values !== (imp ? 11 : 10)) r.push(`${name} maps ${values} values, expected ${imp ? 11 : 10}`);
+    }
+    return [...new Set(r)];
+}
+
 // Java and JavaScript actions whose parameters ops can fill (values and entity types), import and export mappings
 // with a root object, and an entity that is a file document: the first of each in the project, or null.
 async function callTargets(model, E) {
@@ -240,7 +328,8 @@ const ACTION_KEYS = {
     "Microflows$HttpConfiguration": "ClientCertificate CustomLocation CustomLocationTemplate HttpAuthenticationPassword HttpAuthenticationUserName HttpHeaderEntries HttpMethod OverrideLocation UseHttpAuthentication",
     "Microflows$CustomRequestHandling": "Template", "Microflows$MappingRequestHandling": "ContentType MappingId MappingVariableName", "Microflows$ResultHandling": "Bind ImportMappingCall ResultVariableName VariableType",
     "Microflows$ImportMappingCall": "Commit ContentType ForceSingleOccurrence ObjectHandlingBackup ParameterVariableName Range ReturnValueMapping",
-    "Microflows$ImportXmlAction": "ErrorHandlingType IsValidationRequired ResultHandling XmlDocumentVariableName", "Microflows$DownloadFileAction": "ErrorHandlingType FileDocumentVariableName ShowFileInBrowser"
+    "Microflows$ImportXmlAction": "ErrorHandlingType IsValidationRequired ResultHandling XmlDocumentVariableName",
+    "Microflows$ExportXmlAction": "ErrorHandlingType IsValidationRequired OutputMethod ResultHandling", "ExportXmlAction$StringExport": "OutputVariableName", "Microflows$DownloadFileAction": "ErrorHandlingType FileDocumentVariableName ShowFileInBrowser"
 };
 
 // The newer actions as stored: Mendix's keys for each type, every action of the plans present, the object type
@@ -531,9 +620,10 @@ async function selftest(mpr, keep, { out, relevant }) {
         // the newer microflow/nanoflow actions; calls to Java/JavaScript actions, mappings and file downloads only
         // where the project has something to call
         const targets = await callTargets(s1.model, E);
-        const missing = { java: "callJava (no Java action with value or entity type parameters)", js: "callJavaScript (no such JavaScript action)", importMapping: "importWithMapping and a REST call with an import mapping (no import mapping without parameter)", exportMapping: "a REST call with an export mapping body (no export mapping of one object)", file: "downloadFile (no file document entity)" };
+        const missing = { java: "callJava (no Java action with value or entity type parameters)", js: "callJavaScript (no such JavaScript action)", importMapping: "REST call and importWithMapping with one of the project's import mappings (none without parameter; the new mapping is tested above)", exportMapping: "REST call with one of the project's export mappings as body (none of one object)", file: "downloadFile (no file document entity)" };
         for (const [k, what] of Object.entries(missing)) if (!targets[k]) results.push(`SKIP ${what}`);
         phase1.ops.push(...actionPlans(mod, T, targets));
+        phase1.ops.push(...mappingPlans(mod, T));
         const plannedActions = ["AggregateAction", "ListOperationsAction", "CreateListAction", "ChangeListAction", "ValidationFeedbackAction", "RollbackAction", "CastAction", "InheritanceSplit", "ShowHomePageAction", "RestCallAction", "CustomRequestHandling",
             "Union", "Intersect", "Subtract", "ListEquals", "Contains", "Head", "Tail", "Find", "FindByExpression", "Filter", "FilterByExpression", "Sort", "ListRange",
             ...(targets.importMapping ? ["ImportXmlAction", "ImportMappingCall"] : []), ...(targets.exportMapping ? ["MappingRequestHandling"] : []), ...(targets.java ? ["JavaActionCallAction"] : []),
@@ -577,6 +667,8 @@ async function selftest(mpr, keep, { out, relevant }) {
         check("saved model shows every op", !failed.length, failed.join("; "));
         const secp = securityProblems(s2.ctx.project, M, E, role, userRole);
         check("new module, user role, demo user, addModuleRoles, revokeAccess stored", !secp.length, secp.join("; "));
+        const mapp = mappingProblems(s2.ctx.project, T, src.version);
+        check("JSON structure, import + export mapping and import/export steps stored like Studio Pro", !mapp.length, mapp.slice(0, 6).join("; "));
         const actp = actionProblems(s2.ctx.project, T, plannedActions);
         check(`newer actions stored with Mendix's keys (${plannedActions.length} kinds: lists, aggregates, object type decision + cast, feedback, rollback, REST${targets.java ? ", Java" : ""}${targets.js ? ", JavaScript" : ""}${targets.importMapping ? ", import mapping" : ""}${targets.file ? ", download" : ""})`, !actp.length, actp.slice(0, 6).join("; "));
         if (pageable) {

@@ -184,7 +184,7 @@ function snippetTree(text) {
 
 // The path a user writes: the JSON keys joined with / (array and item markers left out); "" for the root.
 const userPath = p => p.split("|").filter(x => !/^\((Object|Array|Wrapper|Value)\)$/.test(x)).join("/");
-const normPath = p => String(p).replace(/\[\]/g, "").replace(/^\$?\/?(Root\/|Root$)?/, "").replace(/\/+$/, "");
+const normPath = p => String(p).replace(/\[\]/g, "").replace(/^\(root\)$/i, "").replace(/^\$?\/?(Root\/|Root$)?/, "").replace(/\/+$/, "");
 
 // ---------------------------------------------------------------- bound operations
 
@@ -310,7 +310,8 @@ function makeMappings(h) {
         for (const { n } of objects) {
             if (model.findEntityByQualifiedName(n.entity)) continue;
             const [m, name] = n.entity.split(".");
-            if (!create) fail(`${plan.where}: no entity ${n.entity} (for JSON '${userPath(n.schema.path) || "root"}')${hint}`, n.entity, model.allDomainModels().flatMap(d => d.entities.map(e => `${d.containerAsModule.name}.${e.name}`)));
+            const field = n === plan.top ? `"entity"` : `"entities": { "${userPath(n.schema.path)}": "Module.Entity" }`;
+            if (!create) fail(`${plan.where}: no entity ${n.entity} (for JSON '${userPath(n.schema.path) || "(root)"}'); add "create": true to create it, or name an existing one with ${field}`, n.entity, model.allDomainModels().flatMap(d => d.entities.map(e => `${d.containerAsModule.name}.${e.name}`)));
             validName(name, "entity name");
             await impl.createEntity({ module: m, name, persistable: o.persistable });
             created.push(n.entity);

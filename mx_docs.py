@@ -550,33 +550,59 @@ def render_published_rest(doc, qn, index):
     return "\n".join(out) + "\n"
 
 
+def json_path(path):
+    """Mendix element path -> readable JSON path: (Object)|lines|(Object)|sku -> lines[]/sku; the root -> (root)."""
+    keys = []
+    for part in (path or "").split("|"):
+        if part in ("(Object)", "(Wrapper)") and keys and not keys[-1].endswith("[]"):
+            keys[-1] += "[]"
+        elif part == "(Array)":
+            keys.append("[]")
+        elif part and not part.startswith("("):
+            keys.append(part)
+    return "/".join(k for k in keys if k != "[]" or len(keys) == 1) or "(root)"
+
+
+def occurs(e):
+    lo, hi = e.get("MinOccurs"), e.get("MaxOccurs")
+    return "" if (lo, hi) in ((0, 1), (1, 1)) else " [%s..%s]" % (lo, "*" if hi == -1 else hi)
+
+
 def render_mapping(doc, qn):
     is_import = doc["$Type"].startswith("ImportMappings")
     out = ["%s %s" % ("IMPORT MAPPING" if is_import else "EXPORT MAPPING", qn)]
-    for k in ("JsonStructure", "MessageDefinition", "XmlSchema"):
+    for k, label in (("JsonStructure", "JSON STRUCTURE"), ("MessageDefinition", "MESSAGE DEFINITION"), ("XmlSchema", "XML SCHEMA")):
         if doc.get(k):
-            out.append("%s: %s" % (k.upper(), doc[k]))
+            out.append("%s: %s" % (label, doc[k]))
     if doc.get("ParameterType") and dtype(doc["ParameterType"]) not in ("Unknown", ""):
         out.append("PARAMETER: " + dtype(doc["ParameterType"]))
+    if not is_import and doc.get("NullValueOption"):
+        out.append("EMPTY VALUES: " + ("left out" if doc["NullValueOption"] == "LeaveOutElement" else "sent as null"))
     if clean(doc.get("Documentation")):
         out.append("DOC: " + clean(doc["Documentation"]))
-    out.append("ELEMENTS (json path -> model):")
+    out.append("ELEMENTS (json path -> model; objects: %s):" % ("[Create] new, [Find] by key" if is_import else "[Parameter] the input, [Find] over the association"))
 
     def walk(elements, indent):
         for e in elements or []:
-            path = (e.get("JsonPath") or e.get("XmlPath") or "").split("|")[-1] or e.get("ExposedName")
-            if e.get("Entity") or e.get("$Type", "").endswith("ObjectMappingElement"):
-                line = "%s%s -> %s" % ("  " * indent, path, e.get("Entity") or "(no entity)")
-                if e.get("Association"):
-                    line += " via " + e["Association"]
-                line += " [%s]" % e.get("ObjectHandling")
+            path = json_path(e.get("JsonPath") or "") if e.get("JsonPath") else (e.get("XmlPath") or e.get("ExposedName"))
+            if e.get("$Type", "").endswith("ObjectMappingElement"):
+                if not e.get("Entity"):
+                    line = "%s%s (array)" % ("  " * indent, path)
+                else:
+                    line = "%s%s -> %s" % ("  " * indent, path, e["Entity"])
+                    if e.get("Association"):
+                        line += " via " + e["Association"]
+                    line += " [%s]" % e.get("ObjectHandling")
                 handler = (e.get("CustomHandlerCall") or {}).get("Microflow")
                 if handler:
                     line += " handler " + handler
+                line += occurs(e)
             else:
                 line = "%s%s -> %s: %s" % ("  " * indent, path, short(e.get("Attribute")) or "(none)", dtype(e.get("Type")))
                 if e.get("IsKey"):
                     line += " [key]"
+                if e.get("Converter"):
+                    line += " converter " + e["Converter"]
             out.append(line)
             walk(e.get("Children"), indent + 1)
 
@@ -588,7 +614,23 @@ def render_json_structure(doc, qn):
     snippet = doc.get("JsonSnippet") or ""
     if len(snippet) > 6000:
         snippet = snippet[:6000] + "\n... (truncated)"
-    return "JSON STRUCTURE %s\n\n%s\n" % (qn, snippet)
+    out = ["JSON STRUCTURE %s" % qn, "ELEMENTS (json path: name type; [0..*] = list):"]
+
+    def walk(elements, indent):
+        for e in elements or []:
+            kind = e.get("ElementType")
+            t = e.get("PrimitiveType") if kind == "Value" else kind.lower()
+            out.append("%s%s: %s %s%s" % ("  " * indent, json_path(e.get("Path")), e.get("ExposedName"), t, occurs(e)))
+            walk(e.get("Children"), indent + 1)
+
+    walk(doc.get("Elements"), 1)
+    lines = len(out)
+    if lines > 400:
+        out = out[:400] + ["  ... (%d more)" % (lines - 400)]
+    if clean(doc.get("Documentation")):
+        out.append("DOC: " + clean(doc["Documentation"]))
+    out += ["", "SNIPPET:", snippet.replace("\r\n", "\n")]
+    return "\n".join(out) + "\n"
 
 
 def render_dataset(doc, qn, index):

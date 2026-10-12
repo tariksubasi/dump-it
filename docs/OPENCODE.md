@@ -269,6 +269,7 @@ Actions (inside `"actions": [ { "action": "<name>", ... } ]`). Every action also
 | `callJavaScript` | **jsAction** (`Module.JSAction`), args, variable | Nanoflows only; same rules as `callJava` |
 | `callRest` | **url** (`{1}` = urlArgs), urlArgs, method (default `Get`), headers `{"Name":"expr"}`, timeout (s, default 300), body (`{1}` = bodyArgs) or exportMapping + exportObject, response (`none`/`string`/`Module.ImportMapping`), variable, commit | Microflows only. Write the body as plain text, e.g. `{"name": "{1}"}`: braces are escaped for Mendix. response defaults to `string` with variable, else `none`. An import mapping response gets an object or list of the mapping's root entity; commit `yes`/`no`/`withoutEvents` (default). Authentication, proxy, form data and binary bodies: Studio Pro |
 | `importWithMapping` | **mapping** (`Module.ImportMapping`), **source** (String variable with JSON/XML), variable, commit | Microflows only. Mappings that take a parameter are refused |
+| `exportWithMapping` | **mapping** (`Module.ExportMapping`), **object** (variable to export), **variable** (new String) | Microflows only. The object must be the mapping's root entity |
 | `downloadFile` | **variable** (object of a `System.FileDocument` specialization), showInBrowser | Microflows only. showInBrowser = false |
 | `cast` | **variable** | Only as the first action of an `ifType` case: the object as that case's entity |
 
@@ -472,6 +473,28 @@ What pages cannot do yet (use Studio Pro, and `python mx.py gap "<what>"`):
 | `createConstant` | **module**, **name**, **type**, **default**, exposedToClient, folder | Type String/Integer/Long/Decimal/Boolean/DateTime |
 | `createScheduledEvent` | **module**, **name**, **microflow**, **every** (`Minute`/`Hour`/`Day`/`Week`), interval, at (`HH:MM`), days, enabled (default false), timeZone, onOverlap, folder | The microflow must have no parameters |
 | `publishRest` | **module**, **service**, **resource**, **method**, **microflow**, path (e.g. `{Id}`), servicePath, authentication (default Basic), roles, folder | Microflow parameters become path (`{Name}` in path) or query parameters. Object/list parameters or results need mappings: refused, do those in Studio Pro. Experimental |
+
+### JSON structures and mappings
+
+| Op | Fields | Notes |
+|---|---|---|
+| `createJsonStructure` | **module**, **name**, **snippet** (JSON text), folder | Elements as Studio Pro derives them: root `Root`, keys capitalized (`orderId` -> `OrderId`, reserved `id`/`class` -> `_id`/`_class`), arrays of objects -> `<Name>Item`, arrays of values -> a wrapper per item, ISO dates -> DateTime, `1.0` -> Decimal, `null` -> Unknown. Uses the first item of each array. Give the snippet as a string |
+| `createImportMapping` | **module**, **name**, **jsonStructure**, entity (root), entities `{"json/path":"Module.Entity"}`, attributes `{"json/path/key":"Attr"}`, skip `[paths]`, keys `[paths]`, create, persistable, folder | One entity per JSON object, an attribute per value (the element name), child -> parent associations (`Child_Parent`). Arrays: the item maps straight under its parent (many children). Paths are the JSON keys joined with `/` (`lines/sku`, `[]` may be written). keys: the object is found by those values, else created. Default `create: false`: maps onto existing entities/attributes/associations by name and says "did you mean"; `create: true` creates what is missing (strings unlimited, integers Long). Root arrays are fine |
+| `createExportMapping` | same fields, no keys | The root entity is the parameter; nested objects are found over the association. Export over a JSON structure whose root is an array: Studio Pro |
+
+Typical plan: structure, import mapping that creates the entities, export mapping on the same entities, then a flow:
+
+```json
+{ "ops": [
+  { "op": "createJsonStructure", "module": "Sales", "name": "JSON_Order", "snippet": "{ \"orderId\": 12, \"total\": 10.5, \"lines\": [ { \"sku\": \"A1\", \"qty\": 2 } ] }" },
+  { "op": "createImportMapping", "module": "Sales", "name": "IMM_Order", "jsonStructure": "Sales.JSON_Order", "entity": "Sales.OrderIn", "entities": { "lines": "Sales.OrderLineIn" }, "keys": ["orderId"], "create": true },
+  { "op": "createExportMapping", "module": "Sales", "name": "EXM_Order", "jsonStructure": "Sales.JSON_Order", "entity": "Sales.OrderIn", "entities": { "lines": "Sales.OrderLineIn" } },
+  { "op": "createMicroflow", "module": "Sales", "name": "ACT_Order_Echo", "parameters": [ { "name": "Json", "type": "String" } ], "returns": "String", "returnValue": "$Out",
+    "actions": [ { "action": "importWithMapping", "mapping": "Sales.IMM_Order", "source": "Json", "variable": "Order", "commit": "no" },
+                 { "action": "exportWithMapping", "mapping": "Sales.EXM_Order", "object": "Order", "variable": "Out" } ] } ] }
+```
+
+The export shows a structure as `json/path: Name type` lines and a mapping as `json/path -> Entity via Association [Create/Find/Parameter]`; use those paths in `entities`, `attributes`, `skip`, `keys`. Custom handlers, converters, XML schemas and message definitions: Studio Pro.
 
 ### Documents, rename and delete
 

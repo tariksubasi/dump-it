@@ -85,7 +85,7 @@
 "Microflows$TransformJsonAction":{"p":{"outputVariableName":"VariableName"}},
 "Microflows$Union":{"p":{"listVariableName":"ListName","secondListOrObjectVariableName":"SecondListOrObjectName"}},
 "Microflows$ValidationFeedbackAction":{"p":{"objectVariableName":"ValidationVariableName"}},
-"Microflows$VariableExport":{"$":"ExportXmlAction$StringExport","p":{"outputVariableName":"VariableName"}},
+"Microflows$VariableExport":{"$":"ExportXmlAction$StringExport"},
 "Microflows$WebServiceCallAction":{"$":"Microflows$CallWebServiceAction"},
 "Microflows$WorkflowCallAction":{"p":{"outputVariableName":"VariableName"}},
 "Navigation$NavigationProfile":{"p":{"roleBasedHomePages":"HomeItems","menuItemCollection":"Menu"}},
