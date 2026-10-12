@@ -356,6 +356,7 @@ also take `editable` (true, false or a condition like `visible`). Full field lis
 | `referenceSelector` | **association**, attribute, label, xpath, selectableMicroflow, editable, onChange | Inside a data view whose entity owns the reference (`Module.Order_Customer` in a data view of Order); `attribute` of the other entity (default: its first String attribute). `selectableMicroflow`: a microflow that returns the selectable objects (instead of `xpath`) |
 | `referenceSetSelector` | **association**, attribute, label, xpath, selectableMicroflow, editable, onChange | Several objects of a reference set the entity around it owns (Studio Pro's input reference set selector) |
 | `comboBox` | attribute or association, captionAttribute, label, editable, onChange | Combo box (pluggable) for an enumeration/Boolean attribute or a reference, copied from a Studio Pro-saved combo box of this project whose widget equals `widgets/*.mpk`, every setting back to its default. Otherwise refused with the classic alternative (`referenceSelector`, `dropDown`, `checkBox`) |
+| `templateGrid` | entity, source, association, microflow, nanoflow, xpath, widgets (per tile), columns (tiles per row, default 2), rows (default 3), selection, selectFirst, buttons | Classic template grid (as the Studio Pro 10.24 / 11.12 samples store it): tiles with their own widgets (inputs too), control bar `buttons` as `dataGrid`; a data view can listen to it; addWidgets `into` it |
 | `gallery` | entity, source, association, microflow, nanoflow, xpath, widgets (per item), selection (default Single), pageSize, columns (desktop 1-12), onClick | Gallery (pluggable), data source as `listView`, copied like `comboBox`; a data view can listen to it (`listenTo`). Without one to copy it is refused: use `listView` |
 
 Data sources (`"source"`; `association` / `microflow` / `nanoflow` alone also pick it). The object around a widget is
@@ -459,6 +460,39 @@ Master-detail: customers in a grid; the selected customer's details and, inside 
                      "xpath": "[Sales.Order_Customer = '[%CurrentObject%]']" } ] } ] } ] }
 ```
 
+Relational order entry: orders in a grid; the selected order with its customer (over the reference), an editable
+list of its lines (an input per line, a data view per line with a product picker whose choices come from a microflow
+and an on-change microflow), a grid of the lines with a button that passes the selected lines (Multi selection) to a
+microflow, a button that opens a page with two parameters, a data view filled by a nanoflow, and a snippet of the
+customer (`Sales.OrderLine_Order` goes from OrderLine to Order, `Sales.Order_Customer` from Order to Customer):
+
+```json
+{ "ops": [ { "op": "createPage", "module": "Sales", "name": "Order_Entry", "entity": "Sales.Order", "roles": ["Sales.User"],
+  "widgets": [
+    { "widget": "dataGrid", "name": "ordersGrid", "columns": ["Number", "Date"],
+      "buttons": [ { "action": "new", "page": "Sales.Order_Edit" }, { "action": "edit", "page": "Sales.Order_Edit" }, { "action": "delete" } ] },
+    { "widget": "dataView", "name": "orderView", "listenTo": "ordersGrid", "widgets": [
+      { "widget": "dataView", "name": "customerView", "association": "Sales.Order_Customer", "editable": false, "fields": ["Name"],
+        "widgets": [ { "widget": "snippetCall", "snippet": "Sales.Customer_Card", "params": { "Customer": "$currentObject" } } ] },
+      { "widget": "listView", "name": "lineList", "association": "Sales.OrderLine_Order", "widgets": [
+        { "widget": "input", "attribute": "Quantity" },
+        { "widget": "dataView", "widgets": [
+          { "widget": "referenceSelector", "association": "Sales.OrderLine_Product", "attribute": "Name",
+            "selectableMicroflow": "Sales.DS_Products_Active",
+            "onChange": { "action": "callMicroflow", "microflow": "Sales.OCH_OrderLine_Product" } } ] } ] },
+      { "widget": "dataGrid", "name": "lineGrid", "association": "Sales.OrderLine_Order", "selection": "Multi", "columns": ["Quantity", "Price"] },
+      { "widget": "actionButton", "action": "callMicroflow", "microflow": "Sales.ACT_OrderLines_Split", "caption": "Split lines",
+        "params": { "Lines": "$lineGrid.selection" } },
+      { "widget": "actionButton", "action": "showPage", "page": "Sales.Order_Customer_Compare", "caption": "Compare",
+        "params": { "Order": "$orderView", "Customer": "$customerView" } },
+      { "widget": "dataView", "nanoflow": "Sales.DS_Order_Totals", "params": { "Order": "$orderView" }, "editable": false, "fields": ["Total"] } ],
+      "footer": [ { "widget": "actionButton", "action": "save", "closePage": false } ] } ] } ] }
+```
+
+Wrong: `"params": { "Customer": "$customerView" }` on a button outside `customerView` (a sibling data view's object is
+not reachable; the error lists the variables there), and a data view with `"source": "parameter"` inside `lineList`
+(a list item never adds a page parameter).
+
 Tabs, a group box, a snippet, a logo, a reference selector, a combo box, a gallery with its selected item next to it,
 and conditional visibility and editability (`Sales.Order_Customer` goes from Order to Customer):
 
@@ -519,6 +553,7 @@ What pages cannot do yet (use Studio Pro, and `python mx.py gap "<what>"`):
   on-leave events or the visibility by module role. `moveWidget`: within one page; a widget that shows
   attributes stays in its data view or list view. Renaming a widget does not change `$widgetName` in expressions
   (the dry run lists them).
+- Template grid: no search fields (the database source gets no search bar). Grid buttons: no export, no inline new rows.
 - Widgets other than the ones above: file manager, image uploader, navigation
   list, scroll container, and every other pluggable widget (only Data grid 2, combo box and gallery, each copied from
   a Studio Pro-saved one of this project whose widget equals `widgets/*.mpk`).

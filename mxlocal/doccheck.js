@@ -54,6 +54,27 @@ function checkActions(list, where, problems) {
     }
 }
 
+// Widget specs of createPage / addWidgets: known kinds and fields, also nested (widgets, footer, tabs, layout grid
+// columns, Data grid 2 custom content columns).
+function checkWidgets(list, where, problems) {
+    const { WIDGETS, COMMON_FIELDS, widgetKind } = require("./ops-pages");
+    for (const [i, spec] of (Array.isArray(list) ? list : []).entries()) {
+        const at = `${where}[${i + 1}]`;
+        const kind = spec && widgetKind(spec.widget !== undefined ? spec.widget : spec.type);
+        if (!kind) {
+            problems.push(`${at}: unknown widget '${spec && spec.widget}'`);
+            continue;
+        }
+        const fields = { ...(WIDGETS[kind] || WIDGETS.input).fields, ...COMMON_FIELDS, widget: 1, type: 1, name: 1 };
+        for (const k of Object.keys(spec)) if (!(k in fields)) problems.push(`${at}: unknown field '${k}' for ${kind}`);
+        checkWidgets(spec.widgets, `${at}.widgets`, problems);
+        checkWidgets(spec.footer, `${at}.footer`, problems);
+        for (const t of Array.isArray(spec.tabs) ? spec.tabs : []) checkWidgets(t && t.widgets, `${at}.tabs`, problems);
+        const cols = kind === "layoutGrid" ? [].concat(spec.rows || [{ columns: spec.columns }]).flatMap(r => (r && Array.isArray(r.columns) ? r.columns : [])) : kind === "dataGrid" && Array.isArray(spec.columns) ? spec.columns : [];
+        for (const c of cols) if (c && typeof c === "object") checkWidgets(c.widgets, `${at}.columns`, problems);
+    }
+}
+
 function doccheck() {
     const problems = [];
     let count = 0;
@@ -87,6 +108,7 @@ function doccheck() {
                     problems.push(e.message);
                 }
                 checkActions(o.actions, w, problems);
+                if (o.op === "createPage" || o.op === "addWidgets") checkWidgets(o.widgets, `${w}.widgets`, problems);
             }
         }
     }

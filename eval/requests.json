@@ -251,6 +251,117 @@
           "Customer_Edit\\.txt$": "Müşteri Düzenle"
         }
       }
+    },
+    {
+      "id": "masterlines",
+      "setup": [
+        {
+          "op": "createEntity",
+          "module": "MyFirstModule",
+          "name": "OrderLine",
+          "attributes": [
+            {
+              "name": "Quantity",
+              "type": "Integer"
+            },
+            {
+              "name": "Price",
+              "type": "Decimal"
+            }
+          ]
+        },
+        {
+          "op": "addAssociation",
+          "from": "MyFirstModule.OrderLine",
+          "to": "MyFirstModule.Order"
+        },
+        {
+          "op": "addAccessRule",
+          "entity": "MyFirstModule.OrderLine",
+          "roles": [
+            "MyFirstModule.User"
+          ],
+          "access": "ReadWrite",
+          "create": true,
+          "delete": true
+        }
+      ],
+      "text": "Order_Lines sayfası yap: solda siparişler tablosu, sağda seçilen siparişin detayı; detayın içinde bu siparişin satırlarını (OrderLine) Quantity ve Price alanları düzenlenebilir şekilde listeleyen bir liste ve Kaydet butonu olsun. Yeni eklenen satırlar da (kaydedilmeden) görünsün.",
+      "checks": {
+        "find": [
+          "MyFirstModule.Order_Lines"
+        ],
+        "files": {
+          "Order_Lines\\.txt$": "(?s)^(?=.*data: association MyFirstModule\\.OrderLine_Order)(?=.*TextBox[^\\n]*attr Quantity)(?=.*save changes)"
+        }
+      }
+    },
+    {
+      "id": "gridselection",
+      "setup": [
+        {
+          "op": "createMicroflow",
+          "module": "MyFirstModule",
+          "name": "ACT_Orders_MarkPaid",
+          "parameters": [
+            {
+              "name": "Orders",
+              "type": "List(MyFirstModule.Order)"
+            }
+          ],
+          "actions": [
+            {
+              "action": "log",
+              "message": "mark paid"
+            }
+          ]
+        }
+      ],
+      "text": "Order_Overview sayfası yap: birden çok sipariş seçilebilen bir tablo ve seçili siparişleri ACT_Orders_MarkPaid microflow'una gönderen 'Ödendi işaretle' butonu olsun.",
+      "checks": {
+        "find": [
+          "MyFirstModule.Order_Overview"
+        ],
+        "files": {
+          "Order_Overview\\.txt$": "(?s)^(?=.*Multi)(?=.*Ödendi işaretle[^\\n]*ACT_Orders_MarkPaid)"
+        }
+      }
+    },
+    {
+      "id": "dsmicroflow",
+      "setup": [
+        {
+          "op": "createMicroflow",
+          "module": "MyFirstModule",
+          "name": "DS_Customer_LastOrder",
+          "parameters": [
+            {
+              "name": "Customer",
+              "type": "MyFirstModule.Customer"
+            }
+          ],
+          "returns": "MyFirstModule.Order",
+          "actions": [
+            {
+              "action": "retrieve",
+              "variable": "Last",
+              "entity": "MyFirstModule.Order",
+              "xpath": "[MyFirstModule.Order_Customer = $Customer]",
+              "first": true
+            }
+          ],
+          "returnValue": "$Last"
+        }
+      ],
+      "text": "Customer_Summary sayfası yap: müşteri parametreli; müşterinin adı ve altında DS_Customer_LastOrder microflow'unun döndürdüğü son siparişi (Number, Total) salt okunur gösteren bir data view olsun, microflow'a müşteri parametre olarak verilsin.",
+      "checks": {
+        "find": [
+          "MyFirstModule.Customer_Summary"
+        ],
+        "files": {
+          "Customer_Summary\\.txt$": "(?s)^(?=.*data: microflow MyFirstModule\\.DS_Customer_LastOrder)(?=.*attr Total)"
+        }
+      }
     }
   ]
 }

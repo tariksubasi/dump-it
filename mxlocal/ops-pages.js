@@ -100,6 +100,12 @@ const WIDGETS = {
         doc: "Combo box (pluggable, copied from the project's own pages like Data grid 2) for an enumeration or Boolean attribute, or a reference (association + caption attribute), inside a data view. Without a Studio Pro-saved combo box matching widgets/*.mpk it is refused: use referenceSelector (association) or dropDown / radioButtons (enumeration)",
         fields: { attribute: "enumeration or Boolean attribute (or use association)", association: "Module.Assoc reference from the data view's entity", captionAttribute: "optional with association: String attribute of the other entity (default: its first)", label: "optional label", editable: EDITABLE, onChange: ON_CHANGE }
     },
+    templateGrid: {
+        doc: "template grid (classic): objects (database, association or microflow/nanoflow, as listView) as tiles in rows and columns, each with its own widgets, with a control bar like a classic grid; a data view can listen to it",
+        fields: { entity: "optional Module.Entity (default: the page entity)", ...LIST_SOURCE, xpath: "optional XPath constraint (source database)", widgets: "optional [ widgets ] per item (default: one text per attribute)",
+            columns: "optional tiles per row 1-12 (default 2)", rows: "optional rows per page (default 3)", selection: "optional None | Single | SingleAndMaintain | Multi | SimpleMulti (default Single)", selectFirst: "optional true/false (default false)",
+            buttons: "optional control bar buttons, as dataGrid (new, edit, delete, callMicroflow, callNanoflow)" }
+    },
     gallery: {
         doc: "Gallery (pluggable, copied from the project's own pages like Data grid 2): objects (database, association or microflow/nanoflow, as listView) as tiles, each item with its own widgets; a data view can listen to it. Without a Studio Pro-saved gallery matching widgets/*.mpk it is refused: use listView",
         fields: { entity: "optional Module.Entity (default: the page entity)", ...LIST_SOURCE, xpath: "optional XPath constraint", widgets: "optional [ widgets ] per item (default: one text per attribute)", selection: "optional Single | Multi | None (default Single)", pageSize: "optional (default 20)", columns: "optional desktop columns 1-12 (default 1)", onClick: "optional: on an item click " + ACTION + "; the item is passed" }
@@ -132,7 +138,7 @@ const SYNONYMS = {
 };
 const KINDS = [...Object.keys(WIDGETS), ...Object.keys(INPUTS)];
 const PREFIX = { layoutGrid: "layoutGrid", container: "container", text: "text", dataView: "dataView", dataGrid: "grid", listView: "listView", actionButton: "actionButton",
-    tabContainer: "tabControl", groupBox: "groupBox", snippetCall: "snippetCall", referenceSelector: "referenceSelector", referenceSetSelector: "referenceSetSelector", comboBox: "comboBox", gallery: "gallery" };
+    tabContainer: "tabControl", groupBox: "groupBox", snippetCall: "snippetCall", referenceSelector: "referenceSelector", referenceSetSelector: "referenceSetSelector", templateGrid: "templateGrid", comboBox: "comboBox", gallery: "gallery" };
 // enumValue with the widget location in the message
 function choice(cls, value, field, where) {
     try {
@@ -143,8 +149,8 @@ function choice(cls, value, field, where) {
     }
 }
 const NO_MENU_ROLES = page => `menu items have no roles: who sees one = the user roles that may open ${page} (grantAccess / revokeAccess on the page)`;
-const LISTENABLE = { datagrid: "dataGrid", grid: "dataGrid", listview: "listView", list: "listView", gallery: "gallery" };
-const LISTENS = ["dataGrid", "listView", "gallery"]; // kinds a data view can listen to
+const LISTENABLE = { datagrid: "dataGrid", grid: "dataGrid", listview: "listView", list: "listView", gallery: "gallery", templategrid: "templateGrid" };
+const LISTENS = ["dataGrid", "listView", "gallery", "templateGrid"]; // kinds a data view can listen to
 const ITEM_KINDS = ["listView", "gallery", "templateGrid", "pluggable", "dataGrid"]; // dataGrid: a Data grid 2 custom content column // each item is an object (also existing ones: pluggable)
 const OBJECT_KINDS = ["dataView", "listView", "gallery", "templateGrid", "dataGrid"];
 const ROW_KINDS = ["dataGrid", "gallery", "templateGrid", "pluggable"]; // a page opened from a row gets it mapped explicitly (Studio Pro stores Widget = the grid) // inputs and {Attribute} use their object
@@ -292,7 +298,7 @@ function makePages(h) {
         if (raw === undefined) throw new Error(`${where}: missing "widget". Supported: ${KINDS.join(", ")}`);
         if (typeof raw !== "string") throw new Error(`${where}: "widget" must be a kind name such as "text" (supported: ${KINDS.join(", ")})`);
         const kind = widgetKind(raw);
-        if (!kind) fail(`${where}: unknown widget '${raw}'. Supported: ${KINDS.join(", ")} (other widgets, e.g. a template grid, file manager or reference set selector: add them in Studio Pro)`, raw, KINDS);
+        if (!kind) fail(`${where}: unknown widget '${raw}'. Supported: ${KINDS.join(", ")} (other widgets, e.g. a file manager or image uploader: add them in Studio Pro)`, raw, KINDS);
         const own = [...new Set([...Object.keys((WIDGETS[kind] || WIDGETS.input).fields), ...Object.keys(COMMON_FIELDS)])];
         const known = ["widget", "type", "name", ...own];
         for (const k of Object.keys(spec)) {
@@ -355,7 +361,7 @@ function makePages(h) {
             else if (kind === "dataView") {
                 node.widgets = scan(spec.widgets, `${node.where}.widgets`, node, nodes);
                 node.footer = scan(spec.footer, `${node.where}.footer`, node, nodes);
-            } else if (kind === "listView" || kind === "gallery") node.widgets = scan(spec.widgets, `${node.where}.widgets`, node, nodes);
+            } else if (kind === "listView" || kind === "gallery" || kind === "templateGrid") node.widgets = scan(spec.widgets, `${node.where}.widgets`, node, nodes);
             else if (kind === "groupBox") node.widgets = scan(spec.widgets, `${node.where}.widgets`, container, nodes);
             else if (kind === "tabContainer") {
                 const tabs = list(spec.tabs, `${node.where}.tabs`);
@@ -2007,6 +2013,33 @@ function makePages(h) {
             client.warnFirst(`${ctx.qn}: ${w.name} is a Combo box ${info.def.version}, copied from ${info.exemplars[0].unitName} with every setting back to its default`);
             return `${w.name} (Combo box ${info.def.version}, ${attr ? attr.name : `${s.association} -> ${other.name}.${cap.name}`}${oc})`;
         },
+        async templateGrid(node, target, ctx) {
+            const s = node.spec, ent = node.ent;
+            const tg = pages.TemplateGrid.create(model);
+            target.push(tg);
+            tg.name = node.name;
+            node.widget = tg;
+            const shows = listSource(node, tg, false, ctx);
+            if (node.source === "database") tg.dataSource.searchBar.type = pages.SearchBarTypeEnum.None; // no search fields
+            const num = (v, k, max) => {
+                const n = Number(v);
+                if (!Number.isInteger(n) || n < 1 || n > max) throw new Error(`${node.where}: ${k} must be a whole number 1-${max}`);
+                return n;
+            };
+            tg.numberOfColumns = s.columns !== undefined ? num(s.columns, "columns", 12) : 2; // Studio Pro's default
+            tg.numberOfRows = s.rows !== undefined ? num(s.rows, "rows", 1000) : 3;
+            tg.selectionMode = choice(pages.GridSelectionMode, s.selection || "Single", "selection", node.where);
+            tg.selectFirst = bool(s.selectFirst, false);
+            const fields = node.widgets.length ? [] : shown(ent);
+            const inner = [];
+            for (const f of fields) inner.push(await build({ kind: "text", spec: { text: `{${f}}` }, where: node.where, container: node }, tg.contents.widgets, ctx));
+            for (const ch of node.widgets) inner.push(await build(ch, tg.contents.widgets, ctx));
+            const bar = [];
+            for (const [i, b] of list(s.buttons, `${node.where}.buttons`).entries()) bar.push(await gridButton(tg, b, node, ctx, `${node.where} button ${i + 1}`));
+            if (!bar.length) tg.isControlBarVisible = false;
+            client.warn(`Forms$TemplateGrid first use by ops: layout as the Studio Pro 10.24 / 11.12 samples; check ${ctx.qn} ${tg.name} in Studio Pro`);
+            return `${tg.name} (template grid, ${shows}, ${tg.numberOfColumns} x ${tg.numberOfRows}, selection ${tg.selectionMode.name}${bar.length ? `, buttons: ${bar.join(", ")}` : ""}) [${inner.join(", ")}]`;
+        },
         async gallery(node, target, ctx) {
             const s = node.spec, ent = node.ent;
             const info = plLive(GALLERY);
@@ -2388,19 +2421,19 @@ function makePages(h) {
                 page.traverse(el => {
                     const k = el instanceof pages.DataGrid || isGrid2(el) ? "dataGrid" : el instanceof pages.DataView ? "dataView" : el instanceof pages.ListView ? "listView" : el instanceof pages.ActionButton ? "actionButton" : el instanceof pages.LayoutGrid ? "layoutGrid" :
                         el instanceof pages.TabContainer ? "tabContainer" : el instanceof pages.GroupBox ? "groupBox" : el instanceof pages.SnippetCallWidget ? "snippetCall" : el instanceof pages.StaticImageViewer || el instanceof pages.DynamicImageViewer ? "image" :
-                            el instanceof pages.ReferenceSelector ? "referenceSelector" : el instanceof pages.InputReferenceSetSelector ? "referenceSetSelector" : isPl(el, COMBOBOX) ? "comboBox" : isPl(el, GALLERY) ? "gallery" : null;
+                            el instanceof pages.TemplateGrid ? "templateGrid" : el instanceof pages.ReferenceSelector ? "referenceSelector" : el instanceof pages.InputReferenceSetSelector ? "referenceSetSelector" : isPl(el, COMBOBOX) ? "comboBox" : isPl(el, GALLERY) ? "gallery" : null;
                     if (k) have[k] = (have[k] || 0) + 1;
                     if (el instanceof pages.Widget) names.set(el.name, el);
                     if (el instanceof pages.ListenTargetSource) listens.push(el.listenTarget);
                 });
-                for (const k of ["dataGrid", "dataView", "listView", "layoutGrid", "actionButton", "tabContainer", "groupBox", "snippetCall", "image", "referenceSelector", "referenceSetSelector", "comboBox", "gallery"]) if ((have[k] || 0) < (want[k] || 0)) r.push(`${qn} has ${have[k] || 0} ${k}(s), expected at least ${want[k]}`);
+                for (const k of ["dataGrid", "dataView", "listView", "layoutGrid", "actionButton", "tabContainer", "groupBox", "snippetCall", "image", "referenceSelector", "referenceSetSelector", "comboBox", "gallery", "templateGrid"]) if ((have[k] || 0) < (want[k] || 0)) r.push(`${qn} has ${have[k] || 0} ${k}(s), expected at least ${want[k]}`);
                 for (const x of namedSources(o.widgets)) {
                     const w = names.get(x.name), got = w && sourceKind(w);
                     if (w && got !== x.source) r.push(`${qn}: ${x.name} has a ${got || "no"} source, expected ${x.source}`);
                 }
                 for (const t of listens) {
                     const w = names.get(t);
-                    if (!(w instanceof pages.DataGrid || w instanceof pages.ListView || isGrid2(w) || isPl(w, GALLERY))) r.push(`${qn}: a data view listens to '${t}', which is no grid, list view or gallery on the page`);
+                    if (!(w instanceof pages.DataGrid || w instanceof pages.TemplateGrid || w instanceof pages.ListView || isGrid2(w) || isPl(w, GALLERY))) r.push(`${qn}: a data view listens to '${t}', which is no grid, list view or gallery on the page`);
                     else if ((isGrid2(w) || isPl(w, GALLERY)) && valueOf(w.object, "itemSelection").selection !== cw.CustomWidgetSelectionType.Single) r.push(`${qn}: ${t} is listened to but its selection is not Single`);
                 }
             }

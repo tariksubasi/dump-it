@@ -157,6 +157,20 @@ Master-detail (selected customer + its orders): a list view INSIDE the listening
                { "widget": "dataView", "listenTo": "dataGrid", "editable": false, "fields": ["Name"],
                  "widgets": [ { "widget": "listView", "entity": "Sales.Order", "fields": ["Number", "Total"], "xpath": "[Sales.Order_Customer = '[%CurrentObject%]']" } ] } ] } ] }
 
+Relational page: the selected order, its customer over the reference, an editable list of its lines (association,
+an input per line), and a button that passes the selected lines (Multi) to a microflow ("params"; variables:
+$currentObject, $<dataView>, $<grid>.selection, $<PageParameter> or an expression):
+{ "ops": [ { "op": "createPage", "module": "Sales", "name": "Order_Lines", "entity": "Sales.Order", "roles": ["Sales.User"],
+  "widgets": [ { "widget": "dataGrid", "name": "ordersGrid", "columns": ["Number"] },
+               { "widget": "dataView", "name": "orderView", "listenTo": "ordersGrid", "widgets": [
+                 { "widget": "dataView", "association": "Sales.Order_Customer", "editable": false, "fields": ["Name"] },
+                 { "widget": "listView", "association": "Sales.OrderLine_Order", "widgets": [ { "widget": "input", "attribute": "Quantity" } ] },
+                 { "widget": "dataGrid", "name": "lineGrid", "association": "Sales.OrderLine_Order", "selection": "Multi", "columns": ["Quantity"] },
+                 { "widget": "actionButton", "action": "callMicroflow", "microflow": "Sales.ACT_Lines_Split", "caption": "Split", "params": { "Lines": "$lineGrid.selection" } } ],
+                 "footer": [ { "widget": "actionButton", "action": "save", "closePage": false } ] } ] } ] }
+  Sources: "association" (from the object around), "microflow"/"nanoflow" (return type checked), "context" (a data
+  view in a list item); a list over Order without "source" shows every order in the database.
+
 Menu item for ONE role: a menu item has no roles; it shows for the user roles that may open the page. So:
 { "ops": [
   { "op": "grantAccess", "document": "Sales.Order_List", "roles": ["Sales.Manager"] },

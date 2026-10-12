@@ -381,6 +381,8 @@ class PageRenderer:
             for k in ("Microflow", "Nanoflow", "Form"):
                 if v.get(k):
                     out.append("%s: %s %s" % (key, k.lower(), v[k]))
+            if v.get("Selection") not in (None, "None"):
+                out.append("%s: selection %s" % (key, v["Selection"]))
             if clean(v.get("XPathConstraint")):
                 out.append("%s: where %s" % (key, clean(v["XPathConstraint"])))
             if isinstance(v.get("TextTemplate"), dict):

@@ -207,6 +207,15 @@ function relationalPlan(mod, T, x) {
             ...(x.grid2 ? [{ widget: "dataGrid", kind: "datagrid2", name: "zzClickGrid", columns: ["Number", { dynamicText: "No. {Number}", caption: "Text" },
                 { caption: "Open", widgets: [{ widget: "actionButton", name: "zzRowBtn", action: "showPage", page: `${mod}.${T}_OrderEdit`, caption: "Open" }] }], onClick: { action: "showPage", page: `${mod}.${T}_OrderEdit` } }] : []),
             ...(x.gallery ? [{ widget: "gallery", name: "zzClickGallery", widgets: [{ widget: "text", text: "{Number}" }], onClick: { action: "callMicroflow", microflow: `${mod}.${T}_ACT_Order`, params: { Note: "'item'" } } }] : [])] },
+        // template grids: database with a control bar and a button per tile, a listening data view with an editable
+        // template grid over the association; addWidgets into a tile
+        { op: "createPage", module: mod, name: `${T}_Tiles`, entity: e("Order"), folder: "ZzTest", widgets: [
+            { widget: "templateGrid", name: "zzTiles", widgets: [{ widget: "text", text: "{Number}" }, { widget: "actionButton", name: "zzTileBtn", action: "showPage", page: `${mod}.${T}_OrderEdit`, caption: "Open" }],
+                buttons: [{ action: "new", page: `${mod}.${T}_OrderEdit` }, { action: "edit", page: `${mod}.${T}_OrderEdit` }, { action: "delete" }] },
+            { widget: "dataView", name: "zzTileOrder", listenTo: "zzTiles", widgets: [
+                { widget: "templateGrid", name: "zzLineTiles", association: a("OLine", "Order"), columns: 3, widgets: [{ widget: "input", name: "zzTileQty", attribute: "Quantity" }] }],
+                footer: [{ widget: "actionButton", action: "save" }] }] },
+        { op: "addWidgets", page: `${mod}.${T}_Tiles`, into: "zzLineTiles", widgets: [{ widget: "text", name: "zzTileNote", text: "{Note}" }] },
         // changeWidget: a button's action, on change of an input, on click of a Data grid 2
         { op: "changeWidget", page: `${mod}.${T}_Orders`, widget: "zzSwapBtn", action: { action: "showPage", page: `${mod}.${T}_OrderEdit`, params: { [`${T}Order`]: "$zzOrder" } } },
         { op: "changeWidget", page: `${mod}.${T}_Orders`, widget: "zzQty", onChange: { action: "callMicroflow", microflow: `${mod}.${T}_OCH_Line` } },
@@ -324,6 +333,20 @@ function relationalProblems(project, mod, T, x) {
         const oc = (cwProp(named.get("zzCustCombo"), "onChangeEvent") || {}).Action || {};
         if (oc.$Type !== "Forms$MicroflowAction") r.push("zzCustCombo has no on change microflow");
     }
+    // template grids
+    const tiles = pageOf(`${T}_Tiles`);
+    if (!tiles) return r.concat(`${T}_Tiles missing`);
+    walkPlain(tiles, o => {
+        if (o.Name && !named.has(o.Name)) named.set(o.Name, o);
+        const want = WIDGET_KEYS[o.$Type] || SOURCE_KEYS[o.$Type], have = Object.keys(o).filter(k => k[0] !== "$").sort().join(" ");
+        if (want && have !== want) r.push(`${o.$Type} has keys [${have}], Studio Pro stores [${want}]`);
+    });
+    const tg = named.get("zzTiles"), ltg = named.get("zzLineTiles");
+    if (!tg || tg.DataSource.$Type !== "Forms$GridXPathSource" || tg.DataSource.EntityRef.Entity !== e("Order") || tg.Contents.Widgets.length !== 2) r.push("zzTiles is not a template grid of orders with 2 widgets per tile");
+    const tEdit = tg && tg.ControlBar.NewButtons.find(b => b.Action && b.Action.$Type === "Forms$FormAction");
+    if (!tEdit || tEdit.Action.FormSettings.ParameterMappings[0].Variable.Widget !== "zzTiles" || tg.ControlBar.DefaultButtonPointer !== tEdit.$ID) r.push("zzTiles's edit button does not map the selected tile");
+    if (!tg || tg.ControlBar.NewButtons.length !== 3) r.push("zzTiles has not 3 control bar buttons");
+    if (!ltg || !step(ltg.DataSource, a("OLine", "Order"), e("OLine")) || ltg.NumberOfColumns !== 3 || !ltg.Contents.Widgets.some(w => w.Name === "zzTileQty" && w.SourceVariable === null) || !ltg.Contents.Widgets.some(w => w.Name === "zzTileNote")) r.push("zzLineTiles is not an editable template grid over the reverse of OLine_Order (with the added text)");
     const cds = ds("zzCustDs");
     if (!cds || cds.$Type !== "Forms$NanoflowSource" || JSON.stringify(cds.ParameterMappings.map(m => [m.Parameter.split(".").pop(), m.Expression])) !== JSON.stringify([["Order", "$zzOrder"]])) r.push("zzCustDs is not a nanoflow source with Order = $zzOrder");
     if (x.snippetParam) {
@@ -402,7 +425,9 @@ const WIDGET_KEYS = {
     "Forms$GridNewButton": "Appearance ButtonStyle CaptionTemplate ConditionalVisibilitySettings EditLocation Entity FormSettings Icon Name Tooltip",
     "Forms$GridActionButton": "Action Appearance ButtonStyle CaptionTemplate ConditionalVisibilitySettings Icon MaintainSelectionAfterMicroflow Name Tooltip",
     "Forms$InputReferenceSetSelector": "Appearance AttributeRef ConditionalEditabilitySettings ConditionalVisibilitySettings Editable LabelTemplate Name OnChangeAction PopupFormSettings ReadOnlyStyle ScreenReaderLabel SelectorSource SourceVariable TabIndex",
-    "Forms$SelectorMicroflowSource": "DataSourceMicroflowSettings"
+    "Forms$SelectorMicroflowSource": "DataSourceMicroflowSettings",
+    "Forms$TemplateGrid": "Appearance ConditionalVisibilitySettings Contents ControlBar DataSource DefaultButtonTrigger IsControlBarVisible Name NumberOfColumns NumberOfRows RefreshTime SelectFirst SelectionMode ShowPagingBar TabIndex",
+    "Forms$TemplateGridContents": "Widgets"
 };
 
 // The widget page as stored: Studio Pro's keys per type, every planned kind present, the conditions, the pluggable
@@ -1068,7 +1093,7 @@ async function selftest(mpr, keep, { out, relevant }) {
             check(`widget page stored with Studio Pro's keys (${kinds.join(", ")}; visible, editable, class, style)`, !wp.length, wp.slice(0, 5).join("; "));
             const rel = relationalProblems(s2.ctx.project, mod, T, wt);
             if (!wt.snippetParam) results.push("SKIP snippet call with parameters: no snippet of this project has one object parameter of a project entity");
-            check(`relational pages stored like Studio Pro (grid buttons new/edit/delete/flow with Multi selection, ${wt.grid2 ? "Data grid 2 onClick + dynamic text + custom content, " : ""}${wt.gallery ? "gallery onClick, " : ""}reference set selector, selectable objects by microflow, on change${wt.combo ? " (also combo box)" : ""}, changeWidget action/onChange${wt.grid2 ? "/onClick" : ""}; params: Multi selection -> List, grid selection, data view, expression, 2 page parameters${wt.snippetParam ? ", snippet parameter" : ""}; grid -> listening data view -> data view over a reference, editable list view over the reverse reference -> context data view -> reference selector; association grid${wt.gallery ? ", gallery" : ""}${wt.grid2 ? ", Data grid 2" : ""}; microflow and nanoflow sources; 3-level master-detail by XPath; addWidgets)`, !rel.length, rel.slice(0, 5).join("; "));
+            check(`relational pages stored like Studio Pro (template grids with control bar, over an association, addWidgets into a tile; grid buttons new/edit/delete/flow with Multi selection, ${wt.grid2 ? "Data grid 2 onClick + dynamic text + custom content, " : ""}${wt.gallery ? "gallery onClick, " : ""}reference set selector, selectable objects by microflow, on change${wt.combo ? " (also combo box)" : ""}, changeWidget action/onChange${wt.grid2 ? "/onClick" : ""}; params: Multi selection -> List, grid selection, data view, expression, 2 page parameters${wt.snippetParam ? ", snippet parameter" : ""}; grid -> listening data view -> data view over a reference, editable list view over the reverse reference -> context data view -> reference selector; association grid${wt.gallery ? ", gallery" : ""}${wt.grid2 ? ", Data grid 2" : ""}; microflow and nanoflow sources; 3-level master-detail by XPath; addWidgets)`, !rel.length, rel.slice(0, 5).join("; "));
         }
 
         // phase T: a new language, translations of existing texts (page title, enumeration caption, show-message text,

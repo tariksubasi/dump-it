@@ -325,6 +325,7 @@ function makePageEdit(h, I) {
             if (slot !== undefined && !/^(footer|body|widgets)$/i.test(String(slot))) fail(`${where}: slot '${slot}' is not known (a data view has body and footer)`, slot, ["footer", "body"]);
             return slotOf(P, footer ? el.footerWidgets : el.widgets, node, footer ? `${node.name} footer` : node.name);
         } else if (el instanceof pages.DivContainer || el instanceof pages.GroupBox || el instanceof pages.TabPage || el instanceof pages.ListView) out = slotOf(P, el.widgets, node, node.name);
+        else if (el instanceof pages.TemplateGrid) out = slotOf(P, el.contents.widgets, node, node.name);
         else if (el instanceof pages.LayoutGrid) {
             const cols = columnPaths(node);
             if (cols.length !== 1) throw new Error(`${where}: into '${s}': a layout grid holds widgets in its columns; name one: ${cols.join(", ")}`);
@@ -776,7 +777,7 @@ function makePageEdit(h, I) {
             if (needs) throw e;
             return null;
         });
-        if (dc && dc.kind !== "dataView" && dc.kind !== "listView") throw new Error(`${where}: widgets inside a ${dc.kind === "pluggable" ? "pluggable widget" : "template grid"} are not supported; add them in Studio Pro`);
+        if (dc && !["dataView", "listView", "templateGrid"].includes(dc.kind)) throw new Error(`${where}: widgets inside a pluggable widget are not supported; add them in Studio Pro`);
         const nodes = [];
         const top = I.scan(o.widgets, "widgets", dc, nodes);
         if (!top.length) throw new Error(`${where}: 'widgets' is empty`);
@@ -786,7 +787,7 @@ function makePageEdit(h, I) {
         for (const p of params) if (!ctx.params.has(p.parameterType.entityQualifiedName)) ctx.params.set(p.parameterType.entityQualifiedName, p);
         const dflt = o.entity || (params.length === 1 ? params[0].parameterType.entityQualifiedName : undefined);
         I.prepare(nodes);
-        for (const n of nodes) if (["dataGrid", "listView", "gallery"].includes(n.kind)) await I.listEntity(n, { dflt });
+        for (const n of nodes) if (["dataGrid", "listView", "gallery", "templateGrid"].includes(n.kind)) await I.listEntity(n, { dflt });
         for (const n of nodes) if (n.kind === "dataGrid") I.gridKind(n);
         for (const n of nodes) {
             if (!n.name) continue;
@@ -797,7 +798,7 @@ function makePageEdit(h, I) {
             if (t.name && P.names.includes(t.name)) throw new Error(`${t.where}: the name '${t.name}' is already used on ${P.qn}`);
             if (t.name) ctx.names.reserve(t.name, t.where);
         }
-        for (const n of nodes) if (!n.name && ["dataGrid", "listView", "gallery"].includes(n.kind)) n.name = ctx.names.next(n.gridKind === "datagrid2" ? "dataGrid2_" : n.kind === "dataGrid" ? "grid" : n.kind);
+        for (const n of nodes) if (!n.name && ["dataGrid", "listView", "gallery", "templateGrid"].includes(n.kind)) n.name = ctx.names.next(n.gridKind === "datagrid2" ? "dataGrid2_" : n.kind === "dataGrid" ? "grid" : n.kind);
         // data views: listen to a grid or list view (new or on the page), show an existing page parameter, the object
         // around them, an object over an association or from a flow
         const existing = await scopeOf(P, where);
@@ -1010,7 +1011,7 @@ function makePageEdit(h, I) {
         return bits.join(", ");
     }
 
-    const INTO = el => el instanceof pages.LayoutCallArgument || el instanceof pages.LayoutGridColumn || el instanceof pages.DivContainer || el instanceof pages.GroupBox || el instanceof pages.TabPage || el instanceof pages.ListView || el instanceof pages.DataView;
+    const INTO = el => el instanceof pages.TemplateGrid || el instanceof pages.LayoutCallArgument || el instanceof pages.LayoutGridColumn || el instanceof pages.DivContainer || el instanceof pages.GroupBox || el instanceof pages.TabPage || el instanceof pages.ListView || el instanceof pages.DataView;
 
     async function widgets(qn) {
         const P = await open(qn, "widgets").catch(e => {
