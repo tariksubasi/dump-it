@@ -153,6 +153,12 @@ function relationalPlan(mod, T, x) {
         { op: "createMicroflow", module: mod, name: `${T}_DS_Lines`, folder: "ZzTest", parameters: [{ name: "Order", type: e("Order") }], returns: `List(${e("OLine")})`,
             actions: [{ action: "retrieve", variable: "Lines", from: "Order", association: a("OLine", "Order") }], returnValue: "$Lines" },
         { op: "createNanoflow", module: mod, name: `${T}_DS_NewOrder`, folder: "ZzTest", returns: e("Order"), actions: [{ action: "create", variable: "New", entity: e("Order") }], returnValue: "$New" },
+        { op: "createNanoflow", module: mod, name: `${T}_DS_Cust`, folder: "ZzTest", parameters: [{ name: "Order", type: e("Order") }], returns: e("Cust"),
+            actions: [{ action: "retrieve", variable: "Cust", from: "Order", association: a("Order", "Cust") }], returnValue: "$Cust" },
+        { op: "createMicroflow", module: mod, name: `${T}_ACT_Lines`, folder: "ZzTest", parameters: [{ name: "Lines", type: `List(${e("OLine")})` }], actions: [{ action: "log", message: "lines" }] },
+        { op: "createMicroflow", module: mod, name: `${T}_ACT_Order`, folder: "ZzTest", parameters: [{ name: "Order", type: e("Order") }, { name: "Note", type: "String" }], actions: [{ action: "log", message: "order" }] },
+        { op: "createPage", module: mod, name: `${T}_Two`, folder: "ZzTest", widgets: [
+            { widget: "dataView", entity: e("Order"), editable: false, fields: ["Number"] }, { widget: "dataView", entity: e("Cust"), editable: false, fields: ["Name"] }] },
         { op: "createPage", module: mod, name: `${T}_Orders`, entity: e("Order"), folder: "ZzTest", widgets: [
             { widget: "dataGrid", name: "zzOrders", columns: ["Number", "Placed"] },
             { widget: "dataView", name: "zzOrder", listenTo: "zzOrders", widgets: [
@@ -160,11 +166,18 @@ function relationalPlan(mod, T, x) {
                 { widget: "listView", name: "zzLines", association: a("OLine", "Order"), widgets: [
                     { widget: "input", attribute: "Quantity", name: "zzQty" },
                     { widget: "dataView", name: "zzLine", widgets: [{ widget: "input", attribute: "Note" }, { widget: "referenceSelector", name: "zzProd", association: a("OLine", "Prod"), attribute: "Name" }] }] },
-                { widget: "dataGrid", name: "zzLineGrid", source: "association", association: a("OLine", "Order"), columns: ["Quantity", "Note"] },
+                { widget: "dataGrid", name: "zzLineGrid", source: "association", association: a("OLine", "Order"), columns: ["Quantity", "Note"], selection: "Multi" },
+                { widget: "actionButton", name: "zzLinesBtn", action: "callMicroflow", microflow: `${mod}.${T}_ACT_Lines`, caption: "Lines", params: { Lines: "$zzLineGrid.selection" } },
+                { widget: "actionButton", name: "zzNoteBtn", action: "callMicroflow", microflow: `${mod}.${T}_ACT_Order`, caption: "Note", params: { Note: "'hi'" } },
+                { widget: "dataView", name: "zzCustDs", nanoflow: `${mod}.${T}_DS_Cust`, params: { Order: "$zzOrder" }, editable: false, fields: ["Name"],
+                    footer: [{ widget: "actionButton", name: "zzTwoBtn", action: "showPage", page: `${mod}.${T}_Two`, caption: "Two", params: { [`${T}Order`]: "$zzOrder", [`${T}Cust`]: "$currentObject" } }] },
                 { widget: "listView", name: "zzLinesMf", microflow: `${mod}.${T}_DS_Lines`, fields: ["Quantity"] },
                 ...(x.gallery ? [{ widget: "gallery", name: "zzLineGallery", association: a("OLine", "Order"), widgets: [{ widget: "text", text: "{Quantity}" }] }] : []),
                 ...(x.grid2 ? [{ widget: "dataGrid", kind: "datagrid2", name: "zzLineGrid2", association: a("OLine", "Order"), columns: ["Quantity"] }] : [])],
-                footer: [{ widget: "actionButton", action: "save" }] }] },
+                footer: [{ widget: "actionButton", action: "save" }] },
+            { widget: "actionButton", name: "zzTopBtn", action: "callMicroflow", microflow: `${mod}.${T}_ACT_Order`, caption: "Top", params: { Order: "$zzOrders.selection", Note: "'top'" } }] },
+        ...(x.snippetParam ? [{ op: "createPage", module: mod, name: `${T}_Snip`, folder: "ZzTest", widgets: [{ widget: "dataView", name: "zzSnipDv", entity: x.snippetParam.entity, editable: false, buttons: false,
+            widgets: [{ widget: "snippetCall", name: "zzSnipMapped", snippet: x.snippetParam.snippet, params: { [x.snippetParam.param]: "$currentObject" } }, { widget: "snippetCall", name: "zzSnipImplicit", snippet: x.snippetParam.snippet }] }] }] : []),
         { op: "createPage", module: mod, name: `${T}_Master3`, entity: e("Cust"), folder: "ZzTest", widgets: [
             { widget: "dataGrid", name: "zzCusts", columns: ["Name"] },
             { widget: "dataView", name: "zzCustDv", listenTo: "zzCusts", editable: false, widgets: [
@@ -222,6 +235,31 @@ function relationalProblems(project, mod, T, x) {
     if ((ds("zzNewOrder") || {}).$Type !== "Forms$NanoflowSource" || ds("zzNewOrder").Nanoflow !== `${mod}.${T}_DS_NewOrder`) r.push("zzNewOrder is not a data view from the nanoflow");
     for (const n of ["zzCustOrders", "zzOrderLines"]) if (!/\[%CurrentObject%\]/.test((ds(n) || {}).XPathConstraint || "")) r.push(`${n} has no [%CurrentObject%] XPath`);
     for (const p of [orders, master, nf]) if ((p.Parameters || []).length) r.push(`${p.Name} has a page parameter`);
+    // parameter mappings: keys as Studio Pro stores them, variables naming the right widgets, expressions as given
+    const maps = o => (o.MicroflowSettings || o.FormSettings || o).ParameterMappings || [];
+    const act = n => (named.get(n) || {}).Action || {};
+    const two = pageOf(`${T}_Two`);
+    if (!two || (two.Parameters || []).length !== 2) r.push(`${T}_Two has not 2 page parameters`);
+    const want = { zzLinesBtn: [["Lines", null, "zzLineGrid"]], zzNoteBtn: [["Note", "'hi'", null]], zzTopBtn: [["Order", null, "zzOrders"], ["Note", "'top'", null]], zzTwoBtn: [[`${T}Order`, null, "zzOrder"], [`${T}Cust`, null, "zzCustDs"]] };
+    for (const [btn, list] of Object.entries(want)) {
+        const got = maps(act(btn)).map(m => [m.Parameter.split(".").pop(), m.Expression !== undefined ? m.Expression || null : m.Argument || null, m.Variable ? m.Variable.Widget || m.Variable.PageParameter : null]);
+        if (JSON.stringify(got) !== JSON.stringify(list)) r.push(`${btn} maps ${JSON.stringify(got)}, expected ${JSON.stringify(list)}`);
+        for (const m of maps(act(btn))) {
+            const keys = Object.keys(m).filter(k => k[0] !== "$").sort().join(" "), wantKeys = m.$Type === "Forms$PageParameterMapping" ? "Argument Parameter Variable" : "Expression Parameter Variable";
+            if (keys !== wantKeys) r.push(`${m.$Type} has keys [${keys}], Studio Pro stores [${wantKeys}]`);
+        }
+    }
+    const cds = ds("zzCustDs");
+    if (!cds || cds.$Type !== "Forms$NanoflowSource" || JSON.stringify(cds.ParameterMappings.map(m => [m.Parameter.split(".").pop(), m.Expression])) !== JSON.stringify([["Order", "$zzOrder"]])) r.push("zzCustDs is not a nanoflow source with Order = $zzOrder");
+    if (x.snippetParam) {
+        const sp = pageOf(`${T}_Snip`);
+        const calls = [];
+        if (sp) walkPlain(sp, o => o.$Type === "Forms$SnippetCallWidget" && calls.push(o));
+        const mapped = calls.find(c => c.Name === "zzSnipMapped"), implicit = calls.find(c => c.Name === "zzSnipImplicit");
+        const m = mapped && mapped.FormCall.ParameterMappings[0];
+        if (!m || m.Variable.Widget !== "zzSnipDv" || !m.Parameter.endsWith("." + x.snippetParam.param)) r.push("zzSnipMapped does not map its parameter to zzSnipDv");
+        if (!implicit || implicit.FormCall.ParameterMappings.length) r.push("zzSnipImplicit has parameter mappings (Studio Pro passes the object implicitly)");
+    }
     if ((named.get("zzQty") || {}).SourceVariable !== null || (named.get("zzProd") || {}).SourceVariable !== null) r.push("an input of a list item has a SourceVariable (Studio Pro writes null)");
     return [...new Set(r)];
 }
@@ -236,6 +274,16 @@ async function widgetTargets(model, project) {
     for (const sn of [...model.allSnippets()].sort((a, b) => (a.qualifiedName < b.qualifiedName ? -1 : 1))) {
         if (!(await sn.load()).parameters.length) {
             out.snippet = sn.qualifiedName;
+            break;
+        }
+    }
+    // a snippet with one object parameter of a project entity (snippetCall with "params")
+    for (const sn of [...model.allSnippets()].sort((a, b) => (a.qualifiedName < b.qualifiedName ? -1 : 1))) {
+        const full = await sn.load();
+        const p = full.parameters.length === 1 && full.parameters[0];
+        const qn = p && p.parameterType instanceof sdk.datatypes.ObjectType ? p.parameterType.entityQualifiedName : null;
+        if (qn && !qn.startsWith("System.") && model.allDomainModels().some(d => d.containerAsModule.name === qn.split(".")[0])) {
+            out.snippetParam = { snippet: sn.qualifiedName, param: p.name, entity: qn };
             break;
         }
     }
@@ -940,7 +988,8 @@ async function selftest(mpr, keep, { out, relevant }) {
             const kinds = ["tab container", "group box", "reference selector", wt.snippet && "snippet call", wt.image && "image", wt.imageEntity && "dynamic image", wt.combo && "combo box x2", wt.gallery && "gallery"].filter(Boolean);
             check(`widget page stored with Studio Pro's keys (${kinds.join(", ")}; visible, editable, class, style)`, !wp.length, wp.slice(0, 5).join("; "));
             const rel = relationalProblems(s2.ctx.project, mod, T, wt);
-            check(`relational pages stored like Studio Pro (grid -> listening data view -> data view over a reference, editable list view over the reverse reference -> context data view -> reference selector; association grid${wt.gallery ? ", gallery" : ""}${wt.grid2 ? ", Data grid 2" : ""}; microflow and nanoflow sources; 3-level master-detail by XPath; addWidgets)`, !rel.length, rel.slice(0, 5).join("; "));
+            if (!wt.snippetParam) results.push("SKIP snippet call with parameters: no snippet of this project has one object parameter of a project entity");
+            check(`relational pages stored like Studio Pro (params: Multi selection -> List, grid selection, data view, expression, 2 page parameters${wt.snippetParam ? ", snippet parameter" : ""}; grid -> listening data view -> data view over a reference, editable list view over the reverse reference -> context data view -> reference selector; association grid${wt.gallery ? ", gallery" : ""}${wt.grid2 ? ", Data grid 2" : ""}; microflow and nanoflow sources; 3-level master-detail by XPath; addWidgets)`, !rel.length, rel.slice(0, 5).join("; "));
         }
 
         // phase T: a new language, translations of existing texts (page title, enumeration caption, show-message text,

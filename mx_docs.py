@@ -157,11 +157,18 @@ def _event_label(key):
     return words or "action"
 
 
+# widget name -> $Type of the page being rendered: a mapping to a grid, list view or gallery passes its selection
+_PAGE_WIDGETS = {}
+_LISTS = ("Forms$DataGrid", "Forms$TemplateGrid", "Forms$ListView", "CustomWidgets$CustomWidget")
+
+
 def page_var(var):
     if not isinstance(var, dict):
         return ""
     for key, prefix in (("PageParameter", "$"), ("SnippetParameter", "$"), ("LocalVariable", "$"), ("Widget", "widget ")):
         if var.get(key):
+            if key == "Widget" and _PAGE_WIDGETS:
+                return ("selection of " if _PAGE_WIDGETS.get(var[key]) in _LISTS else "$") + var[key]
             return prefix + var[key]
     return ""
 
@@ -173,6 +180,8 @@ class PageRenderer:
 
     def render(self):
         d = self.doc
+        _PAGE_WIDGETS.clear()
+        self._names(d)
         out = ["%s %s" % (PAGE_HEADINGS.get(d["$Type"], d["$Type"]), self.qn)]
         if self.unit.excluded:
             out.append("EXCLUDED: yes (not part of the build)")
@@ -202,6 +211,17 @@ class PageRenderer:
                 self._collect_widgets(v, roots)
         self._widgets(roots, 1)
         return "\n".join(out + ["", "WIDGETS:"] + (self.lines or ["  (none)"])) + "\n"
+
+    def _names(self, value):
+        if isinstance(value, list):
+            for v in value:
+                self._names(v)
+        elif isinstance(value, dict):
+            if _is_widget(value):
+                _PAGE_WIDGETS.setdefault(value["Name"], value["$Type"])
+            for k, v in value.items():
+                if k != "Type":
+                    self._names(v)
 
     def _collect_widgets(self, value, found):
         if isinstance(value, list):
@@ -282,6 +302,8 @@ class PageRenderer:
             out.append("image " + w["Image"])
         if (w.get("Editable") in ("Never", False) or w.get("Editability") == "Never") and w["$Type"] != "Forms$ListView" and not w.get("ConditionalEditabilitySettings"):
             out.append("read-only")
+        if w["$Type"] in ("Forms$DataGrid", "Forms$TemplateGrid") and w.get("SelectionMode") not in (None, "Single"):
+            out.append("selection " + w["SelectionMode"])
         if w["$Type"] == "Forms$GroupBox" and w.get("Collapsible") not in (None, "No"):
             out.append("collapsible" + (" (collapsed)" if w["Collapsible"] == "YesInitiallyCollapsed" else ""))
         for k, v in w.items():

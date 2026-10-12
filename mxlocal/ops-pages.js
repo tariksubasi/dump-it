@@ -11,13 +11,15 @@ const { userRoleNamed } = require("./ops-security");
 
 const { pages, domainmodels: dm, datatypes, menus, navigation, microflows: mf, customwidgets: cw, enumerations } = sdk;
 
+const PARAMS = "optional { \"<Parameter>\": \"$currentObject\" | \"$<dataView>\" (one around it, or one that listens) | \"$<grid>.selection\" (a List parameter gets a Multi selection) | \"$<PageParameter>\" | an expression for other parameters } (default: the objects around it, as Studio Pro passes them)";
 const ASSOC_ONE = "with source association: Module.Assoc (or a path A/B) from the object around it to one object: a reference it owns (Order_Customer in a data view of Order)";
 // source fields of the list kinds (dataGrid, listView, gallery)
 const LIST_SOURCE = {
     source: "optional database | association | microflow | nanoflow (default database; association / microflow / nanoflow when that field is given)",
     association: "with source association: Module.Assoc from the object around it (data view, list view or gallery item) to many objects: a reference set it owns, or the reference another entity has to it (OrderLine_Order in a data view of Order)",
     microflow: "with source microflow: Module.Microflow that returns a list (of entity)",
-    nanoflow: "with source nanoflow: Module.Nanoflow that returns a list"
+    nanoflow: "with source nanoflow: Module.Nanoflow that returns a list",
+    params: "with source microflow / nanoflow: its parameters, " + PARAMS.slice(9)
 };
 const EDITABLE = "optional true | false | an expression \"$currentObject/Open\" | { \"attribute\": \"Status\", \"values\": [\"Open\"] } (editable only then)";
 // Widget kinds of createPage "widgets" (also the help text). Every widget also takes "name" and COMMON_FIELDS.
@@ -37,6 +39,7 @@ const WIDGETS = {
             association: ASSOC_ONE,
             microflow: "with source microflow: Module.Microflow that returns one object (of entity)",
             nanoflow: "with source nanoflow: Module.Nanoflow that returns one object",
+            params: "with source microflow / nanoflow: its parameters, " + PARAMS.slice(9),
             editable: "optional true/false (default true; an editable data view needs a save button: \"buttons\": true or one in footer, or one in a data view around it)",
             fields: "optional [ \"Attribute\" ] inputs by attribute type (default: all attributes, unless widgets is given)",
             buttons: "optional true/false: Save/Cancel in the footer (default: true for an editable parameter data view)",
@@ -68,6 +71,7 @@ const WIDGETS = {
             action: "R save | cancel | close | delete | showPage | callMicroflow | callNanoflow",
             caption: "optional (default Save/Cancel/Close page/Delete; required for the others)",
             page: "showPage: Module.Page", microflow: "callMicroflow: Module.Microflow", nanoflow: "callNanoflow: Module.Nanoflow",
+            params: "showPage / callMicroflow / callNanoflow: page or flow parameters, " + PARAMS.slice(9),
             style: "optional Default | Primary | Success | Info | Warning | Danger | Inverse",
             closePage: "optional true/false for save/cancel/delete (default: true in a parameter data view; false in a listening data view, which stays on the page; Studio Pro's own default is true)"
         }
@@ -75,7 +79,7 @@ const WIDGETS = {
     input: { doc: "input for an attribute, inside a data view or a list view / gallery item (an editable list): text box, text area, check box, date picker or radio buttons (enumeration) by attribute type (or use textBox, textArea, checkBox, datePicker, radioButtons, dropDown)", fields: { attribute: "R attribute name", label: "optional label (default: the attribute name)", editable: EDITABLE } },
     tabContainer: { doc: "tabs, each with its own widgets", fields: { tabs: "R [ { \"caption\": \"General\", \"widgets\": [...], \"name\": optional } ]" } },
     groupBox: { doc: "a box with a caption around widgets", fields: { caption: "optional caption; {Attribute} inside a data view or list view", collapsible: "optional no | expanded | collapsed (default no)", headerMode: "optional Div | H1 ... H6 (default as Studio Pro)", widgets: "[ widgets ]" } },
-    snippetCall: { doc: "shows an existing snippet (one without parameters)", fields: { snippet: "R Module.Snippet" } },
+    snippetCall: { doc: "shows an existing snippet; its parameters get the objects around it, or \"params\"", fields: { snippet: "R Module.Snippet", params: "snippet parameters, " + PARAMS.slice(9) } },
     image: {
         doc: "a static image from an image collection (\"image\"), or without it the image of the object around it (data view / list view / gallery of an entity that inherits System.Image, or over \"association\")",
         fields: { image: "optional Module.Collection.Image (static image)", association: "optional Module.Assoc from the object around it to a System.Image entity (dynamic image)", width: "optional pixels (200) or percent (\"50%\"); default auto", height: "optional pixels or percent; default auto" }
@@ -445,6 +449,123 @@ function makePages(h) {
             (objs.length ? ` (${objs.map(o => `${o.name}: ${o.ent.qualifiedName}`).join(", ")})` : " (it is in none)") + `; ${bad[0].entity ? `${bad[0].name} (${bad[0].entity}) matches none of them` : `${bad[0].name} is not an object`}`);
     }
 
+    // ------------------------------------------------ explicit parameter mapping ("params")
+
+    // Variables a widget can pass: [{ name ("$x"), kind, ent, list (Multi selection), node/widget, text }].
+    // $currentObject = the object around it; enclosing data views by name and data views that listen; grid
+    // selections; page and snippet parameters.
+    async function reachable(node, ctx) {
+        const out = [];
+        const objs = objectsAround(node);
+        if (objs.length) out.push({ name: "$currentObject", kind: "object", ent: objs[0].ent, node: objs[0].node, text: `the ${objs[0].ent.name} of ${objs[0].name}` });
+        for (const o of objs) if (o.node.kind === "dataView" && o.name) out.push({ name: "$" + o.name, kind: "object", ent: o.ent, node: o.node, text: `data view ${o.name} (${o.ent.qualifiedName})` });
+        for (const n of ctx.scope || []) {
+            if (!n.name || !n.ent) continue;
+            if (n.kind === "dataView" && n.source === "listen" && !out.some(x => x.name === "$" + n.name)) out.push({ name: "$" + n.name, kind: "object", ent: n.ent, node: n, text: `data view ${n.name} (${n.ent.qualifiedName}, listens to ${n.target ? n.target.name : "a grid"})` });
+            if (LISTENS.includes(n.kind) || n.kind === "templateGrid") {
+                const sel = String((n.spec && n.spec.selection) || "Single").toLowerCase();
+                if (sel === "none") continue;
+                out.push({ name: `$${n.name}.selection`, kind: "selection", ent: n.ent, list: /multi/.test(sel), node: n, text: `the ${/multi/.test(sel) ? "selected rows (a list)" : "selected row"} of ${n.name} (${n.ent.qualifiedName})` });
+            }
+        }
+        const params = ctx.page ? [...(ctx.page.parameters || [])] : [];
+        for (const p of ctx.params ? ctx.params.values() : []) if (!params.includes(p)) params.push(p);
+        const snip = ctx.page instanceof pages.Snippet;
+        for (const p of params) {
+            const t = p.parameterType;
+            const ent = t instanceof datatypes.ObjectType ? await entityOf(t.entityQualifiedName, node.where).catch(() => null) : null;
+            out.push({ name: "$" + p.name, kind: snip ? "snippetParameter" : "pageParameter", el: p, ent, type: typeText(t), text: `${snip ? "snippet" : "page"} parameter ${p.name} (${typeText(t)})` });
+        }
+        // parameters a new page gets from its data views (source parameter), named after their entity
+        for (const n of ctx.scope || []) {
+            if (n.kind !== "dataView" || n.source !== "parameter" || !n.ent || ctx.existing || out.some(x => x.kind === "pageParameter" && x.ent === n.ent)) continue;
+            out.push({ name: "$" + n.ent.name, kind: "pageParameter", el: null, ent: n.ent, type: n.ent.qualifiedName, text: `page parameter ${n.ent.name} (${n.ent.qualifiedName})` });
+        }
+        return out;
+    }
+    const SYSTEM_VARS = /^\$(currentUser|currentSession|currentDeviceType)\b/;
+
+    // The "params" of a page, flow or snippet call: [{ p, v (a reachable variable) | expr }] for the given ones; the
+    // rest must be objects around the widget (passed implicitly, as Studio Pro does). target: page | flow | snippet.
+    async function mapParams(given, params, node, ctx, what, target) {
+        if (given === undefined) {
+            implicitOnly(params, node, what);
+            return [];
+        }
+        if (!given || typeof given !== "object" || Array.isArray(given)) throw new Error(`${node.where}: params is { "<Parameter>": "$currentObject" | "$dataView1" | "$grid1.selection" | "$Parameter" | expression }`);
+        const vars = await reachable(node, ctx);
+        const list = () => vars.length ? vars.map(v => `${v.name} = ${v.text}`).join("; ") : "none (the widget is in no data view or list item, and the page has no grid or parameter)";
+        const out = [];
+        for (const [k, raw] of Object.entries(given)) {
+            const p = params.find(x => x.name === k);
+            if (!p) fail(`${node.where}: ${what} has no parameter '${k}'${params.length ? ` (parameters: ${params.map(x => `${x.name} (${x.type || x.entity})`).join(", ")})` : " (it has none)"}`, k, params.map(x => x.name));
+            const val = String(raw).trim();
+            const at = `${node.where}: params.${k}`;
+            if (!val) throw new Error(`${at}: empty; give a variable (${vars.map(v => v.name).join(", ") || "none here"}) or an expression`);
+            const m = /^\$([A-Za-z_]\w*)(\.selection)?$/.exec(val);
+            let v = m && !SYSTEM_VARS.test(val) ? vars.find(x => x.name === val) : null;
+            if (m && !v && !SYSTEM_VARS.test(val)) {
+                if (m[2]) fail(`${at}: no grid, list view or gallery '${m[1]}' with a selection on this page. Variables here: ${list()}`, val, vars.map(x => x.name));
+                // $name of something else: an error with what is there (an expression would not find it either)
+                fail(`${at}: '${val}' is no variable here. Variables here: ${list()}`, val, vars.map(x => x.name));
+            }
+            if (v && v.kind === "selection" && /\.selection$/.test(val) && !v.list && p.list) throw new Error(`${at}: ${val} is one object (selection ${(v.node.spec || {}).selection || "Single"}); ${p.name} is a List of ${p.list}: give the grid "selection": "Multi"`);
+            if (v && v.list && !p.list) throw new Error(`${at}: ${val} is a list (Multi selection); ${p.name} takes ${p.type || p.entity}: use a List parameter, or "selection": "Single"`);
+            if (v) {
+                const need = p.entity || p.list;
+                if (!need) throw new Error(`${at}: ${val} is an object (${v.ent ? v.ent.qualifiedName : v.type}); ${p.name} is ${p.type}: give an expression, e.g. "${val}/<Attribute>"`);
+                if (v.ent && !isA(v.ent, need)) throw new Error(`${at}: ${val} is ${v.ent.qualifiedName}; ${p.name} takes ${p.list ? "a List of " : ""}${need}. Variables here: ${list()}`);
+                if (!v.ent && v.type !== need) throw new Error(`${at}: ${val} is ${v.type}; ${p.name} takes ${need}`);
+                out.push({ p, v, text: `${k} = ${val}` });
+            } else {
+                if (p.list) throw new Error(`${at}: ${p.name} is a List of ${p.list}: pass a grid selection "$<grid>.selection" (selection Multi). Variables here: ${list()}`);
+                if (target === "page" && p.entity) throw new Error(`${at}: a page parameter of an object takes a variable (${vars.filter(x => x.ent).map(x => x.name).join(", ") || "none here"}), not an expression`);
+                if (target === "snippet") throw new Error(`${at}: a snippet parameter takes a variable (${vars.filter(x => x.ent).map(x => x.name).join(", ") || "none here"})`);
+                if (/\$currentObject/i.test(val) && !objectsAround(node).length) throw new Error(`${at}: $currentObject is the object around the widget, and it is in none`);
+                out.push({ p, expr: val, text: `${k} = ${val}` });
+            }
+        }
+        const rest = params.filter(x => !(x.name in given));
+        if (rest.length) implicitOnly(rest, node, `${what} (parameters not in "params")`);
+        return out;
+    }
+
+    // Writes mappings (from mapParams) into list after every widget exists (a variable may name a widget built later).
+    // kind: microflow | nanoflow | page | snippet
+    function writeMappings(list, mapped, kind, node, ctx) {
+        if (!mapped.length) return;
+        const cls = { microflow: pages.MicroflowParameterMapping, nanoflow: pages.NanoflowParameterMapping, page: pages.PageParameterMapping, snippet: pages.SnippetParameterMapping }[kind];
+        ctx.after.push(() => {
+            for (const m of mapped) {
+                const x = cls.create(model);
+                list.push(x);
+                x.parameter = m.p.el;
+                const flowExpr = (kind === "microflow" || kind === "nanoflow") && m.v && m.v.kind !== "selection";
+                if (m.expr !== undefined || flowExpr) {
+                    // flows: an expression ($currentObject, $dataView1, $Param or any), as Studio Pro stores them
+                    if (kind === "page" || kind === "snippet") setIfAvailable(x, "argument", m.expr);
+                    else x.expression = m.expr !== undefined ? m.expr : m.v.name;
+                    continue;
+                }
+                const v = pages.PageVariable.create(model);
+                x.variable = v; // attach first: the references are local to the page
+                if (m.v.kind === "pageParameter") v.pageParameter = m.v.el || ctx.params.get(m.v.ent.qualifiedName);
+                else if (m.v.kind === "snippetParameter") v.snippetParameter = m.v.el;
+                else {
+                    const w = m.v.node.widget;
+                    if (!w) throw new Error(`${node.where}: ${m.v.name} names a widget that was not built`);
+                    v.widget = w;
+                }
+            }
+            if (kind === "page" && mapped.some(m => m.expr !== undefined)) client.warn(`Forms$PageParameterMapping first use with an argument expression (no Studio Pro sample has primitive page parameters): check ${ctx.qn} ${node.name || node.where} in Studio Pro`);
+            if (kind === "snippet") client.warn(`Forms$SnippetParameterMapping first use (no Studio Pro sample maps snippet parameters explicitly): check ${ctx.qn} ${node.name || node.where} in Studio Pro`);
+        });
+    }
+    const mapText = mapped => (mapped.length ? `(${mapped.map(m => m.text).join(", ")})` : "");
+
+    // parameters of a page or snippet as flowParams gives them
+    const pageParams = page => page.parameters.map(p => ({ name: p.name, el: p, type: typeText(p.parameterType),
+        entity: p.parameterType instanceof datatypes.ObjectType ? p.parameterType.entityQualifiedName : null, list: null }));
     const typeText = t => !t ? "nothing" : t instanceof datatypes.ObjectType ? t.entityQualifiedName : t instanceof datatypes.ListType ? `List of ${t.entityQualifiedName}` : t.structureTypeName.split("$")[1].replace(/Type$/, "");
 
     // A flow and its parameters: [{ name, entity (object parameter), list (entity of a list parameter), type, el }].
@@ -610,7 +731,6 @@ function makePages(h) {
             } else if (n.source === "microflow" || n.source === "nanoflow") {
                 if (!n.flow) n.flow = await flowSource(n);
                 n.ent = n.flow.ent;
-                implicitOnly(n.flow.params, n, n.flow.f.qualifiedName);
             } else {
                 await listEntity(n, o);
                 // lints: a list inside an object that does not use it
@@ -623,6 +743,8 @@ function makePages(h) {
             n.done = true;
         };
         for (const n of nodes) await resolve(n);
+        // flow parameters: once every object on the page is known (a parameter may take a data view or grid elsewhere)
+        for (const n of nodes) if (n.flow && n.done) n.mapped = await mapParams(n.spec.params, n.flow.params, n, ctx, n.flow.f.qualifiedName, "flow");
     }
     // associations between ent and the entity qn, either way (for messages)
     async function assocBetween(ent, qn, ctx) {
@@ -631,7 +753,7 @@ function makePages(h) {
 
     // Writes node's list source into owner (a classic grid / list view, or the datasource value of a pluggable widget);
     // returns how the dry run describes it.
-    function listSource(node, owner, pluggableValue) {
+    function listSource(node, owner, pluggableValue, ctx) {
         const s = node.spec, ent = node.ent;
         const at = (cls) => (pluggableValue ? cls.createInWidgetValueUnderDataSource(owner) : cls.createInEntityWidgetUnderDataSource(owner));
         if (node.source === "database") {
@@ -652,8 +774,8 @@ function makePages(h) {
             stepsInto(at(pages.AssociationSource), node.path);
             return `${ent.qualifiedName} over ${s.association} of ${node.container.name}`;
         }
-        flowInto(node.source === "nanoflow" ? at(pages.NanoflowSource) : at(pages.MicroflowSource), node);
-        return `${ent.qualifiedName} from ${node.source} ${node.flow.f.qualifiedName}`;
+        flowInto(node.source === "nanoflow" ? at(pages.NanoflowSource) : at(pages.MicroflowSource), node, ctx);
+        return `${ent.qualifiedName} from ${node.source} ${node.flow.f.qualifiedName}${mapText(node.mapped || [])}`;
     }
     function stepsInto(src, steps) {
         const er = dm.IndirectEntityRef.createInEntityPathSourceUnderEntityRef(src);
@@ -664,9 +786,10 @@ function makePages(h) {
         }
     }
     // a microflow / nanoflow source: the flow (parameters: implicit, as Studio Pro stores them)
-    function flowInto(src, node) {
+    function flowInto(src, node, ctx) {
         if (node.flow.nano) src.nanoflow = node.flow.f;
         else src.microflowSettings.microflow = node.flow.f;
+        writeMappings(node.flow.nano ? src.parameterMappings : src.microflowSettings.parameterMappings, node.mapped || [], node.flow.nano ? "nanoflow" : "microflow", node, ctx);
     }
 
     // A pluggable widget on the project's pages and snippets: { exemplars (copyable: type = installed .mpk), stale, def, reason }.
@@ -1073,7 +1196,7 @@ function makePages(h) {
         for (const p of grid.object.properties) if (p.type.key !== "columns") await blank(p.value, p.type, null);
         colProp.value.objects.clear();
         for (const col of made) colProp.value.objects.push(col);
-        const shows = listSource(node, props.get("datasource").value, true);
+        const shows = listSource(node, props.get("datasource").value, true, ctx);
         // selection (Single: row click, as Studio Pro's own master-detail grids)
         const selName = { single: "Single", multi: "Multi", none: "None" }[String(node.spec.selection || "Single").toLowerCase()];
         const selVal = props.get("itemSelection").value;
@@ -1319,8 +1442,8 @@ function makePages(h) {
                 how = node.source === "context" ? `the ${ent.name} of ${node.container.name}` : `over ${node.spec.association} of ${node.container.name}`;
                 client.warn(`Forms$DataViewSource first use with source ${node.source} (no Studio Pro 10/11 sample in the test projects has one): check ${ctx.qn} ${dv.name} in Studio Pro`);
             } else {
-                flowInto((node.source === "nanoflow" ? pages.NanoflowSource : pages.MicroflowSource).createInEntityWidgetUnderDataSource(dv), node);
-                how = `${node.source} ${node.flow.f.qualifiedName}`;
+                flowInto((node.source === "nanoflow" ? pages.NanoflowSource : pages.MicroflowSource).createInEntityWidgetUnderDataSource(dv), node, ctx);
+                how = `${node.source} ${node.flow.f.qualifiedName}${mapText(node.mapped || [])}`;
             }
             const editable = bool(node.spec.editable, true);
             // Mendix 10.7+: editability; older: editable
@@ -1357,7 +1480,7 @@ function makePages(h) {
             node.widget = grid;
             const db = node.source === "database";
             if (!db && bool(node.spec.search, false)) throw new Error(`${node.where}: search works with source database only (a ${node.source} source has no search bar)`);
-            const shows = listSource(node, grid, false);
+            const shows = listSource(node, grid, false, ctx);
             const src = grid.dataSource;
             grid.selectionMode = choice(pages.GridSelectionMode, node.spec.selection || "Single", "selection", node.where);
             grid.selectFirst = bool(node.spec.selectFirst, false);
@@ -1427,7 +1550,7 @@ function makePages(h) {
             target.push(lv);
             lv.name = node.name;
             node.widget = lv;
-            const shows = listSource(node, lv, false);
+            const shows = listSource(node, lv, false, ctx);
             if (node.spec.pageSize !== undefined) {
                 const n = Number(node.spec.pageSize);
                 if (!Number.isInteger(n) || n < 1) throw new Error(`${node.where}: pageSize must be a whole number >= 1`);
@@ -1451,6 +1574,7 @@ function makePages(h) {
             if (need && !s[need]) throw new Error(`${node.where}: action ${s.action} needs '${need}'`);
             for (const k of ["page", "microflow", "nanoflow"]) if (s[k] !== undefined && k !== need) throw new Error(`${node.where}: '${k}' does not go with action ${s.action}`);
             if (s.closePage !== undefined && !["save", "cancel", "delete"].includes(action)) throw new Error(`${node.where}: closePage goes with save, cancel or delete`);
+            if (s.params !== undefined && !need) throw new Error(`${node.where}: params goes with showPage, callMicroflow or callNanoflow`);
             const caption = s.caption !== undefined ? String(s.caption) : { save: "Save", cancel: "Cancel", close: "Close page", delete: "Delete" }[action];
             if (caption === undefined) throw new Error(`${node.where}: a ${s.action} button needs 'caption'`);
             const b = pages.ActionButton.create(model);
@@ -1470,16 +1594,25 @@ function makePages(h) {
             else if (action === "showpage") {
                 const page = await h.get(s.page);
                 if (!(page instanceof pages.Page)) throw new Error(`${node.where}: '${s.page}' is not a page`);
-                implicitOnly(page.parameters.map(p => ({ name: p.name, entity: p.parameterType instanceof datatypes.ObjectType ? p.parameterType.entityQualifiedName : null })), node, s.page);
-                pages.PageClientAction.createInActionButtonUnderAction(b).pageSettings.page = page;
-                what = `opens ${s.page}`;
+                const mapped = await mapParams(s.params, pageParams(page), node, ctx, s.page, "page");
+                const a = pages.PageClientAction.createInActionButtonUnderAction(b);
+                a.pageSettings.page = page;
+                writeMappings(a.pageSettings.parameterMappings, mapped, "page", node, ctx);
+                what = `opens ${s.page}${mapText(mapped)}`;
             } else {
                 const nano = action === "callnanoflow";
                 const { f, params } = await flowParams(nano ? s.nanoflow : s.microflow, nano ? mf.Nanoflow : mf.Microflow, nano ? "nanoflow" : "microflow", node);
-                implicitOnly(params, node, f.qualifiedName);
-                if (nano) pages.CallNanoflowClientAction.createInActionButtonUnderAction(b).nanoflow = f;
-                else pages.MicroflowClientAction.createInActionButtonUnderAction(b).microflowSettings.microflow = f;
-                what = `calls ${f.qualifiedName}`;
+                const mapped = await mapParams(s.params, params, node, ctx, f.qualifiedName, "flow");
+                if (nano) {
+                    const a = pages.CallNanoflowClientAction.createInActionButtonUnderAction(b);
+                    a.nanoflow = f;
+                    writeMappings(a.parameterMappings, mapped, "nanoflow", node, ctx);
+                } else {
+                    const a = pages.MicroflowClientAction.createInActionButtonUnderAction(b);
+                    a.microflowSettings.microflow = f;
+                    writeMappings(a.microflowSettings.parameterMappings, mapped, "microflow", node, ctx);
+                }
+                what = `calls ${f.qualifiedName}${mapText(mapped)}`;
             }
             await templateAll(b, "caption", caption, ctx, node.where, s.caption === undefined);
             return `${b.name} (${what})`;
@@ -1528,13 +1661,16 @@ function makePages(h) {
             if (!(sn instanceof pages.Snippet)) return fail(`${node.where}: '${qn}' is a ${sn.structureTypeName.split("$")[1]}, not a snippet`, qn, snippets());
             if (ctx.page === sn) throw new Error(`${node.where}: a snippet cannot show itself`);
             const full = sn.isLoaded ? sn : await sn.load();
-            if (full.parameters.length) throw new Error(`${node.where}: ${qn} has parameter(s) ${full.parameters.map(p => p.name).join(", ")}; snippet calls with parameters are not supported (add it in Studio Pro), only snippets without parameters`);
+            const params = pageParams(full);
+            if (params.some(p => !p.entity) && node.spec.params === undefined) throw new Error(`${node.where}: ${qn} has parameter(s) ${params.map(p => `${p.name} (${p.type})`).join(", ")}; give "params"`);
+            const mapped = await mapParams(node.spec.params, params, node, ctx, qn, "snippet");
             const w = pages.SnippetCallWidget.create(model);
             target.push(w);
             w.name = node.name || ctx.names.next("snippetCall");
             if (!w.snippetCall) pages.SnippetCall.createIn(w);
             w.snippetCall.snippet = sn;
-            return `${w.name} (snippet ${qn})`;
+            writeMappings(w.snippetCall.parameterMappings, mapped, "snippet", node, ctx);
+            return `${w.name} (snippet ${qn}${params.length ? `, ${mapped.length ? mapText(mapped).slice(1, -1) : `${params.map(p => p.name).join(", ")} from the object around it`}` : ""})`;
         },
         async image(node, target, ctx) {
             const s = node.spec;
@@ -1667,7 +1803,7 @@ function makePages(h) {
             const { w, props } = await copyPluggable(info.exemplars[0], node, target, ctx, "gallery", alt);
             for (const k of ["datasource", "content", "itemSelection"]) if (!props.has(k)) throw new Error(`${node.where}: Gallery ${info.def.version} has no '${k}' property; ${alt}`);
             for (const p of w.object.properties) await blank(p.value, p.type, null, true);
-            const shows = listSource(node, props.get("datasource").value, true);
+            const shows = listSource(node, props.get("datasource").value, true, ctx);
             const sel = props.get("itemSelection").value;
             if (!sel.type.selectionTypes.some(x => x.name === selName)) throw new Error(`${node.where}: this gallery has no selection ${selName}`);
             sel.selection = cw.CustomWidgetSelectionType[selName];
@@ -1844,7 +1980,7 @@ function makePages(h) {
         const nodes = [];
         const top = scan(specs, form ? "form" : "widgets", null, nodes);
         if (!top.length && !form) throw new Error(`${qn}: 'widgets' is empty; leave it out for an empty page`);
-        const ctx = { qn, names: names(), params: new Map(), count: { inputs: 0 }, untranslated: 0, ents: new Set() };
+        const ctx = { qn, names: names(), params: new Map(), count: { inputs: 0 }, untranslated: 0, ents: new Set(), scope: nodes, after: [] };
         // sources; entities of lists that do not depend on the object around them, grid kinds, names (given ones first,
         // also tab pages; then grids, list views and galleries in page order, which listenTo needs); then every source
         prepare(nodes);
@@ -1887,6 +2023,7 @@ function makePages(h) {
         arg.parameter = lp;
         const parts = [];
         for (const n of arranged) parts.push(await build(n, arg.widgets, ctx));
+        for (const f of ctx.after) f(); // parameter mappings: every widget they name exists now
         if (form) return { ctx, text: `${qn} (layout ${layout}${o.entity ? `, form for ${o.entity} with ${ctx.count.inputs} input(s)` : ""})` };
         return { ctx, text: `${qn} (layout ${layout}${ctx.params.size ? `, parameter ${[...ctx.params.values()].map(p => p.name).join(", ")}` : ""})\n      widgets: ${parts.join("; ")}` };
     }

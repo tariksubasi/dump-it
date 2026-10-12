@@ -347,11 +347,11 @@ also take `editable` (true, false or a condition like `visible`). Full field lis
 | `dataGrid` | entity, source, association, microflow, nanoflow, columns (`"Attr"` or `{attribute, caption, width}`), xpath, search, selection (default Single), selectFirst, rows, kind | Data source: see the source table below; the database source needs a persistable entity, search only with it. `kind`: `classic` (default; search bar), `datagrid2` (a Data grid 2 copied from one on this project's pages; refused when the project has none or its widget differs from `widgets/*.mpk`), `auto` (datagrid2 when possible, else classic; also classic when a column type does not fit a Data grid 2). `width`: whole numbers (weights, 100 in total) |
 | `dataView` | entity, source, listenTo, association, microflow, nanoflow, editable (default true), fields, buttons, widgets, footer | Data source: see the source table below. `listenTo`: the name of a grid or list view, or `dataGrid` / `listView` when the page has exactly one (a Data grid 2 needs selection Single). A page parameter (Save/Cancel when editable) only outside list items. An editable data view without a save button (also none in a data view around it) gets a warning |
 | `listView` | entity, source, association, microflow, nanoflow, xpath, fields, widgets, pageSize (whole number) | Data source: see the source table below. Each item is an object: inputs, reference selectors and data views (source context) go inside (an editable list). A data view can listen to it |
-| `actionButton` | **action** (`save`, `cancel`, `close`, `delete`, `showPage`, `callMicroflow`, `callNanoflow`), caption, page, microflow, nanoflow, style, closePage | Passes only the object of the data view or list view it is in (target with that one parameter or none). save/cancel `closePage` default: true in a parameter data view, false in a listening one (the dashboard stays open; Studio Pro's own default is true). `close` = `closePageButton1` "Close page" |
+| `actionButton` | **action** (`save`, `cancel`, `close`, `delete`, `showPage`, `callMicroflow`, `callNanoflow`), caption, page, microflow, nanoflow, params, style, closePage | Without `params` it passes the objects around it (a target whose parameters are all such objects, or none); `params` maps each parameter (table below). save/cancel `closePage` default: true in a parameter data view, false in a listening one (the dashboard stays open; Studio Pro's own default is true). `close` = `closePageButton1` "Close page" |
 | `input`, `textBox`, `textArea`, `checkBox`, `datePicker`, `radioButtons`, `dropDown` | **attribute**, label, editable | Inside a data view or a list view / gallery item; `input` picks the widget by attribute type (an enumeration gets radio buttons, as on Studio Pro's pages) |
 | `tabContainer` | **tabs** `[{"caption": "General", "widgets": [...], "name": ...}]` | Tab pages `tabPage1`, ...; addWidgets `into` a tab page by its name |
 | `groupBox` | caption, collapsible (`no`/`expanded`/`collapsed`), headerMode (`Div`, `H1`-`H6`), widgets | `{Attribute}` in the caption inside a data view or list view |
-| `snippetCall` | **snippet** | An existing snippet without parameters (`Did you mean`); snippets with parameters are refused |
+| `snippetCall` | **snippet**, params | An existing snippet (`Did you mean`); its object parameters get the objects around it, or `params` |
 | `image` | image, association, width, height | `image`: a static image `Module.Collection.Image` (`Did you mean`). Without it: the image of the object around it (data view, list view or gallery of an entity that inherits `System.Image`, or over `association`). Size: pixels `200`, `"50%"` or `"auto"` |
 | `referenceSelector` | **association**, attribute, label, xpath, editable | Inside a data view whose entity owns the reference (`Module.Order_Customer` in a data view of Order); `attribute` of the other entity (default: its first String attribute). Reference sets are refused |
 | `comboBox` | attribute or association, captionAttribute, label, editable | Combo box (pluggable) for an enumeration/Boolean attribute or a reference, copied from a Studio Pro-saved combo box of this project whose widget equals `widgets/*.mpk`, every setting back to its default. Otherwise refused with the classic alternative (`referenceSelector`, `dropDown`, `checkBox`) |
@@ -369,6 +369,22 @@ layout grids); every level keeps its own object, so lists and data views nest as
 | `context` (default of a data view inside a list item) | dataView | the object around it | E.g. a data view per list view item; `entity` may be left out |
 | `parameter` (default of a data view elsewhere) | dataView | a page parameter of `entity` | Never inside a list item; an existing page gets no new parameter |
 | `listen` | dataView | the selected row of `listenTo` | |
+
+Parameters (`"params": { "<Parameter>": "<value>" }` on `actionButton` showPage / callMicroflow / callNanoflow,
+`snippetCall`, and data widgets with a microflow / nanoflow source). Parameters left out get the objects around the
+widget, as Studio Pro passes them (no mapping is stored); a primitive parameter must be given. Every value is type
+checked (entity, also a specialization; object or list); a wrong name is an error that lists the variables here:
+
+| value | is | Notes |
+|---|---|---|
+| `"$currentObject"` | the object of the nearest data view or list item around it | |
+| `"$<dataView>"` | the object of a data view around it, or of one that listens (anywhere on the page) | |
+| `"$<grid>.selection"` | the selected row of a grid, list view or gallery | A List parameter needs `"selection": "Multi"`; a Multi selection to an object parameter is an error |
+| `"$<Parameter>"` | a page (or snippet) parameter | A new page's parameters are named after their entity |
+| any other text | an expression (`"'Open'"`, `"$currentObject/Total * 2"`) | Flow parameters only (a page or snippet parameter of an object takes a variable) |
+
+Pages may have several parameters (one per data view with source parameter and entity); a button that opens such a
+page maps each one.
 
 A grid followed by the data view that listens to it is placed side by side (layout grid 8/4); `"arrange": "rows"`
 stacks them. The dry run's `Warnings` start with the grid kind that was used, then lint lines: a grid with 0
@@ -501,7 +517,8 @@ What pages cannot do yet (use Studio Pro, and `python mx.py gap "<what>"`):
 - Widgets other than the ones above: template grid, reference set selector, file manager, image uploader, navigation
   list, scroll container, and every other pluggable widget (only Data grid 2, combo box and gallery, each copied from
   a Studio Pro-saved one of this project whose widget equals `widgets/*.mpk`).
-- Snippet calls of snippets with parameters; tab pages with visibility, badges or a default tab; images with an on-click
+- Primitive page parameters (no Studio Pro sample stores one; a mapping to one on an existing page is written with a
+  "first use" warning); tab pages with visibility, badges or a default tab; images with an on-click
   action or a default image; design properties (the Atlas toggles); visibility by module role.
 - Combo box: only the context source with an enumeration, Boolean or reference (no database / static source, reference
   set, custom content, on-change events or footer). Gallery: no filters, sorting, click action, empty message or
@@ -513,7 +530,7 @@ What pages cannot do yet (use Studio Pro, and `python mx.py gap "<what>"`):
 - Data sources: a list over an association takes one association (a longer path: a microflow source or XPath); no
   reverse of a reference set that the other side owns; data views with source context or association have no Studio
   Pro 10/11 sample in the test projects (the dry run says "first use": check them in Studio Pro).
-- Buttons: no parameter mappings, no create-object action, no design properties or on-change events.
+- Buttons: no create-object action, no design properties.
 - Menus: web profiles only (native profiles are refused); no reordering, and no op removes a menu item or home page
   (deleting a page that one opens says so).
 - Texts (labels, titles, captions, headers, menu captions) given as plain text are written in the default language

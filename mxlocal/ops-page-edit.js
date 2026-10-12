@@ -685,7 +685,7 @@ function makePageEdit(h, I) {
 
     // new widgets in the op's ctx, names given and Studio Pro style
     function newCtx(P) {
-        return { qn: P.qn, names: I.names(P.names), params: new Map(), count: { inputs: 0 }, untranslated: 0, ents: new Set(), page: P.doc, existing: true };
+        return { qn: P.qn, names: I.names(P.names), params: new Map(), count: { inputs: 0 }, untranslated: 0, ents: new Set(), page: P.doc, existing: true, scope: [], after: [] };
     }
 
     async function untranslatedLint(ctx) {
@@ -712,8 +712,20 @@ function makePageEdit(h, I) {
             }
             if (!kind || !n.name) continue;
             const { qn } = await containerEntity(P, n);
-            out.push({ kind, name: n.name, gridKind, spec: { selection: sel }, existing: true, entQn: qn, where: n.name });
+            out.push({ kind, name: n.name, gridKind, spec: { selection: sel }, existing: true, entQn: qn, where: n.name, widget: el });
         }
+        return out;
+    }
+
+    // Grids and listening data views already on the page, as builder nodes (for "params": $grid1.selection, $dataView1).
+    async function scopeOf(P, where) {
+        const out = await listenables(P);
+        for (const n of P.nodes) {
+            if (!(n.el instanceof pages.DataView) || !n.name || !(n.el.dataSource instanceof pages.ListenTargetSource)) continue;
+            const { qn } = await containerEntity(P, n);
+            out.push({ kind: "dataView", source: "listen", name: n.name, existing: true, entQn: qn, widget: n.el, target: { name: n.el.dataSource.listenTarget } });
+        }
+        for (const e of out) e.ent = e.entQn ? await I.entityOf(e.entQn, where).catch(() => null) : null; // System entities are not in the project
         return out;
     }
 
@@ -751,14 +763,15 @@ function makePageEdit(h, I) {
         for (const n of nodes) if (!n.name && ["dataGrid", "listView", "gallery"].includes(n.kind)) n.name = ctx.names.next(n.gridKind === "datagrid2" ? "dataGrid2_" : n.kind === "dataGrid" ? "grid" : n.kind);
         // data views: listen to a grid or list view (new or on the page), show an existing page parameter, the object
         // around them, an object over an association or from a flow
-        const existing = nodes.some(n => n.kind === "dataView" && n.source === "listen") ? await listenables(P) : [];
-        for (const e of existing) e.ent = e.entQn ? await I.entityOf(e.entQn, where).catch(() => null) : null; // System entities are not in the project
-        await I.resolveSources(nodes, { dflt, extra: existing, snippet: P.snippet, ctx });
+        const existing = await scopeOf(P, where);
+        ctx.scope = [...nodes, ...existing.filter(e => !nodes.some(x => x.name === e.name))];
+        await I.resolveSources(nodes, { dflt, extra: existing.filter(e => e.kind !== "dataView"), snippet: P.snippet, ctx });
         // insert at the place, in order
         let index = slot.index;
         const at = { push: w => slot.list.splice(index++, 0, w) };
         const parts = [];
         for (const n of top) parts.push(await I.build(n, at, ctx));
+        for (const f of ctx.after) f(); // parameter mappings: every widget they name exists now
         await untranslatedLint(ctx);
         return `${P.qn}: ${parts.join("; ")} -> ${slot.pos}${dc ? ` (in ${dc.name}, ${dc.ent.qualifiedName})` : ""}`;
     }
