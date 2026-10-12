@@ -11,6 +11,14 @@ const { userRoleNamed } = require("./ops-security");
 
 const { pages, domainmodels: dm, datatypes, menus, navigation, microflows: mf, customwidgets: cw, enumerations } = sdk;
 
+const ASSOC_ONE = "with source association: Module.Assoc (or a path A/B) from the object around it to one object: a reference it owns (Order_Customer in a data view of Order)";
+// source fields of the list kinds (dataGrid, listView, gallery)
+const LIST_SOURCE = {
+    source: "optional database | association | microflow | nanoflow (default database; association / microflow / nanoflow when that field is given)",
+    association: "with source association: Module.Assoc from the object around it (data view, list view or gallery item) to many objects: a reference set it owns, or the reference another entity has to it (OrderLine_Order in a data view of Order)",
+    microflow: "with source microflow: Module.Microflow that returns a list (of entity)",
+    nanoflow: "with source nanoflow: Module.Nanoflow that returns a list"
+};
 const EDITABLE = "optional true | false | an expression \"$currentObject/Open\" | { \"attribute\": \"Status\", \"values\": [\"Open\"] } (editable only then)";
 // Widget kinds of createPage "widgets" (also the help text). Every widget also takes "name" and COMMON_FIELDS.
 const WIDGETS = {
@@ -21,12 +29,15 @@ const WIDGETS = {
     container: { doc: "a container around widgets", fields: { widgets: "[ widgets ]", class: "optional CSS class" } },
     text: { doc: "a text or heading. Inside a data view or list view {Attribute} shows its value", fields: { text: "R the text", style: "optional Text | Paragraph | H1 | H2 | H3 | H4 | H5 | H6 (default Text; \"widget\": \"heading\" = H2)" } },
     dataView: {
-        doc: "shows one object: a page parameter (source parameter) or the selected row of a grid/list view (listenTo)",
+        doc: "shows one object: a page parameter (source parameter), the selected row of a grid/list view (listenTo), the object around it (context: the item of a list view / gallery, or the data view around it), one object over an association, or what a microflow/nanoflow returns",
         fields: {
-            entity: "optional Module.Entity (default: the page entity; with listenTo: the grid's entity)",
-            source: "optional parameter | listen (default: listen with listenTo, else parameter = adds a page parameter)",
+            entity: "optional Module.Entity (default: the page entity; with listenTo: the grid's entity; with context / association / microflow: what it gives)",
+            source: "optional parameter | listen | context | association | microflow | nanoflow (default: listen with listenTo; association / microflow / nanoflow when that field is given; context inside a list view or gallery item; else parameter = adds a page parameter; never inside a list item)",
             listenTo: "optional name of a grid/list view on this page, or dataGrid / listView when the page has one",
-            editable: "optional true/false (default true; an editable data view needs a save button: \"buttons\": true or one in footer)",
+            association: ASSOC_ONE,
+            microflow: "with source microflow: Module.Microflow that returns one object (of entity)",
+            nanoflow: "with source nanoflow: Module.Nanoflow that returns one object",
+            editable: "optional true/false (default true; an editable data view needs a save button: \"buttons\": true or one in footer, or one in a data view around it)",
             fields: "optional [ \"Attribute\" ] inputs by attribute type (default: all attributes, unless widgets is given)",
             buttons: "optional true/false: Save/Cancel in the footer (default: true for an editable parameter data view)",
             widgets: "optional [ widgets ] inside the data view (after the fields)",
@@ -34,12 +45,13 @@ const WIDGETS = {
         }
     },
     dataGrid: {
-        doc: "data grid over the database (XPath source) with single selection: a classic Data grid with a search bar, or with kind datagrid2 a Data grid 2 copied from the project's own pages",
+        doc: "data grid (objects from the database, over an association or from a microflow/nanoflow) with single selection: a classic Data grid with a search bar, or with kind datagrid2 a Data grid 2 copied from the project's own pages",
         fields: {
-            entity: "optional Module.Entity (default: the page entity)",
+            entity: "optional Module.Entity (default: the page entity; with association / microflow: what it gives)",
+            ...LIST_SOURCE,
             columns: "optional [ \"Attribute\" or { \"attribute\": ..., \"caption\": ..., \"width\": 25 } ] (default: all attributes; width: classic only)",
-            xpath: "optional XPath constraint, e.g. [Active = true()]; inside a data view [Module.Assoc = '[%CurrentObject%]'] shows the objects linked to the data view's object",
-            search: "optional true/false: classic only, Search button + search fields for text, number and enumeration columns (default true)",
+            xpath: "optional XPath constraint (source database), e.g. [Active = true()]; inside a data view [Module.Assoc = '[%CurrentObject%]'] shows the committed objects linked to its object (source association also shows new ones)",
+            search: "optional true/false: classic only, source database: Search button + search fields for text, number and enumeration columns (default true)",
             selection: "optional Single | SingleAndMaintain | Multi | SimpleMulti | None (default Single; Data grid 2: Single | Multi | None)",
             selectFirst: "optional true/false (default false)",
             rows: "optional rows per page (default 20)",
@@ -47,8 +59,8 @@ const WIDGETS = {
         }
     },
     listView: {
-        doc: "list of objects over the database (XPath source); a data view can listen to it",
-        fields: { entity: "optional Module.Entity (default: the page entity)", xpath: "optional XPath constraint (see dataGrid)", fields: "optional [ \"Attribute\" ] one text per attribute (default: all attributes, unless widgets is given)", widgets: "optional [ widgets ] per item", pageSize: "optional (default 10)" }
+        doc: "list of objects (from the database, over an association or from a microflow/nanoflow), each item with its own widgets (also inputs: an editable list); a data view can listen to it",
+        fields: { entity: "optional Module.Entity (default: the page entity; with association / microflow: what it gives)", ...LIST_SOURCE, xpath: "optional XPath constraint (see dataGrid)", fields: "optional [ \"Attribute\" ] one text per attribute (default: all attributes, unless widgets is given)", widgets: "optional [ widgets ] per item", pageSize: "optional (default 10)" }
     },
     actionButton: {
         doc: "a button",
@@ -60,7 +72,7 @@ const WIDGETS = {
             closePage: "optional true/false for save/cancel/delete (default: true in a parameter data view; false in a listening data view, which stays on the page; Studio Pro's own default is true)"
         }
     },
-    input: { doc: "input for an attribute, inside a data view: text box, text area, check box, date picker or radio buttons (enumeration) by attribute type (or use textBox, textArea, checkBox, datePicker, radioButtons, dropDown)", fields: { attribute: "R attribute name", label: "optional label (default: the attribute name)", editable: EDITABLE } },
+    input: { doc: "input for an attribute, inside a data view or a list view / gallery item (an editable list): text box, text area, check box, date picker or radio buttons (enumeration) by attribute type (or use textBox, textArea, checkBox, datePicker, radioButtons, dropDown)", fields: { attribute: "R attribute name", label: "optional label (default: the attribute name)", editable: EDITABLE } },
     tabContainer: { doc: "tabs, each with its own widgets", fields: { tabs: "R [ { \"caption\": \"General\", \"widgets\": [...], \"name\": optional } ]" } },
     groupBox: { doc: "a box with a caption around widgets", fields: { caption: "optional caption; {Attribute} inside a data view or list view", collapsible: "optional no | expanded | collapsed (default no)", headerMode: "optional Div | H1 ... H6 (default as Studio Pro)", widgets: "[ widgets ]" } },
     snippetCall: { doc: "shows an existing snippet (one without parameters)", fields: { snippet: "R Module.Snippet" } },
@@ -69,7 +81,7 @@ const WIDGETS = {
         fields: { image: "optional Module.Collection.Image (static image)", association: "optional Module.Assoc from the object around it to a System.Image entity (dynamic image)", width: "optional pixels (200) or percent (\"50%\"); default auto", height: "optional pixels or percent; default auto" }
     },
     referenceSelector: {
-        doc: "drop-down to pick the object of a reference (association from the data view's entity), inside a data view",
+        doc: "drop-down to pick the object of a reference (association from the entity of the data view or list item around it)",
         fields: { association: "R Module.Assoc (a reference from the data view's entity)", attribute: "optional attribute of the other entity to show (default: its first String attribute)", label: "optional label (default: the other entity's name)", xpath: "optional XPath constraint on the selectable objects", editable: EDITABLE }
     },
     comboBox: {
@@ -77,8 +89,8 @@ const WIDGETS = {
         fields: { attribute: "enumeration or Boolean attribute (or use association)", association: "Module.Assoc reference from the data view's entity", captionAttribute: "optional with association: String attribute of the other entity (default: its first)", label: "optional label", editable: EDITABLE }
     },
     gallery: {
-        doc: "Gallery (pluggable, copied from the project's own pages like Data grid 2): objects over the database as tiles, each item with its own widgets; a data view can listen to it. Without a Studio Pro-saved gallery matching widgets/*.mpk it is refused: use listView",
-        fields: { entity: "optional Module.Entity (default: the page entity)", xpath: "optional XPath constraint", widgets: "optional [ widgets ] per item (default: one text per attribute)", selection: "optional Single | Multi | None (default Single)", pageSize: "optional (default 20)", columns: "optional desktop columns 1-12 (default 1)" }
+        doc: "Gallery (pluggable, copied from the project's own pages like Data grid 2): objects (database, association or microflow/nanoflow, as listView) as tiles, each item with its own widgets; a data view can listen to it. Without a Studio Pro-saved gallery matching widgets/*.mpk it is refused: use listView",
+        fields: { entity: "optional Module.Entity (default: the page entity)", ...LIST_SOURCE, xpath: "optional XPath constraint", widgets: "optional [ widgets ] per item (default: one text per attribute)", selection: "optional Single | Multi | None (default Single)", pageSize: "optional (default 20)", columns: "optional desktop columns 1-12 (default 1)" }
     }
 };
 // Fields every widget kind takes (style: inline CSS, but for text and actionButton it is the text / button style
@@ -93,11 +105,11 @@ const INPUTS = { textBox: "TextBox", textArea: "TextArea", checkBox: "CheckBox",
 const ALIASES = { button: "actionButton", grid: "dataGrid", datagrid: "dataGrid", datagrid2: "dataGrid", list: "listView", heading: "text", div: "container", radiobuttongroup: "radioButtons",
     tabs: "tabContainer", tabcontrol: "tabContainer", snippet: "snippetCall", staticimage: "image", dynamicimage: "image", imageviewer: "image", reference: "referenceSelector", combo: "comboBox" };
 // fields a weak model takes from a neighbouring widget kind -> what to write instead
-const MASTER_DETAIL = `to show objects linked to the selected row, put a dataGrid or listView inside the listening dataView with "xpath": "[Module.Assoc = '[%CurrentObject%]']"`;
+const MASTER_DETAIL = `to show objects linked to the selected row, put a listView or dataGrid inside the listening dataView with "source": "association", "association": "Module.Assoc"`;
 const SYNONYMS = {
     dataGrid: { fields: "use \"columns\"", pageSize: "use \"rows\"", listenTo: `a grid cannot listen; ${MASTER_DETAIL}` },
     listView: { columns: "use \"fields\"", rows: "use \"pageSize\"", listenTo: `a list view cannot listen; ${MASTER_DETAIL}` },
-    dataView: { columns: "use \"fields\"", readOnly: "use \"editable\": false", readonly: "use \"editable\": false" },
+    dataView: { columns: "use \"fields\"", readOnly: "use \"editable\": false", readonly: "use \"editable\": false", xpath: "a data view shows one object: use \"source\": \"association\" (from the object around it), \"listenTo\" or a microflow", path: "use \"association\": \"A/B\"" },
     layoutGrid: { widgets: "a layout grid holds widgets in its columns: \"columns\": [ { \"weight\": 6, \"widgets\": [...] }, { \"weight\": 6, \"widgets\": [...] } ]" },
     tabContainer: { widgets: "a tab container holds widgets in its tabs: \"tabs\": [ { \"caption\": \"General\", \"widgets\": [...] } ]", pages: "use \"tabs\"" },
     groupBox: { title: "use \"caption\"", header: "use \"caption\"" },
@@ -121,6 +133,10 @@ function choice(cls, value, field, where) {
 const NO_MENU_ROLES = page => `menu items have no roles: who sees one = the user roles that may open ${page} (grantAccess / revokeAccess on the page)`;
 const LISTENABLE = { datagrid: "dataGrid", grid: "dataGrid", listview: "listView", list: "listView", gallery: "gallery" };
 const LISTENS = ["dataGrid", "listView", "gallery"]; // kinds a data view can listen to
+const ITEM_KINDS = ["listView", "gallery", "templateGrid", "pluggable"]; // each item is an object (also existing ones: pluggable)
+const OBJECT_KINDS = ["dataView", "listView", "gallery", "templateGrid"]; // inputs and {Attribute} use their object
+const DV_SOURCES = ["parameter", "listen", "context", "association", "microflow", "nanoflow"];
+const LIST_SOURCES = ["database", "association", "microflow", "nanoflow"];
 const DATAGRID2 = "com.mendix.widget.web.datagrid.Datagrid";
 const COMBOBOX = "com.mendix.widget.web.combobox.Combobox";
 const GALLERY = "com.mendix.widget.web.gallery.Gallery";
@@ -336,14 +352,25 @@ function makePages(h) {
                     return { caption: String(t.caption), name: t.name !== undefined ? String(t.name) : null, where: at, widgets: scan(t.widgets, `${at}.widgets`, container, nodes) };
                 });
             }
-            if ((INPUTS[kind] || kind === "input" || kind === "referenceSelector" || kind === "comboBox") && (!container || container.kind !== "dataView")) throw new Error(`${node.where}: inputs go inside a dataView (its "widgets" or "fields")`);
+            if ((INPUTS[kind] || kind === "input" || kind === "referenceSelector" || kind === "comboBox") && (!container || !OBJECT_KINDS.includes(container.kind))) throw new Error(`${node.where}: inputs go inside a dataView (its "widgets" or "fields"), or a listView / gallery item (an editable list)`);
             if (kind === "actionButton") {
                 const a = String(spec.action).toLowerCase();
-                if (["save", "cancel"].includes(a) && (!container || container.kind !== "dataView")) throw new Error(`${node.where}: a ${a} button goes inside a dataView`);
+                if (["save", "cancel"].includes(a) && !around(node, "dataView")) throw new Error(`${node.where}: a ${a} button goes inside a dataView (or a list item inside one)`);
                 if (a === "delete" && !container) throw new Error(`${node.where}: a delete button goes inside a dataView or listView`);
             }
             return node;
         });
+    }
+
+    // the nearest node of kind around n (through list items and nested data views), or null
+    function around(n, kind) {
+        for (let c = n.container; c; c = c.container) if (c.kind === kind) return c;
+        return null;
+    }
+    // the list item n sits in (list view, gallery, template grid; also deeper, in a data view inside it), or null
+    function inItem(n) {
+        for (let c = n.container; c; c = c.container) if (ITEM_KINDS.includes(c.kind)) return c;
+        return null;
     }
 
     // taken: names already on the page (an existing page keeps its widget names)
@@ -399,23 +426,247 @@ function makePages(h) {
         return false;
     }
 
-    // Studio Pro passes the object of the enclosing data view / list view implicitly (no parameter mapping is stored),
-    // so a button can call a page or flow without parameters or with exactly that one object parameter.
-    function implicitOnly(params, node, what) {
-        if (!params.length) return;
-        const ctx = node.container && node.container.ent;
-        if (params.length === 1 && params[0].entity && ctx && isA(ctx, params[0].entity)) return;
-        const list = params.map(p => `${p.name}${p.entity ? " (" + p.entity + ")" : ""}`).join(", ");
-        throw new Error(`${node.where}: ${what} has parameter(s) ${list}. A button passes only the object of the data view or list view it is in` +
-            (ctx ? ` (${ctx.qualifiedName})` : " (this button is in none)") + ". Use a page/flow with that one parameter or none");
+    // The objects around a node, nearest first: [{ name, ent, node }] of the data views and list items it sits in.
+    function objectsAround(node) {
+        const out = [];
+        for (let c = node.container; c; c = c.container) if (c.ent) out.push({ name: c.name || (c.widget && c.widget.name) || c.kind, ent: c.ent, node: c });
+        return out;
     }
 
+    // Studio Pro passes the objects around a button or data source implicitly (no parameter mapping is stored): a page
+    // or flow can have no parameters, or object parameters of the data view / list item it is in (or one around that).
+    function implicitOnly(params, node, what) {
+        if (!params.length) return;
+        const objs = objectsAround(node);
+        const bad = params.filter(p => !p.entity || !objs.some(o => isA(o.ent, p.entity)));
+        if (!bad.length) return;
+        const list = params.map(p => `${p.name} (${p.type || p.entity || "?"})`).join(", ");
+        throw new Error(`${node.where}: ${what} has parameter(s) ${list}. Without "params" only the object of the data view or list item around it is passed` +
+            (objs.length ? ` (${objs.map(o => `${o.name}: ${o.ent.qualifiedName}`).join(", ")})` : " (it is in none)") + `; ${bad[0].entity ? `${bad[0].name} (${bad[0].entity}) matches none of them` : `${bad[0].name} is not an object`}`);
+    }
+
+    const typeText = t => !t ? "nothing" : t instanceof datatypes.ObjectType ? t.entityQualifiedName : t instanceof datatypes.ListType ? `List of ${t.entityQualifiedName}` : t.structureTypeName.split("$")[1].replace(/Type$/, "");
+
+    // A flow and its parameters: [{ name, entity (object parameter), list (entity of a list parameter), type, el }].
     async function flowParams(qn, cls, kind, node) {
         const f = await h.get(qn);
-        if (!(f instanceof cls)) throw new Error(`${node.where}: '${qn}' is not a ${kind}`);
-        const params = f.objectCollection.objects.filter(x => x instanceof mf.MicroflowParameterObject)
-            .map(p => ({ name: p.name, entity: p.variableType instanceof datatypes.ObjectType ? p.variableType.entityQualifiedName : null }));
+        if (!(f instanceof cls)) throw new Error(`${node.where}: '${qn}' is ${f instanceof mf.Nanoflow ? "a nanoflow" : f instanceof mf.Microflow ? "a microflow" : `a ${f.structureTypeName.split("$")[1]}`}, not a ${kind}`);
+        const params = f.objectCollection.objects.filter(x => x instanceof mf.MicroflowParameterObject).map(p => ({ name: p.name, el: p, type: typeText(p.variableType),
+            entity: p.variableType instanceof datatypes.ObjectType ? p.variableType.entityQualifiedName : null, list: p.variableType instanceof datatypes.ListType ? p.variableType.entityQualifiedName : null }));
         return { f, params };
+    }
+
+    // ------------------------------------------------ data sources (dataView, dataGrid, listView, gallery)
+
+    const short = qn => String(qn).split(".").pop();
+    // both ends of an association: { from (owner side, parent), to }
+    const ends = a => ({ from: a.parent ? a.parent.qualifiedName : null, to: a instanceof dm.CrossAssociation ? a.childQualifiedName : a.child ? a.child.qualifiedName : null });
+    async function allAssociations(ctx) {
+        if (ctx && ctx.assocs) return ctx.assocs;
+        const out = [];
+        for (const d of model.allDomainModels()) {
+            const full = d.isLoaded ? d : await d.load();
+            out.push(...full.associations, ...full.crossAssociations);
+        }
+        if (ctx) ctx.assocs = out;
+        return out;
+    }
+
+    // The steps of "association" from ent: [{ assoc, to (entity) }]. One object (many false): references ent owns (a
+    // path A/B), or the other side of a one-to-one; many: one reference set ent owns, or a reference to ent (reverse).
+    async function assocSteps(ent, spec, where, many, ctx) {
+        const names = String(spec).split("/").map(x => x.trim()).filter(Boolean);
+        if (!names.length) throw new Error(`${where}: association is empty; give Module.Assoc`);
+        if (many && names.length > 1) throw new Error(`${where}: a list over an association takes one association ('${spec}' is a path); for a longer path use a microflow source or "source": "database" with an XPath`);
+        const all = await allAssociations(ctx);
+        const steps = [];
+        let cur = ent;
+        for (const name of names) {
+            const mine = all.filter(a => isA(cur, ends(a).from) || isA(cur, ends(a).to)).map(a => a.qualifiedName);
+            const a = all.find(x => x.qualifiedName === name);
+            if (!a) fail(`${where}: no association '${name}'${mine.length ? ` (associations of ${cur.qualifiedName}: ${mine.join(", ")})` : ` (${cur.qualifiedName} has no association)`}`, name, mine);
+            const { from, to } = ends(a);
+            const set = a.type === dm.AssociationType.ReferenceSet, both = a.owner === dm.AssociationOwner.Both;
+            const fwd = isA(cur, from), rev = isA(cur, to);
+            if (!fwd && !rev) throw new Error(`${where}: ${name} links ${from} and ${to}, not the ${cur.qualifiedName} around it` + (mine.length ? `; associations of ${cur.qualifiedName}: ${mine.join(", ")}` : ""));
+            let dest;
+            if (many) {
+                if (fwd && set) dest = to;
+                else if (rev && !set) dest = from;
+                else if (rev && set && both) dest = from;
+                else if (fwd) throw new Error(`${where}: ${name} is a reference: a ${short(from)} has one ${short(to)}; show it in a dataView with "source": "association", "association": "${name}"`);
+                else throw new Error(`${where}: ${name} is a reference set that ${short(from)} owns; from a ${short(to)} it cannot be listed: use "source": "database" with "xpath": "[${name} = '[%CurrentObject%]']"`);
+            } else {
+                if (fwd && !set) dest = to;
+                else if (rev && !set && both) dest = from;
+                else if (set) throw new Error(`${where}: ${name} is a reference set (many ${short(fwd ? to : from)}); a data view shows one object: use a listView or dataGrid with "source": "association", "association": "${name}"`);
+                else throw new Error(`${where}: ${name} goes from ${from} to ${to}: a ${short(to)} has many ${short(from)}; a data view shows one object: use a listView or dataGrid with "source": "association", "association": "${name}"`);
+            }
+            const other = await entityOf(dest, where).catch(() => {
+                throw new Error(`${where}: ${name} leads to ${dest}, which ops cannot read (System module); use a microflow source`);
+            });
+            steps.push({ assoc: a, to: other });
+            cur = other;
+        }
+        return steps;
+    }
+
+    // Associations that give the objects of list entity ent from the object around (an association source would do).
+    async function listAssocs(outer, ent, ctx) {
+        const all = await allAssociations(ctx);
+        return all.filter(a => {
+            const { from, to } = ends(a), set = a.type === dm.AssociationType.ReferenceSet;
+            return (set && isA(outer, from) && isA(ent, to)) || (!set && isA(ent, from) && isA(outer, to));
+        }).map(a => a.qualifiedName);
+    }
+
+    // The source a data widget node asked for (or its default); checks the fields that go with it.
+    function sourceOf(n) {
+        const s = n.spec, dv = n.kind === "dataView";
+        const all = dv ? DV_SOURCES : LIST_SOURCES;
+        let src = s.source !== undefined ? String(s.source).toLowerCase() : null;
+        if (src === "entity" && dv) src = "parameter";
+        if (src === "xpath" && !dv) src = "database";
+        if (src !== null && !all.includes(src)) fail(`${n.where}: source '${s.source}' is not known (use ${all.join(" | ")})`, s.source, all);
+        if (s.parameter !== undefined) throw new Error(`${n.where}: use "source": "parameter"`);
+        const given = ["association", "microflow", "nanoflow"].filter(k => s[k] !== undefined);
+        if (given.length > 1) throw new Error(`${n.where}: give one of ${given.join(", ")} (each is a source of its own)`);
+        if (given.length && src && src !== given[0]) throw new Error(`${n.where}: "${given[0]}" goes with "source": "${given[0]}", not ${src}`);
+        if (dv && s.listenTo !== undefined && (src || given[0]) && (src || given[0]) !== "listen") throw new Error(`${n.where}: listenTo goes with source listen, not ${src || given[0]}`);
+        if (!dv && s.xpath !== undefined && (src || given[0] || "database") !== "database") throw new Error(`${n.where}: xpath goes with source database; a ${src || given[0]} source gives its own objects`);
+        const out = src || given[0] || (dv ? (s.listenTo !== undefined ? "listen" : inItem(n) ? "context" : "parameter") : "database");
+        if (["association", "microflow", "nanoflow"].includes(out) && (s[out] === undefined || s[out] === "")) throw new Error(`${n.where}: source ${out} needs "${out}": ${out === "association" ? "Module.Assoc" : `Module.${out === "microflow" ? "Microflow" : "Nanoflow"}`}`);
+        if (out === "listen" && s.listenTo === undefined) throw new Error(`${n.where}: source listen needs listenTo (a grid or list view on this page)`);
+        return out;
+    }
+
+    // A microflow / nanoflow source: { f, nano, params, ent }; the return type must be one object (data view) or a list.
+    async function flowSource(n) {
+        const nano = n.source === "nanoflow", dv = n.kind === "dataView";
+        const { f, params } = await flowParams(String(n.spec[n.source]), nano ? mf.Nanoflow : mf.Microflow, n.source, n);
+        const rt = f.microflowReturnType;
+        if (dv && !(rt instanceof datatypes.ObjectType)) throw new Error(`${n.where}: ${f.qualifiedName} returns ${typeText(rt)}; a data view's ${n.source} returns one object${rt instanceof datatypes.ListType ? " (for a list: a listView or dataGrid)" : ""}`);
+        if (!dv && !(rt instanceof datatypes.ListType)) throw new Error(`${n.where}: ${f.qualifiedName} returns ${typeText(rt)}; a ${n.kind}'s ${n.source} returns a list${rt instanceof datatypes.ObjectType ? " (for one object: a dataView)" : ""}`);
+        const ent = await entityOf(rt.entityQualifiedName, n.where);
+        if (n.spec.entity && !isA(ent, String(n.spec.entity))) throw new Error(`${n.where}: ${f.qualifiedName} returns ${typeText(rt)}, not ${n.spec.entity}; leave out entity`);
+        return { f, nano, params, ent };
+    }
+
+    // Entities and data sources of the data widgets in nodes, outer before inner (an association or context needs the
+    // object around it; a listening data view its target). o: { dflt (entity), extra (listen targets already on the
+    // page), snippet, ctx }. prepare() first: the entity of lists that do not depend on what is around them, so that
+    // names can be given in page order before anything else.
+    function prepare(nodes) {
+        for (const n of nodes) if (n.kind === "dataView" || LISTENS.includes(n.kind) || n.kind === "templateGrid") n.source = sourceOf(n);
+    }
+    async function listEntity(n, o) {
+        if (n.ent || n.source === "association") return;
+        if (n.source === "database") {
+            n.ent = await entityOf(n.spec.entity || o.dflt, n.where);
+            if (!h.persistable(n.ent)) throw new Error(`${n.where}: ${n.ent.qualifiedName} is non-persistable; a ${n.kind} over the database needs a persistable entity (give it a microflow / nanoflow or association source, or show it in a data view)`);
+        } else {
+            n.flow = await flowSource(n);
+            n.ent = n.flow.ent;
+        }
+    }
+    async function resolveSources(nodes, o) {
+        const ctx = o.ctx;
+        const resolve = async n => {
+            if (n.done || n.existing || !n.source) return;
+            if (n.resolving) throw new Error(`${n.where}: its data source depends on itself (listenTo / association go round in a circle)`);
+            n.resolving = true;
+            const c = n.container;
+            if (c && !c.existing) await resolve(c);
+            const s = n.spec, dv = n.kind === "dataView";
+            const outer = c && c.ent ? c : null;
+            const around = outer && (outer.name || `the ${outer.kind === "dataView" ? "data view" : outer.kind} of ${outer.ent.name}`);
+            if (n.source === "listen") {
+                n.target = listenTarget(n, [...nodes, ...(o.extra || []).filter(e => !nodes.some(x => x.name === e.name))]);
+                await resolve(n.target);
+                if (!n.target.ent) throw new Error(`${n.where}: the entity of ${n.target.name} is not known here; add this data view in Studio Pro`);
+                if (s.entity && s.entity !== n.target.ent.qualifiedName) throw new Error(`${n.where}: listens to ${n.target.name} (${n.target.ent.qualifiedName}), but entity is ${s.entity}; ${MASTER_DETAIL}`);
+                n.ent = n.target.ent;
+                const sel = String(n.target.spec.selection || "Single").toLowerCase();
+                if ((n.target.gridKind === "datagrid2" || n.target.kind === "gallery") && sel !== "single") throw new Error(`${n.where}: listenTo needs a ${n.target.kind === "gallery" ? "gallery" : "Data grid 2"} with selection Single (${n.target.name} has ${n.target.spec.selection}); leave out "selection"`);
+                if (n.target.kind === "dataGrid" && sel === "none") client.warn(`${ctx.qn}: ${n.name || "the data view"} listens to ${n.target.name}, whose selection is None; select Single so it can show a row`);
+                else if (n.target.kind === "dataGrid" && /multi/.test(sel)) client.warn(`${ctx.qn}: ${n.target.name} allows multi-selection; the listening data view shows one of the selected rows (Single is usual)`);
+            } else if (n.source === "parameter") {
+                const item = inItem(n);
+                if (item) throw new Error(`${n.where}: a data view inside ${item.name || item.kind} (a list item) cannot add a page parameter; leave out "source" to show the ${item.ent ? item.ent.name : "item"} itself ("source": "context"), or use "source": "association"`);
+                if (o.snippet) throw new Error(`${n.where}: on a snippet a new data view cannot add a parameter; give it "listenTo", or "source": "context" / "association" / "microflow"`);
+                n.ent = await entityOf(s.entity || o.dflt, n.where);
+            } else if (n.source === "context") {
+                if (!outer) throw new Error(`${n.where}: source context is the object of the data view or list item around it, and this data view is in none; use "source": "parameter", "listenTo" or "microflow"`);
+                if (s.entity && !isA(outer.ent, String(s.entity))) {
+                    const via = await assocBetween(outer.ent, String(s.entity), ctx);
+                    throw new Error(`${n.where}: the object around it is the ${outer.ent.qualifiedName} of ${around}, not ${s.entity}` + (via.length ? `; to show the ${short(s.entity)} it refers to: "source": "association", "association": "${via[0]}"` : ""));
+                }
+                n.ent = outer.ent;
+            } else if (n.source === "association") {
+                if (!outer) throw new Error(`${n.where}: source association starts at the object of the data view or list item around it, and this ${n.kind} is in none; use ${dv ? `"source": "parameter" or "listenTo"` : `"source": "database"`}, or put it inside a data view`);
+                n.path = await assocSteps(outer.ent, s.association, n.where, !dv, ctx);
+                n.ent = n.path[n.path.length - 1].to;
+                if (s.entity && !isA(n.ent, String(s.entity))) throw new Error(`${n.where}: ${s.association} gives ${n.ent.qualifiedName}, not ${s.entity}; leave out entity`);
+            } else if (n.source === "microflow" || n.source === "nanoflow") {
+                if (!n.flow) n.flow = await flowSource(n);
+                n.ent = n.flow.ent;
+                implicitOnly(n.flow.params, n, n.flow.f.qualifiedName);
+            } else {
+                await listEntity(n, o);
+                // lints: a list inside an object that does not use it
+                const via = outer ? await listAssocs(outer.ent, n.ent, ctx) : [];
+                const xp = String(s.xpath || "");
+                if (via.length && !xp) client.warn(`${ctx.qn}: ${n.name || n.kind} inside ${around} shows every ${n.ent.name} in the database; for the ${n.ent.name} objects of its ${outer.ent.name} use "source": "association", "association": "${via[0]}"`);
+                else if (via.length && /\[%CurrentObject%\]/i.test(xp)) client.warn(`${ctx.qn}: ${n.name || n.kind} shows ${n.ent.name} objects by XPath [%CurrentObject%]: only committed ones; ${n.ent.name} objects created on this page stay hidden until saved. "source": "association", "association": "${via[0]}" shows them too`);
+            }
+            n.resolving = false;
+            n.done = true;
+        };
+        for (const n of nodes) await resolve(n);
+    }
+    // associations between ent and the entity qn, either way (for messages)
+    async function assocBetween(ent, qn, ctx) {
+        return (await allAssociations(ctx)).filter(a => (isA(ent, ends(a).from) && ends(a).to === qn) || (isA(ent, ends(a).to) && ends(a).from === qn)).map(a => a.qualifiedName);
+    }
+
+    // Writes node's list source into owner (a classic grid / list view, or the datasource value of a pluggable widget);
+    // returns how the dry run describes it.
+    function listSource(node, owner, pluggableValue) {
+        const s = node.spec, ent = node.ent;
+        const at = (cls) => (pluggableValue ? cls.createInWidgetValueUnderDataSource(owner) : cls.createInEntityWidgetUnderDataSource(owner));
+        if (node.source === "database") {
+            let src;
+            if (pluggableValue) src = cw.CustomWidgetXPathSource.createInWidgetValueUnderDataSource(owner);
+            else {
+                src = owner.dataSource; // GridXPathSource / ListViewXPathSource from Mendix 10.5 (the "Database" source in Studio Pro)
+                if (!(src instanceof pages.GridXPathSource || src instanceof pages.ListViewXPathSource)) throw new Error(`${node.where}: this Mendix version gives a ${src.structureTypeName} source; only the XPath source (10.5+) is supported`);
+            }
+            dm.DirectEntityRef.createInEntityPathSourceUnderEntityRef(src).entity = ent;
+            if (s.xpath) {
+                checkXPath(node, ent);
+                src.xPathConstraint = String(s.xpath);
+            }
+            return `${ent.qualifiedName}${s.xpath ? ", XPath " + s.xpath : ""}`;
+        }
+        if (node.source === "association") {
+            stepsInto(at(pages.AssociationSource), node.path);
+            return `${ent.qualifiedName} over ${s.association} of ${node.container.name}`;
+        }
+        flowInto(node.source === "nanoflow" ? at(pages.NanoflowSource) : at(pages.MicroflowSource), node);
+        return `${ent.qualifiedName} from ${node.source} ${node.flow.f.qualifiedName}`;
+    }
+    function stepsInto(src, steps) {
+        const er = dm.IndirectEntityRef.createInEntityPathSourceUnderEntityRef(src);
+        for (const st of steps) {
+            const x = dm.EntityRefStep.createIn(er);
+            x.association = st.assoc;
+            x.destinationEntity = st.to;
+        }
+    }
+    // a microflow / nanoflow source: the flow (parameters: implicit, as Studio Pro stores them)
+    function flowInto(src, node) {
+        if (node.flow.nano) src.nanoflow = node.flow.f;
+        else src.microflowSettings.microflow = node.flow.f;
     }
 
     // A pluggable widget on the project's pages and snippets: { exemplars (copyable: type = installed .mpk), stale, def, reason }.
@@ -766,7 +1017,7 @@ function makePages(h) {
         });
         if (!(src instanceof cw.CustomWidget)) throw new Error(`${node.where}: the ${what} on ${pick.unitName} could not be loaded; ${alt}`);
         const w = src.deepCopy(model);
-        w.name = node.name || ctx.names.next(PREFIX[node.kind]);
+        w.name = node.name = node.name || ctx.names.next(PREFIX[node.kind]);
         target.push(w);
         node.widget = w;
         // the copy's object must point into the copy's own type
@@ -822,14 +1073,7 @@ function makePages(h) {
         for (const p of grid.object.properties) if (p.type.key !== "columns") await blank(p.value, p.type, null);
         colProp.value.objects.clear();
         for (const col of made) colProp.value.objects.push(col);
-        // data source: the database (XPath), this entity
-        const dsv = props.get("datasource").value;
-        const ds = cw.CustomWidgetXPathSource.createInWidgetValueUnderDataSource(dsv);
-        dm.DirectEntityRef.createInEntityPathSourceUnderEntityRef(ds).entity = ent;
-        if (node.spec.xpath) {
-            checkXPath(node, ent);
-            ds.xPathConstraint = String(node.spec.xpath);
-        }
+        const shows = listSource(node, props.get("datasource").value, true);
         // selection (Single: row click, as Studio Pro's own master-detail grids)
         const selName = { single: "Single", multi: "Multi", none: "None" }[String(node.spec.selection || "Single").toLowerCase()];
         const selVal = props.get("itemSelection").value;
@@ -847,7 +1091,7 @@ function makePages(h) {
         leftovers(grid, [ent], node.where, "Data grid 2", `use "kind": "classic"`);
         const why = node.kindAsked === "auto" ? `"kind": "auto"` : `"kind": "datagrid2"`;
         client.warnFirst(`${ctx.qn}: ${grid.name} is a Data grid 2 ${info.def.version} (${why}), copied from ${doc.qualifiedName}.${pick.name} with its filters, actions and personalization left empty; "kind": "classic" for a classic Data grid`);
-        return `${grid.name} (Data grid 2 ${info.def.version}, ${ent.qualifiedName}, ${cols.length} column(s), selection ${selName}${node.spec.xpath ? ", XPath " + node.spec.xpath : ""})`;
+        return `${grid.name} (Data grid 2 ${info.def.version}, ${shows}, ${cols.length} column(s), selection ${selName})`;
     }
 
     // Light XPath check: brackets, and the first step of each top-level path is an attribute or association of ent.
@@ -1052,18 +1296,31 @@ function makePages(h) {
         async dataView(node, target, ctx) {
             const dv = pages.DataView.create(model);
             target.push(dv);
-            dv.name = node.name || ctx.names.next("dataView");
+            dv.name = node.name = node.name || ctx.names.next("dataView");
             const ent = node.ent;
             node.widget = dv;
+            let how;
             if (node.source === "listen") {
                 pages.ListenTargetSource.createInEntityWidgetUnderDataSource(dv).listenTarget = node.target.name;
-            } else {
+                how = `listens to ${node.target.name}`;
+            } else if (node.source === "parameter") {
                 node.param = await pageParameter(ent, ctx);
                 const src = pages.DataViewSource.createInEntityWidgetUnderDataSource(dv);
                 dm.DirectEntityRef.createInEntityPathSourceUnderEntityRef(src).entity = ent;
                 const sv = pages.PageVariable.create(model);
                 src.sourceVariable = sv; // attach first: the parameter reference is local to the page
                 sv.pageParameter = node.param;
+                how = `parameter ${node.param.name}`;
+            } else if (node.source === "context" || node.source === "association") {
+                // the object around it (SourceVariable null, as inputs in a listening data view), or over references from it
+                const src = pages.DataViewSource.createInEntityWidgetUnderDataSource(dv);
+                if (node.source === "context") dm.DirectEntityRef.createInEntityPathSourceUnderEntityRef(src).entity = ent;
+                else stepsInto(src, node.path);
+                how = node.source === "context" ? `the ${ent.name} of ${node.container.name}` : `over ${node.spec.association} of ${node.container.name}`;
+                client.warn(`Forms$DataViewSource first use with source ${node.source} (no Studio Pro 10/11 sample in the test projects has one): check ${ctx.qn} ${dv.name} in Studio Pro`);
+            } else {
+                flowInto((node.source === "nanoflow" ? pages.NanoflowSource : pages.MicroflowSource).createInEntityWidgetUnderDataSource(dv), node);
+                how = `${node.source} ${node.flow.f.qualifiedName}`;
             }
             const editable = bool(node.spec.editable, true);
             // Mendix 10.7+: editability; older: editable
@@ -1071,13 +1328,16 @@ function makePages(h) {
             const fields = node.spec.fields !== undefined ? list(node.spec.fields, `${node.where}.fields`) : node.widgets.length ? [] : shown(ent);
             const inner = [];
             const before = ctx.count.inputs;
-            for (const f of fields) inner.push((await attrInput("input", dv.widgets, attributeOf(ent, f, node.where), node, node.where, ctx)).name);
-            for (const ch of node.widgets) inner.push(await build(ch, dv.widgets, ctx));
             const buttons = bool(node.spec.buttons, editable && node.source === "parameter" && !node.footer.length);
             const saves = [...node.widgets, ...node.footer].some(function has(n) {
-                return (n.kind === "actionButton" && /^save$/i.test(n.spec.action)) || [...(n.widgets || []), ...(n.rows || []).flat().flatMap(c => c.widgets)].some(has);
+                return (n.kind === "actionButton" && /^save$/i.test(n.spec.action)) || [...(n.widgets || []), ...(n.tabs || []).flatMap(t => t.widgets), ...(n.rows || []).flat().flatMap(c => c.widgets)].some(has);
             });
-            if (editable && ctx.count.inputs > before && !buttons && !saves) client.warn(`${ctx.qn}: ${dv.name} is editable but has no Save button: add "buttons": true (or a save actionButton in "footer"), or "editable": false`);
+            node.saves = buttons || saves; // a Save button saves the changes of the data views inside too
+            for (const f of fields) inner.push((await attrInput("input", dv.widgets, attributeOf(ent, f, node.where), node, node.where, ctx)).name);
+            for (const ch of node.widgets) inner.push(await build(ch, dv.widgets, ctx));
+            let saved = node.saves;
+            for (let c = node.container; c && !saved; c = c.container) saved = !!c.saves || !!c.existing;
+            if (editable && ctx.count.inputs > before && !saved) client.warn(`${ctx.qn}: ${dv.name} is editable but has no Save button: add "buttons": true (or a save actionButton in "footer"), or "editable": false`);
             const foot = [];
             if (buttons) {
                 foot.push((await button(dv.footerWidgets, "Save", "save", pages.ButtonStyle.Success, node.source === "parameter", ctx)).name);
@@ -1085,7 +1345,6 @@ function makePages(h) {
             }
             for (const ch of node.footer) foot.push(await build(ch, dv.footerWidgets, ctx));
             if (!dv.widgets.length) client.warn(`${ctx.qn}: ${dv.name} has no widgets and shows nothing`);
-            const how = node.source === "listen" ? `listens to ${node.target.name}` : `parameter ${node.param.name}`;
             return `${dv.name} (${ent.qualifiedName}, ${how}, ${editable ? "editable" : "read-only"}) [${inner.join(", ")}${foot.length ? " | footer: " + foot.join(", ") : ""}]`;
         },
         async dataGrid(node, target, ctx) {
@@ -1096,13 +1355,10 @@ function makePages(h) {
             target.push(grid);
             grid.name = node.name;
             node.widget = grid;
-            const src = grid.dataSource; // GridXPathSource from Mendix 10.5 (the "Database" source in Studio Pro)
-            if (!(src instanceof pages.GridXPathSource)) throw new Error(`${node.where}: this Mendix version gives a ${src.structureTypeName} source; only the XPath source (10.5+) is supported`);
-            dm.DirectEntityRef.createInEntityPathSourceUnderEntityRef(src).entity = ent;
-            if (node.spec.xpath) {
-                checkXPath(node, ent);
-                src.xPathConstraint = String(node.spec.xpath);
-            }
+            const db = node.source === "database";
+            if (!db && bool(node.spec.search, false)) throw new Error(`${node.where}: search works with source database only (a ${node.source} source has no search bar)`);
+            const shows = listSource(node, grid, false);
+            const src = grid.dataSource;
             grid.selectionMode = choice(pages.GridSelectionMode, node.spec.selection || "Single", "selection", node.where);
             grid.selectFirst = bool(node.spec.selectFirst, false);
             if (node.spec.rows !== undefined) {
@@ -1132,7 +1388,7 @@ function makePages(h) {
             }
             // search: Studio Pro's generated grids have a Search button and one search field per text/number/enum column
             let fields = 0;
-            if (bool(node.spec.search, true)) {
+            if (db && bool(node.spec.search, true)) {
                 for (const c of cols) {
                     const t = c.attr.type;
                     const text = t instanceof dm.StringAttributeType;
@@ -1155,7 +1411,7 @@ function makePages(h) {
                 grid.controlBar.items.push(b);
                 b.name = ctx.names.next("searchButton");
                 await textAll(b.caption.template, "Search", ctx, true);
-            } else src.searchBar.type = pages.SearchBarTypeEnum.None;
+            } else if (db) src.searchBar.type = pages.SearchBarTypeEnum.None;
             if (!cols.length) client.warn(`${ctx.qn}: ${grid.name} has 0 columns; it shows empty rows (give "columns")`);
             let why = node.kindAsked === "auto" ? `"kind": "auto" picks classic: ${node.autoWhy}` : `"kind": "classic"`;
             if (node.kindAsked === "classic") {
@@ -1163,7 +1419,7 @@ function makePages(h) {
                 if (d2.exemplars.length) why += `; this project uses Data grid 2 (${d2.exemplars.length + d2.stale}x), "kind": "datagrid2" makes one`;
             }
             client.warnFirst(`${ctx.qn}: ${grid.name} is a classic Data grid (${why})`);
-            return `${grid.name} (classic Data grid, ${ent.qualifiedName}, ${cols.length} column(s)${fields ? `, ${fields} search field(s)` : ""}${node.spec.xpath ? ", XPath " + node.spec.xpath : ""})`;
+            return `${grid.name} (classic Data grid, ${shows}, ${cols.length} column(s)${fields ? `, ${fields} search field(s)` : ""})`;
         },
         async listView(node, target, ctx) {
             const ent = node.ent;
@@ -1171,13 +1427,7 @@ function makePages(h) {
             target.push(lv);
             lv.name = node.name;
             node.widget = lv;
-            const src = lv.dataSource;
-            if (!(src instanceof pages.ListViewXPathSource)) throw new Error(`${node.where}: this Mendix version gives a ${src.structureTypeName} source; only the XPath source (10.5+) is supported`);
-            dm.DirectEntityRef.createInEntityPathSourceUnderEntityRef(src).entity = ent;
-            if (node.spec.xpath) {
-                checkXPath(node, ent);
-                src.xPathConstraint = String(node.spec.xpath);
-            }
+            const shows = listSource(node, lv, false);
             if (node.spec.pageSize !== undefined) {
                 const n = Number(node.spec.pageSize);
                 if (!Number.isInteger(n) || n < 1) throw new Error(`${node.where}: pageSize must be a whole number >= 1`);
@@ -1190,7 +1440,7 @@ function makePages(h) {
                 inner.push(await build({ kind: "text", spec: { text: `{${attr.name}}` }, where: node.where, container: node }, lv.widgets, ctx));
             }
             for (const ch of node.widgets) inner.push(await build(ch, lv.widgets, ctx));
-            return `${lv.name} (${ent.qualifiedName}${node.spec.xpath ? ", XPath " + node.spec.xpath : ""}) [${inner.join(", ")}]`;
+            return `${lv.name} (${shows}) [${inner.join(", ")}]`;
         },
         async actionButton(node, target, ctx) {
             const s = node.spec;
@@ -1208,7 +1458,7 @@ function makePages(h) {
             b.name = node.name || ctx.names.next(action === "close" ? "closePageButton" : "actionButton");
             b.buttonStyle = choice(pages.ButtonStyle, (cssOf(node) === undefined && s.style) || (action === "save" ? "Success" : "Default"), "style", node.where);
             // closes the page by default, except in a data view that listens to a grid (it stays on the page)
-            const dvParam = node.container && node.container.kind === "dataView" && node.container.source !== "listen";
+            const dvParam = node.container && node.container.kind === "dataView" && !["listen", "context", "association"].includes(node.container.source);
             let what = action;
             if (action === "save" || action === "cancel") {
                 const cls = action === "save" ? pages.SaveChangesClientAction : pages.CancelChangesClientAction;
@@ -1417,9 +1667,7 @@ function makePages(h) {
             const { w, props } = await copyPluggable(info.exemplars[0], node, target, ctx, "gallery", alt);
             for (const k of ["datasource", "content", "itemSelection"]) if (!props.has(k)) throw new Error(`${node.where}: Gallery ${info.def.version} has no '${k}' property; ${alt}`);
             for (const p of w.object.properties) await blank(p.value, p.type, null, true);
-            const ds = cw.CustomWidgetXPathSource.createInWidgetValueUnderDataSource(props.get("datasource").value);
-            dm.DirectEntityRef.createInEntityPathSourceUnderEntityRef(ds).entity = ent;
-            if (s.xpath) ds.xPathConstraint = String(s.xpath);
+            const shows = listSource(node, props.get("datasource").value, true);
             const sel = props.get("itemSelection").value;
             if (!sel.type.selectionTypes.some(x => x.name === selName)) throw new Error(`${node.where}: this gallery has no selection ${selName}`);
             sel.selection = cw.CustomWidgetSelectionType[selName];
@@ -1433,7 +1681,7 @@ function makePages(h) {
             for (const f of fields) inner.push(await build({ kind: "text", spec: { text: `{${f}}` }, where: node.where, container: node }, content, ctx));
             for (const ch of node.widgets) inner.push(await build(ch, content, ctx));
             client.warnFirst(`${ctx.qn}: ${w.name} is a Gallery ${info.def.version}, copied from ${info.exemplars[0].unitName} with every setting back to its default`);
-            return `${w.name} (Gallery ${info.def.version}, ${ent.qualifiedName}${s.xpath ? ", XPath " + s.xpath : ""}, selection ${selName}) [${inner.join(", ")}]`;
+            return `${w.name} (Gallery ${info.def.version}, ${shows}, selection ${selName}) [${inner.join(", ")}]`;
         },
         async input(node, target, ctx) {
             const w = await attrInput(node.kind, target, attributeOf(node.container.ent, node.spec.attribute, node.where), node.container, node.where, ctx, node.spec.label, node.name);
@@ -1597,37 +1845,15 @@ function makePages(h) {
         const top = scan(specs, form ? "form" : "widgets", null, nodes);
         if (!top.length && !form) throw new Error(`${qn}: 'widgets' is empty; leave it out for an empty page`);
         const ctx = { qn, names: names(), params: new Map(), count: { inputs: 0 }, untranslated: 0, ents: new Set() };
-        // entities of grids and list views (a database source needs a persistable entity), then the grid kinds
-        for (const n of nodes) {
-            if (!LISTENS.includes(n.kind)) continue;
-            n.ent = await entityOf(n.spec.entity || o.entity, n.where);
-            if (!h.persistable(n.ent)) throw new Error(`${n.where}: ${n.ent.qualifiedName} is non-persistable; a grid, list view or gallery over the database needs a persistable entity (show it in a data view with source parameter, or set a microflow/nanoflow source in Studio Pro)`);
-        }
+        // sources; entities of lists that do not depend on the object around them, grid kinds, names (given ones first,
+        // also tab pages; then grids, list views and galleries in page order, which listenTo needs); then every source
+        prepare(nodes);
+        for (const n of nodes) if (LISTENS.includes(n.kind)) await listEntity(n, { dflt: o.entity });
         for (const n of nodes) if (n.kind === "dataGrid") gridKind(n);
-        // names: given ones first (also tab pages), then grids, list views and galleries (listenTo needs them before anything is built)
         for (const n of nodes) if (n.name) ctx.names.reserve(n.name, n.where);
         for (const n of nodes) for (const t of n.tabs || []) if (t.name) ctx.names.reserve(t.name, t.where);
         for (const n of nodes) if (!n.name && LISTENS.includes(n.kind)) n.name = ctx.names.next(n.gridKind === "datagrid2" ? "dataGrid2_" : PREFIX[n.kind]);
-        // data view sources
-        for (const n of nodes.filter(x => x.kind === "dataView")) {
-            const s = n.spec;
-            let source = s.source !== undefined ? String(s.source).toLowerCase() : null;
-            if (source === "entity") source = "parameter";
-            if (source !== null && !["parameter", "listen"].includes(source)) fail(`${n.where}: source '${s.source}' is not known (use parameter | listen)` + (/assoc/.test(source) ? `; ${MASTER_DETAIL}` : ""), s.source, ["parameter", "listen", "entity"]);
-            if (s.parameter !== undefined) throw new Error(`${n.where}: use "source": "parameter"`);
-            if (s.listenTo !== undefined && source === "parameter") throw new Error(`${n.where}: listenTo goes with source listen, not parameter`);
-            n.source = source || (s.listenTo !== undefined ? "listen" : "parameter");
-            if (n.source === "listen") {
-                if (s.listenTo === undefined) throw new Error(`${n.where}: source listen needs listenTo (a grid or list view on this page)`);
-                n.target = listenTarget(n, nodes);
-                if (s.entity && s.entity !== n.target.ent.qualifiedName) throw new Error(`${n.where}: listens to ${n.target.name} (${n.target.ent.qualifiedName}), but entity is ${s.entity}; ${MASTER_DETAIL}`);
-                n.ent = n.target.ent;
-                const sel = String(n.target.spec.selection || "Single").toLowerCase();
-                if ((n.target.gridKind === "datagrid2" || n.target.kind === "gallery") && sel !== "single") throw new Error(`${n.where}: listenTo needs a ${n.target.kind === "gallery" ? "gallery" : "Data grid 2"} with selection Single (${n.target.name} has ${n.target.spec.selection}); leave out "selection"`);
-                if (n.target.kind === "dataGrid" && sel === "none") client.warn(`${qn}: ${n.name || "the data view"} listens to ${n.target.name}, whose selection is None; select Single so it can show a row`);
-                else if (n.target.kind === "dataGrid" && /multi/.test(sel)) client.warn(`${qn}: ${n.target.name} allows multi-selection; the listening data view shows one of the selected rows (Single is usual)`);
-            } else n.ent = await entityOf(s.entity || o.entity, n.where);
-        }
+        await resolveSources(nodes, { dflt: o.entity, ctx });
         for (const n of nodes) if (n.ent) ctx.ents.add(n.ent);
         // a grid or list view followed by the data view that listens to it: side by side (8/4)
         let arranged = top;
@@ -1745,6 +1971,42 @@ function makePages(h) {
         return out;
     }
 
+    // The data source kind of a saved data widget: database | association | context | parameter | listen | microflow | nanoflow | other
+    function sourceKind(w) {
+        let src = null;
+        if (w instanceof cw.CustomWidget) {
+            for (const p of w.object ? w.object.properties : []) if (p.value && p.value.dataSource) src = src || p.value.dataSource;
+        } else {
+            try {
+                src = w.dataSource;
+            } catch (e) {
+                src = null;
+            }
+        }
+        if (!src) return null;
+        if (src instanceof pages.ListenTargetSource) return "listen";
+        if (src instanceof pages.MicroflowSource) return "microflow";
+        if (src instanceof pages.NanoflowSource) return "nanoflow";
+        if (src instanceof pages.AssociationSource) return "association";
+        if (src instanceof pages.DataViewSource) return src.sourceVariable && src.sourceVariable.pageParameter ? "parameter" : src.entityRef instanceof dm.IndirectEntityRef ? "association" : "context";
+        if (src instanceof pages.GridXPathSource || src instanceof pages.ListViewXPathSource || src instanceof cw.CustomWidgetXPathSource) return "database";
+        return "other";
+    }
+    // [{ name, source }] of the named data widgets of specs that ask for a source
+    function namedSources(specs, out = []) {
+        for (const s of specs || []) {
+            if (!s || typeof s !== "object") continue;
+            const kind = widgetKind(s.widget !== undefined ? s.widget : s.type);
+            const want = !["dataView", "dataGrid", "listView", "gallery", "templateGrid"].includes(kind) ? null : s.source !== undefined ? String(s.source).toLowerCase() : ["association", "microflow", "nanoflow"].find(k => s[k] !== undefined) || (s.listenTo !== undefined ? "listen" : null);
+            if (s.name && want) out.push({ name: String(s.name), source: want === "entity" ? "parameter" : want === "xpath" ? "database" : want });
+            namedSources(s.widgets, out);
+            namedSources(s.footer, out);
+            for (const t of Array.isArray(s.tabs) ? s.tabs : []) if (t) namedSources(t.widgets, out);
+            if (kind === "layoutGrid") for (const r of [].concat(s.rows || [{ columns: s.columns }])) for (const c of (r && Array.isArray(r.columns) && r.columns) || []) if (c && typeof c === "object") namedSources(c.widgets, out);
+        }
+        return out;
+    }
+
     async function menuHas(profileName, qn) {
         const profile = await navProfile(profileName, "check");
         return menuItems(profile.menuItemCollection.items).some(x => opens(x.item, qn));
@@ -1770,8 +2032,11 @@ function makePages(h) {
                     if (el instanceof pages.Widget) names.set(el.name, el);
                     if (el instanceof pages.ListenTargetSource) listens.push(el.listenTarget);
                 });
-                for (const k of ["dataGrid", "dataView", "listView"]) if ((want[k] || 0) !== (have[k] || 0)) r.push(`${qn} has ${have[k] || 0} ${k}(s), expected ${want[k] || 0}`);
-                for (const k of ["layoutGrid", "actionButton", "tabContainer", "groupBox", "snippetCall", "image", "referenceSelector", "comboBox", "gallery"]) if ((have[k] || 0) < (want[k] || 0)) r.push(`${qn} has ${have[k] || 0} ${k}(s), expected at least ${want[k]}`);
+                for (const k of ["dataGrid", "dataView", "listView", "layoutGrid", "actionButton", "tabContainer", "groupBox", "snippetCall", "image", "referenceSelector", "comboBox", "gallery"]) if ((have[k] || 0) < (want[k] || 0)) r.push(`${qn} has ${have[k] || 0} ${k}(s), expected at least ${want[k]}`);
+                for (const x of namedSources(o.widgets)) {
+                    const w = names.get(x.name), got = w && sourceKind(w);
+                    if (w && got !== x.source) r.push(`${qn}: ${x.name} has a ${got || "no"} source, expected ${x.source}`);
+                }
                 for (const t of listens) {
                     const w = names.get(t);
                     if (!(w instanceof pages.DataGrid || w instanceof pages.ListView || isGrid2(w) || isPl(w, GALLERY))) r.push(`${qn}: a data view listens to '${t}', which is no grid, list view or gallery on the page`);
@@ -1799,7 +2064,8 @@ function makePages(h) {
 
     // the builders and lookups ops-page-edit.js uses on existing pages
     const internals = { scan, build, gridKind, entityOf, attributeOf, names, textAll, templateAll, noPlaceholder, checkXPath, dg2Info,
-        isGrid2, isPl, valueOf, humanize, condition, sameCondition, fill, languages, shown, listenTarget, classicColumn, dg2Column, typeOf, isA, list, unitNamed };
+        isGrid2, isPl, valueOf, humanize, condition, sameCondition, fill, languages, shown, listenTarget, classicColumn, dg2Column, typeOf, isA, list, unitNamed,
+        prepare, listEntity, resolveSources, sourceKind };
     return { createPage, addMenuItem, setHomePage, checks, internals };
 }
 

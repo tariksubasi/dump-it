@@ -214,7 +214,7 @@ function makePageEdit(h, I) {
         let f = flow;
         let t = prop(f, "microflowReturnType");
         if (t === undefined) t = prop((f = await flow.load()), "microflowReturnType");
-        return t instanceof datatypes.ObjectType ? t.entityQualifiedName : null;
+        return t instanceof datatypes.ObjectType || t instanceof datatypes.ListType ? t.entityQualifiedName : null;
     }
 
     // Qualified name of the entity a data container shows, or null with why.
@@ -247,13 +247,15 @@ function makePageEdit(h, I) {
         const ent = await I.entityOf(qn, where).catch(() => {
             throw new Error(`${where}: ${dc.name} shows ${qn}, which ops cannot read (System module); add widgets that show its attributes in Studio Pro`);
         });
+        // the data containers around it too (objects a new widget can use; a list item around it)
+        const container = dc.ctx ? await builderContext(P, dc.ctx, where).catch(() => null) : null;
         if (el instanceof pages.DataView) {
-            const src = el.dataSource;
-            const source = src instanceof pages.ListenTargetSource ? "listen" : src instanceof pages.DataViewSource && src.sourceVariable && src.sourceVariable.pageParameter ? "parameter" : "other";
-            return { kind: "dataView", ent, source, widget: el, name: el.name, existing: true, inputVariable: inputStyle(P, dc) };
+            const kind = I.sourceKind(el);
+            const source = ["listen", "parameter", "context", "association"].includes(kind) ? kind : "other";
+            return { kind: "dataView", ent, source, widget: el, name: el.name, existing: true, container, inputVariable: inputStyle(P, dc) };
         }
-        if (el instanceof pages.ListView) return { kind: "listView", ent, widget: el, name: el.name, existing: true };
-        return { kind: el instanceof cw.CustomWidget ? "pluggable" : "templateGrid", ent, widget: el, name: el.name, existing: true };
+        if (el instanceof pages.ListView) return { kind: "listView", ent, widget: el, name: el.name, existing: true, container };
+        return { kind: el instanceof cw.CustomWidget ? "pluggable" : "templateGrid", ent, widget: el, name: el.name, existing: true, container };
     }
 
     // How a new input in an existing data view refers to the object: like the inputs already in it (a page variable
@@ -734,11 +736,8 @@ function makePageEdit(h, I) {
         const params = (P.snippet ? [] : P.doc.parameters).filter(p => p.parameterType instanceof datatypes.ObjectType);
         for (const p of params) if (!ctx.params.has(p.parameterType.entityQualifiedName)) ctx.params.set(p.parameterType.entityQualifiedName, p);
         const dflt = o.entity || (params.length === 1 ? params[0].parameterType.entityQualifiedName : undefined);
-        for (const n of nodes) {
-            if (!["dataGrid", "listView", "gallery"].includes(n.kind)) continue;
-            n.ent = await I.entityOf(n.spec.entity || dflt, n.where);
-            if (!h.persistable(n.ent)) throw new Error(`${n.where}: ${n.ent.qualifiedName} is non-persistable; a grid, list view or gallery over the database needs a persistable entity`);
-        }
+        I.prepare(nodes);
+        for (const n of nodes) if (["dataGrid", "listView", "gallery"].includes(n.kind)) await I.listEntity(n, { dflt });
         for (const n of nodes) if (n.kind === "dataGrid") I.gridKind(n);
         for (const n of nodes) {
             if (!n.name) continue;
@@ -750,30 +749,11 @@ function makePageEdit(h, I) {
             if (t.name) ctx.names.reserve(t.name, t.where);
         }
         for (const n of nodes) if (!n.name && ["dataGrid", "listView", "gallery"].includes(n.kind)) n.name = ctx.names.next(n.gridKind === "datagrid2" ? "dataGrid2_" : n.kind === "dataGrid" ? "grid" : n.kind);
-        // data views: listen to a grid or list view (new or on the page), or show an existing page parameter
-        const existing = nodes.some(n => n.kind === "dataView") ? await listenables(P) : [];
+        // data views: listen to a grid or list view (new or on the page), show an existing page parameter, the object
+        // around them, an object over an association or from a flow
+        const existing = nodes.some(n => n.kind === "dataView" && n.source === "listen") ? await listenables(P) : [];
         for (const e of existing) e.ent = e.entQn ? await I.entityOf(e.entQn, where).catch(() => null) : null; // System entities are not in the project
-        for (const n of nodes.filter(x => x.kind === "dataView")) {
-            const s = n.spec;
-            let source = s.source !== undefined ? String(s.source).toLowerCase() : null;
-            if (source === "entity") source = "parameter";
-            if (source !== null && !["parameter", "listen"].includes(source)) fail(`${n.where}: source '${s.source}' is not known (use parameter | listen)`, s.source, ["parameter", "listen"]);
-            if (s.listenTo !== undefined && source === "parameter") throw new Error(`${n.where}: listenTo goes with source listen, not parameter`);
-            n.source = source || (s.listenTo !== undefined ? "listen" : "parameter");
-            if (n.source === "listen") {
-                if (s.listenTo === undefined) throw new Error(`${n.where}: source listen needs listenTo (a grid or list view on this page)`);
-                n.target = I.listenTarget(n, [...nodes, ...existing.filter(e => !nodes.some(x => x.name === e.name))]);
-                if (!n.target.ent) throw new Error(`${n.where}: the entity of ${n.target.name} is not known here; add this data view in Studio Pro`);
-                if (s.entity && s.entity !== n.target.ent.qualifiedName) throw new Error(`${n.where}: listens to ${n.target.name} (${n.target.ent.qualifiedName}), but entity is ${s.entity}`);
-                n.ent = n.target.ent;
-                const sel = String(n.target.spec.selection || "Single").toLowerCase();
-                if ((n.target.gridKind === "datagrid2" || n.target.kind === "gallery") && sel !== "single") throw new Error(`${n.where}: listenTo needs a widget with selection Single (${n.target.name} has ${n.target.spec.selection})`);
-                if (n.target.kind === "dataGrid" && sel === "none") client.warn(`${P.qn}: ${n.name || "the data view"} listens to ${n.target.name}, whose selection is None; select Single so it can show a row`);
-            } else {
-                if (P.snippet) throw new Error(`${n.where}: on a snippet a new data view can only listen to a grid or list view ("listenTo")`);
-                n.ent = await I.entityOf(s.entity || dflt, n.where);
-            }
-        }
+        await I.resolveSources(nodes, { dflt, extra: existing, snippet: P.snippet, ctx });
         // insert at the place, in order
         let index = slot.index;
         const at = { push: w => slot.list.splice(index++, 0, w) };
@@ -921,10 +901,11 @@ function makePageEdit(h, I) {
             let how = "";
             if (src instanceof pages.ListenTargetSource) how = `listens to ${src.listenTarget}`;
             else if (src instanceof pages.MicroflowSource) how = `microflow ${src.microflowSettings.microflowQualifiedName}`;
-            else if (src instanceof pages.NanoflowSource) how = "nanoflow";
+            else if (src instanceof pages.NanoflowSource) how = `nanoflow ${src.nanoflowQualifiedName}`;
             else if (src && prop(src, "sourceVariable") && (src.sourceVariable.pageParameter || src.sourceVariable.snippetParameter)) how = `parameter ${(src.sourceVariable.pageParameter || src.sourceVariable.snippetParameter).name}`;
             else if (src && prop(src, "xPathConstraint") !== undefined) how = `database${src.xPathConstraint ? " " + short(src.xPathConstraint) : ""}`;
-            else if (src && prop(src, "entityRef") instanceof dm.IndirectEntityRef) how = "over an association";
+            else if (src && prop(src, "entityRef") instanceof dm.IndirectEntityRef) how = `over ${src.entityRef.steps.map(x => x.associationQualifiedName).join("/")}${n.ctx ? ` of ${n.ctx.name}` : ""}`;
+            else if (src instanceof pages.DataViewSource && n.ctx) how = `the object of ${n.ctx.name}`;
             if (qn || how) bits.push(`${qn || "?"}${how ? ` (${how})` : ""}`);
             if (el instanceof pages.DataView) {
                 const ed = prop(el, "editability");

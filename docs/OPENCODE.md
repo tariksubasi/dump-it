@@ -344,18 +344,31 @@ also take `editable` (true, false or a condition like `visible`). Full field lis
 | `layoutGrid` | columns `[8, 4]` or `[{"weight": 8, "widgets": [...]}]`, or rows `[{"columns": [...]}]`, width | Weights 1-12 or `"auto"`; `tablet`/`phone` weights per column |
 | `container` | widgets, class | |
 | `text` | **text**, style (`Text`, `Paragraph`, `H1`-`H6`) | Inside a data view or list view, `{Attribute}` shows the value. `{1}` is refused (a Mendix placeholder). `"widget": "heading"` = a text with style H2 |
-| `dataGrid` | entity, columns (`"Attr"` or `{attribute, caption, width}`), xpath, search, selection (default Single), selectFirst, rows, kind | Database (XPath) source: the entity must be persistable. `kind`: `classic` (default; search bar), `datagrid2` (a Data grid 2 copied from one on this project's pages; refused when the project has none or its widget differs from `widgets/*.mpk`), `auto` (datagrid2 when possible, else classic; also classic when a column type does not fit a Data grid 2). `width`: whole numbers (weights, 100 in total) |
-| `dataView` | entity, source (`parameter`/`listen`), listenTo, editable (default true), fields, buttons, widgets, footer | `listenTo`: the name of a grid or list view, or `dataGrid` / `listView` when the page has exactly one (a Data grid 2 needs selection Single). Without `listenTo`: a page parameter of the entity, with Save/Cancel when editable. An editable data view without a save button gets a warning |
-| `listView` | entity, xpath, fields, widgets, pageSize (whole number) | Persistable entity. A data view can listen to it |
+| `dataGrid` | entity, source, association, microflow, nanoflow, columns (`"Attr"` or `{attribute, caption, width}`), xpath, search, selection (default Single), selectFirst, rows, kind | Data source: see the source table below; the database source needs a persistable entity, search only with it. `kind`: `classic` (default; search bar), `datagrid2` (a Data grid 2 copied from one on this project's pages; refused when the project has none or its widget differs from `widgets/*.mpk`), `auto` (datagrid2 when possible, else classic; also classic when a column type does not fit a Data grid 2). `width`: whole numbers (weights, 100 in total) |
+| `dataView` | entity, source, listenTo, association, microflow, nanoflow, editable (default true), fields, buttons, widgets, footer | Data source: see the source table below. `listenTo`: the name of a grid or list view, or `dataGrid` / `listView` when the page has exactly one (a Data grid 2 needs selection Single). A page parameter (Save/Cancel when editable) only outside list items. An editable data view without a save button (also none in a data view around it) gets a warning |
+| `listView` | entity, source, association, microflow, nanoflow, xpath, fields, widgets, pageSize (whole number) | Data source: see the source table below. Each item is an object: inputs, reference selectors and data views (source context) go inside (an editable list). A data view can listen to it |
 | `actionButton` | **action** (`save`, `cancel`, `close`, `delete`, `showPage`, `callMicroflow`, `callNanoflow`), caption, page, microflow, nanoflow, style, closePage | Passes only the object of the data view or list view it is in (target with that one parameter or none). save/cancel `closePage` default: true in a parameter data view, false in a listening one (the dashboard stays open; Studio Pro's own default is true). `close` = `closePageButton1` "Close page" |
-| `input`, `textBox`, `textArea`, `checkBox`, `datePicker`, `radioButtons`, `dropDown` | **attribute**, label, editable | Inside a data view; `input` picks the widget by attribute type (an enumeration gets radio buttons, as on Studio Pro's pages) |
+| `input`, `textBox`, `textArea`, `checkBox`, `datePicker`, `radioButtons`, `dropDown` | **attribute**, label, editable | Inside a data view or a list view / gallery item; `input` picks the widget by attribute type (an enumeration gets radio buttons, as on Studio Pro's pages) |
 | `tabContainer` | **tabs** `[{"caption": "General", "widgets": [...], "name": ...}]` | Tab pages `tabPage1`, ...; addWidgets `into` a tab page by its name |
 | `groupBox` | caption, collapsible (`no`/`expanded`/`collapsed`), headerMode (`Div`, `H1`-`H6`), widgets | `{Attribute}` in the caption inside a data view or list view |
 | `snippetCall` | **snippet** | An existing snippet without parameters (`Did you mean`); snippets with parameters are refused |
 | `image` | image, association, width, height | `image`: a static image `Module.Collection.Image` (`Did you mean`). Without it: the image of the object around it (data view, list view or gallery of an entity that inherits `System.Image`, or over `association`). Size: pixels `200`, `"50%"` or `"auto"` |
 | `referenceSelector` | **association**, attribute, label, xpath, editable | Inside a data view whose entity owns the reference (`Module.Order_Customer` in a data view of Order); `attribute` of the other entity (default: its first String attribute). Reference sets are refused |
 | `comboBox` | attribute or association, captionAttribute, label, editable | Combo box (pluggable) for an enumeration/Boolean attribute or a reference, copied from a Studio Pro-saved combo box of this project whose widget equals `widgets/*.mpk`, every setting back to its default. Otherwise refused with the classic alternative (`referenceSelector`, `dropDown`, `checkBox`) |
-| `gallery` | entity, xpath, widgets (per item), selection (default Single), pageSize, columns (desktop 1-12) | Gallery (pluggable) over the database, copied like `comboBox`; a data view can listen to it (`listenTo`). Without one to copy it is refused: use `listView` |
+| `gallery` | entity, source, association, microflow, nanoflow, xpath, widgets (per item), selection (default Single), pageSize, columns (desktop 1-12) | Gallery (pluggable), data source as `listView`, copied like `comboBox`; a data view can listen to it (`listenTo`). Without one to copy it is refused: use `listView` |
+
+Data sources (`"source"`; `association` / `microflow` / `nanoflow` alone also pick it). The object around a widget is
+the one of the nearest data view or list view / gallery item it sits in (through containers, group boxes, tabs and
+layout grids); every level keeps its own object, so lists and data views nest as deep as needed:
+
+| source | on | gives | Notes |
+|---|---|---|---|
+| `database` (default of lists) | dataGrid, listView, gallery | every object of `entity`, filtered by `xpath` | Inside a data view without `xpath` the dry run suggests `association` when one links the two; `[%CurrentObject%]` in `xpath` shows only committed objects (the dry run says so) |
+| `association` | all | over `"association": "Module.Assoc"` from the object around it | Lists: a reference set the object owns, or the reference another entity has to it (`Sales.OrderLine_Order` in a data view of Order gives its lines, new ones too). Data views: a reference the object owns (a path `A/B` of references), or the other side of a one-to-one. The wrong direction is an error that says which widget fits |
+| `microflow` / `nanoflow` | all | what `"microflow": "Module.DS_X"` returns | A data view needs one object, a list a list (else an error). Parameters: the objects around it are passed as Studio Pro does (each object parameter must match one of them) |
+| `context` (default of a data view inside a list item) | dataView | the object around it | E.g. a data view per list view item; `entity` may be left out |
+| `parameter` (default of a data view elsewhere) | dataView | a page parameter of `entity` | Never inside a list item; an existing page gets no new parameter |
+| `listen` | dataView | the selected row of `listenTo` | |
 
 A grid followed by the data view that listens to it is placed side by side (layout grid 8/4); `"arrange": "rows"`
 stacks them. The dry run's `Warnings` start with the grid kind that was used, then lint lines: a grid with 0
@@ -497,7 +510,9 @@ What pages cannot do yet (use Studio Pro, and `python mx.py gap "<what>"`):
   click actions (they are left empty). It needs a Data grid 2 on a page or snippet of this project whose widget equals
   `widgets/*.mpk` (otherwise `kind: datagrid2` is refused; use `classic`).
 - Classic data grid: only the database (XPath) source and a Search button (no New/Edit/Delete buttons in the bar).
-- Data views: only a page parameter or a listened grid/list view (no microflow, nanoflow or association source).
+- Data sources: a list over an association takes one association (a longer path: a microflow source or XPath); no
+  reverse of a reference set that the other side owns; data views with source context or association have no Studio
+  Pro 10/11 sample in the test projects (the dry run says "first use": check them in Studio Pro).
 - Buttons: no parameter mappings, no create-object action, no design properties or on-change events.
 - Menus: web profiles only (native profiles are refused); no reordering, and no op removes a menu item or home page
   (deleting a page that one opens says so).

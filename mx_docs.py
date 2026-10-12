@@ -280,7 +280,7 @@ class PageRenderer:
             return out
         if w.get("Image"):
             out.append("image " + w["Image"])
-        if w.get("Editable") in ("Never", False) and w["$Type"] != "Forms$ListView" and not w.get("ConditionalEditabilitySettings"):
+        if (w.get("Editable") in ("Never", False) or w.get("Editability") == "Never") and w["$Type"] != "Forms$ListView" and not w.get("ConditionalEditabilitySettings"):
             out.append("read-only")
         if w["$Type"] == "Forms$GroupBox" and w.get("Collapsible") not in (None, "No"):
             out.append("collapsible" + (" (collapsed)" if w["Collapsible"] == "YesInitiallyCollapsed" else ""))
@@ -382,7 +382,11 @@ class PageRenderer:
         if entity and "/" not in entity:
             self.index.entity(entity, "page", self.qn)
         kind = {"AssociationSource": "association", "DataViewSource": "context", "ImageViewerSource": "image of"}.get(name, "database" if "XPath" in name else name)
-        parts = [kind, page_var(ds.get("SourceVariable")), entity]
+        var = page_var(ds.get("SourceVariable"))
+        if name == "DataViewSource":
+            # a page/snippet parameter, an object over references from the object around it, or that object itself
+            kind = "parameter" if var.startswith("$") else "association" if "/" in (entity or "") else "context (the object around it)"
+        parts = [kind, var, entity]
         xpath = clean(ds.get("XPathConstraint"))
         if xpath:
             parts.append("WHERE " + xpath)

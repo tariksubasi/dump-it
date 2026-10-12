@@ -135,6 +135,97 @@ function widgetPlan(mod, T, x) {
     ] };
 }
 
+// Relational pages: Customer / Order / OrderLine / Product entities and flows, a grid with a listening data view that
+// holds a data view over a reference, an editable list view over the reverse reference (an input per line, a data
+// view of the line with a reference selector), a classic grid over the association and a list view from a microflow
+// with the order as implicit parameter; a 3-level master-detail by [%CurrentObject%] XPath; a data view from a
+// nanoflow; addWidgets of an association list into the existing data view. x: widgetTargets (gallery, Data grid 2).
+function relationalPlan(mod, T, x) {
+    const e = n => `${mod}.${T}${n}`, a = (f, t) => `${mod}.${T}${f}_${T}${t}`;
+    return [
+        { op: "createEntity", module: mod, name: `${T}Cust`, attributes: [{ name: "Name", type: "String(100)" }] },
+        { op: "createEntity", module: mod, name: `${T}Prod`, attributes: [{ name: "Name", type: "String(100)" }, { name: "Price", type: "Decimal" }] },
+        { op: "createEntity", module: mod, name: `${T}Order`, attributes: [{ name: "Number", type: "String(20)" }, { name: "Placed", type: "DateTime" }] },
+        { op: "createEntity", module: mod, name: `${T}OLine`, attributes: [{ name: "Quantity", type: "Integer" }, { name: "Note", type: "String(200)" }] },
+        { op: "addAssociation", from: e("Order"), to: e("Cust") },
+        { op: "addAssociation", from: e("OLine"), to: e("Order") },
+        { op: "addAssociation", from: e("OLine"), to: e("Prod") },
+        { op: "createMicroflow", module: mod, name: `${T}_DS_Lines`, folder: "ZzTest", parameters: [{ name: "Order", type: e("Order") }], returns: `List(${e("OLine")})`,
+            actions: [{ action: "retrieve", variable: "Lines", from: "Order", association: a("OLine", "Order") }], returnValue: "$Lines" },
+        { op: "createNanoflow", module: mod, name: `${T}_DS_NewOrder`, folder: "ZzTest", returns: e("Order"), actions: [{ action: "create", variable: "New", entity: e("Order") }], returnValue: "$New" },
+        { op: "createPage", module: mod, name: `${T}_Orders`, entity: e("Order"), folder: "ZzTest", widgets: [
+            { widget: "dataGrid", name: "zzOrders", columns: ["Number", "Placed"] },
+            { widget: "dataView", name: "zzOrder", listenTo: "zzOrders", widgets: [
+                { widget: "dataView", name: "zzCust", association: a("Order", "Cust"), editable: false, fields: ["Name"] },
+                { widget: "listView", name: "zzLines", association: a("OLine", "Order"), widgets: [
+                    { widget: "input", attribute: "Quantity", name: "zzQty" },
+                    { widget: "dataView", name: "zzLine", widgets: [{ widget: "input", attribute: "Note" }, { widget: "referenceSelector", name: "zzProd", association: a("OLine", "Prod"), attribute: "Name" }] }] },
+                { widget: "dataGrid", name: "zzLineGrid", source: "association", association: a("OLine", "Order"), columns: ["Quantity", "Note"] },
+                { widget: "listView", name: "zzLinesMf", microflow: `${mod}.${T}_DS_Lines`, fields: ["Quantity"] },
+                ...(x.gallery ? [{ widget: "gallery", name: "zzLineGallery", association: a("OLine", "Order"), widgets: [{ widget: "text", text: "{Quantity}" }] }] : []),
+                ...(x.grid2 ? [{ widget: "dataGrid", kind: "datagrid2", name: "zzLineGrid2", association: a("OLine", "Order"), columns: ["Quantity"] }] : [])],
+                footer: [{ widget: "actionButton", action: "save" }] }] },
+        { op: "createPage", module: mod, name: `${T}_Master3`, entity: e("Cust"), folder: "ZzTest", widgets: [
+            { widget: "dataGrid", name: "zzCusts", columns: ["Name"] },
+            { widget: "dataView", name: "zzCustDv", listenTo: "zzCusts", editable: false, widgets: [
+                { widget: "listView", name: "zzCustOrders", entity: e("Order"), xpath: `[${a("Order", "Cust")} = '[%CurrentObject%]']`, widgets: [
+                    { widget: "text", text: "{Number}" },
+                    { widget: "listView", name: "zzOrderLines", entity: e("OLine"), xpath: `[${a("OLine", "Order")} = '[%CurrentObject%]']`, fields: ["Quantity"] }] }] }] },
+        { op: "createPage", module: mod, name: `${T}_NewOrder`, folder: "ZzTest", widgets: [
+            { widget: "dataView", name: "zzNewOrder", nanoflow: `${mod}.${T}_DS_NewOrder`, fields: ["Number"], footer: [{ widget: "actionButton", action: "save" }] }] },
+        { op: "addWidgets", page: `${mod}.${T}_Orders`, into: "zzOrder", widgets: [
+            { widget: "listView", name: "zzLines2", association: a("OLine", "Order"), widgets: [{ widget: "dataView", name: "zzLine2", widgets: [{ widget: "text", text: "{Note}" }] }] }] }
+    ];
+}
+
+// Keys Studio Pro stores for the data source types (the same in every 10.24-11.13 sample of the test projects).
+const SOURCE_KEYS = {
+    "Forms$AssociationSource": "EntityRef ForceFullObjects SourceVariable", "Forms$DataViewSource": "EntityRef ForceFullObjects SourceVariable",
+    "Forms$MicroflowSource": "ForceFullObjects MicroflowSettings", "Forms$NanoflowSource": "ForceFullObjects Nanoflow ParameterMappings",
+    "DomainModels$IndirectEntityRef": "Steps", "DomainModels$EntityRefStep": "Association DestinationEntity"
+};
+
+// The relational pages as stored: source types and keys, association steps (direction), no page parameter from a
+// data view inside a list, inputs of list items without a source variable.
+function relationalProblems(project, mod, T, x) {
+    const r = [];
+    const pageOf = name => [...project.units.keys()].map(id => project.read(id)).find(u => u.$Type === "Forms$Page" && u.Name === name);
+    const orders = pageOf(`${T}_Orders`), master = pageOf(`${T}_Master3`), nf = pageOf(`${T}_NewOrder`);
+    if (!orders || !master || !nf) return ["relational pages missing"];
+    const named = new Map(), all = [];
+    for (const p of [orders, master, nf]) walkPlain(p, o => {
+        all.push(o);
+        if (o.Name && !named.has(o.Name)) named.set(o.Name, o);
+        const want = SOURCE_KEYS[o.$Type], have = Object.keys(o).filter(k => k[0] !== "$").sort().join(" ");
+        if (want && have !== want) r.push(`${o.$Type} has keys [${have}], Studio Pro stores [${want}]`);
+    });
+    const a = (f, t) => `${mod}.${T}${f}_${T}${t}`, e = n => `${mod}.${T}${n}`;
+    const step = (ds, assoc, dest) => ds && ds.EntityRef && ds.EntityRef.$Type === "DomainModels$IndirectEntityRef" && ds.EntityRef.Steps.length === 1 && ds.EntityRef.Steps[0].Association === assoc && ds.EntityRef.Steps[0].DestinationEntity === dest && ds.SourceVariable === null;
+    const ds = n => (named.get(n) || {}).DataSource;
+    const dsOf = n => {
+        const w = named.get(n);
+        if (!w || w.$Type !== "CustomWidgets$CustomWidget") return ds(n);
+        let out = null;
+        walkPlain(w.Object, o => o.$Type === "CustomWidgets$WidgetValue" && o.DataSource && !out && (out = o.DataSource));
+        return out;
+    };
+    if (!(ds("zzCust") && ds("zzCust").$Type === "Forms$DataViewSource" && step(ds("zzCust"), a("Order", "Cust"), e("Cust")))) r.push("zzCust is not a data view over the reference Order_Cust");
+    for (const n of ["zzLines", "zzLineGrid", "zzLines2", ...(x.gallery ? ["zzLineGallery"] : []), ...(x.grid2 ? ["zzLineGrid2"] : [])]) {
+        const d = dsOf(n);
+        if (!(d && d.$Type === "Forms$AssociationSource" && step(d, a("OLine", "Order"), e("OLine")))) r.push(`${n} is not a list over the reverse of OLine_Order`);
+    }
+    for (const n of ["zzLine", "zzLine2"]) {
+        const d = ds(n);
+        if (!(d && d.$Type === "Forms$DataViewSource" && d.EntityRef.Entity === e("OLine") && d.SourceVariable === null)) r.push(`${n} is not a context data view of the line`);
+    }
+    if ((ds("zzLinesMf") || {}).$Type !== "Forms$MicroflowSource" || ds("zzLinesMf").MicroflowSettings.Microflow !== `${mod}.${T}_DS_Lines` || ds("zzLinesMf").MicroflowSettings.ParameterMappings.length) r.push("zzLinesMf is not a list from the microflow (implicit parameter)");
+    if ((ds("zzNewOrder") || {}).$Type !== "Forms$NanoflowSource" || ds("zzNewOrder").Nanoflow !== `${mod}.${T}_DS_NewOrder`) r.push("zzNewOrder is not a data view from the nanoflow");
+    for (const n of ["zzCustOrders", "zzOrderLines"]) if (!/\[%CurrentObject%\]/.test((ds(n) || {}).XPathConstraint || "")) r.push(`${n} has no [%CurrentObject%] XPath`);
+    for (const p of [orders, master, nf]) if ((p.Parameters || []).length) r.push(`${p.Name} has a page parameter`);
+    if ((named.get("zzQty") || {}).SourceVariable !== null || (named.get("zzProd") || {}).SourceVariable !== null) r.push("an input of a list item has a SourceVariable (Studio Pro writes null)");
+    return [...new Set(r)];
+}
+
 // What the project offers for widgetPlan: a snippet without parameters, an image, a System.Image entity (persistable,
 // outside System), and combo box / gallery copies (pluggable.exemplars).
 async function widgetTargets(model, project) {
@@ -761,6 +852,8 @@ async function selftest(mpr, keep, { out, relevant }) {
         const { phase1, E, M, role } = plans(mod, T, userRole, grid2.exemplars.length > 0);
         const wt = await widgetTargets(s1.model, s1.ctx.project);
         phase1.ops.push(widgetPlan(mod, T, wt));
+        wt.grid2 = grid2.exemplars.length > 0;
+        phase1.ops.push(...relationalPlan(mod, T, wt));
         // pages copy a layout from the project's own pages; a project without any cannot get pages
         const layouts = new Set(s1.model.allLayouts().map(l => l.qualifiedName));
         const pageable = [...s1.ctx.project.units.keys()].some(id => {
@@ -775,7 +868,7 @@ async function selftest(mpr, keep, { out, relevant }) {
             if (!wt.gallery) results.push(`SKIP gallery: ${wt.galleryInfo.reason}`);
         }
         if (!pageable) {
-            phase1.ops = phase1.ops.filter(o => !["createPage", "addMenuItem", "setHomePage"].includes(o.op) && o.name !== `${T}_Open`);
+            phase1.ops = phase1.ops.filter(o => !["createPage", "addMenuItem", "setHomePage", "addWidgets"].includes(o.op) && o.name !== `${T}_Open`);
             results.push("SKIP pages, dashboard and widget page: this project has no page with a layout to copy");
         } else if (!web) {
             phase1.ops = phase1.ops.filter(o => !["addMenuItem", "setHomePage"].includes(o.op));
@@ -846,6 +939,8 @@ async function selftest(mpr, keep, { out, relevant }) {
             const wp = widgetProblems(s2.ctx.project, T, wt);
             const kinds = ["tab container", "group box", "reference selector", wt.snippet && "snippet call", wt.image && "image", wt.imageEntity && "dynamic image", wt.combo && "combo box x2", wt.gallery && "gallery"].filter(Boolean);
             check(`widget page stored with Studio Pro's keys (${kinds.join(", ")}; visible, editable, class, style)`, !wp.length, wp.slice(0, 5).join("; "));
+            const rel = relationalProblems(s2.ctx.project, mod, T, wt);
+            check(`relational pages stored like Studio Pro (grid -> listening data view -> data view over a reference, editable list view over the reverse reference -> context data view -> reference selector; association grid${wt.gallery ? ", gallery" : ""}${wt.grid2 ? ", Data grid 2" : ""}; microflow and nanoflow sources; 3-level master-detail by XPath; addWidgets)`, !rel.length, rel.slice(0, 5).join("; "));
         }
 
         // phase T: a new language, translations of existing texts (page title, enumeration caption, show-message text,
