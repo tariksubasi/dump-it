@@ -1,0 +1,116 @@
+{
+  "ops": [
+    {
+      "op": "createPage",
+      "module": "Builder",
+      "name": "Dashboard_Web",
+      "title": "Dashboard / Oluşturucu Ana Sayfa",
+      "entity": "",
+      "fields": [],
+      "buttons": [],
+      "widgets": [
+        {
+          "id": "LayoutGrid1",
+          "type": "LayoutGrid",
+          "rows": [
+            {
+              "size": "auto",
+              "cells": [
+                {
+                  "widget": "ActionButton1",
+                  "desktop": 12,
+                  "tablet": 12,
+                  "phone": 12
+                }
+              ]
+            },
+            {
+              "size": "auto",
+              "cells": [
+                {
+                  "widget": "Container1",
+                  "desktop": 4,
+                  "tablet": 6,
+                  "phone": 12
+                },
+                {
+                  "widget": "Container2",
+                  "desktop": 4,
+                  "tablet": 6,
+                  "phone": 12
+                },
+                {
+                  "widget": "Container3",
+                  "desktop": 4,
+                  "tablet": 6,
+                  "phone": 12
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "ActionButton1",
+          "type": "ActionButton",
+          "text": "Home / Anasayfa",
+          "onClick": "Ulug.Home_Web()"
+        },
+        {
+          "id": "Container1",
+          "type": "DivContainer",
+          "onClick": "open page Builder.School_Overview()",
+          "widgets": [
+            {
+              "id": "Text1",
+              "type": "StaticText",
+              "text": "School / Okul"
+            },
+            {
+              "id": "Counter1",
+              "type": "DataWidget",
+              "dataPath": "count(schools)"
+            }
+          ]
+        },
+        {
+          "id": "Container2",
+          "type": "DivContainer",
+          "onClick": "open page Builder.Course_Overview()",
+          "widgets": [
+            {
+              "id": "Text2",
+              "type": "StaticText",
+              "text": "Course / Kurs"
+            },
+            {
+              "id": "Counter2",
+              "type": "DataWidget",
+              "dataPath": "count(courses)"
+            }
+          ]
+        },
+        {
+          "id": "Container3",
+          "type": "DivContainer",
+          "onClick": "open page Builder.Lecture_Overview()",
+          "widgets": [
+            {
+              "id": "Text3",
+              "type": "StaticText",
+              "text": "Lecture / Ders"
+            },
+            {
+              "id": "Counter3",
+              "type": "DataWidget",
+              "dataPath": "count(lectures)"
+            }
+          ]
+        }
+      ],
+      "menu": false,
+      "layout": "Atlas_Core.Atlas_Default",
+      "folder": "Pages",
+      "roles": ["Builder.Administrator"]
+    }
+  ]
+}

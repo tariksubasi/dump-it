@@ -1,0 +1,88 @@
+{
+    "ops": [
+        {
+            "op": "createPage",
+            "module": "Builder",
+            "name": "LectureDashboard",
+            "title": "Lecture Dashboard",
+            "entity": "School.CourseLecture",
+            "fields": [
+                {
+                    "name": "Name",
+                    "type": "String"
+                },
+                {
+                    "name": "Course",
+                    "type": "String"
+                },
+                {
+                    "name": "StartDate",
+                    "type": "DateTime"
+                },
+                {
+                    "name": "EndDate",
+                    "type": "DateTime"
+                }
+            ],
+            "buttons": [
+                {
+                    "name": "AddLecture",
+                    "caption": "Add Lecture"
+                },
+                {
+                    "name": "EditLecture",
+                    "caption": "Edit Lecture"
+                }
+            ],
+            "widgets": [
+                {
+                    "id": "LayoutGrid1",
+                    "type": "LayoutGrid",
+                    "rows": [
+                        {
+                            "size": "auto",
+                            "cells": [
+                                {
+                                    "widget": "DataGrid1",
+                                    "desktop": 12,
+                                    "tablet": 12,
+                                    "phone": 12
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "id": "DataGrid1",
+                    "type": "DataGrid",
+                    "source": "School.CourseLecture",
+                    "columns": [
+                        {
+                            "name": "Name",
+                            "caption": "Name"
+                        },
+                        {
+                            "name": "Course",
+                            "caption": "Course"
+                        },
+                        {
+                            "name": "StartDate",
+                            "caption": "Start Date"
+                        },
+                        {
+                            "name": "EndDate",
+                            "caption": "End Date"
+                        }
+                    ]
+                }
+            ],
+            "menu": "BuilderMenu",
+            "layout": "Atlas_Core.Atlas_Default",
+            "folder": "Dashboards",
+            "roles": [
+                "Administrator",
+                "BuilderUser"
+            ]
+        }
+    ]
+}

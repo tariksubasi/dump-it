@@ -1,0 +1,148 @@
+{
+  "ops": [
+    {
+      "op": "createPage",
+      "module": "Builder",
+      "name": "Builder_Web",
+      "title": "Dashboard / Oluşturucu Ana Sayfa",
+      "entity": "",
+      "fields": [],
+      "buttons": [],
+      "widgets": [
+        {
+          "id": "LayoutGrid2",
+          "type": "LayoutGrid",
+          "rows": [
+            {
+              "size": "auto",
+              "cells": [
+                {
+                  "widget": "ActionButton13",
+                  "desktop": 4,
+                  "tablet": 6,
+                  "phone": 12
+                },
+                {
+                  "widget": "ActionButton11",
+                  "desktop": 4,
+                  "tablet": 6,
+                  "phone": 12
+                },
+                {
+                  "widget": "ActionButton14",
+                  "desktop": 4,
+                  "tablet": 6,
+                  "phone": 12
+                }
+              ]
+            },
+            {
+              "size": "auto",
+              "cells": [
+                {
+                  "widget": "Container_School",
+                  "desktop": 4,
+                  "tablet": 6,
+                  "phone": 12
+                },
+                {
+                  "widget": "Container_Course",
+                  "desktop": 4,
+                  "tablet": 6,
+                  "phone": 12
+                },
+                {
+                  "widget": "Container_Lecture",
+                  "desktop": 4,
+                  "tablet": 6,
+                  "phone": 12
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "ActionButton13",
+          "type": "ActionButton",
+          "text": "Home / Anasayfa",
+          "onClick": "open page Ulug.Home_Web()"
+        },
+        {
+          "id": "ActionButton11",
+          "type": "ActionButton",
+          "text": "Modules / Modüller",
+          "onClick": "open page Ulug.Modules_Web()"
+        },
+        {
+          "id": "ActionButton14",
+          "type": "ActionButton",
+          "text": "Builder / Oluşturucu"
+        },
+        {
+          "id": "Container_School",
+          "type": "DivContainer",
+          "class": "dashboard-card",
+          "onClick": "open page Builder.School_Overview()",
+          "widgets": [
+            {
+              "id": "Text1",
+              "type": "StaticText",
+              "text": "School / Okul"
+            },
+            {
+              "id": "Counter_School",
+              "type": "DataWidget",
+              "dataSourceType": "variable",
+              "variableName": "schoolCount",
+              "format": "integer"
+            }
+          ]
+        },
+        {
+          "id": "Container_Course",
+          "type": "DivContainer",
+          "class": "dashboard-card",
+          "onClick": "open page Builder.Course_Overview()",
+          "widgets": [
+            {
+              "id": "Text2",
+              "type": "StaticText",
+              "text": "Course / Kurs"
+            },
+            {
+              "id": "Counter_Course",
+              "type": "DataWidget",
+              "dataSourceType": "variable",
+              "variableName": "courseCount",
+              "format": "integer"
+            }
+          ]
+        },
+        {
+          "id": "Container_Lecture",
+          "type": "DivContainer",
+          "class": "dashboard-card",
+          "onClick": "open page Builder.Lecture_Overview()",
+          "widgets": [
+            {
+              "id": "Text3",
+              "type": "StaticText",
+              "text": "Lecture / Ders"
+            },
+            {
+              "id": "Counter_Lecture",
+              "type": "DataWidget",
+              "dataSourceType": "variable",
+              "variableName": "lectureCount",
+              "format": "integer"
+            }
+          ]
+        }
+      ],
+      "menu": false,
+      "layout": "Atlas_Core.Atlas_Default",
+      "folder": "Pages",
+      "roles": ["Builder.Administrator"]
+    }
+  ]
+}
