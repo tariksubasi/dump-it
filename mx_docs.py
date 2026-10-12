@@ -114,9 +114,24 @@ def _access_rule(rule, entity, index):
 WIDGET_PREFIXES = ("Forms$", "CustomWidgets$CustomWidget")
 NOT_WIDGETS = {"Forms$PageParameter", "Forms$SnippetParameter", "Forms$LocalVariable", "Forms$PageVariable"}
 TRANSPARENT = {"DivContainer", "ScrollContainer", "Table", "TableRow", "TableCell", "GroupBox",
-               "LayoutGridRow", "LayoutGridColumn", "Placeholder", "TabControl", "Header", "Footer"}
+               "LayoutGridRow", "LayoutGridColumn", "Placeholder", "Header", "Footer"}
 CUSTOM = "CustomWidgets$CustomWidget"
 PAGE_HEADINGS = {"Forms$Page": "PAGE", "Forms$Snippet": "SNIPPET", "Forms$Layout": "LAYOUT"}
+
+
+def _inline_template(value):
+    """'Total: {1}' with {1}=Total -> 'Total: {Total}' when every parameter is a plain attribute (as in Studio Pro)."""
+    raw = value.get("Text", value.get("Template"))
+    body = text(raw) if isinstance(raw, dict) else clean(raw)
+    names = []
+    for p in value.get("Parameters") or []:
+        ref = p.get("AttributeRef")
+        if clean(p.get("Expression")) or not isinstance(ref, dict) or not ref.get("Attribute"):
+            return ""
+        names.append(short(ref["Attribute"]))
+    if not names or not body:
+        return ""
+    return re.sub(r"\{(\d+)\}", lambda m: "{%s}" % names[int(m.group(1)) - 1] if 0 < int(m.group(1)) <= len(names) else m.group(0), body)
 
 
 def _width(column):
@@ -212,6 +227,8 @@ class PageRenderer:
                 self._layout_grid(w, indent)
                 continue
             kind = w["$Type"].split("$", 1)[-1]
+            if kind == "TabControl":
+                kind = "TabContainer"
             if w["$Type"] == CUSTOM:
                 kind = (w.get("Type") or {}).get("WidgetName") or kind
             facts = self._facts(w)
@@ -247,7 +264,7 @@ class PageRenderer:
         for key in ("CaptionTemplate", "LabelTemplate", "Content"):
             value = w.get(key)
             if isinstance(value, dict):
-                s = template(value)
+                s = _inline_template(value) or template(value)
                 if s and s != "''":
                     return s.strip("'") if s.startswith("'") and " with " not in s else s
         return text(w.get("Caption"))
@@ -263,6 +280,8 @@ class PageRenderer:
             return out
         if w.get("Image"):
             out.append("image " + w["Image"])
+        if w.get("Editable") in ("Never", False) and w["$Type"] != "Forms$ListView" and not w.get("ConditionalEditabilitySettings"):
+            out.append("read-only")
         if w["$Type"] == "Forms$GroupBox" and w.get("Collapsible") not in (None, "No"):
             out.append("collapsible" + (" (collapsed)" if w["Collapsible"] == "YesInitiallyCollapsed" else ""))
         for k, v in w.items():

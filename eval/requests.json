@@ -1,36 +1,256 @@
 {
   "note": "Natural-language requests for scripts/../eval/run.js. setup: ops applied before the agent starts. checks: find = names that must exist after apply, absent = names that must not, files = { path regex in the export : text regex that must appear }, gap = the agent must record a gap instead of a change.",
   "baseSetup": [
-    { "op": "createEntity", "module": "MyFirstModule", "name": "Order", "attributes": [
-      { "name": "Number", "type": "AutoNumber" }, { "name": "Total", "type": "Decimal" }, { "name": "Paid", "type": "Boolean" }, { "name": "Note", "type": "String(200)" } ] },
-    { "op": "createEntity", "module": "MyFirstModule", "name": "Customer", "attributes": [
-      { "name": "Name", "type": "String(200)" }, { "name": "Email", "type": "String(200)" } ] },
-    { "op": "addAssociation", "from": "MyFirstModule.Order", "to": "MyFirstModule.Customer" },
-    { "op": "addAccessRule", "entity": "MyFirstModule.Order", "roles": ["MyFirstModule.User"], "access": "ReadWrite", "create": true, "delete": true },
-    { "op": "addAccessRule", "entity": "MyFirstModule.Customer", "roles": ["MyFirstModule.User"], "access": "ReadWrite", "create": true, "delete": true }
+    {
+      "op": "createEntity",
+      "module": "MyFirstModule",
+      "name": "Order",
+      "attributes": [
+        {
+          "name": "Number",
+          "type": "AutoNumber"
+        },
+        {
+          "name": "Total",
+          "type": "Decimal"
+        },
+        {
+          "name": "Paid",
+          "type": "Boolean"
+        },
+        {
+          "name": "Note",
+          "type": "String(200)"
+        }
+      ]
+    },
+    {
+      "op": "createEntity",
+      "module": "MyFirstModule",
+      "name": "Customer",
+      "attributes": [
+        {
+          "name": "Name",
+          "type": "String(200)"
+        },
+        {
+          "name": "Email",
+          "type": "String(200)"
+        }
+      ]
+    },
+    {
+      "op": "addAssociation",
+      "from": "MyFirstModule.Order",
+      "to": "MyFirstModule.Customer"
+    },
+    {
+      "op": "addAccessRule",
+      "entity": "MyFirstModule.Order",
+      "roles": [
+        "MyFirstModule.User"
+      ],
+      "access": "ReadWrite",
+      "create": true,
+      "delete": true
+    },
+    {
+      "op": "addAccessRule",
+      "entity": "MyFirstModule.Customer",
+      "roles": [
+        "MyFirstModule.User"
+      ],
+      "access": "ReadWrite",
+      "create": true,
+      "delete": true
+    }
   ],
   "requests": [
-    { "id": "attr", "text": "Order entity'sine CreatedOn adında tarih-saat (DateTime) attribute ekle.",
-      "checks": { "find": ["MyFirstModule.Order.CreatedOn"] } },
-    { "id": "entity", "text": "Ürünler için Product adında yeni bir entity oluştur: Name (200 karakter), Price (ondalıklı), Active (evet/hayır). Order ile ilişkilendir.",
-      "checks": { "find": ["MyFirstModule.Product.Name", "MyFirstModule.Product.Price", "MyFirstModule.Product.Active"], "files": { "domain-model\\.txt$": "Order_Product|Product_Order" } } },
-    { "id": "enum", "text": "Order için Status enumeration'ı ekle (Open, Paid, Cancelled) ve Order'a Status attribute'u olarak bağla, varsayılanı Open olsun.",
-      "checks": { "find": ["MyFirstModule.Order.Status"], "files": { "_module\\.txt$": "Open.*Paid.*Cancelled" } } },
-    { "id": "microflow", "text": "Bir Order alıp Paid'i true yapan, commit eden ve 'Ödeme alındı' mesajı gösteren ACT_Order_Pay microflow'unu yaz. User rolü çalıştırabilsin.",
-      "checks": { "find": ["MyFirstModule.ACT_Order_Pay"], "files": { "ACT_Order_Pay\\.txt$": "(?s)^(?=.*COMMIT)(?=.*Paid = true).*Ödeme alındı" } } },
-    { "id": "dashboard", "text": "Siparişler için bir dashboard sayfası yap: solda Number, Total ve Paid kolonlu bir tablo, sağda seçilen siparişin salt okunur detayı olsun. Menüye ekle, User rolü görsün.",
-      "checks": { "files": { "pages/.*\\.txt$": "(?s)(DataGrid|Datagrid).*DataView", "overview\\.txt$": "menu \"" } } },
-    { "id": "security", "text": "HR adında bir modül rolü ve HRManager adında bir kullanıcı rolü oluştur; Administrator kullanıcı rolü de HR'yi alsın. demo_hr adında bir demo kullanıcı ekle.",
-      "checks": { "find": ["MyFirstModule.HR"], "files": { "overview\\.txt$": "HRManager" } } },
-    { "id": "module", "text": "EmployeeOnboarding adında yeni bir modül oluştur. İçinde EmployeeOnboarding entity'si olsun: FullName, WFH (evet/hayır), FirstDay (tarih), PhoneModel, LaptopModel. Bunlar için tablo ve seçileni gösteren salt okunur detaydan oluşan bir dashboard yap ve menüye ekle.",
-      "checks": { "find": ["EmployeeOnboarding.EmployeeOnboarding.FullName"], "files": { "EmployeeOnboarding/pages/.*\\.txt$": "(?s)(DataGrid|Datagrid).*DataView" } } },
-    { "id": "rename", "text": "Order'daki Total attribute'unun adını Amount yap.",
-      "checks": { "find": ["MyFirstModule.Order.Amount"], "absent": ["MyFirstModule.Order.Total"] } },
-    { "id": "validation", "text": "Customer'da Email zorunlu olsun; boş bırakılırsa 'E-posta gerekli' mesajı çıksın.",
-      "checks": { "files": { "domain-model\\.txt$": "E-posta gerekli" } } },
-    { "id": "form", "text": "Customer için Name ve Email alanlı bir düzenleme sayfası (Customer_Edit) yap ve onu açan NF_Customer_Open nanoflow'unu ekle.",
-      "checks": { "find": ["MyFirstModule.Customer_Edit", "MyFirstModule.NF_Customer_Open"] } },
-    { "id": "gap", "text": "Sipariş onayı için iki adımlı bir onay workflow'u (Workflow dokümanı) oluştur.",
-      "checks": { "gap": true } }
+    {
+      "id": "attr",
+      "text": "Order entity'sine CreatedOn adında tarih-saat (DateTime) attribute ekle.",
+      "checks": {
+        "find": [
+          "MyFirstModule.Order.CreatedOn"
+        ]
+      }
+    },
+    {
+      "id": "entity",
+      "text": "Ürünler için Product adında yeni bir entity oluştur: Name (200 karakter), Price (ondalıklı), Active (evet/hayır). Order ile ilişkilendir.",
+      "checks": {
+        "find": [
+          "MyFirstModule.Product.Name",
+          "MyFirstModule.Product.Price",
+          "MyFirstModule.Product.Active"
+        ],
+        "files": {
+          "domain-model\\.txt$": "Order_Product|Product_Order"
+        }
+      }
+    },
+    {
+      "id": "enum",
+      "text": "Order için Status enumeration'ı ekle (Open, Paid, Cancelled) ve Order'a Status attribute'u olarak bağla, varsayılanı Open olsun.",
+      "checks": {
+        "find": [
+          "MyFirstModule.Order.Status"
+        ],
+        "files": {
+          "_module\\.txt$": "Open.*Paid.*Cancelled"
+        }
+      }
+    },
+    {
+      "id": "microflow",
+      "text": "Bir Order alıp Paid'i true yapan, commit eden ve 'Ödeme alındı' mesajı gösteren ACT_Order_Pay microflow'unu yaz. User rolü çalıştırabilsin.",
+      "checks": {
+        "find": [
+          "MyFirstModule.ACT_Order_Pay"
+        ],
+        "files": {
+          "ACT_Order_Pay\\.txt$": "(?s)^(?=.*COMMIT)(?=.*Paid = true).*Ödeme alındı"
+        }
+      }
+    },
+    {
+      "id": "dashboard",
+      "text": "Siparişler için bir dashboard sayfası yap: solda Number, Total ve Paid kolonlu bir tablo, sağda seçilen siparişin salt okunur detayı olsun. Menüye ekle, User rolü görsün.",
+      "checks": {
+        "files": {
+          "pages/.*\\.txt$": "(?s)(DataGrid|Datagrid).*DataView",
+          "overview\\.txt$": "menu \""
+        }
+      }
+    },
+    {
+      "id": "security",
+      "text": "HR adında bir modül rolü ve HRManager adında bir kullanıcı rolü oluştur; Administrator kullanıcı rolü de HR'yi alsın. demo_hr adında bir demo kullanıcı ekle.",
+      "checks": {
+        "find": [
+          "MyFirstModule.HR"
+        ],
+        "files": {
+          "overview\\.txt$": "HRManager"
+        }
+      }
+    },
+    {
+      "id": "module",
+      "text": "EmployeeOnboarding adında yeni bir modül oluştur. İçinde EmployeeOnboarding entity'si olsun: FullName, WFH (evet/hayır), FirstDay (tarih), PhoneModel, LaptopModel. Bunlar için tablo ve seçileni gösteren salt okunur detaydan oluşan bir dashboard yap ve menüye ekle.",
+      "checks": {
+        "find": [
+          "EmployeeOnboarding.EmployeeOnboarding.FullName"
+        ],
+        "files": {
+          "EmployeeOnboarding/pages/.*\\.txt$": "(?s)(DataGrid|Datagrid).*DataView"
+        }
+      }
+    },
+    {
+      "id": "rename",
+      "text": "Order'daki Total attribute'unun adını Amount yap.",
+      "checks": {
+        "find": [
+          "MyFirstModule.Order.Amount"
+        ],
+        "absent": [
+          "MyFirstModule.Order.Total"
+        ]
+      }
+    },
+    {
+      "id": "validation",
+      "text": "Customer'da Email zorunlu olsun; boş bırakılırsa 'E-posta gerekli' mesajı çıksın.",
+      "checks": {
+        "files": {
+          "domain-model\\.txt$": "E-posta gerekli"
+        }
+      }
+    },
+    {
+      "id": "form",
+      "text": "Customer için Name ve Email alanlı bir düzenleme sayfası (Customer_Edit) yap ve onu açan NF_Customer_Open nanoflow'unu ekle.",
+      "checks": {
+        "find": [
+          "MyFirstModule.Customer_Edit",
+          "MyFirstModule.NF_Customer_Open"
+        ]
+      }
+    },
+    {
+      "id": "gap",
+      "text": "Sipariş onayı için iki adımlı bir onay workflow'u (Workflow dokümanı) oluştur.",
+      "checks": {
+        "gap": true
+      }
+    },
+    {
+      "id": "pageedit",
+      "setup": [
+        {
+          "op": "createPage",
+          "module": "MyFirstModule",
+          "name": "Customer_Edit",
+          "entity": "MyFirstModule.Customer"
+        }
+      ],
+      "text": "Customer_Edit sayfasındaki Email alanını salt okunur yap ve sayfanın en altına 'Bilgileri kontrol edin' yazan bir metin ekle.",
+      "checks": {
+        "files": {
+          "Customer_Edit\\.txt$": "(?s)^(?=.*Bilgileri kontrol edin)(?=.*Email\"[^\\n]*read-only)"
+        }
+      }
+    },
+    {
+      "id": "listflow",
+      "text": "Ödenmemiş (Paid = false) tüm siparişlerin Total toplamını hesaplayıp 'Açık bakiye: ' mesajıyla gösteren ACT_Order_OpenBalance microflow'unu yaz.",
+      "checks": {
+        "find": [
+          "MyFirstModule.ACT_Order_OpenBalance"
+        ],
+        "files": {
+          "ACT_Order_OpenBalance\\.txt$": "(?s)^(?=.*(Sum|sum|SUM))(?=.*Açık bakiye)"
+        }
+      }
+    },
+    {
+      "id": "tabs",
+      "text": "Customer için Customer_Detail sayfası yap: iki sekme olsun, 'Genel' sekmesinde Name ve Email, 'Siparişler' sekmesinde bu müşterinin siparişlerini Number ve Total ile listeleyen bir liste.",
+      "checks": {
+        "find": [
+          "MyFirstModule.Customer_Detail"
+        ],
+        "files": {
+          "Customer_Detail\\.txt$": "(?s)^(?=.*TabContainer)(?=.*Genel)(?=.*Siparişler)"
+        }
+      }
+    },
+    {
+      "id": "json",
+      "text": "Şu JSON için bir JSON structure ve onu Order/Customer'a eşleyen bir import mapping oluştur: {\"number\": 12, \"total\": 99.5, \"customer\": {\"name\": \"Ali\", \"email\": \"ali@x.com\"}}",
+      "checks": {
+        "files": {
+          ".*\\.txt$": "(?s)^(?=.*import mapping|.*ImportMapping)(?=.*customer)"
+        }
+      }
+    },
+    {
+      "id": "translate",
+      "text": "Projeye Türkçe (tr_TR) dilini ekle ve Customer_Edit sayfasının başlığını Türkçe'de 'Müşteri Düzenle' yap.",
+      "setup": [
+        {
+          "op": "createPage",
+          "module": "MyFirstModule",
+          "name": "Customer_Edit",
+          "entity": "MyFirstModule.Customer"
+        }
+      ],
+      "checks": {
+        "files": {
+          "Customer_Edit\\.txt$": "Müşteri Düzenle"
+        }
+      }
+    }
   ]
 }

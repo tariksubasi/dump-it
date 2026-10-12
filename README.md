@@ -153,7 +153,7 @@ dokümanının kendisi, JSON structure, consumed REST servisi, workflow, nesne g
    ```
    node C:\tools\dump-it\mxlocal\mxlocal.js selftest --project "C:\Projeler\BenimProje"
    ```
-   50 kadar işlemi dener ve 11 kontrol yapar: kayıpsız kayıt, her işlemin modelde görünmesi, **Studio Pro'nun bu
+   50 kadar işlemi dener ve 16 kontrol yapar: kayıpsız kayıt, her işlemin modelde görünmesi, **Studio Pro'nun bu
    projede yazdığı yapıyla aynı yapı**, yeni modül ve güvenlik (kullanıcı rolü, demo kullanıcı), dashboard sayfası ve
    menü, Data grid 2 kopyası, modül yeniden adlandırma, byte byte okuma/yazma, SDK ile yeniden açma.
    Bütün satırlar `OK` demeli. 2. veya 3. adımda `FAIL` varsa model değiştirmeyi **kullanma**, çıktıyı bana gönder.
