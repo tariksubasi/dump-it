@@ -255,12 +255,16 @@ class PageRenderer:
     def _facts(self, w):
         out = []
         if w["$Type"] == CUSTOM:
-            keys = {}
+            keys, self._defaults = {}, {}
             self._property_keys(w.get("Type"), keys)
             self._widget_object(w.get("Object"), keys, "", out)
             for k in ("ConditionalVisibilitySettings", "ConditionalEditabilitySettings"):
                 self._scan(w.get(k), k, out)
             return out
+        if w.get("Image"):
+            out.append("image " + w["Image"])
+        if w["$Type"] == "Forms$GroupBox" and w.get("Collapsible") not in (None, "No"):
+            out.append("collapsible" + (" (collapsed)" if w["Collapsible"] == "YesInitiallyCollapsed" else ""))
         for k, v in w.items():
             if k not in ("CaptionTemplate", "LabelTemplate", "Caption", "Content"):
                 self._scan(v, k, out)
@@ -306,6 +310,9 @@ class PageRenderer:
         if isinstance(value, dict):
             if value.get("$Type") == "CustomWidgets$WidgetPropertyType":
                 keys[value.get("$ID")] = value.get("PropertyKey")
+                vt = value.get("ValueType") or {}
+                # the widget's own default texts and expression: not worth a fact
+                self._defaults[value.get("$ID")] = {t.get("Text") for t in vt.get("Translations") or []} | {vt.get("DefaultValue")}
             for v in value.values():
                 self._property_keys(v, keys)
         elif isinstance(value, list):
@@ -325,7 +332,8 @@ class PageRenderer:
             if isinstance(ref, dict) and ref.get("Attribute"):
                 out.append("%s: attr %s" % (key, attr_path(ref)))
                 self.index.attr_shown(ref["Attribute"], self.qn)
-            if clean(v.get("Expression")):
+            default = getattr(self, "_defaults", {}).get(p.get("TypePointer"), set())
+            if clean(v.get("Expression")) and v["Expression"] not in default:
                 out.append("%s: %s" % (key, clean(v["Expression"])))
             for k in ("Microflow", "Nanoflow", "Form"):
                 if v.get(k):
@@ -334,6 +342,9 @@ class PageRenderer:
                 out.append("%s: where %s" % (key, clean(v["XPathConstraint"])))
             if isinstance(v.get("TextTemplate"), dict):
                 s = template(v["TextTemplate"])
+                items = ((v["TextTemplate"].get("Template") or {}).get("Items")) or []
+                if items and all(i.get("Text") in default for i in items):
+                    s = ""
                 if s and s != "''":
                     out.append("%s: %s" % (key, s))
             for i, o in enumerate(v.get("Objects") or []):
@@ -351,7 +362,7 @@ class PageRenderer:
         entity = entity_ref(ds.get("EntityRef"))
         if entity and "/" not in entity:
             self.index.entity(entity, "page", self.qn)
-        kind = {"AssociationSource": "association", "DataViewSource": "context"}.get(name, "database" if "XPath" in name else name)
+        kind = {"AssociationSource": "association", "DataViewSource": "context", "ImageViewerSource": "image of"}.get(name, "database" if "XPath" in name else name)
         parts = [kind, page_var(ds.get("SourceVariable")), entity]
         xpath = clean(ds.get("XPathConstraint"))
         if xpath:
