@@ -10,8 +10,9 @@ const { ATTRIBUTE_TYPES, DATA_TYPES, suggest, fail, validate, bool, noDollar, en
 // ---------------------------------------------------------------- op catalog (also the 'ops' help text)
 
 
-const { makeFlows, ACTIONS, CONTROL, COMMON } = require("./ops-flows");
+const { makeFlows, ACTIONS, CONTROL, COMMON, CREATES } = require("./ops-flows");
 const { makePages, PAGE_FIELDS, MENU_FIELDS, HOME_FIELDS, widgetFields, NO_MENU_ROLES } = require("./ops-pages");
+const { makePageEdit, PAGE_EDIT_OPS, PAGE_EDIT_NAMES, FIELD_SYNONYMS } = require("./ops-page-edit");
 const { makeSecurity, SECURITY_OPS } = require("./ops-security");
 const { makeMappings, MAPPING_OPS } = require("./ops-mappings");
 
@@ -54,11 +55,15 @@ const OPS = {
             microflow: "R Module.Microflow or Module.Nanoflow", id: "R step id from 'steps', e.g. 3f2a9c1b",
             xpath: "retrieve: new XPath", first: "retrieve: true/false", entity: "retrieve: Module.Entity",
             set: "create/change: { \"Attr\": \"expression\" } (adds or replaces)", unset: "create/change: [ \"Attr\" ] to remove",
-            commit: "create/change: true/false", refresh: "change/commit: true/false", events: "commit: true/false",
-            args: "call: { \"Param\": \"expression\" }", message: "log: text", level: "log: level", text: "message: text",
-            type: "message: Information | Warning | Error", blocking: "message: true/false", value: "variable/set/end: expression",
-            condition: "decision: expression", caption: "decision or action: caption", disabled: "action: true/false",
-            while: "while loop: expression", over: "list loop: list variable"
+            commit: "create/change: true/false; callRest/importWithMapping (import mapping): yes | no | withoutEvents", refresh: "change/commit/rollback: true/false", events: "commit: true/false",
+            args: "call/callJava/callJavaScript: { \"Param\": \"expression\" }; validationFeedback: [\"expression\"]", message: "log/validationFeedback: text", level: "log: level", text: "message: text",
+            type: "message: Information | Warning | Error; changeList: add | remove | replace | clear", blocking: "message: true/false",
+            value: "variable/set/end/changeList: expression; listOperation find/filter: value", condition: "decision: expression", caption: "decision, ifType or action: caption",
+            disabled: "action: true/false", while: "while loop: expression", over: "list loop: list variable",
+            function: "aggregateList: count | sum | average | minimum | maximum | all | any", attribute: "aggregateList: attribute", expression: "aggregateList, listOperation find/filter by expression: expression",
+            other: "listOperation: second list or object variable", offset: "listOperation range: expression", limit: "listOperation range: expression",
+            showInBrowser: "downloadFile: true/false", url: "callRest: location text", urlArgs: "callRest: [\"expression\"]", method: "callRest: Get | Post | ...",
+            headers: "callRest: { \"Name\": \"expression\" } (replaces all)", timeout: "callRest: seconds", body: "callRest: body text", bodyArgs: "callRest: [\"expression\"]"
         }
     },
     deleteAction: { doc: "Delete one action or loop from a flow and reconnect the line. Get its id with: steps Module.Flow.", fields: { microflow: "R Module.Microflow or Module.Nanoflow", id: "R step id from 'steps'" } },
@@ -78,6 +83,7 @@ const OPS = {
         fields: { module: "R module name", name: "R event name", microflow: "R Module.Microflow", every: "R Minute | Hour | Day | Week", interval: "optional number for Minute/Hour (default 1)", at: "optional time HH:MM for Day/Week, minutes MM for Hour (default 00:00)", days: "Week: [ \"Monday\", ... ]", enabled: "optional true/false (default false)", timeZone: "optional UTC | Server (default UTC)", onOverlap: "optional DelayNext | SkipNext (default DelayNext)", folder: "optional folder path" }
     },
     createPage: { doc: "Create a page: an edit form for an entity (inputs by attribute type, Save/Cancel), an empty page, or a page from widgets (layout grids, containers, texts, data grids (classic, or a Data grid 2 copied from the project's pages), data views that listen to a grid, list views, buttons, inputs), optionally with a menu item. Uses the layout the project's other pages use.", fields: PAGE_FIELDS },
+    ...PAGE_EDIT_OPS,
     addMenuItem: { doc: "Add a menu item that opens a page to a navigation profile's menu.", fields: MENU_FIELDS },
     setHomePage: { doc: "Set the home page (or home microflow) of a navigation profile, for everyone or for some user roles.", fields: HOME_FIELDS },
     ...MAPPING_OPS,
@@ -394,6 +400,7 @@ function bind(model, client) {
 
     const flows = makeFlows({ model, get, entity, text, dataType, attributeChain, loadParents });
     const pageOps = makePages({ model, client, get, exists, entity, text, folder, attributeChain, loadParents, persistable, grantAccess: o => impl.grantAccess(o) });
+    const pageEdit = makePageEdit({ model, client, get, text, attributeChain, persistable }, pageOps.internals);
     const securityOps = makeSecurity({ model, get });
     const mappingOps = makeMappings({ model, get, exists, entity, folder, attributeChain, loadParents, impl: () => impl });
 
@@ -408,14 +415,16 @@ function bind(model, client) {
         return `${qn} (${count} action(s))`;
     }
 
+    // The nested action lists of one spec: if branches, loop body, ifType cases, error handler.
+    const nested = sp => [sp.then, sp.else, sp.actions, ...(sp.cases && typeof sp.cases === "object" ? Object.values(sp.cases) : []), sp.other, sp.empty, sp.onError && sp.onError.actions].filter(Array.isArray);
+
     // Activities (boxes) a list of action specs creates, including nested branches, loops and error handlers.
     function countActivities(specs) {
         let n = 0;
         for (const sp of specs || []) {
             if (!sp || typeof sp !== "object") continue;
-            if (sp.action === "if") n += countActivities(sp.then) + countActivities(sp.else);
-            else if (sp.action === "loop") n += countActivities(sp.actions);
-            else if (ACTIONS[sp.action]) n += 1 + (sp.onError && sp.onError.actions ? countActivities(sp.onError.actions) : 0);
+            if (ACTIONS[sp.action]) n++;
+            for (const list of nested(sp)) n += countActivities(list);
         }
         return n;
     }
@@ -423,13 +432,9 @@ function bind(model, client) {
     function createdVariables(specs, out = []) {
         for (const sp of specs || []) {
             if (!sp || typeof sp !== "object") continue;
-            if (["retrieve", "create", "call", "importWithMapping", "exportWithMapping"].includes(sp.action) && sp.variable) out.push(sp.variable);
-            if (sp.action === "variable") out.push(sp.name);
+            if (CREATES[sp.action] && sp[CREATES[sp.action]]) out.push(sp[CREATES[sp.action]]);
             if (sp.action === "loop" && sp.over) out.push(sp.item || `${noDollar(sp.over)}Item`);
-            createdVariables(sp.then, out);
-            createdVariables(sp.else, out);
-            createdVariables(sp.actions, out);
-            if (sp.onError && sp.onError.actions) createdVariables(sp.onError.actions, out);
+            for (const list of nested(sp)) createdVariables(list, out);
         }
         return out;
     }
@@ -757,6 +762,10 @@ function bind(model, client) {
             return `${qn}: every ${unit === "minute" || unit === "hour" ? interval + " " : ""}${unit}${unit === "day" || unit === "week" ? " at " + String(hour).padStart(2, "0") + ":" + String(minute).padStart(2, "0") : ""} -> ${o.microflow}${ev.enabled ? "" : " (disabled)"}`;
         },
         createPage: o => pageOps.createPage(o), // grants o.roles, adds o.menu
+        addWidgets: o => pageEdit.addWidgets(o),
+        changeWidget: o => pageEdit.changeWidget(o),
+        deleteWidget: o => pageEdit.deleteWidget(o),
+        moveWidget: o => pageEdit.moveWidget(o),
         addMenuItem: o => pageOps.addMenuItem(o),
         setHomePage: o => pageOps.setHomePage(o),
         async publishRest(o) {
@@ -959,6 +968,7 @@ function bind(model, client) {
             return ev.microflowQualifiedName === o.microflow && ev.schedule ? [] : [`${o.module}.${o.name} is incomplete`];
         },
         createPage: o => pageOps.checks.createPage(o),
+        ...pageEdit.checks,
         addMenuItem: o => pageOps.checks.addMenuItem(o),
         setHomePage: o => pageOps.checks.setHomePage(o),
         async publishRest(o) {
@@ -995,6 +1005,7 @@ function bind(model, client) {
         const name = Object.keys(OPS).find(k => k.toLowerCase() === String(o.op).toLowerCase());
         if (!name) fail(`${where}: unknown op '${o.op}'`, o.op, Object.keys(OPS));
         if (name === "addMenuItem" && o.roles !== undefined) throw new Error(`${where} (addMenuItem): ${NO_MENU_ROLES(o.page)}`);
+        for (const [k, hint] of Object.entries(FIELD_SYNONYMS[name] || {})) if (o[k] !== undefined && !OPS[name].fields[k]) throw new Error(`${where} (${name}): unknown field '${k}': ${hint}`);
         validate("op", name, OPS[name], o, where);
         return { name, where };
     }
@@ -1025,7 +1036,11 @@ function bind(model, client) {
             const edited = qn && rest.some(x => ["addActions", "changeAction", "deleteAction"].includes(x.op) && x.microflow === qn);
             const opposite = { grantAccess: "revokeAccess", revokeAccess: "grantAccess" }[name];
             const undone = opposite && rest.some(x => x.op === opposite && x.document === o.document);
-            if ((later && name !== "rename" && name !== "delete") || edited || undone) continue;
+            // a later page edit of the same page that deletes, moves or renames one of this op's widgets (or changes it again)
+            const mine = PAGE_EDIT_NAMES.includes(name) ? pageEdit.touched(o) : [];
+            const undoes = x => ["deleteWidget", "moveWidget"].includes(x.op) || (x.op === "changeWidget" && (x.name !== undefined || name === "changeWidget"));
+            const reworked = mine.length && rest.some(x => x.page === o.page && undoes(x) && pageEdit.touched(x).some(n => mine.includes(n)));
+            if ((later && name !== "rename" && name !== "delete") || edited || undone || reworked) continue;
             try {
                 failed.push(...(await checks[name](o)).map(f => `${i + 1}. ${name}: ${f}`));
             } catch (e) {
@@ -1035,7 +1050,7 @@ function bind(model, client) {
         return failed;
     }
 
-    const api = { get, runPlan, checkPlan, dataType, folder, lintExpressions: () => flows.lintExpressions(), steps: qn => flows.steps(qn) };
+    const api = { get, runPlan, checkPlan, dataType, folder, lintExpressions: () => flows.lintExpressions(), steps: qn => flows.steps(qn), widgets: qn => pageEdit.widgets(qn) };
     for (const name of Object.keys(OPS)) {
         api[name] = o => {
             validate("op", name, OPS[name], o || {}, `ops.${name}`);

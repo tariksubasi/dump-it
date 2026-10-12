@@ -3,9 +3,8 @@
 // laid out like Studio Pro does, list their steps with stable ids, and change or delete single steps.
 const sdk = require("mendixmodelsdk");
 const { DATA_TYPES, suggest, fail, validate, bool, noDollar, enumValue } = require("./ops-util");
-const { MAPPING_ACTIONS, mappingAction } = require("./ops-mappings");
 
-const { microflows: mf, domainmodels: dm, datatypes, pages } = sdk;
+const { microflows: mf, domainmodels: dm, datatypes, pages, codeactions, javaactions, javascriptactions, importmappings, exportmappings, services } = sdk;
 
 const X_STEP = 190; // horizontal distance between steps
 const LANE = 150; // vertical distance between branches
@@ -29,13 +28,70 @@ const ACTIONS = {
     set: { doc: "Change a variable.", fields: { name: "R variable name (no $)", value: "R expression" } },
     showPage: { doc: "Open a page.", fields: { page: "R Module.Page", args: "optional { \"PageParameter\": \"$Variable\" } (every page parameter needs one)" } },
     closePage: { doc: "Close the current page.", fields: { count: "optional number of pages to close" } },
-    ...MAPPING_ACTIONS
+    showHomePage: { doc: "Open the home page (microflows only).", fields: {} },
+    callJava: {
+        doc: "Call a Java action (microflows only).",
+        fields: { javaAction: "R Module.JavaAction", args: "optional { \"Param\": \"expression\" } (every required parameter needs one; an entity type parameter takes \"Module.Entity\")", variable: "optional result variable name (when the Java action returns something)" }
+    },
+    callJavaScript: {
+        doc: "Call a JavaScript action (nanoflows only).",
+        fields: { jsAction: "R Module.JavaScriptAction", args: "optional { \"Param\": \"expression\" } (every required parameter needs one; an entity type parameter takes \"Module.Entity\")", variable: "optional result variable name (when the action returns something)" }
+    },
+    validationFeedback: {
+        doc: "Show a validation message below the input of an attribute or association of an object.",
+        fields: { variable: "R object variable (no $)", member: "R attribute name, or Module.Association", message: "R text; {1} {2} are filled from args", args: "optional [\"expression\", ...]" }
+    },
+    rollback: { doc: "Undo the uncommitted changes of an object or list.", fields: { variable: "R variable (no $)", refresh: "optional true/false (default false)" } },
+    createList: { doc: "Create an empty list.", fields: { variable: "R new list variable name", entity: "R Module.Entity" } },
+    changeList: {
+        doc: "Add to, remove from, replace or clear a list.",
+        fields: { list: "R list variable (no $)", type: "optional add | remove | replace | clear (default add)", value: "object or list expression, e.g. $NewOrder (not for clear)" }
+    },
+    aggregateList: {
+        doc: "Count, sum, average, minimum or maximum of a list; all/any test a Boolean.",
+        fields: { variable: "R result variable name", list: "R list variable (no $)", function: "R count | sum | average | minimum | maximum | all | any", attribute: "attribute to aggregate (not for count)", expression: "instead of attribute: expression on $currentObject, e.g. $currentObject/Price * $currentObject/Quantity" }
+    },
+    listOperation: {
+        doc: "Combine, search, filter, sort or cut a list.",
+        fields: {
+            variable: "R result variable name", operation: "R union | intersect | subtract | contains | equals | head | tail | find | filter | sort | range", list: "R list variable (no $)",
+            other: "union/intersect/subtract/equals: second list variable; contains: object variable", attribute: "find/filter: attribute name or Module.Association", value: "find/filter: expression the attribute must equal",
+            expression: "find/filter instead of attribute + value: condition on $currentObject", sort: "sort: [ \"Attribute\" or { \"attribute\": \"Attribute\", \"descending\": true } ]",
+            offset: "range: index of the first item, expression (default 0)", limit: "range: number of items, expression"
+        }
+    },
+    cast: { doc: "Use the object of an ifType case as that case's entity. Only as the first action of a case.", fields: { variable: "R new variable name" } },
+    downloadFile: { doc: "Send a file document to the user's browser (microflows only).", fields: { variable: "R object variable of a System.FileDocument specialization (no $)", showInBrowser: "optional true/false (default false: download)" } },
+    callRest: {
+        doc: "Call a REST service (microflows only). Body: text or an export mapping. Response: ignored, a String, or an import mapping.",
+        fields: {
+            url: "R location; {1} {2} are filled from urlArgs, e.g. https://api.example.com/orders/{1}", urlArgs: "optional [\"expression\", ...]", method: "optional Get | Post | Put | Patch | Delete | Head | Options (default Get)",
+            headers: "optional { \"Header-Name\": \"expression\" }", timeout: "optional seconds (default 300)", body: "optional request body text; {1} {2} are filled from bodyArgs", bodyArgs: "optional [\"expression\", ...]",
+            exportMapping: "optional Module.ExportMapping for the body (instead of body)", exportObject: "with exportMapping: variable to export (no $)",
+            response: "optional none | string | Module.ImportMapping (default: string when variable is set, else none)", variable: "result variable: the response text, or the import mapping result",
+            commit: "with an import mapping: yes | no | withoutEvents (default withoutEvents)"
+        }
+    },
+    importWithMapping: {
+        doc: "Import JSON or XML text with an import mapping (microflows only).",
+        fields: { mapping: "R Module.ImportMapping", source: "R String variable with the JSON/XML (no $)", variable: "optional result variable name", commit: "optional yes | no | withoutEvents (default withoutEvents)" }
+    },
+    exportWithMapping: {
+        doc: "Export an object (or list) to JSON or XML text with an export mapping (microflows only).",
+        fields: { mapping: "R Module.ExportMapping", object: "R variable to export (no $)", variable: "R new String variable for the text" }
+    }
 };
+// Which field of an action names the variable it creates.
+const CREATES = { retrieve: "variable", create: "variable", call: "variable", variable: "name", callJava: "variable", callJavaScript: "variable", createList: "variable", aggregateList: "variable", listOperation: "variable", cast: "variable", callRest: "variable", importWithMapping: "variable", exportWithMapping: "variable" };
 const COMMON = { caption: "optional caption on the box (default: generated)", onError: ON_ERROR };
 
 // Structure (no box of their own, or a special box).
 const CONTROL = {
     if: { doc: "Decision. Runs 'then' when the condition is true, otherwise 'else'. A branch may end with end/break/continue.", fields: { condition: "R boolean expression, e.g. $Order/Total > 100", then: "optional [ actions ]", else: "optional [ actions ]", caption: "optional text in the diamond (default: the condition)" } },
+    ifType: {
+        doc: "Object type decision: runs the case of the object's specialization (start a case with 'cast' to use it as that entity), 'other' for any other type, 'empty' when there is no object.",
+        fields: { variable: "R object variable (no $)", cases: "R { \"Module.Specialization\": [ actions ] }", other: "optional [ actions ]", empty: "optional [ actions ]", caption: "optional text in the diamond" }
+    },
     loop: { doc: "Loop over a list ('over' + 'item'), or while a condition is true ('while').", fields: { over: "list variable to loop over (no $)", item: "name of the current object (default: <list>Item)", while: "boolean expression (instead of 'over')", actions: "R [ actions inside the loop ]" } },
     end: { doc: "End the flow here.", fields: { value: "return expression; required when the flow returns a value" } },
     break: { doc: "Leave the loop (only inside a loop).", fields: {} },
@@ -47,8 +103,9 @@ function makeFlows(h) {
     const { model } = h;
     const toLint = [];
 
-    function expr(m, value, where) {
-        toLint.push({ m, expr: String(value), where });
+    // current: the entity $currentObject stands for (list operations and aggregates)
+    function expr(m, value, where, current = null) {
+        toLint.push({ m, expr: String(value), where, current });
         return String(value);
     }
 
@@ -67,15 +124,23 @@ function makeFlows(h) {
 
     // ------------------------------------------------ flows (lines)
 
+    // value: null (no case), "true"/"Enum value", or { type: Module.Entity | System.X | "" } (object type decision)
     function addCase(fl, value) {
-        const Case = value === null ? mf.NoCase : mf.EnumerationCase;
+        const typed = value !== null && typeof value === "object";
+        const Case = value === null ? mf.NoCase : typed ? mf.InheritanceCase : mf.EnumerationCase;
         let c;
         try {
             c = Case.createInSequenceFlowUnderCaseValues(fl); // Mendix 10.15+
         } catch (e) {
             c = Case.createInSequenceFlowUnderCaseValue(fl); // older versions: one case value
         }
-        if (value !== null) c.value = value;
+        if (!typed) {
+            if (value !== null) c.value = value;
+        } else if (value.type) {
+            const e = model.findEntityByQualifiedName(value.type);
+            if (e) c.value = e;
+            else c.__value.updateWithRawValue(value.type); // System.* entities are not in the project
+        }
     }
 
     function flow(m, from, to, { originIndex = 1, destIndex = 3, caseValue = null, errorHandler = false } = {}) {
@@ -93,13 +158,19 @@ function makeFlows(h) {
     const connect = (f, tail, to, destIndex = 3) =>
         flow(f.m, tail.obj, to, { originIndex: tail.originIndex || 1, destIndex: tail.errorHandler ? 0 : destIndex, caseValue: tail.caseValue === undefined ? null : tail.caseValue, errorHandler: !!tail.errorHandler });
 
+    // The case of a flow, as addCase takes it
     function caseOf(fl) {
         const list = fl.caseValues ? [...fl.caseValues] : fl.caseValue ? [fl.caseValue] : [];
         const c = list[0];
         if (!c || c instanceof mf.NoCase) return null;
         if (c instanceof mf.EnumerationCase) return c.value;
+        if (c instanceof mf.InheritanceCase) return { type: c.valueQualifiedName || "" };
         return c.structureTypeName.split("$")[1];
     }
+    const caseLabel = fl => {
+        const c = caseOf(fl);
+        return c && typeof c === "object" ? c.type || "empty" : c;
+    };
 
     // ------------------------------------------------ variables
 
@@ -115,36 +186,94 @@ function makeFlows(h) {
         walkObjects(m.objectCollection, o => {
             if (o instanceof mf.MicroflowParameterObject) out.set(o.name, o);
             else if (o instanceof mf.ActionActivity && o.action) {
-                for (const key of ["outputVariableName", "variableName"]) if (o.action[key]) out.set(o.action[key], o);
-                const named = o.action.resultHandling || o.action.outputMethod; // import/export with mapping
-                if (named && named.outputVariableName) out.set(named.outputVariableName, o);
+                const a = o.action;
+                if (a.outputVariableName && a.useReturnVariable !== false) out.set(a.outputVariableName, o);
+                if (a.variableName) out.set(a.variableName, o);
+                const r = a.resultHandling; // REST call, import with mapping
+                if (r && r.storeInVariable && r.outputVariableName) out.set(r.outputVariableName, o);
+                if (a.outputMethod && a.outputMethod.outputVariableName) out.set(a.outputMethod.outputVariableName, o); // export with mapping
             } else if (o instanceof mf.LoopedActivity && o.loopSource instanceof mf.IterableList && o.loopSource.variableName) out.set(o.loopSource.variableName, o);
         });
         return out;
     }
 
-    async function entityOfVariable(m, name, where) {
-        const v = variablesOf(m).get(noDollar(name));
-        if (!v) fail(`${where}: no variable '${name}' before this action in ${m.qualifiedName}`, noDollar(name), [...variablesOf(m).keys()]);
-        if (v instanceof mf.MicroflowParameterObject) {
-            if (v.variableType && v.variableType.entity) return v.variableType.entityQualifiedName;
-        } else if (v instanceof mf.LoopedActivity) {
-            return entityOfVariable(m, v.loopSource.listVariableName, where);
-        } else {
-            const a = v.action;
-            if (a.entity) return a.entityQualifiedName;
-            if (a.variableType && a.variableType.entity) return a.variableType.entityQualifiedName;
-            if (a.retrieveSource && a.retrieveSource.entity) return a.retrieveSource.entityQualifiedName;
-            if (a.resultHandling && a.resultHandling.variableType && a.resultHandling.variableType.entity) return a.resultHandling.variableType.entityQualifiedName;
-            if (a.retrieveSource && a.retrieveSource.association) {
-                const assoc = a.retrieveSource.association;
-                if (assoc instanceof dm.Association || assoc instanceof dm.CrossAssociation) {
-                    const loaded = assoc.isLoaded ? assoc : await assoc.load();
-                    return loaded.child ? loaded.child.qualifiedName || loaded.childQualifiedName : null;
-                }
+    const load = async x => (x && !x.isLoaded && x.load ? x.load() : x);
+    const ofType = t => ({ entity: t && t.entity ? t.entityQualifiedName : null, list: t instanceof datatypes.ListType });
+
+    // What a code action (Java/JavaScript) call returns.
+    async function codeResult(a) {
+        const target = await load(a.javaAction || a.javaScriptAction);
+        const t = target && target.actionReturnType;
+        const concrete = async x => {
+            if (x instanceof codeactions.ConcreteEntityType) return x.entityQualifiedName;
+            if (!(x instanceof codeactions.ParameterizedEntityType)) return null;
+            // the entity passed for the type parameter
+            for (const pm of a.parameterMappings) {
+                const p = await load(pm.parameter);
+                if (p && p.actionParameterType instanceof codeactions.EntityTypeParameterType && p.actionParameterType.typeParameter === x.typeParameter && pm.parameterValue instanceof mf.EntityTypeCodeActionParameterValue) return pm.parameterValue.entityQualifiedName;
             }
+            return null;
+        };
+        if (t instanceof codeactions.ListType) return { entity: await concrete(t.parameter), list: true };
+        return { entity: await concrete(t), list: false };
+    }
+
+    // What a variable holds: { entity: "Module.Entity" or null for a value (String, Integer, ...), list }.
+    async function variableInfo(m, name, where) {
+        const n = noDollar(name);
+        if (n === "currentUser") return { entity: "System.User", list: false };
+        const vars = variablesOf(m);
+        const v = vars.get(n);
+        if (!v) fail(`${where}: no variable '${name}' before this action in ${m.qualifiedName}`, n, [...vars.keys()]);
+        if (v instanceof mf.MicroflowParameterObject) return ofType(v.variableType);
+        if (v instanceof mf.LoopedActivity) return { entity: (await variableInfo(m, v.loopSource.listVariableName, where)).entity, list: false };
+        const a = v.action;
+        if (a instanceof mf.RetrieveAction) {
+            const src = a.retrieveSource;
+            if (src instanceof mf.DatabaseRetrieveSource) return { entity: src.entityQualifiedName, list: !(src.range instanceof mf.ConstantRange && src.range.singleObject) };
+            const assoc = await load(src.association);
+            const end = k => (assoc && assoc[k] ? assoc[k].qualifiedName : null) || (assoc && assoc[k + "QualifiedName"]) || null; // cross associations: child by name
+            if (!end("parent")) return { entity: null, list: false };
+            const from = (await variableInfo(m, src.startVariableName, where)).entity;
+            // from the owner (parent) side: the child, a list for a reference set; from the other side: the owners
+            if (from === end("parent")) return { entity: end("child"), list: assoc.type === dm.AssociationType.ReferenceSet };
+            return { entity: end("parent"), list: true };
         }
-        throw new Error(`${where}: cannot tell the entity of variable '${name}'`);
+        if (a instanceof mf.CreateObjectAction) return { entity: a.entityQualifiedName, list: false };
+        if (a instanceof mf.CreateListAction) return { entity: a.entityQualifiedName, list: true };
+        if (a instanceof mf.CreateVariableAction) return ofType(a.variableType);
+        if (a instanceof mf.AggregateListAction) return { entity: null, list: false };
+        if (a instanceof mf.ListOperationAction) {
+            const op = a.operation;
+            if (op instanceof mf.Contains || op instanceof mf.ListEquals) return { entity: null, list: false };
+            const base = await variableInfo(m, op.listVariableName, where);
+            return { entity: base.entity, list: !(op instanceof mf.Head || op instanceof mf.Find || op instanceof mf.FindByExpression) };
+        }
+        if (a instanceof mf.CastAction) {
+            const into = flowsOf(m).find(fl => fl.destination === v);
+            const c = into && caseOf(into);
+            return { entity: c && typeof c === "object" ? c.type : null, list: false };
+        }
+        if (a instanceof mf.JavaActionCallAction || a instanceof mf.JavaScriptActionCallAction) return codeResult(a);
+        if (a instanceof mf.MicroflowCallAction || a instanceof mf.NanoflowCallAction) {
+            const target = await load(a.microflowCall ? a.microflowCall.microflow : a.nanoflowCall.nanoflow);
+            return ofType(target && target.microflowReturnType);
+        }
+        if (a.resultHandling) return ofType(a.resultHandling.variableType);
+        return { entity: null, list: false };
+    }
+
+    async function entityOfVariable(m, name, where) {
+        const info = await variableInfo(m, name, where);
+        if (!info.entity) throw new Error(`${where}: cannot tell the entity of variable '${name}'`);
+        return info.entity;
+    }
+
+    // An object (list = false) or list (list = true) variable; returns its entity.
+    async function needVariable(m, name, list, where) {
+        const info = await variableInfo(m, name, where);
+        if (!info.entity || info.list !== list) throw new Error(`${where}: '${noDollar(name)}' is ${info.list ? "a list" : info.entity ? "an object" : "not an object or list"}; this needs ${list ? "a list" : "an object"} variable`);
+        return info.entity;
     }
 
     async function memberChange(f, action, ent, entityQn, member, value, where) {
@@ -215,9 +344,267 @@ function makeFlows(h) {
         if (missing.length) throw new Error(`${where}: page ${page.qualifiedName} needs args for: ${missing.map(p => p.name).join(", ")}`);
     }
 
+    // An attribute (own or inherited) or an association of an entity, by name.
+    async function memberOf(entityQn, name, where) {
+        const parts = String(name).split(".");
+        if (parts.length === 2) {
+            const assoc = await h.get(name);
+            if (!(assoc instanceof dm.AssociationBase)) throw new Error(`${where}: '${name}' is not an association`);
+            return { association: assoc };
+        }
+        const short = parts.pop(); // Module.Entity.Attribute works too
+        const ent = await h.entity(entityQn);
+        await h.loadParents(ent);
+        const chain = h.attributeChain(ent);
+        const attr = chain.attributes.find(a => a.name === short);
+        if (!attr && !chain.complete) throw new Error(`${where}: '${short}' is not an own attribute of ${entityQn}; attributes inherited from System entities cannot be used by ops (use Studio Pro)`);
+        if (!attr) fail(`${where}: ${entityQn} has no attribute '${short}'`, short, chain.attributes.map(a => a.name));
+        return { attribute: attr };
+    }
+
+    // Does entityQn inherit from base (e.g. System.FileDocument)?
+    async function isA(entityQn, base) {
+        let e = await h.entity(entityQn);
+        for (let i = 0; i < 20; i++) {
+            if (e.qualifiedName === base) return true;
+            const g = e.generalization;
+            if (!(g instanceof dm.Generalization)) return false;
+            if (g.generalizationQualifiedName === base) return true;
+            if (!g.generalization) return false;
+            e = await load(g.generalization);
+        }
+        return false;
+    }
+
+    // Entities that inherit (directly or not) from entityQn, by qualified name.
+    async function specializationsOf(entityQn) {
+        const parent = new Map();
+        for (const d of model.allDomainModels()) {
+            for (const e of (await load(d)).entities) if (e.generalization instanceof dm.Generalization) parent.set(e.qualifiedName, e.generalization.generalizationQualifiedName);
+        }
+        const out = [];
+        for (const qn of parent.keys()) {
+            for (let p = parent.get(qn), i = 0; p && i < 20; p = parent.get(p), i++) {
+                if (p === entityQn) {
+                    out.push(qn);
+                    break;
+                }
+            }
+        }
+        return out.sort();
+    }
+
+    // Template text with {1} {2} placeholders, filled from args (expressions). brace: write a literal { as {{ (REST
+    // location and body templates).
+    // text null: keep the text (only the arguments change).
+    function fillTemplate(f, tpl, text, args, where, brace = false) {
+        const own = tpl instanceof mf.StringTemplate; // a TextTemplate's text is a translated Texts$Text (h.text)
+        const s = text === null ? (own ? tpl.text : "") : String(text === undefined ? "" : text);
+        if (args !== undefined && !Array.isArray(args)) throw new Error(`${where}: template arguments must be a list [ "expression", ... ]`);
+        const used = Math.max(0, ...[...s.matchAll(/\{(\d+)\}/g)].map(x => Number(x[1])));
+        if (used > (args || []).length) throw new Error(`${where}: the text uses {${used}} but there ${(args || []).length === 1 ? "is 1 argument" : `are ${(args || []).length} arguments`}`);
+        if (own && text !== null) tpl.text = brace && !s.includes("{{") ? s.replace(/\{(?!\d+\})/g, "{{") : s;
+        for (const old of [...tpl.arguments]) old.delete();
+        for (const e of args || []) mf.TemplateArgument.createIn(tpl).expression = expr(f.m, e, where);
+    }
+
+    const required = p => {
+        try {
+            return p.isRequired !== false;
+        } catch (e) {
+            return true; // versions without optional parameters
+        }
+    };
+
+    // Java action (microflows) or JavaScript action (nanoflows) call: one mapping per parameter, in parameter order.
+    async function codeCall(f, act, spec, where, js) {
+        const qn = js ? spec.jsAction : spec.javaAction;
+        const target = await h.get(qn);
+        const [want, other] = js ? [javascriptactions.JavaScriptAction, javaactions.JavaAction] : [javaactions.JavaAction, javascriptactions.JavaScriptAction];
+        if (!(target instanceof want)) throw new Error(`${where}: '${qn}' is not a ${js ? "JavaScript" : "Java"} action` + (target instanceof other ? ` but a ${js ? "Java action: use callJava in a microflow" : "JavaScript action: use callJavaScript in a nanoflow"}` : ""));
+        const a = (js ? mf.JavaScriptActionCallAction : mf.JavaActionCallAction).createIn(act);
+        if (js) a.javaScriptAction = target;
+        else a.javaAction = target;
+        const params = [...target.actionParameters];
+        const args = spec.args || {};
+        if (typeof args !== "object" || Array.isArray(args)) throw new Error(`${where}: args must be { "Param": "expression" }`);
+        for (const name of Object.keys(args)) if (!params.some(p => p.name === name)) fail(`${where}: ${qn} has no parameter '${name}'`, name, params.map(p => p.name));
+        const missing = params.filter(p => !(p.name in args) && required(p));
+        if (missing.length) throw new Error(`${where}: ${qn} needs args for: ${missing.map(p => p.name).join(", ")} (an expression; "empty" for no value)`);
+        const under = js ? "createInJavaScriptActionParameterMappingUnderParameterValue" : "createInJavaActionParameterMappingUnderParameterValue";
+        for (const p of params) {
+            const pm = (js ? mf.JavaScriptActionParameterMapping : mf.JavaActionParameterMapping).createIn(a);
+            pm.parameter = p;
+            const t = p.actionParameterType;
+            const v = args[p.name];
+            if (t instanceof codeactions.EntityTypeParameterType) {
+                if (String(v).startsWith("$")) throw new Error(`${where}: parameter '${p.name}' of ${qn} takes an entity name like "Module.Entity", not a variable`);
+                mf.EntityTypeCodeActionParameterValue[under](pm).entity = await h.entity(v);
+            } else if (t instanceof codeactions.BasicParameterType) mf.BasicCodeActionParameterValue[under](pm).argument = p.name in args ? expr(f.m, v, where) : "";
+            else throw new Error(`${where}: parameter '${p.name}' of ${qn} takes a ${t.structureTypeName.split("$")[1].replace(/(JavaScript|Java)?ActionParameterType$|ParameterType$/, "").toLowerCase() || "value"} argument, which ops cannot fill in; add this call in Studio Pro`);
+        }
+        const isVoid = target.actionReturnType instanceof codeactions.VoidType;
+        if (spec.variable && isVoid) throw new Error(`${where}: ${qn} returns nothing; remove 'variable'`);
+        a.useReturnVariable = isVoid || !!spec.variable; // Studio Pro keeps true for actions that return nothing
+        a.outputVariableName = spec.variable ? noDollar(spec.variable) : "";
+        return a;
+    }
+
+    const COMMIT = { yes: "Yes", no: "No", withoutevents: "YesWithoutEvents", yeswithoutevents: "YesWithoutEvents" };
+    const contentType = mapping => (mapping.jsonStructureQualifiedName ? mf.ContentType.Json : mf.ContentType.Xml);
+
+    // Where a REST response or an import goes: { how: "none" | "string" | "mapping", variable, mapping, commit }.
+    // Returns the ResultHandlingType name.
+    async function resultHandling(f, r, how, spec, where) {
+        const variable = spec.variable ? noDollar(spec.variable) : "";
+        if (how === "none" && variable) throw new Error(`${where}: response "none" stores nothing; remove 'variable' or use response "string"`);
+        if (how === "string" && !variable) throw new Error(`${where}: response "string" needs 'variable' (the name for the response text)`);
+        if (how !== "mapping" && spec.commit !== undefined) throw new Error(`${where}: 'commit' only applies to an import mapping`);
+        r.storeInVariable = !!variable;
+        r.outputVariableName = variable;
+        if (how === "string") {
+            r.variableType = datatypes.StringType.create(model);
+            return "String";
+        }
+        if (how === "none") {
+            r.variableType = datatypes.VoidType.create(model);
+            return "None";
+        }
+        const map = await h.get(spec.mapping);
+        if (!(map instanceof importmappings.ImportMapping)) throw new Error(`${where}: '${spec.mapping}' is not an import mapping`);
+        const pt = map.parameterType;
+        if (pt && !(pt instanceof datatypes.UnknownType) && !(pt instanceof datatypes.VoidType)) throw new Error(`${where}: import mapping ${spec.mapping} takes a parameter, which ops cannot pass; add this call in Studio Pro`);
+        const root = map.rootMappingElements[0];
+        if (!root || !root.entity) throw new Error(`${where}: import mapping ${spec.mapping} has no root object (finish it in Studio Pro)`);
+        const call = mf.ImportMappingCall.createIn(r);
+        call.mapping = map;
+        importCommit(r, spec.commit || "withoutEvents");
+        call.contentType = contentType(map);
+        call.objectHandlingBackup = sdk.mappings.ObjectHandlingBackupEnum.Create;
+        call.forceSingleOccurrence = false;
+        mf.ConstantRange.createInImportMappingCallUnderRange(call).singleObject = false;
+        if (variable) {
+            const t = (root.maxOccurs === -1 ? datatypes.ListType : datatypes.ObjectType).create(model);
+            t.entity = root.entity;
+            r.variableType = t;
+        } else r.variableType = datatypes.VoidType.create(model);
+        return "Mapping";
+    }
+
+    function importCommit(r, v) {
+        if (!r || !r.importMappingCall) throw new Error("'commit' only applies to a result with an import mapping");
+        const c = COMMIT[String(v).toLowerCase()];
+        if (!c) fail(`commit '${v}' is not one of yes | no | withoutEvents`, v, Object.keys(COMMIT));
+        r.importMappingCall.commit = mf.CommitEnum[c];
+    }
+
+    // Microflow-only and nanoflow-only actions.
+    const ONLY = { log: "micro", showHomePage: "micro", callJava: "micro", downloadFile: "micro", callRest: "micro", importWithMapping: "micro", exportWithMapping: "micro", callJavaScript: "nano" };
+    const AGGREGATE = { count: "Count", sum: "Sum", average: "Average", avg: "Average", minimum: "Minimum", min: "Minimum", maximum: "Maximum", max: "Maximum", all: "All", any: "Any" };
+    const LIST_OPS = {
+        union: "Union", intersect: "Intersect", subtract: "Subtract", contains: "Contains", equals: "ListEquals",
+        head: "Head", tail: "Tail", find: "Find", filter: "Filter", sort: "Sort", range: "ListRange"
+    };
+    const CHANGE_LIST = { add: "Add", remove: "Remove", replace: "Set", set: "Set", clear: "Clear" };
+    // Known to Mendix, but not written by ops: refused with the way out.
+    const NOT_STORED = {
+        reduce: "aggregate function 'reduce' is not supported (its return type cannot be set exactly); add it in Studio Pro"
+    };
+
+    // An attribute the aggregate function works on: numbers for sum/average, numbers or dates for minimum/maximum,
+    // Booleans for all/any.
+    async function aggregateAttribute(fn, entityQn, name, where) {
+        if (fn === "Count") throw new Error(`${where}: count takes no attribute`);
+        const { attribute } = await memberOf(entityQn, name, where);
+        if (!attribute) throw new Error(`${where}: aggregate an attribute, not an association`);
+        const t = attribute.type;
+        const numeric = t instanceof dm.IntegerAttributeType || t instanceof dm.LongAttributeType || t instanceof dm.DecimalAttributeType || t instanceof dm.AutoNumberAttributeType;
+        const ok = fn === "All" || fn === "Any" ? t instanceof dm.BooleanAttributeType : fn === "Sum" || fn === "Average" ? numeric : numeric || t instanceof dm.DateTimeAttributeType;
+        if (!ok) throw new Error(`${where}: ${fn.toLowerCase()} does not work on ${attribute.name} (${t.structureTypeName.split("$")[1].replace("AttributeType", "")})`);
+        return attribute;
+    }
+
+    async function aggregate(f, a, spec, where) {
+        if (NOT_STORED[String(spec.function).toLowerCase()]) throw new Error(`${where}: ${NOT_STORED[String(spec.function).toLowerCase()]}`);
+        const fn = AGGREGATE[String(spec.function).toLowerCase()];
+        if (!fn) fail(`${where}: function '${spec.function}' is not one of count | sum | average | minimum | maximum | all | any`, spec.function, Object.keys(AGGREGATE));
+        const ent = await needVariable(f.m, spec.list, true, where);
+        a.inputListVariableName = noDollar(spec.list);
+        a.aggregateFunction = mf.AggregateFunctionEnum[fn];
+        a.attribute = null;
+        a.useExpression = false;
+        a.expression = "";
+        if (fn === "Count") {
+            if (spec.attribute !== undefined || spec.expression !== undefined) throw new Error(`${where}: count takes no attribute or expression`);
+        } else if ((spec.attribute === undefined) === (spec.expression === undefined)) throw new Error(`${where}: ${spec.function} needs either 'attribute' or 'expression'`);
+        else if (spec.attribute !== undefined) a.attribute = await aggregateAttribute(fn, ent, spec.attribute, where);
+        else {
+            a.useExpression = true;
+            a.expression = expr(f.m, spec.expression, where, ent);
+        }
+        // what Studio Pro stores when the function is not reduce
+        a.reduceInitialValueExpression = "";
+        a.reduceReturnDataType = datatypes.BooleanType.create(model);
+    }
+
+    async function listOperation(f, a, spec, where) {
+        if (NOT_STORED[String(spec.operation).toLowerCase()]) throw new Error(`${where}: ${NOT_STORED[String(spec.operation).toLowerCase()]}`);
+        const name = LIST_OPS[String(spec.operation).toLowerCase()];
+        if (!name) fail(`${where}: operation '${spec.operation}' is not one of ${Object.keys(LIST_OPS).join(" | ")}`, spec.operation, Object.keys(LIST_OPS));
+        const ent = await needVariable(f.m, spec.list, true, where);
+        const allowed = {
+            Union: ["other"], Intersect: ["other"], Subtract: ["other"], Contains: ["other"], ListEquals: ["other"], Head: [], Tail: [],
+            Find: ["attribute", "value", "expression"], Filter: ["attribute", "value", "expression"], Sort: ["sort"], ListRange: ["offset", "limit"]
+        }[name];
+        for (const k of ["other", "attribute", "value", "expression", "sort", "offset", "limit"]) {
+            if (spec[k] !== undefined && !allowed.includes(k)) throw new Error(`${where}: '${k}' does not apply to ${spec.operation}${allowed.length ? ` (it takes ${allowed.join(", ")})` : ""}`);
+        }
+        let op;
+        if (allowed.includes("other")) {
+            if (!spec.other) throw new Error(`${where}: ${spec.operation} needs 'other' (${name === "Contains" ? "an object" : "a second list"} variable)`);
+            await needVariable(f.m, spec.other, name !== "Contains", where);
+            op = mf[name].createIn(a);
+            op.secondListOrObjectVariableName = noDollar(spec.other);
+        } else if (name === "Find" || name === "Filter") {
+            if (spec.expression !== undefined) {
+                if (spec.attribute !== undefined || spec.value !== undefined) throw new Error(`${where}: use 'attribute' + 'value' or 'expression', not both`);
+                op = mf[name + "ByExpression"].createIn(a);
+                op.expression = expr(f.m, spec.expression, where, ent);
+            } else {
+                if (spec.attribute === undefined || spec.value === undefined) throw new Error(`${where}: ${spec.operation} needs 'attribute' and 'value', or 'expression'`);
+                const mem = await memberOf(ent, spec.attribute, where);
+                op = mf[name].createIn(a);
+                if (mem.attribute) op.attribute = mem.attribute;
+                else op.association = mem.association;
+                op.expression = expr(f.m, spec.value, where);
+            }
+        } else if (name === "Sort") {
+            if (!Array.isArray(spec.sort) || !spec.sort.length) throw new Error(`${where}: sort needs sort: [ "Attribute" or { "attribute": "Attribute", "descending": true } ]`);
+            op = mf.Sort.createIn(a);
+            const items = mf.SortItemList.createInSortUnderSortItemList(op);
+            for (const s of spec.sort) {
+                const o = typeof s === "string" ? { attribute: s } : s || {};
+                const { attribute } = await memberOf(ent, o.attribute, where);
+                if (!attribute) throw new Error(`${where}: sort on an attribute, not an association`);
+                const item = mf.SortItem.createIn(items);
+                dm.AttributeRef.createInSortItemUnderAttributeRef(item).attribute = attribute;
+                item.sortOrder = bool(o.descending, false) ? mf.SortOrderEnum.Descending : mf.SortOrderEnum.Ascending;
+            }
+        } else if (name === "ListRange") {
+            if (spec.limit === undefined) throw new Error(`${where}: range needs 'limit' (number of items) and optionally 'offset'`);
+            op = mf.ListRange.createIn(a);
+            const r = mf.CustomRange.createInListRangeUnderCustomRange(op);
+            r.offsetExpression = expr(f.m, spec.offset === undefined ? "0" : spec.offset, where);
+            r.limitExpression = expr(f.m, spec.limit, where);
+        } else op = mf[name].createIn(a);
+        op.listVariableName = noDollar(spec.list);
+    }
+
     async function activity(f, spec, x, y, where) {
         const kind = spec.action;
         validate("action", kind, { fields: { ...ACTIONS[kind].fields, ...COMMON } }, spec, where);
+        if (ONLY[kind] === "micro" && f.nano) throw new Error(`${where}: '${kind}' is not available in nanoflows${kind === "callJava" ? "; call a microflow that calls the Java action" : ""}`);
+        if (ONLY[kind] === "nano" && !f.nano) throw new Error(`${where}: '${kind}' only works in nanoflows (JavaScript runs in the browser); in a microflow use callJava`);
         const act = mf.ActionActivity.createIn(f.coll);
         point(act, x, y);
         size(act, 120, 60);
@@ -268,7 +655,6 @@ function makeFlows(h) {
                 a = await callAction(f, act, spec, where);
                 break;
             case "log":
-                if (f.nano) throw new Error(`${where}: 'log' is not available in nanoflows`);
                 a = mf.LogMessageAction.createIn(act);
                 a.level = enumValue(mf.LogLevel, spec.level || "Info", "log level");
                 a.node = `'${String(spec.node || f.m.qualifiedName.split(".")[0]).replace(/'/g, "''")}'`;
@@ -305,10 +691,144 @@ function makeFlows(h) {
                 a = mf.CloseFormAction.createIn(act);
                 a.numberOfPagesToClose = spec.count === undefined ? "" : String(spec.count);
                 break;
-            case "importWithMapping":
-            case "exportWithMapping":
-                a = await mappingAction(h, f, act, spec, where);
+            case "showHomePage":
+                a = mf.ShowHomePageAction.createIn(act);
                 break;
+            case "callJava":
+            case "callJavaScript":
+                a = await codeCall(f, act, spec, where, kind === "callJavaScript");
+                break;
+            case "validationFeedback": {
+                const ent = await needVariable(f.m, spec.variable, false, where);
+                const mem = await memberOf(ent, spec.member, where);
+                a = mf.ValidationFeedbackAction.createIn(act);
+                a.objectVariableName = noDollar(spec.variable);
+                if (mem.attribute) a.attribute = mem.attribute;
+                else a.association = mem.association;
+                fillTemplate(f, a.feedbackTemplate, spec.message, spec.args, where);
+                await h.text(a.feedbackTemplate.text, spec.message);
+                break;
+            }
+            case "rollback": {
+                const info = await variableInfo(f.m, spec.variable, where);
+                if (!info.entity) throw new Error(`${where}: '${noDollar(spec.variable)}' is not an object or list`);
+                a = mf.RollbackAction.createIn(act);
+                a.rollbackVariableName = noDollar(spec.variable);
+                a.refreshInClient = bool(spec.refresh, false);
+                break;
+            }
+            case "createList":
+                a = mf.CreateListAction.createIn(act);
+                a.entity = await h.entity(spec.entity);
+                a.outputVariableName = noDollar(spec.variable);
+                break;
+            case "changeList": {
+                const type = CHANGE_LIST[String(spec.type || "add").toLowerCase()];
+                if (!type) fail(`${where}: type '${spec.type}' is not one of add | remove | replace | clear`, spec.type, Object.keys(CHANGE_LIST));
+                await needVariable(f.m, spec.list, true, where);
+                if (type === "Clear" && spec.value !== undefined) throw new Error(`${where}: clear takes no 'value'`);
+                if (type !== "Clear" && (spec.value === undefined || spec.value === "")) throw new Error(`${where}: ${spec.type || "add"} needs 'value' (an object or list expression, e.g. $NewOrder)`);
+                a = mf.ChangeListAction.createIn(act);
+                a.changeVariableName = noDollar(spec.list);
+                a.type = mf.ChangeListActionType[type];
+                a.value = type === "Clear" ? "" : expr(f.m, spec.value, where);
+                break;
+            }
+            case "aggregateList":
+                a = mf.AggregateListAction.createIn(act);
+                a.outputVariableName = noDollar(spec.variable);
+                await aggregate(f, a, spec, where);
+                break;
+            case "listOperation":
+                a = mf.ListOperationAction.createIn(act);
+                a.outputVariableName = noDollar(spec.variable);
+                await listOperation(f, a, spec, where);
+                break;
+            case "cast":
+                a = mf.CastAction.createIn(act);
+                a.outputVariableName = noDollar(spec.variable);
+                break;
+            case "downloadFile": {
+                const ent = await needVariable(f.m, spec.variable, false, where);
+                if (!(await isA(ent, "System.FileDocument")) && !(await isA(ent, "System.Image"))) throw new Error(`${where}: ${ent} is no file document; downloadFile needs an object of an entity that inherits from System.FileDocument`);
+                a = mf.DownloadFileAction.createIn(act);
+                a.fileDocumentVariableName = noDollar(spec.variable);
+                a.showFileInBrowser = bool(spec.showInBrowser, false);
+                break;
+            }
+            case "callRest": {
+                if (spec.body !== undefined && spec.exportMapping) throw new Error(`${where}: give 'body' or 'exportMapping', not both`);
+                if (!spec.exportMapping !== !spec.exportObject) throw new Error(`${where}: 'exportMapping' and 'exportObject' go together`);
+                if (spec.headers !== undefined && (typeof spec.headers !== "object" || Array.isArray(spec.headers))) throw new Error(`${where}: headers must be { "Name": "expression" }`);
+                // weak models mix up the text template (url, body) and expressions (args, header values)
+                if (/^\s*['@$]/.test(spec.url)) throw new Error(`${where}: url is text, not an expression: write https://... and put expressions in urlArgs, e.g. "url": "{1}/orders/{2}", "urlArgs": ["@Module.BaseUrl", "$Order/Id"]`);
+                for (const [k, v] of Object.entries(spec.headers || {})) {
+                    if (!/['$@(]|^\s*(-?\d+(\.\d+)?|empty|true|false)\s*$/.test(String(v))) throw new Error(`${where}: header ${k} is an expression: write '${v}' in single quotes`);
+                }
+                a = mf.RestCallAction.createIn(act);
+                const http = a.httpConfiguration || mf.HttpConfiguration.createInRestCallActionUnderHttpConfiguration(a);
+                http.overrideLocation = true;
+                fillTemplate(f, http.customLocationTemplate || mf.StringTemplate.createInHttpConfigurationUnderCustomLocationTemplate(http), spec.url, spec.urlArgs, `${where} url`, true);
+                try {
+                    http.newHttpMethod = enumValue(services.HttpMethod, spec.method || "Get", "HTTP method");
+                } catch (e) {
+                    throw new Error(`${where}: ${e.message}`);
+                }
+                for (const [k, v] of Object.entries(spec.headers || {})) {
+                    const e = mf.HttpHeaderEntry.createInHttpConfigurationUnderHeaderEntries(http);
+                    e.key = k;
+                    e.value = expr(f.m, v, `${where} header ${k}`);
+                }
+                a.useRequestTimeOut = true;
+                a.timeOutExpression = expr(f.m, spec.timeout === undefined ? "300" : spec.timeout, `${where} timeout`);
+                a.errorResultHandlingType = mf.ErrorResultHandlingType.HttpResponse;
+                a.requestProxyType = mf.RequestProxyType.DefaultProxy;
+                if (spec.exportMapping) {
+                    const map = await h.get(spec.exportMapping);
+                    if (!(map instanceof exportmappings.ExportMapping)) throw new Error(`${where}: '${spec.exportMapping}' is not an export mapping`);
+                    await variableInfo(f.m, spec.exportObject, where);
+                    const rq = mf.MappingRequestHandling.createInRestCallActionUnderRequestHandling(a);
+                    rq.mapping = map;
+                    rq.mappingArgumentVariableName = noDollar(spec.exportObject);
+                    rq.contentType = contentType(map);
+                    a.requestHandlingType = mf.RequestHandlingType.Mapping;
+                } else {
+                    const rq = mf.CustomRequestHandling.createInRestCallActionUnderRequestHandling(a);
+                    fillTemplate(f, rq.template || mf.StringTemplate.createInCustomRequestHandlingUnderTemplate(rq), spec.body || "", spec.bodyArgs, `${where} body`, true);
+                    a.requestHandlingType = mf.RequestHandlingType.Custom;
+                }
+                const response = spec.response === undefined ? (spec.variable ? "string" : "none") : String(spec.response);
+                const how = /^none$/i.test(response) ? "none" : /^string$/i.test(response) ? "string" : "mapping";
+                if (how === "mapping" && !response.includes(".")) fail(`${where}: response '${response}' is not none, string or an import mapping (Module.Mapping)`, response, ["none", "string"]);
+                const r = a.resultHandling || mf.ResultHandling.createInRestCallActionUnderResultHandling(a);
+                a.resultHandlingType = mf.ResultHandlingType[await resultHandling(f, r, how, { ...spec, mapping: response }, where)];
+                break;
+            }
+            case "importWithMapping": {
+                const src = await variableInfo(f.m, spec.source, where);
+                if (src.entity) throw new Error(`${where}: source must be a String variable with the JSON/XML text, not ${src.list ? "a list" : "an object"}`);
+                a = mf.ImportXmlAction.createIn(act);
+                a.xmlDocumentVariableName = noDollar(spec.source);
+                a.isValidationRequired = false;
+                await resultHandling(f, a.resultHandling || mf.ResultHandling.createInImportXmlActionUnderResultHandling(a), "mapping", spec, where);
+                break;
+            }
+            case "exportWithMapping": {
+                const map = await h.get(spec.mapping);
+                if (!(map instanceof exportmappings.ExportMapping)) throw new Error(`${where}: '${spec.mapping}' is not an export mapping`);
+                const obj = await variableInfo(f.m, spec.object, where);
+                const root = map.rootMappingElements[0];
+                const want = root && root.entityQualifiedName;
+                if (want && obj.entity && obj.entity !== want) throw new Error(`${where}: ${spec.mapping} exports ${want}, but $${noDollar(spec.object)} is ${obj.entity}`);
+                a = mf.ExportXmlAction.createIn(act);
+                a.isValidationRequired = false;
+                const rq = mf.MappingRequestHandling.createInExportXmlActionUnderResultHandling(a);
+                rq.mapping = map;
+                rq.mappingArgumentVariableName = noDollar(spec.object);
+                rq.contentType = contentType(map);
+                mf.VariableExport.createIn(a).outputVariableName = noDollar(spec.variable);
+                break;
+            }
         }
         a.errorHandlingType = errorDefault(f);
         if (spec.caption) {
@@ -324,6 +844,8 @@ function makeFlows(h) {
     // Returns { first, tail (null when the sequence ended), width, height (in lanes) }.
     async function buildSeq(f, specs, x, y, prev, where) {
         if (!Array.isArray(specs)) throw new Error(`${where}: expected a list of actions [ ... ]`);
+        const castable = f.castable; // first action of an ifType case: may be a cast
+        f = { ...f, castable: null };
         let cursor = x;
         let height = 1;
         let first = null;
@@ -339,9 +861,55 @@ function makeFlows(h) {
             if (!spec || typeof spec !== "object") throw new Error(`${w}: each action must be an object { "action": ... }`);
             if (ended) throw new Error(`${w}: unreachable: an earlier action already ended this path (end/break/continue/error)`);
             const kind = spec.action;
+            if (/^call(Microflow|Nanoflow)$/i.test(kind)) throw new Error(`${w}: unknown action '${kind}'; use "call" with "microflow": "Module.Flow" (microflows and nanoflows)`);
             if (!ACTIONS[kind] && !CONTROL[kind]) fail(`${w}: unknown action '${kind}'`, kind, [...Object.keys(ACTIONS), ...Object.keys(CONTROL)]);
             if (CONTROL[kind]) validate("action", kind, CONTROL[kind], spec, w);
+            if (kind === "cast" && !(i === 0 && castable)) throw new Error(`${w}: 'cast' must be the first action of a case of an ifType (it casts the object to that case's entity)`);
             switch (kind) {
+                case "ifType": {
+                    const entityQn = await needVariable(f.m, spec.variable, false, w);
+                    const cases = spec.cases && typeof spec.cases === "object" && !Array.isArray(spec.cases) ? Object.entries(spec.cases) : [];
+                    if (!cases.length) throw new Error(`${w}: ifType needs cases: { "Module.Specialization": [ actions ] }`);
+                    const specs = await specializationsOf(entityQn);
+                    if (!specs.length) throw new Error(`${w}: no entity inherits from ${entityQn}, so there is no type to decide on`);
+                    for (const [qn, list] of cases) {
+                        if (!specs.includes(qn)) fail(`${w}: ${qn} is not a specialization of ${entityQn}`, qn, specs);
+                        if (!Array.isArray(list)) throw new Error(`${w}: case ${qn} must be a list of actions [ ... ]`);
+                    }
+                    const split = mf.InheritanceSplit.createIn(f.coll);
+                    point(split, cursor, y);
+                    size(split, 60, 40);
+                    split.splitVariableName = noDollar(spec.variable);
+                    split.caption = spec.caption ? String(spec.caption) : "";
+                    link(split);
+                    cursor += X_STEP;
+                    // one flow per case, then the variable's own entity (any other type), then empty
+                    const branches = [...cases.map(([qn, acts]) => ({ type: qn, acts, castable: qn })), { type: entityQn, acts: spec.other || [] }, { type: "", acts: spec.empty || [] }];
+                    let laneY = y;
+                    let width = 0;
+                    const open = [];
+                    for (const [bi, b] of branches.entries()) {
+                        const seg = await buildSeq({ ...f, castable: b.castable || null }, b.acts, cursor, laneY, { obj: split, originIndex: bi ? 2 : 1, caseValue: { type: b.type } }, `${w} ${b.type || "empty"}`);
+                        if (seg.tail) open.push(seg.tail);
+                        width = Math.max(width, seg.width);
+                        laneY += LANE * seg.height;
+                    }
+                    cursor += width;
+                    height = Math.max(height, (laneY - y) / LANE);
+                    if (open.length > 1) {
+                        const merge = mf.ExclusiveMerge.createIn(f.coll);
+                        point(merge, cursor, y);
+                        size(merge, 60, 60);
+                        open.forEach((t, k) => connect(f, t, merge, k ? 2 : 3));
+                        tail = { obj: merge, originIndex: 1 };
+                        cursor += X_STEP;
+                    } else if (open.length === 1) tail = open[0];
+                    else {
+                        tail = null;
+                        ended = true;
+                    }
+                    break;
+                }
                 case "if": {
                     const split = mf.ExclusiveSplit.createIn(f.coll);
                     point(split, cursor, y);
@@ -574,6 +1142,7 @@ function makeFlows(h) {
         if (o instanceof mf.EndEvent) return "END" + (o.returnValue ? ` return ${o.returnValue}` : "");
         if (o instanceof mf.MicroflowParameterObject) return `PARAMETER $${o.name}`;
         if (o instanceof mf.ExclusiveSplit) return `IF ${o.splitCondition instanceof mf.ExpressionSplitCondition ? o.splitCondition.expression : o.caption}`;
+        if (o instanceof mf.InheritanceSplit) return `IF TYPE OF $${o.splitVariableName}`;
         if (o instanceof mf.ExclusiveMerge) return "MERGE";
         if (o instanceof mf.BreakEvent) return "BREAK";
         if (o instanceof mf.ContinueEvent) return "CONTINUE";
@@ -605,14 +1174,34 @@ function makeFlows(h) {
         else if (a instanceof mf.ChangeVariableAction) s = `SET $${a.changeVariableName} = ${a.value}`;
         else if (a instanceof mf.ShowPageAction) s = `SHOW PAGE ${a.pageSettings ? a.pageSettings.pageQualifiedName : "?"}`;
         else if (a instanceof mf.CloseFormAction) s = "CLOSE PAGE";
-        else if (a instanceof mf.ImportXmlAction) {
-            const rh = a.resultHandling;
-            s = `IMPORT $${a.xmlDocumentVariableName} WITH ${rh && rh.importMappingCall ? rh.importMappingCall.mappingQualifiedName : "?"}${rh && rh.storeInVariable ? " -> $" + rh.outputVariableName : ""}`;
+        else if (a instanceof mf.ShowHomePageAction) s = "SHOW HOME PAGE";
+        else if (a instanceof mf.JavaActionCallAction || a instanceof mf.JavaScriptActionCallAction) {
+            const js = a instanceof mf.JavaScriptActionCallAction;
+            s = `CALL ${js ? "JAVASCRIPT" : "JAVA"} ${js ? a.javaScriptActionQualifiedName : a.javaActionQualifiedName}${a.useReturnVariable && a.outputVariableName ? " -> $" + a.outputVariableName : ""}`;
+        } else if (a instanceof mf.ValidationFeedbackAction) s = `VALIDATION FEEDBACK $${a.objectVariableName}/${a.attributeQualifiedName ? a.attributeQualifiedName.split(".").pop() : a.associationQualifiedName}`;
+        else if (a instanceof mf.RollbackAction) s = `ROLLBACK $${a.rollbackVariableName}`;
+        else if (a instanceof mf.CreateListAction) s = `CREATE LIST $${a.outputVariableName} OF ${a.entityQualifiedName}`;
+        else if (a instanceof mf.ChangeListAction) s = `CHANGE LIST $${a.changeVariableName} ${a.type.name.toUpperCase()}${a.value ? " " + a.value : ""}`;
+        else if (a instanceof mf.AggregateListAction) s = `AGGREGATE $${a.outputVariableName} = ${a.aggregateFunction.name.toUpperCase()}($${a.inputListVariableName}${a.useExpression ? ", " + a.expression : a.attributeQualifiedName ? "/" + a.attributeQualifiedName.split(".").pop() : ""})`;
+        else if (a instanceof mf.ListOperationAction) {
+            const op = a.operation;
+            const detail = !op ? "" : op.secondListOrObjectVariableName ? `, $${op.secondListOrObjectVariableName}`
+                : op instanceof mf.Find || op instanceof mf.Filter ? `, ${op.attributeQualifiedName ? op.attributeQualifiedName.split(".").pop() : op.associationQualifiedName} = ${op.expression}`
+                : op.expression !== undefined ? `, ${op.expression}` : op instanceof mf.ListRange && op.customRange ? `, ${op.customRange.offsetExpression}, ${op.customRange.limitExpression}` : "";
+            s = `LIST $${a.outputVariableName} = ${op ? op.structureTypeName.split("$")[1].toUpperCase() : "?"}($${op ? op.listVariableName : "?"}${detail})`;
+        } else if (a instanceof mf.CastAction) s = `CAST -> $${a.outputVariableName}`;
+        else if (a instanceof mf.DownloadFileAction) s = `DOWNLOAD $${a.fileDocumentVariableName}`;
+        else if (a instanceof mf.RestCallAction) {
+            const http = a.httpConfiguration;
+            const r = a.resultHandling;
+            s = `REST ${http ? http.newHttpMethod.name.toUpperCase() : "?"} ${http && http.customLocationTemplate ? http.customLocationTemplate.text : "?"}${r && r.storeInVariable ? " -> $" + r.outputVariableName : ""}`;
+        } else if (a instanceof mf.ImportXmlAction) {
+            const r = a.resultHandling;
+            s = `IMPORT $${a.xmlDocumentVariableName} WITH ${r && r.importMappingCall ? r.importMappingCall.mappingQualifiedName : "?"}${r && r.storeInVariable ? " -> $" + r.outputVariableName : ""}`;
         } else if (a instanceof mf.ExportXmlAction) {
-            const rh = a.resultHandling;
-            s = `EXPORT $${rh ? rh.mappingArgumentVariableName : "?"} WITH ${rh ? rh.mappingQualifiedName : "?"}${a.outputMethod && a.outputMethod.outputVariableName ? " -> $" + a.outputMethod.outputVariableName : ""}`;
-        }
-        else s = t.replace(/Action$/, "").toUpperCase();
+            const r = a.resultHandling;
+            s = `EXPORT $${r ? r.mappingArgumentVariableName : "?"} WITH ${r ? r.mappingQualifiedName : "?"}${a.outputMethod && a.outputMethod.outputVariableName ? " -> $" + a.outputMethod.outputVariableName : ""}`;
+        } else s = t.replace(/Action$/, "").toUpperCase();
         return s + off;
     }
 
@@ -642,7 +1231,7 @@ function makeFlows(h) {
             const normal = outs.filter(x => !x.isErrorHandler);
             for (const x of outs.filter(x => x.isErrorHandler)) visit(x.destination, depth + 1, "[on error] ");
             if (normal.length === 1 && caseOf(normal[0]) === null) visit(normal[0].destination, depth, "");
-            else for (const x of normal) visit(x.destination, depth + 1, `[${caseOf(x)}] `);
+            else for (const x of normal) visit(x.destination, depth + 1, `[${caseLabel(x)}] `);
         };
         for (const p of m.objectCollection.objects.filter(x => x instanceof mf.MicroflowParameterObject)) visit(p, 0, "");
         const start = m.objectCollection.objects.find(x => x instanceof mf.StartEvent);
@@ -734,6 +1323,114 @@ function makeFlows(h) {
             type: (f, a, v) => (a.type = enumValue(mf.ShowMessageType, v, "message type")),
             blocking: (f, a, v) => (a.blocking = bool(v, true))
         },
+        code: {
+            args: async (f, a, v, where) => {
+                for (const [name, value] of Object.entries(v || {})) {
+                    const pm = [...a.parameterMappings].find(x => x.parameterQualifiedName.split(".").pop() === name);
+                    if (!pm) fail(`${where}: the call has no parameter '${name}'`, name, [...a.parameterMappings].map(x => x.parameterQualifiedName.split(".").pop()));
+                    const pv = pm.parameterValue;
+                    if (pv instanceof mf.EntityTypeCodeActionParameterValue) pv.entity = await h.entity(value);
+                    else if (pv instanceof mf.BasicCodeActionParameterValue) pv.argument = expr(f.m, value, where);
+                    else throw new Error(`${where}: parameter '${name}' takes no expression; change it in Studio Pro`);
+                }
+            }
+        },
+        ValidationFeedbackAction: {
+            message: (f, a, v) => h.text(a.feedbackTemplate.text, v),
+            args: (f, a, v, where) => fillTemplate(f, a.feedbackTemplate, null, [].concat(v), where)
+        },
+        RollbackAction: { refresh: (f, a, v) => (a.refreshInClient = bool(v, false)) },
+        ChangeListAction: {
+            type: (f, a, v) => {
+                const type = CHANGE_LIST[String(v).toLowerCase()];
+                if (!type) fail(`type '${v}' is not one of add | remove | replace | clear`, v, Object.keys(CHANGE_LIST));
+                a.type = mf.ChangeListActionType[type];
+                if (type === "Clear") a.value = "";
+            },
+            value: (f, a, v, where) => {
+                if (a.type === mf.ChangeListActionType.Clear) throw new Error("clear takes no value; change 'type' first");
+                a.value = expr(f.m, v, where);
+            }
+        },
+        AggregateListAction: {
+            function: async (f, a, v, where, o) => {
+                const fn = AGGREGATE[String(v).toLowerCase()];
+                if (!fn) fail(`function '${v}' is not one of count | sum | average | minimum | maximum | all | any`, v, Object.keys(AGGREGATE));
+                a.aggregateFunction = mf.AggregateFunctionEnum[fn];
+                if (fn === "Count") {
+                    a.attribute = null;
+                    a.useExpression = false;
+                    a.expression = "";
+                } else if (o.attribute === undefined && o.expression === undefined) {
+                    // keep what it aggregates when that still fits the new function
+                    if (!a.useExpression && !a.attributeQualifiedName) throw new Error(`${where}: ${v} needs 'attribute' or 'expression' too`);
+                    if (!a.useExpression) await aggregateAttribute(fn, await needVariable(f.m, a.inputListVariableName, true, where), a.attributeQualifiedName, where);
+                }
+            },
+            attribute: async (f, a, v, where) => {
+                a.attribute = await aggregateAttribute(a.aggregateFunction.name, await needVariable(f.m, a.inputListVariableName, true, where), v, where);
+                a.useExpression = false;
+                a.expression = "";
+            },
+            expression: async (f, a, v, where) => {
+                if (a.aggregateFunction === mf.AggregateFunctionEnum.Count) throw new Error(`${where}: count takes no expression; change 'function' first`);
+                a.expression = expr(f.m, v, where, await needVariable(f.m, a.inputListVariableName, true, where));
+                a.useExpression = true;
+                a.attribute = null;
+            }
+        },
+        ListOperationAction: {
+            value: (f, a, v, where) => {
+                if (!(a.operation instanceof mf.Find || a.operation instanceof mf.Filter)) throw new Error("'value' only applies to find/filter on an attribute");
+                a.operation.expression = expr(f.m, v, where);
+            },
+            expression: async (f, a, v, where) => {
+                if (!(a.operation instanceof mf.FindByExpression || a.operation instanceof mf.FilterByExpression)) throw new Error("'expression' only applies to find/filter by expression");
+                a.operation.expression = expr(f.m, v, where, await needVariable(f.m, a.operation.listVariableName, true, where));
+            },
+            other: (f, a, v) => {
+                if (a.operation.secondListOrObjectVariableName === undefined) throw new Error("'other' only applies to union, intersect, subtract, contains and equals");
+                a.operation.secondListOrObjectVariableName = noDollar(v);
+            },
+            offset: (f, a, v, where) => {
+                if (!(a.operation instanceof mf.ListRange)) throw new Error("'offset' only applies to range");
+                a.operation.customRange.offsetExpression = expr(f.m, v, where);
+            },
+            limit: (f, a, v, where) => {
+                if (!(a.operation instanceof mf.ListRange)) throw new Error("'limit' only applies to range");
+                a.operation.customRange.limitExpression = expr(f.m, v, where);
+            }
+        },
+        DownloadFileAction: { showInBrowser: (f, a, v) => (a.showFileInBrowser = bool(v, false)) },
+        RestCallAction: {
+            url: (f, a, v, where) => fillTemplate(f, a.httpConfiguration.customLocationTemplate, v, [...a.httpConfiguration.customLocationTemplate.arguments].map(x => x.expression), where, true),
+            urlArgs: (f, a, v, where) => fillTemplate(f, a.httpConfiguration.customLocationTemplate, null, [].concat(v), where),
+            method: (f, a, v) => (a.httpConfiguration.newHttpMethod = enumValue(services.HttpMethod, v, "HTTP method")),
+            headers: (f, a, v, where) => {
+                if (!v || typeof v !== "object" || Array.isArray(v)) throw new Error(`${where}: headers must be { "Name": "expression" } (it replaces all headers)`);
+                for (const old of [...a.httpConfiguration.headerEntries]) old.delete();
+                for (const [k, x] of Object.entries(v)) {
+                    const e = mf.HttpHeaderEntry.createInHttpConfigurationUnderHeaderEntries(a.httpConfiguration);
+                    e.key = k;
+                    e.value = expr(f.m, x, where);
+                }
+            },
+            timeout: (f, a, v, where) => {
+                a.useRequestTimeOut = true;
+                a.timeOutExpression = expr(f.m, v, where);
+            },
+            body: (f, a, v, where) => {
+                if (!(a.requestHandling instanceof mf.CustomRequestHandling)) throw new Error("'body' only applies to a call with a text body (this one uses a mapping or form data)");
+                fillTemplate(f, a.requestHandling.template, v, [...a.requestHandling.template.arguments].map(x => x.expression), where, true);
+            },
+            bodyArgs: (f, a, v, where) => {
+                if (!(a.requestHandling instanceof mf.CustomRequestHandling)) throw new Error("'bodyArgs' only applies to a call with a text body");
+                fillTemplate(f, a.requestHandling.template, null, [].concat(v), where);
+            },
+            commit: (f, a, v) => importCommit(a.resultHandling, v)
+        },
+        ImportXmlAction: { commit: (f, a, v) => importCommit(a.resultHandling, v) },
+        InheritanceSplit: { caption: (f, o, v) => (o.caption = String(v)) },
         CreateVariableAction: { value: (f, a, v, where) => (a.initialValue = expr(f.m, v, where)) },
         ChangeVariableAction: { value: (f, a, v, where) => (a.value = expr(f.m, v, where)) },
         ExclusiveSplit: {
@@ -768,6 +1465,7 @@ function makeFlows(h) {
                 a instanceof mf.RetrieveAction ? CHANGES.RetrieveAction
                 : a instanceof mf.CreateObjectAction || a instanceof mf.ChangeObjectAction ? CHANGES.members
                 : a instanceof mf.MicroflowCallAction || a instanceof mf.NanoflowCallAction ? CHANGES.call
+                : a instanceof mf.JavaActionCallAction || a instanceof mf.JavaScriptActionCallAction ? CHANGES.code
                 : CHANGES[a && a.structureTypeName.split("$")[1]] || {};
             return { target: a, own, common: CHANGES.activity };
         }
@@ -786,7 +1484,7 @@ function makeFlows(h) {
         for (const k of fields) {
             const fn = own[k] || common[k];
             if (!fn) fail(`${where}: '${k}' cannot be changed on ${describe(step)}. Fields for this step: ${[...Object.keys(own), ...Object.keys(common)].join(", ") || "none"}`, k, [...Object.keys(own), ...Object.keys(common)]);
-            await fn(f, own[k] ? target : step, o[k], where);
+            await fn(f, own[k] ? target : step, o[k], where, o);
         }
         return `${where} ${describe(step)}: ${fields.join(", ")}`;
     }
@@ -820,21 +1518,30 @@ function makeFlows(h) {
 
     async function lintExpressions() {
         const lint = [];
-        for (const { m, expr: e, where } of toLint) {
+        for (const { m, expr: e, where, current } of toLint) {
             const re = /\$(\w+)\/([\w.]+)/g;
             let hit;
             while ((hit = re.exec(e))) {
                 const [, variable, member] = hit;
-                const v = variablesOf(m).get(variable);
-                if (!v) {
-                    lint.push(`${where}: $${variable} is not a parameter or a variable created in ${m.qualifiedName}`);
-                    continue;
-                }
                 let entityQn;
-                try {
-                    entityQn = await entityOfVariable(m, variable, where);
-                } catch (err) {
-                    continue; // primitive variable or unknown: nothing to check
+                if (variable === "currentObject") {
+                    if (!current) {
+                        lint.push(`${where}: $currentObject only exists in an aggregate or list operation expression`);
+                        continue;
+                    }
+                    entityQn = current;
+                } else if (variable === "currentUser") continue;
+                else {
+                    const v = variablesOf(m).get(variable);
+                    if (!v) {
+                        lint.push(`${where}: $${variable} is not a parameter or a variable created in ${m.qualifiedName}`);
+                        continue;
+                    }
+                    try {
+                        entityQn = await entityOfVariable(m, variable, where);
+                    } catch (err) {
+                        continue; // primitive variable or unknown: nothing to check
+                    }
                 }
                 if (!entityQn) continue;
                 const ent = await h.entity(entityQn);
@@ -856,4 +1563,4 @@ function makeFlows(h) {
     return { createFlow, addActions, changeAction, deleteAction, steps, describe, variablesOf, walkObjects, flowDoc, lintExpressions, findStep };
 }
 
-module.exports = { makeFlows, ACTIONS, CONTROL, COMMON };
+module.exports = { makeFlows, ACTIONS, CONTROL, COMMON, CREATES };

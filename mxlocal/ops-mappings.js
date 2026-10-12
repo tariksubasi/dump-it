@@ -1,10 +1,10 @@
 "use strict";
 // JSON integration: JSON structures built from a snippet the way Studio Pro builds them (element names, paths,
-// primitive types, occurrences), import/export mappings from a structure onto entities (optionally creating the
-// missing entities, attributes and associations), and the microflow actions that run them. Layout and naming rules
+// primitive types, occurrences), and import/export mappings from a structure onto entities (optionally creating the
+// missing entities, attributes and associations). The steps that run them are in ops-flows.js. Layout and naming rules
 // learned from Studio Pro-saved structures and mappings (Mendix 10.24-11.13) and from mxcli's measurements.
 const sdk = require("mendixmodelsdk");
-const { fail, suggest, bool, validName, setIfAvailable } = require("./ops-util");
+const { fail, bool, validName, setIfAvailable } = require("./ops-util");
 
 const { jsonstructures: js, importmappings: im, exportmappings: em, mappings: mp, domainmodels: dm, datatypes, microflows: mf, xmlschemas } = sdk;
 
@@ -34,11 +34,6 @@ const MAPPING_OPS = {
         doc: "Create an export mapping (objects -> JSON) from a JSON structure; the root entity is the parameter, nested objects are retrieved over associations.",
         fields: MAP_FIELDS
     }
-};
-
-const MAPPING_ACTIONS = {
-    importWithMapping: { doc: "Import JSON text with an import mapping (microflows only).", fields: { mapping: "R Module.ImportMapping", input: "R String variable with the JSON (no $)", variable: "optional result variable: the root object (or list)", commit: "optional true | false | withoutEvents (default false)" } },
-    exportWithMapping: { doc: "Export an object (or list) to JSON text with an export mapping (microflows only).", fields: { mapping: "R Module.ExportMapping", object: "R variable to export (no $)", variable: "R new String variable for the JSON" } }
 };
 
 // ---------------------------------------------------------------- snippet -> element tree
@@ -499,47 +494,4 @@ function makeMappings(h) {
     return { impl, checks };
 }
 
-// ---------------------------------------------------------------- microflow actions (called from ops-flows)
-
-async function mappingAction(h, f, act, spec, where) {
-    if (f.nano) throw new Error(`${where}: '${spec.action}' is not available in nanoflows`);
-    const doc = await h.get(spec.mapping);
-    const noDollar = v => String(v).replace(/^\$/, "");
-    if (spec.action === "importWithMapping") {
-        if (!(doc instanceof im.ImportMapping)) throw new Error(`${where}: '${spec.mapping}' is not an import mapping`);
-        const a = mf.ImportXmlAction.createIn(act);
-        a.xmlDocumentVariableName = noDollar(spec.input);
-        a.isValidationRequired = false;
-        const rh = mf.ResultHandling.createInImportXmlActionUnderResultHandling(a);
-        const call = mf.ImportMappingCall.createIn(rh);
-        call.mapping = doc;
-        const commit = spec.commit === undefined ? "false" : String(spec.commit);
-        const commits = { true: "Yes", false: "No", withoutevents: "YesWithoutEvents" };
-        if (!commits[commit.toLowerCase()]) fail(`${where}: commit must be true | false | withoutEvents, got '${spec.commit}'`, commit, Object.keys(commits));
-        call.commit = mf.CommitEnum[commits[commit.toLowerCase()]];
-        call.contentType = mf.ContentType.Json;
-        call.forceSingleOccurrence = false;
-        call.objectHandlingBackup = mp.ObjectHandlingBackupEnum.Create;
-        mf.ConstantRange.createInImportMappingCallUnderRange(call).singleObject = false;
-        const root = doc.rootMappingElements[0];
-        rh.storeInVariable = !!spec.variable;
-        rh.outputVariableName = spec.variable ? noDollar(spec.variable) : "";
-        if (spec.variable && root && root.entity) {
-            const t = (root.maxOccurs === 1 ? datatypes.ObjectType : datatypes.ListType).create(h.model);
-            t.entity = root.entity;
-            rh.variableType = t;
-        } else rh.variableType = datatypes.VoidType.create(h.model);
-        return a;
-    }
-    if (!(doc instanceof em.ExportMapping)) throw new Error(`${where}: '${spec.mapping}' is not an export mapping`);
-    const a = mf.ExportXmlAction.createIn(act);
-    a.isValidationRequired = false;
-    const rh = mf.MappingRequestHandling.createInExportXmlActionUnderResultHandling(a);
-    rh.mapping = doc;
-    rh.mappingArgumentVariableName = noDollar(spec.object);
-    rh.contentType = mf.ContentType.Json;
-    mf.VariableExport.createIn(a).outputVariableName = noDollar(spec.variable);
-    return a;
-}
-
-module.exports = { makeMappings, MAPPING_OPS, MAPPING_ACTIONS, mappingAction, snippetTree, parseJson, userPath };
+module.exports = { makeMappings, MAPPING_OPS, snippetTree, parseJson, userPath };

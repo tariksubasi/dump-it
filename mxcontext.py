@@ -96,8 +96,9 @@ HOW TO WORK
 CHANGE_GUIDE = """
 CHANGING OR CHECKING THE MODEL
 - The user asks to change the model (modules, entities, attributes, associations, enumerations, microflows, pages
-  (grids, data views, list views, forms), menu items, home pages, roles, user roles, access, renames, deletes): read
-  guides/EDIT.txt first and follow it step by step. The user may also type /degistir.
+  (new ones with grids, data views, list views, forms; widgets on existing pages and snippets: add, change, move,
+  delete), menu items, home pages, roles, user roles, access, renames, deletes): read guides/EDIT.txt first and
+  follow it step by step. The user may also type /degistir.
 - The user changed the model in Studio Pro and asks for a check: read guides/CHECK.txt and follow it (/kontrol).
 - Short commands, run from this folder: {py} mx.py help
 - Full manual (commands, operations, outputs, errors): guides/MANUAL.md. Read it when you are unsure.
@@ -116,9 +117,10 @@ CHANGING OR CHECKING THE MODEL
 AGENT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent")
 KEEP = {".git", "edits", ".opencode", ".claude"}  # survive re-exports: history, change files, agents' own files
 # mx.py commands an agent may run without asking: lookups, dry runs and the export's own history. apply/undo always ask.
-SAFE_MX_COMMANDS = ("help", "refresh", "find", "steps", "ops", "api", "dryrun", "rerun", "gap", "check", "ok", "selftest")
+SAFE_MX_COMMANDS = ("help", "refresh", "find", "steps", "widgets", "ops", "api", "dryrun", "rerun", "gap", "check", "ok",
+                    "selftest")
 # Tools of the mxlocal MCP server (mxlocal/serve.js) that may run without asking: none of them writes the model.
-MCP_TOOLS = ("find", "steps", "ops", "api", "plan", "dryrun", "gap")
+MCP_TOOLS = ("find", "steps", "widgets", "ops", "api", "plan", "dryrun", "gap")
 # git commands that could rewrite the export history, touch the Mendix project's repo (-C) or send data out.
 GIT_DENY = ("-C", "push", "remote", "reset", "clean", "checkout", "restore", "switch", "rebase", "stash", "rm",
             "filter-branch", "update-ref", "config", "gc", "reflog", "submodule", "worktree", "commit --amend")
