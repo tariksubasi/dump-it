@@ -117,6 +117,21 @@ class Project {
             manifest.restore.push(rel);
         }
         for (const id of createdIds) manifest.remove.push(path.relative(this.dir, this.unitFile(id)));
+        // extra files (Java/JavaScript sources): unchanged since the dry run, backed up like the units
+        for (const x of enc.extra || []) {
+            const full = path.join(this.dir, x.rel);
+            if (path.relative(this.dir, full).startsWith("..")) throw new Error(`refusing to write outside the project: ${x.rel}`);
+            const now = fs.existsSync(full) ? crypto.createHash("sha256").update(fs.readFileSync(full)).digest("hex") : null;
+            if (now !== (x.before || null)) {
+                fs.rmSync(backup, { recursive: true, force: true });
+                throw new Error(`${x.rel} changed since the dry run (edited or created meanwhile). Run the dry run again`);
+            }
+            if (now) {
+                fs.mkdirSync(path.dirname(path.join(backup, x.rel)), { recursive: true });
+                fs.copyFileSync(full, path.join(backup, x.rel));
+                manifest.restore.push(x.rel);
+            } else manifest.remove.push(x.rel);
+        }
         fs.writeFileSync(path.join(backup, "manifest.json"), JSON.stringify(manifest, null, 1));
 
         try {
@@ -153,12 +168,18 @@ class Project {
                 db.close();
             }
             for (const id of enc.deleted) if (fs.existsSync(this.unitFile(id))) fs.unlinkSync(this.unitFile(id));
+            for (const x of enc.extra || []) {
+                const full = path.join(this.dir, x.rel);
+                fs.mkdirSync(path.dirname(full), { recursive: true });
+                fs.writeFileSync(full + ".tmp", x.bytes);
+                fs.renameSync(full + ".tmp", full);
+            }
         } catch (e) {
             restore(this.dir, backup);
             throw new Error(`Write failed and the project was restored from ${backup}: ${e.message}`);
         }
         prune(this.dir);
-        return { backup, written: enc.files.length, deleted: enc.deleted.length, moved: (enc.moved || []).length };
+        return { backup, written: enc.files.length, deleted: enc.deleted.length, moved: (enc.moved || []).length, files: (enc.extra || []).map(x => x.rel) };
     }
 }
 

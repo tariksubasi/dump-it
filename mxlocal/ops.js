@@ -16,6 +16,8 @@ const { makePageEdit, PAGE_EDIT_OPS, PAGE_EDIT_NAMES, FIELD_SYNONYMS } = require
 const { makeSecurity, SECURITY_OPS } = require("./ops-security");
 const { makeMappings, MAPPING_OPS } = require("./ops-mappings");
 const { makeTexts, TEXT_OPS } = require("./ops-texts");
+const { makeCode, CODE_OPS } = require("./ops-code");
+const { makeFlowEdit, FLOW_EDIT_OPS } = require("./ops-flow-edit");
 
 const OPS = {
     createEntity: {
@@ -49,7 +51,7 @@ const OPS = {
     },
     addActions: {
         doc: "Insert actions into an existing microflow or nanoflow. Default: just before the end event (needs exactly one end event).",
-        fields: { microflow: "R Module.Microflow or Module.Nanoflow", after: "optional \"start\", the variable name an existing step creates, or a step id (see: steps)", actions: "R [ actions ]" }
+        fields: { microflow: "R Module.Microflow or Module.Nanoflow", after: "optional \"start\", the variable name an existing step creates, or a step id (see: steps)", branch: "with after = a decision: which outgoing flow, e.g. \"true\" or an enumeration value", actions: "R [ actions ]" }
     },
     changeAction: {
         doc: "Change one existing step. Get its id with: steps Module.Flow. Give only the fields to change.",
@@ -58,17 +60,21 @@ const OPS = {
             xpath: "retrieve: new XPath", first: "retrieve: true/false", entity: "retrieve: Module.Entity",
             set: "create/change: { \"Attr\": \"expression\" } (adds or replaces)", unset: "create/change: [ \"Attr\" ] to remove",
             commit: "create/change: true/false; callRest/importWithMapping (import mapping): yes | no | withoutEvents", refresh: "change/commit/rollback: true/false", events: "commit: true/false",
-            args: "call/callJava/callJavaScript: { \"Param\": \"expression\" }; validationFeedback: [\"expression\"]", message: "log/validationFeedback: text", level: "log: level", text: "message: text",
+            args: "call/callJava/callJavaScript/rule decision: { \"Param\": \"expression\" }; validationFeedback: [\"expression\"]", message: "log/validationFeedback: text", level: "log: level", text: "message: text",
             type: "message: Information | Warning | Error; changeList: add | remove | replace | clear", blocking: "message: true/false",
             value: "variable/set/end/changeList: expression; listOperation find/filter: value", condition: "decision: expression", caption: "decision, ifType or action: caption",
             disabled: "action: true/false", while: "while loop: expression", over: "list loop: list variable",
             function: "aggregateList: count | sum | average | minimum | maximum | all | any", attribute: "aggregateList: attribute", expression: "aggregateList, listOperation find/filter by expression: expression",
             other: "listOperation: second list or object variable", offset: "listOperation range: expression", limit: "listOperation range: expression",
             showInBrowser: "downloadFile: true/false", url: "callRest: location text", urlArgs: "callRest: [\"expression\"]", method: "callRest: Get | Post | ...",
-            headers: "callRest: { \"Name\": \"expression\" } (replaces all)", timeout: "callRest: seconds", body: "callRest: body text", bodyArgs: "callRest: [\"expression\"]"
+            headers: "callRest: { \"Name\": \"expression\" } (replaces all)", timeout: "callRest: seconds", body: "callRest: body text", bodyArgs: "callRest: [\"expression\"]",
+            auth: "callRest: { \"user\": \"expression\", \"password\": \"expression\" } or \"none\"", proxy: "callRest: default | none | { host, port, user, password }", errorBody: "callRest: true/false",
+            initial: "aggregateList reduce: initial value expression"
         }
     },
     deleteAction: { doc: "Delete one action or loop from a flow and reconnect the line. Get its id with: steps Module.Flow.", fields: { microflow: "R Module.Microflow or Module.Nanoflow", id: "R step id from 'steps'" } },
+    ...FLOW_EDIT_OPS,
+    ...CODE_OPS,
     setGeneralization: { doc: "Make an entity inherit from another entity, or from none.", fields: { entity: "R Module.Entity", generalization: "R Module.Parent, or \"\" / \"none\" for no parent", persistable: "optional true/false when there is no parent (default true)" } },
     addValidationRule: {
         doc: "Add a validation rule to an attribute.",
@@ -403,7 +409,9 @@ function bind(model, client) {
 
     const textOps = makeTexts({ model, client, get, resetLanguage });
     const translationsOf = textOps.translationsOf;
-    const flows = makeFlows({ model, get, entity, text, dataType, attributeChain, loadParents });
+    const flows = makeFlows({ model, client, get, entity, text, dataType, attributeChain, loadParents });
+    const codeOps = makeCode({ model, client, get, exists, entity, folder, createFlow: (...a) => flows.createFlow(...a) });
+    const flowEdit = makeFlowEdit({ model, exists, createFlow: (o, nano) => flows.createFlow(o, nano, folder(o.module, o.folder)) }, flows);
     const pageOps = makePages({ model, client, get, exists, entity, text, translationsOf, folder, attributeChain, loadParents, persistable, grantAccess: o => impl.grantAccess(o) });
     const pageEdit = makePageEdit({ model, client, get, text, translationsOf, attributeChain, persistable }, pageOps.internals);
     const securityOps = makeSecurity({ model, get });
@@ -854,6 +862,8 @@ function bind(model, client) {
         },
         ...securityOps.impl,
         ...mappingOps.impl,
+        ...codeOps.impl,
+        ...flowEdit.impl,
         ...textOps.impl
     };
 
@@ -1003,6 +1013,8 @@ function bind(model, client) {
         },
         ...securityOps.checks,
         ...mappingOps.checks,
+        ...codeOps.checks,
+        ...flowEdit.checks,
         ...textOps.checks
     };
 
@@ -1040,7 +1052,7 @@ function bind(model, client) {
             const rest = plan.ops.slice(i + 1);
             const later = rest.some(x => ["rename", "delete"].includes(x.op));
             const qn = o.module && o.name ? `${o.module}.${o.name}` : null;
-            const edited = qn && rest.some(x => ["addActions", "changeAction", "deleteAction"].includes(x.op) && x.microflow === qn);
+            const edited = qn && rest.some(x => ["addActions", "changeAction", "deleteAction", "moveAction", "extractMicroflow", "addAnnotation"].includes(x.op) && x.microflow === qn);
             const opposite = { grantAccess: "revokeAccess", revokeAccess: "grantAccess" }[name];
             const undone = opposite && rest.some(x => x.op === opposite && x.document === o.document);
             // a later page edit of the same page that deletes, moves or renames one of this op's widgets (or changes it again)

@@ -22,6 +22,12 @@ function save(projectDir, enc, info) {
         fs.writeFileSync(path.join(d, "units", f.id + ".mxunit"), f.bytes);
         h.update(f.id).update(f.bytes);
     }
+    const extra = (enc.extra || []).map((x, i) => {
+        fs.mkdirSync(path.join(d, "files"), { recursive: true });
+        fs.writeFileSync(path.join(d, "files", String(i)), x.bytes);
+        h.update(x.rel).update(x.bytes).update(String(x.before));
+        return { rel: x.rel, before: x.before || null };
+    });
     h.update(JSON.stringify([enc.created, enc.deleted, enc.moved || [], info.plan || null]));
     const code = h.digest("hex").slice(0, 4).toUpperCase();
     const manifest = {
@@ -33,6 +39,7 @@ function save(projectDir, enc, info) {
         created: enc.created,
         deleted: enc.deleted,
         moved: enc.moved || [],
+        extra,
         summary: info.summary,
         plan: info.plan || null,
         content: info.content
@@ -47,6 +54,7 @@ function load(projectDir) {
     if (!fs.existsSync(file)) return null;
     const m = JSON.parse(fs.readFileSync(file, "utf8"));
     m.files = m.files.map(f => ({ ...f, bytes: fs.readFileSync(path.join(d, "units", f.id + ".mxunit")) }));
+    m.extra = (m.extra || []).map((x, i) => ({ ...x, bytes: fs.readFileSync(path.join(d, "files", String(i))) }));
     return m;
 }
 

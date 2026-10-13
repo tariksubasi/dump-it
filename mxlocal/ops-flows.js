@@ -1629,7 +1629,9 @@ function makeFlows(h) {
         } else if (a instanceof mf.ExportXmlAction) {
             const r = a.resultHandling;
             s = `EXPORT $${r ? r.mappingArgumentVariableName : "?"} WITH ${r ? r.mappingQualifiedName : "?"}${a.outputMethod && a.outputMethod.outputVariableName ? " -> $" + a.outputMethod.outputVariableName : ""}`;
-        } else s = t.replace(/Action$/, "").toUpperCase();
+        } else if (a instanceof mf.MeterAction) s = `METRIC ${t.replace(/MeterAction$/, "").replace(/([a-z])([A-Z])/g, "$1 $2").toUpperCase()} ${a.name}${a.value ? " " + a.value : ""}`;
+        else if (a instanceof mf.GenerateDocumentAction) s = `GENERATE DOCUMENT ${a.documentTemplateQualifiedName} -> $${a.fileVariableName}`;
+        else s = t.replace(/Action$/, "").toUpperCase();
         return s + off;
     }
 

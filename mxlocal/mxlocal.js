@@ -252,6 +252,7 @@ async function run(file, mpr, allowJs, ctx) {
     for (const x of s.deleted) say("  - " + x);
     for (const x of s.moved) say("  > " + x);
     for (const x of s.renames) say("  rename " + x);
+    for (const [rel, x] of client.extraFiles || []) say(`  ${x.before ? "~" : "+"} file ${rel}`);
     if (!s.created.length && !s.updated.length && !s.deleted.length && !s.moved.length) {
         pending.clear(client.project.dir);
         out("Nothing to write.");
@@ -282,13 +283,13 @@ async function apply(mpr, code) {
         pending.clear(project.dir);
         throw new Error("The model changed since the dry run (Studio Pro save, pull or other apply). Run the dry run again.");
     }
-    const r = project.writeEncoded({ files: p.files, created: p.created, deleted: p.deleted, moved: p.moved || [] });
+    const r = project.writeEncoded({ files: p.files, created: p.created, deleted: p.deleted, moved: p.moved || [], extra: p.extra || [] });
     // The change itself goes into the backup, so it can be run again after an undo even if edits/ was cleaned.
     fs.writeFileSync(path.join(r.backup, "change.txt"), `Source: ${p.source}\n${p.summary.join("\n")}\n`);
     if (p.content !== undefined) fs.writeFileSync(path.join(r.backup, "change" + path.extname(p.source || ".json")), p.content);
-    fs.writeFileSync(path.join(r.backup, "after.json"), JSON.stringify({ fingerprint: project.fingerprint(), units: unitHashes(project) }));
+    fs.writeFileSync(path.join(r.backup, "after.json"), JSON.stringify({ fingerprint: project.fingerprint(), units: unitHashes(project), files: fileHashes(project.dir, r.files) }));
     pending.clear(project.dir);
-    out(`Saved ${r.written} unit file(s), deleted ${r.deleted}${r.moved ? `, moved ${r.moved}` : ""}. Backup: ${path.relative(project.dir, r.backup)}`);
+    out(`Saved ${r.written} unit file(s), deleted ${r.deleted}${r.moved ? `, moved ${r.moved}` : ""}${r.files.length ? `, wrote ${r.files.join(", ")}` : ""}. Backup: ${path.relative(project.dir, r.backup)}`);
     if (p.plan) {
         const ctx = await loadProject(mpr);
         const client = new LocalClient(ctx);
@@ -298,6 +299,11 @@ async function apply(mpr, code) {
         else out(`Checked: all ${p.plan.ops.length} operation(s) are in the saved model.`);
         process.exitCode = failed.length ? 1 : 0;
     }
+}
+
+// rel -> sha256 of files apply wrote (Java/JavaScript sources), to notice later edits before an undo.
+function fileHashes(dir, rels) {
+    return Object.fromEntries((rels || []).map(rel => [rel, fs.existsSync(path.join(dir, rel)) ? require("crypto").createHash("sha256").update(fs.readFileSync(path.join(dir, rel))).digest("hex") : null]));
 }
 
 // UnitID -> ContentsHash of the saved model.
@@ -344,6 +350,17 @@ function restoreCmd(mpr, name, force) {
             throw new Error(`The model changed after this apply (Studio Pro save, pull or a later apply). Undo would erase that work:\n` +
                 lines.slice(0, 15).map(l => "  " + l).join("\n") + (lines.length > 15 ? `\n  ... ${lines.length - 15} more` : "") +
                 `\nUndo the later changes first (newest first), or ask the user whether to undo anyway with --force (that loses the changes above).`);
+        }
+    }
+    // source files apply wrote and the user changed since (e.g. implemented the Java action): never lost silently
+    if (fs.existsSync(afterFile)) {
+        const files = JSON.parse(fs.readFileSync(afterFile, "utf8")).files || {};
+        const edited = Object.keys(files).filter(rel => fileHashes(dir, [rel])[rel] !== files[rel]);
+        if (edited.length && force !== true) throw new Error(`These files changed after the apply; undo would replace or remove them:\n${edited.map(e => "  " + e).join("\n")}\nSave your code elsewhere, or undo anyway with --force (the edited files are kept in the backup's orphans folder).`);
+        for (const rel of edited) {
+            if (!fs.existsSync(path.join(dir, rel))) continue;
+            fs.mkdirSync(path.dirname(path.join(backup, "orphans", rel)), { recursive: true });
+            fs.copyFileSync(path.join(dir, rel), path.join(backup, "orphans", rel));
         }
     }
     const before = new Set(project.units.keys());
@@ -460,7 +477,7 @@ function report(e, file) {
     const stack = (e && e.stack ? e.stack : "").split("\n").slice(1);
     const own = file && stack.find(l => l.includes(path.resolve(file)));
     if (own) lines.push("  at " + own.trim().replace(/^at /, ""));
-    else if (!/^(No |Nothing |Code |The model|apply needs|run needs|Studio Pro|Expected|--project|Only|This project|Unknown command|Unknown tool|Op \d|ops must be|name: |widgets: )|is a script\. Scripts are off|is not a tool here/.test(msg)) lines.push(...stack.slice(0, 4).map(l => "  " + l.trim()));
+    else if (!/^(No |Nothing |Code |The model|apply needs|run needs|Studio Pro|Expected|--project|Only|This project|Unknown command|Unknown tool|Op \d|ops must be|name: |widgets: )|is a script\. Scripts are off|is not a tool here|changed since the dry run|changed after the apply/.test(msg)) lines.push(...stack.slice(0, 4).map(l => "  " + l.trim()));
     const hint = HINTS.find(([re]) => re.test(full)); // the full text: the type names may be past the cut
     if (hint) lines.push("HINT: " + (typeof hint[1] === "function" ? hint[1](full) : hint[1]));
     return lines.join("\n") + "\n";
