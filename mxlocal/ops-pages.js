@@ -219,6 +219,8 @@ const PAGE_FIELDS = {
     arrange: "optional auto | rows: rows stacks every top-level widget, also a grid and its listening data view (default auto)",
     menu: "optional \"Responsive\" (navigation profile) or { \"profile\": ..., \"caption\": ..., \"parent\": \"<menu item caption>\" }: a menu item that opens the page",
     layout: "optional Module.Layout (default: the layout most pages of this kind use)",
+    url: "optional page URL, e.g. \"orders\" or \"order/{Order/Id}\" (a parameter's attribute); unique in the app",
+    popupWidth: "optional pop-up width in pixels (0 = auto)", popupHeight: "optional pop-up height in pixels (0 = auto)", popupResizable: "optional true/false (pop-up layouts)",
     folder: "optional folder path",
     roles: "optional [ \"Module.Role\" ] that may open the page"
 };

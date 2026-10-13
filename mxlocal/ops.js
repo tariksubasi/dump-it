@@ -766,11 +766,24 @@ function bind(model, client) {
             } else fail(`'every' must be Minute | Hour | Day | Week, got '${o.every}'`, o.every, ["Minute", "Hour", "Day", "Week"]);
             return `${qn}: every ${unit === "minute" || unit === "hour" ? interval + " " : ""}${unit}${unit === "day" || unit === "week" ? " at " + String(hour).padStart(2, "0") + ":" + String(minute).padStart(2, "0") : ""} -> ${o.microflow}${ev.enabled ? "" : " (disabled)"}`;
         },
-        createPage: o => pageOps.createPage(o), // grants o.roles, adds o.menu
+        // grants o.roles, adds o.menu; URL and pop-up size as changePage does
+        async createPage(o) {
+            const text = await pageOps.createPage(o);
+            const set = Object.fromEntries(["url", "popupWidth", "popupHeight", "popupResizable"].filter(k => o[k] !== undefined).map(k => [k, o[k]]));
+            if (!Object.keys(set).length) return text;
+            try {
+                return `${text}\n      ${(await pageEdit.changePage({ page: `${o.module}.${o.name}`, ...set })).replace(/^[^:]*: /, "")}`;
+            } catch (e) {
+                const p = model.allPages().find(x => x.qualifiedName === `${o.module}.${o.name}`);
+                if (p) p.delete();
+                throw new Error(e.message.replace(/^changePage /, "createPage "));
+            }
+        },
         addWidgets: o => pageEdit.addWidgets(o),
         changeWidget: o => pageEdit.changeWidget(o),
         deleteWidget: o => pageEdit.deleteWidget(o),
         moveWidget: o => pageEdit.moveWidget(o),
+        changePage: o => pageEdit.changePage(o),
         addMenuItem: o => pageOps.addMenuItem(o),
         setHomePage: o => pageOps.setHomePage(o),
         async publishRest(o) {

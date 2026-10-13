@@ -45,6 +45,18 @@ const PAGE_EDIT_OPS = {
             onChange: "on change of an input, reference (set) selector or combo box: an action as in \"action\" (the object around it is passed)"
         }
     },
+    changePage: {
+        doc: "Change page settings: title, URL, pop-up size, and its parameters (add / remove / rename). A parameter change that would break a caller (button, menu item, microflow that opens the page) is refused with the callers listed; remove deletes callers' mappings of it, rename keeps them.",
+        fields: {
+            page: "R Module.Page",
+            title: "optional page title",
+            url: "optional page URL, e.g. \"orders\" or \"order/{Order/Id}\" (\"\" = none); unique in the app",
+            popupWidth: "optional pop-up width in pixels (0 = auto)", popupHeight: "optional pop-up height in pixels (0 = auto)", popupResizable: "optional true/false",
+            addParameter: "optional { \"name\": \"Order\", \"type\": \"Module.Entity\", \"required\": true } (refused while something opens the page, unless required false on Mendix 11.5+)",
+            removeParameter: "optional parameter name (refused while a widget of the page uses it; callers' mappings of it are removed)",
+            renameParameter: "optional { \"from\": \"Order\", \"to\": \"SalesOrder\" } (widgets and callers follow)"
+        }
+    },
     deleteWidget: {
         doc: "Delete a widget and everything inside it from a page or snippet (also a classic grid column, grid button or tab page). Refuses while a data view listens to it, and the placeholder itself.",
         fields: { page: "R Module.Page or Module.Snippet", widget: "R widget name (see: widgets Module.Page)" }
@@ -1182,7 +1194,159 @@ function makePageEdit(h, I) {
         }
     };
 
-    return { addWidgets, changeWidget, deleteWidget, moveWidget, widgets, checks, touched, open };
+    // ------------------------------------------------ page settings and parameters
+
+    // Every PageSettings (button, menu item, home page, grid button, microflow show page) that opens qn: [{ ps, where }]
+    async function callersOf(qn) {
+        const ids = new Set();
+        const hit = v => typeof v === "string" && v === qn;
+        const scan = (o, id) => {
+            if (!o || typeof o !== "object" || Buffer.isBuffer(o)) return;
+            if (Array.isArray(o)) return o.forEach(x => scan(x, id));
+            for (const [k, v] of Object.entries(o)) if (k[0] !== "$" && (hit(v) || (v && typeof v === "object" && scan(v, id) === true))) ids.add(id);
+        };
+        for (const id of client.project.units.keys()) scan(client.project.read(id), id);
+        const out = [];
+        for (const u of model.allUnits()) {
+            const isNew = !client.project.units.has(u.id);
+            if (!ids.has(u.id) && !(isNew || u.isLoaded)) continue;
+            if (!u.isLoadable) continue;
+            let doc;
+            try {
+                doc = u.isLoaded ? u : await u.load();
+            } catch (e) {
+                continue;
+            }
+            doc.traverse(el => {
+                if (el instanceof pages.PageSettings && el.pageQualifiedName === qn) out.push({ ps: el, where: doc.qualifiedName || doc.structureTypeName.split("$")[1] });
+            });
+        }
+        return out;
+    }
+
+    async function changePage(o) {
+        const where = `changePage ${o.page}`;
+        const page = await h.get(o.page);
+        if (!(page instanceof pages.Page)) throw new Error(`${where}: '${o.page}' is not a page`);
+        const out = [];
+        if (o.title !== undefined) {
+            await I.textAll(page.title, o.title, { untranslated: 0 });
+            out.push(`title "${o.title}"`);
+        }
+        if (o.url !== undefined) out.push(await pageUrl(page, o.url, where));
+        for (const [k, prop] of [["popupWidth", "popupWidth"], ["popupHeight", "popupHeight"]]) {
+            if (o[k] === undefined) continue;
+            const n = Number(o[k]);
+            if (!Number.isInteger(n) || n < 0) throw new Error(`${where}: ${k} is a whole number of pixels (0 = auto)`);
+            if (page[prop] !== n) page[prop] = n;
+            out.push(`${k} ${n || "auto"}`);
+        }
+        if (o.popupResizable !== undefined) {
+            page.popupResizable = bool(o.popupResizable, true);
+            out.push(`pop-up ${page.popupResizable ? "" : "not "}resizable`);
+        }
+        const params = ["addParameter", "removeParameter", "renameParameter"].filter(k => o[k] !== undefined);
+        const callers = params.length ? await callersOf(page.qualifiedName) : [];
+        const list = cs => [...new Set(cs.map(c => c.where))].join(", ");
+        if (o.renameParameter !== undefined) {
+            const r = o.renameParameter;
+            if (!r || typeof r !== "object" || r.from === undefined || r.to === undefined) throw new Error(`${where}: renameParameter is { "from": "Old", "to": "New" }`);
+            const p = page.parameters.find(x => x.name === String(r.from)) || fail(`${where}: no parameter '${r.from}'`, String(r.from), page.parameters.map(x => x.name));
+            validName(String(r.to), "parameter name");
+            if (page.parameters.some(x => x.name === String(r.to))) throw new Error(`${where}: a parameter '${r.to}' exists already`);
+            p.name = String(r.to);
+            if (has(page, "url") && page.url.includes(`{${r.from}/`)) page.url = page.url.split(`{${r.from}/`).join(`{${r.to}/`);
+            out.push(`parameter ${r.from} -> ${r.to}${callers.length ? ` (callers follow: ${list(callers)})` : ""}`);
+        }
+        if (o.removeParameter !== undefined) {
+            const name = String(o.removeParameter);
+            const p = page.parameters.find(x => x.name === name) || fail(`${where}: no parameter '${name}'`, name, page.parameters.map(x => x.name));
+            const users = [];
+            page.traverse(el => {
+                if (el instanceof pages.PageVariable && el.pageParameter === p) {
+                    let w = el.container;
+                    while (w && !(w instanceof pages.Widget)) w = w.container;
+                    users.push(w ? w.name : el.container.structureTypeName.split("$")[1]);
+                }
+            });
+            if (has(page, "url") && page.url.includes(`{${name}/`)) users.push(`the page URL ${page.url}`);
+            if (users.length) throw new Error(`${where}: parameter ${name} is used by ${[...new Set(users)].join(", ")} on the page; change or delete those widgets first`);
+            const mapped = [];
+            for (const c of callers) for (const m of [...c.ps.parameterMappings]) if (m.parameter === p || m.parameterQualifiedName === `${page.qualifiedName}.${name}`) {
+                m.delete();
+                mapped.push(c.where);
+            }
+            p.delete();
+            out.push(`parameter ${name} removed${mapped.length ? ` (mappings removed in ${[...new Set(mapped)].join(", ")})` : ""}`);
+        }
+        if (o.addParameter !== undefined) {
+            const a = o.addParameter;
+            if (!a || typeof a !== "object" || !a.name || !a.type) throw new Error(`${where}: addParameter is { "name": "Order", "type": "Module.Entity" }`);
+            for (const k of Object.keys(a)) if (!["name", "type", "required"].includes(k)) fail(`${where}: unknown field '${k}' in addParameter`, k, ["name", "type", "required"]);
+            validName(String(a.name), "parameter name");
+            if (page.parameters.some(x => x.name === String(a.name))) throw new Error(`${where}: a parameter '${a.name}' exists already`);
+            const required = bool(a.required, true);
+            const p = pages.PageParameter.createIn(page);
+            const canOptional = (() => {
+                try {
+                    return p.isRequired !== undefined;
+                } catch (e) {
+                    return false;
+                }
+            })();
+            if (!required && !canOptional) {
+                p.delete();
+                throw new Error(`${where}: optional page parameters need Mendix 11.5+`);
+            }
+            if (callers.length && required) {
+                p.delete();
+                throw new Error(`${where}: ${page.qualifiedName} is opened by ${list(callers)}; a new required parameter would break them${canOptional ? ` (give "required": false, or add it in Studio Pro and map it in each caller)` : " (add it in Studio Pro and map it in each caller)"}`);
+            }
+            p.name = String(a.name);
+            const ent = await I.entityOf(String(a.type), where);
+            const t = datatypes.ObjectType.create(model);
+            t.entity = ent;
+            p.parameterType = t;
+            if (canOptional) p.isRequired = required;
+            out.push(`parameter ${a.name} (${ent.qualifiedName}${required ? "" : ", optional"})`);
+        }
+        if (!out.length) throw new Error(`${where}: nothing to change (fields: ${Object.keys(PAGE_EDIT_OPS.changePage.fields).filter(k => k !== "page").join(", ")})`);
+        return `${page.qualifiedName}: ${out.join(", ")}`;
+    }
+
+    // URL of a page ("" = none): no leading slash, {Param/Attribute} parts name a parameter, unique among the pages
+    async function pageUrl(page, v, where) {
+        const url = String(v).trim().replace(/^\/+/, "");
+        if (!has(page, "url")) throw new Error(`${where}: this Mendix version has no page URL`);
+        if (url && !/^[A-Za-z0-9_\-./{}]+$/.test(url)) throw new Error(`${where}: url '${url}' may hold letters, digits, - _ . / and {Parameter/Attribute}`);
+        for (const m of url.matchAll(/\{([^}]*)\}/g)) {
+            const [pn] = m[1].split("/");
+            if (!page.parameters.some(p => p.name === pn)) fail(`${where}: url part {${m[1]}} names no parameter of the page`, pn, page.parameters.map(p => p.name));
+        }
+        if (url) for (const other of model.allPages()) {
+            if (other === page || other.id === page.id) continue;
+            const o = other.isLoaded ? other : null;
+            const raw = !o && client.project.units.has(other.id) ? client.project.read(other.id).Url : o ? o.url : null;
+            if (raw && raw.replace(/^\/+/, "").toLowerCase() === url.toLowerCase()) throw new Error(`${where}: url '${url}' is used by ${other.qualifiedName} already`);
+        }
+        if (page.url !== url) page.url = url;
+        return url ? `url ${url}` : "no url";
+    }
+
+    Object.assign(checks, {
+        async changePage(o) {
+            const page = await h.get(o.page);
+            const r = [];
+            if (o.url !== undefined && page.url !== String(o.url).trim().replace(/^\/+/, "")) r.push(`url is '${page.url}'`);
+            if (o.popupWidth !== undefined && page.popupWidth !== Number(o.popupWidth)) r.push(`popupWidth is ${page.popupWidth}`);
+            if (o.addParameter && !page.parameters.some(p => p.name === String(o.addParameter.name))) r.push(`no parameter ${o.addParameter.name}`);
+            if (o.removeParameter !== undefined && page.parameters.some(p => p.name === String(o.removeParameter))) r.push(`parameter ${o.removeParameter} still there`);
+            if (o.renameParameter && !page.parameters.some(p => p.name === String(o.renameParameter.to))) r.push(`no parameter ${o.renameParameter.to}`);
+            return r;
+        }
+    });
+
+    return { addWidgets, changeWidget, deleteWidget, moveWidget, changePage, pageUrl, widgets, checks, touched, open };
 }
 
 const PAGE_EDIT_NAMES = Object.keys(PAGE_EDIT_OPS);
