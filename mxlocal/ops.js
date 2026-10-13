@@ -17,7 +17,7 @@ const { makeSecurity, SECURITY_OPS } = require("./ops-security");
 const { makeMappings, MAPPING_OPS } = require("./ops-mappings");
 const { makeTexts, TEXT_OPS } = require("./ops-texts");
 const { makeRest, REST_OPS } = require("./ops-rest");
-const { makeWorkflows, WORKFLOW_OPS, USER_TASK_PAGE_FIELDS, SYSTEM_ENTITIES } = require("./ops-workflows");
+const { makeWorkflows, WORKFLOW_OPS, USER_TASK_PAGE_FIELDS, SYSTEM_ENTITIES, STEP_FIELDS, STEP_COMMON } = require("./ops-workflows");
 
 const OPS = {
     createEntity: {
@@ -123,6 +123,8 @@ function help(name) {
         }
         const widget = widgetFields(name);
         if (widget) return widget;
+        const step = Object.keys(STEP_FIELDS).find(k => k.toLowerCase() === String(name).toLowerCase());
+        if (step) return [`workflow step ${step} (inside createWorkflow "steps"): ${STEP_FIELDS[step].doc}`, ...Object.entries({ ...STEP_FIELDS[step].fields, ...STEP_COMMON }).map(([f, d]) => `    ${f}: ${d}`)].join("\n");
         const all = groups.flatMap(([, t]) => Object.keys(t));
         const s = suggest(name, all, 3);
         throw new Error(`No operation or action '${name}'.${s.length ? ` Did you mean: ${s.join(", ")}?` : ""} All names: ops (widget fields: ops createPage)`);

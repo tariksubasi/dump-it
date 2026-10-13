@@ -123,4 +123,90 @@ function restProblems(project, T) {
     return r;
 }
 
-module.exports = { runPhase, restPlan, restProblems, unitsNamed, walk };
+// ---------------------------------------------------------------- workflows
+
+function workflowPlan(mod, T, version, pageable, userRole) {
+    const E = `${mod}.${T}`;
+    const R = `${E}WfReq`;
+    const task = (page, outcomes, extra = {}) => (pageable ? [{ step: "userTask", page, outcomes, ...extra }] : []);
+    return { ops: [
+        { op: "createEnumeration", module: mod, name: `${T}WfLevel`, values: ["Low", "High"], folder: "ZzWf" },
+        { op: "createEntity", module: mod, name: `${T}WfReq`, attributes: [{ name: "Amount", type: "Decimal" }, { name: "Reason", type: "String(200)" }, { name: "Level", type: `Enum(${E}WfLevel)` }] },
+        { op: "createModuleRole", module: mod, name: "ZzApprover" },
+        ...(pageable ? [
+            { op: "createPage", kind: "userTaskPage", module: mod, name: `${T}_Review_Task`, folder: "ZzWf", entity: R, workflow: `${E}_Approval`, fields: ["Amount", "Reason"], outcomes: ["Approve", "Reject"] },
+            { op: "createPage", kind: "userTaskPage", module: mod, name: `${T}_Confirm_Task`, folder: "ZzWf", outcomes: ["Done"], title: "Confirm" }] : []),
+        { op: "createMicroflow", module: mod, name: `${T}_WfIsBig`, folder: "ZzWf", parameters: [{ name: "Request", type: R }], returns: "Boolean", returnValue: "$Request/Amount > 1000" },
+        { op: "createMicroflow", module: mod, name: `${T}_WfNotify`, folder: "ZzWf", parameters: [{ name: "Request", type: R }], actions: [{ action: "log", message: "notify" }] },
+        { op: "createMicroflow", module: mod, name: `${T}_WfTargets`, folder: "ZzWf", parameters: [{ name: "Request", type: R }], returns: "List(System.User)", returnValue: "empty" },
+        { op: "createWorkflow", module: mod, name: `${T}_SubWf`, folder: "ZzWf", context: R, steps: [{ step: "callMicroflow", microflow: `${E}_WfNotify` }] },
+        { op: "createWorkflow", module: mod, name: `${T}_Approval`, folder: "ZzWf", context: R, title: "Request approval", description: "Approve a request", dueDate: "addDays([%CurrentDateTime%], 7)", roles: [`${mod}.ZzApprover`],
+            steps: [
+                ...task(`${E}_Review_Task`, { Approve: [], Reject: [{ step: "callMicroflow", microflow: `${E}_WfNotify`, caption: "Tell the requester" }, { step: "end", caption: "Rejected" }] },
+                    { name: "review", caption: "Review", dueDate: "addDays([%CurrentDateTime%], 2)", ...(userRole ? { assignee: { userRoles: [userRole] } } : {}) }),
+                { step: "decision", name: "bigCheck", condition: "$WorkflowContext/Amount > 1000", outcomes: { true: task(`${E}_Confirm_Task`, ["Done"], { assignee: { microflow: `${E}_WfTargets` } }), false: [] } },
+                { step: "decision", condition: "$WorkflowContext/Level", outcomes: { [`${E}WfLevel.High`]: [{ step: "waitForTimer", delay: "addHours([%CurrentDateTime%], 1)" }], "": [] } },
+                { step: "callMicroflow", microflow: `${E}_WfIsBig`, outcomes: { true: [{ step: "jumpTo", target: "bigCheck" }], false: [] } },
+                { step: "parallelSplit", paths: [[{ step: "callMicroflow", microflow: `${E}_WfNotify` }], [{ step: "callWorkflow", workflow: `${E}_SubWf` }, { step: "waitForNotification", name: "waitDocs" }]] }] },
+        { op: "createMicroflow", module: mod, name: `${T}_WfActions`, folder: "ZzWf", parameters: [{ name: "Request", type: R }, { name: "Task", type: "System.WorkflowUserTask" }], actions: [
+            { action: "callWorkflow", workflow: `${E}_Approval`, context: "Request", variable: "Wf" },
+            { action: "retrieveWorkflowContext", workflow: "Wf", definition: `${E}_Approval`, variable: "Ctx" },
+            { action: "log", message: "amount {1}", args: ["toString($Ctx/Amount)"] },
+            { action: "notifyWorkflow", workflow: "Wf", definition: `${E}_Approval`, activity: "waitDocs", variable: "Notified" },
+            ...(cmp(version, "10.4.0") >= 0 ? [{ action: "retrieveWorkflows", context: "Request", variable: "Wfs" }, { action: "retrieveActivityRecords", workflow: "Wf", variable: "Records" }] : []),
+            { action: "generateJumpToOptions", workflow: "Wf", variable: "Options" },
+            { action: "applyJumpTo", details: "Options" },
+            { action: "changeWorkflowState", workflow: "Wf", operation: "pause" },
+            { action: "changeWorkflowState", workflow: "Wf", operation: "abort", reason: "Cancelled" },
+            { action: "lockWorkflow", workflow: `${E}_Approval`, pauseAll: true },
+            { action: "lockWorkflow", workflow: `${E}_Approval`, unlock: true },
+            { action: "retrieve", variable: "TaskWf", from: "Task", association: "System.WorkflowUserTask_Workflow" },
+            { action: "openUserTask", task: "Task" },
+            { action: "completeUserTask", task: "Task", outcome: "Approve" },
+            { action: "openWorkflow", workflow: "TaskWf" }] }
+    ] };
+}
+
+const WF_ACTIONS = ["WorkflowCallAction", "GetWorkflowDataAction", "NotifyWorkflowAction", "GenerateJumpToOptionsAction", "ApplyJumpToOptionAction", "WorkflowOperationAction",
+    "LockWorkflowAction", "UnlockWorkflowAction", "OpenUserTaskAction", "SetTaskOutcomeAction", "OpenWorkflowAction"];
+
+function workflowProblems(project, T, version, pageable) {
+    const r = [];
+    const u = unitsNamed(project, `${T}_`);
+    const w = u[`${T}_Approval`], flow = u[`${T}_WfActions`];
+    if (!w || w.$Type !== "Workflows$Workflow" || !flow) return ["workflow or its microflow missing"];
+    if (w.Parameter.Name !== "WorkflowContext" || !/WfReq$/.test(w.Parameter.Entity)) r.push(`context parameter ${w.Parameter.Name}: ${w.Parameter.Entity}`);
+    const main = w.Flow.Activities;
+    const v11 = cmp(version, "11.1.0") >= 0;
+    if (v11 && (main[0].$Type !== "Workflows$StartWorkflowActivity" || main[0].Name !== "start1")) r.push("main flow does not start with start1");
+    if (main[main.length - 1].$Type !== "Workflows$EndWorkflowActivity" || main[main.length - 1].Name !== "end1") r.push("main flow does not end with end1");
+    const names = [];
+    walk(w.Flow, o => {
+        if (/Activity$|Task$/.test(o.$Type) && o.Name !== undefined) names.push(o.Name);
+        if (o.Outcomes) for (const oc of o.Outcomes) if (!oc.Flow || !oc.PersistentId) r.push(`${o.Name}: an outcome without flow or persistent id`);
+        if (o.$Type === "Workflows$JumpToActivity" && o.TargetActivity !== "bigCheck") r.push(`jump target ${o.TargetActivity}`);
+        if (o.$Type === "Workflows$ExclusiveSplitActivity" && /Level$/.test(o.Expression) && (o.Outcomes.length !== 3 || !o.Outcomes.some(x => x.$Type === "Workflows$VoidConditionOutcome"))) r.push("enumeration decision lacks an outcome per value plus the empty one (CE6686)");
+        if (/UserTaskActivity$/.test(o.$Type)) {
+            if (!o.TaskPage || !o.TaskPage.Page) r.push(`${o.Name} has no task page (CE1834)`);
+            if (o.Outcomes.length === 1 && o.Outcomes[0].Flow.Activities.length) r.push(`${o.Name}: single outcome with steps (CE1876)`);
+        }
+    });
+    const dup = names.filter((n, i) => names.indexOf(n) !== i);
+    if (dup.length) r.push(`duplicate activity names ${dup} (CE0495)`);
+    if (pageable) {
+        for (const p of [`${T}_Review_Task`, `${T}_Confirm_Task`]) {
+            const page = u[p];
+            if (!page || !page.Parameters.some(x => x.ParameterType.Entity === "System.WorkflowUserTask")) r.push(`${p} has no WorkflowUserTask parameter (CE7412)`);
+            const buttons = [];
+            walk(page, o => o.$Type === "Forms$SetTaskOutcomeClientAction" && buttons.push(o.OutcomeValue));
+            if (!buttons.length) r.push(`${p} has no outcome buttons`);
+        }
+        if (!u[`${T}_Review_Task_Context`]) r.push("user task page data source microflow missing");
+    }
+    const seen = new Set();
+    walk(flow, o => seen.add(o.$Type.split("$")[1]));
+    for (const t of WF_ACTIONS) if (!seen.has(t)) r.push(`no ${t} stored`);
+    return r;
+}
+
+module.exports = { runPhase, restPlan, restProblems, workflowPlan, workflowProblems, unitsNamed, walk };

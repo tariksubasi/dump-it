@@ -659,6 +659,64 @@ Publish an operation with a body and a result (the mappings first, see JSON stru
     "exportMapping": "Sales.EXM_Order", "roles": ["Sales.ApiUser"], "version": "2.0.0" } ] }
 ```
 
+### Workflows
+
+| Op | Fields | Notes |
+|---|---|---|
+| `createWorkflow` | **module**, **name**, **context** (a stored `Module.Entity`), **steps**, title, description, dueDate, adminPage, roles, folder | The context is `$WorkflowContext` in every expression (`$WorkflowContext/Amount > 1000`); `$Workflow` is the `System.Workflow`. `roles` may open the task pages and the admin page (workflow security: who sees a task is the step's `assignee`). Steps run top to bottom; the end of the main flow is added (`end1`, and on Mendix 11 a `start1`). Activities get Studio Pro's names (`userTask1`, `decision1`, `parallelSplit1`, `callMicroflow1`, ...) unless the step has `name`. The fields of one step kind: `ops userTask` |
+| `createPage` with `"kind": "userTaskPage"` | **module**, **name**, **outcomes** `["Approve","Reject"]`, entity + **workflow** + fields + editable, title, folder, layout, roles | The page a user task opens: parameter `WorkflowUserTask` (`System.WorkflowUserTask`), a data view of it with one Complete-user-task button per outcome and a Close button. With `entity`: the context object read-only (`editable: true` to edit) in a data view inside it, from a new microflow `<Page>_Context` that retrieves the workflow context; `workflow` may be created later in the same plan |
+
+Steps (`{ "step": "<kind>", "name": "optional", ... }`):
+
+| Step | Fields | Notes |
+|---|---|---|
+| `userTask` | **page** (a user task page), **outcomes** `["Approve","Reject"]` or `{"Approve": [steps], "Reject": [steps]}`, assignee, caption, taskName, description, dueDate, onCreated, autoAssign | assignee: `{"userRoles": ["HRManager"]}` (user roles of the project), `{"xpath": "[...]"}` on the user entity, or `{"microflow": "Module.Flow"}` (parameters: the context or `System.Workflow`; returns a list of users). Without: every user may pick it up. One outcome: no steps of its own (the workflow continues after the task) |
+| `decision` | **condition**, **outcomes** `{"true": [...], "false": [...]}` or `{"Module.Enum.Value": [...], "": [...]}` | Boolean: both outcomes are made. Enumeration: one outcome per value and one for no value (`""`), as Studio Pro requires; leave values out to give them no steps |
+| `parallelSplit` | **paths** `[[steps], [steps]]` | Two or more paths; the workflow continues when all are done. A path cannot `end` the workflow |
+| `callMicroflow` | **microflow**, args `{"Param": "expression"}`, outcomes | The parameter of the context entity gets `$WorkflowContext` (System.Workflow: `$Workflow`). A microflow returning a Boolean or enumeration gets its outcomes (give steps in `outcomes`) |
+| `callWorkflow` | **workflow**, context (default `$WorkflowContext`), async | |
+| `jumpTo` | **target** (an activity name) | Last step of a branch. Not to an end, jump or start |
+| `waitForTimer` | **delay** (DateTime expression) | Mendix 10.6+ |
+| `waitForNotification` | | A microflow continues it with `notifyWorkflow` (give the step a `name`) |
+| `end` | | Ends the workflow; last step of a user task outcome or decision branch, not in a parallel path |
+
+Workflow actions (in microflows; System variables are written by name, e.g. a parameter of type
+`System.WorkflowUserTask` or `System.Workflow`):
+
+| Action | Fields | Notes |
+|---|---|---|
+| `callWorkflow` | **workflow**, **context** (object variable), variable | Starts the workflow; variable gets the `System.Workflow` |
+| `completeUserTask` | **task** (`System.WorkflowUserTask` variable), **outcome** | Studio Pro: Complete user task. The task must be assigned to the current user (open it with `openUserTask`, or a task page) |
+| `changeWorkflowState` | **workflow**, **operation** (`abort`/`pause`/`unpause`/`continue`/`restart`/`retry`), reason (abort) | |
+| `retrieveWorkflowContext` | **workflow** (`System.Workflow` variable), **definition** (`Module.Workflow`), **variable** | The context object |
+| `retrieveWorkflows` | **context**, **variable** | Mendix 10.4+: the workflows of an object (a list) |
+| `retrieveActivityRecords` | **workflow**, **variable** | Mendix 10.4+: list of `System.WorkflowActivityRecord` |
+| `generateJumpToOptions` | **workflow**, **variable** | A `System.WorkflowJumpToDetails` to pick the jump target in |
+| `applyJumpTo` | **details**, variable | Moves the workflow to the chosen option |
+| `lockWorkflow` | **workflow** (`Module.Workflow`), unlock, pauseAll | Lock: no new instances (pauseAll pauses running ones); unlock: true (pauseAll resumes them) |
+| `notifyWorkflow` | **workflow**, **definition**, **activity** (name of a `waitForNotification` step), variable | variable: Boolean, true when it continued |
+| `openUserTask` | **task**, assign (default true) | Opens the task page |
+| `openWorkflow` | **workflow** | Opens the workflow admin page |
+
+`retrieve` also follows System associations: `{ "action": "retrieve", "variable": "Wf", "from": "Task", "association":
+"System.WorkflowUserTask_Workflow" }`.
+
+```json
+{ "ops": [
+  { "op": "createPage", "kind": "userTaskPage", "module": "Sales", "name": "Order_Approve_Task", "entity": "Sales.Order",
+    "workflow": "Sales.WF_OrderApproval", "fields": ["Number", "Total"], "outcomes": ["Approve", "Reject"], "roles": ["Sales.Manager"] },
+  { "op": "createWorkflow", "module": "Sales", "name": "WF_OrderApproval", "context": "Sales.Order", "title": "Order approval",
+    "steps": [
+      { "step": "userTask", "caption": "Approve order", "page": "Sales.Order_Approve_Task", "assignee": { "userRoles": ["Manager"] },
+        "outcomes": { "Approve": [], "Reject": [ { "step": "callMicroflow", "microflow": "Sales.ACT_Order_Reject" }, { "step": "end" } ] } },
+      { "step": "decision", "condition": "$WorkflowContext/Total > 1000",
+        "outcomes": { "true": [ { "step": "userTask", "page": "Sales.Order_Approve_Task", "outcomes": ["Approve", "Reject"], "assignee": { "userRoles": ["Director"] } } ], "false": [] } },
+      { "step": "callMicroflow", "microflow": "Sales.ACT_Order_Confirm" } ] },
+  { "op": "createMicroflow", "module": "Sales", "name": "ACT_Order_StartApproval", "parameters": [ { "name": "Order", "type": "Sales.Order" } ],
+    "actions": [ { "action": "callWorkflow", "workflow": "Sales.WF_OrderApproval", "context": "Order" } ] }
+] }
+```
+
 ### JSON structures and mappings
 
 | Op | Fields | Notes |
