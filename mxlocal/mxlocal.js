@@ -231,6 +231,7 @@ async function run(file, mpr, allowJs, ctx) {
     ctx = ctx || (await loadProject(mpr));
     const fingerprint = ctx.project.fingerprint();
     const client = new LocalClient(ctx);
+    client.changeFile = path.resolve(file); // files an op names (packages) are looked up next to it
     const model = await client.open();
     const ops = require("./ops").bind(model, client);
     const lines = [];

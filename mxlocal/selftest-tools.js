@@ -288,9 +288,97 @@ async function themePhase(ctx) {
     check(`theme files: addCssClass, editThemeFile (find/replace${dp && dpJson ? ", design-properties.json" : ""}, append${before[main] ? "" : ", new main.scss"}) through dry run with diff, apply with backup and check, restore byte for byte; refused outside theme/ themesource/, missing find, broken JSON or braces, duplicate class`, !problems.length, problems.slice(0, 6).join("; "));
 }
 
+// H1: widget packages (a new one, the same one again, a replacement) and a module package exported from this app
+// (with a Java source and a theme file): imported with the same unit ids and bytes, refused on a name clash or a
+// newer Mendix version, and undone byte for byte.
+async function packagePhase(ctx) {
+    const { copy, check, results, reopen } = ctx;
+    const dir = path.dirname(copy);
+    const market = require("./marketplace");
+    const { Project } = require("./mpr");
+    const dl = path.join(dir, "edits", "dl");
+    fs.mkdirSync(dl, { recursive: true });
+    const problems = [];
+    // a widget package of a new widget
+    const wid = "com.example.zz.ZzBadge";
+    const widgetXml = `<?xml version="1.0" encoding="utf-8"?>\n<widget id="${wid}" pluginWidget="true" offlineCapable="true" xmlns="http://www.mendix.com/widget/1.0/">\n    <name>Zz Badge</name>\n    <description/>\n    <properties><propertyGroup caption="General"><property key="value" type="string" required="false"><caption>Value</caption><description/></property></propertyGroup></properties>\n</widget>\n`;
+    const pkgXml = v => `<?xml version="1.0" encoding="utf-8" ?>\n<package xmlns="http://www.mendix.com/package/1.0/">\n    <clientModule name="ZzBadge" version="${v}" xmlns="http://www.mendix.com/clientModule/1.0/">\n        <widgetFiles><widgetFile path="ZzBadge.xml" /></widgetFiles>\n        <files><file path="com/example/zz/" /></files>\n    </clientModule>\n</package>\n`;
+    const widget = v => market.zip([{ name: "package.xml", data: pkgXml(v) }, { name: "ZzBadge.xml", data: widgetXml }, { name: "com/example/zz/ZzBadge.js", data: `export function ZzBadge() { return null; } // ${v}` }]);
+    fs.writeFileSync(path.join(dl, "ZzBadge.mpk"), widget("1.0.0"));
+    fs.writeFileSync(path.join(dl, "ZzBadge-2.mpk"), widget("2.0.0"));
+    const w1 = await cliRun(ctx, { ops: [{ op: "importWidget", file: "dl/ZzBadge.mpk" }] }, "zz-widget");
+    if (!w1.lines.some(l => l.includes(`${wid} "Zz Badge" (pluggable widget, Web, offline capable)`))) problems.push("importWidget does not report the widget type: " + w1.lines.slice(0, 2).join(" | "));
+    const a1 = w1.code ? await cliDo(ctx, cli => cli.apply(copy, w1.code)) : ["no code"];
+    if (!a1.some(l => /^Checked: all/.test(l))) problems.push("widget apply: " + a1.join(" | ").slice(0, 160));
+    if (!fs.existsSync(path.join(dir, "widgets", "ZzBadge.mpk"))) problems.push("widgets/ZzBadge.mpk not installed");
+    for (const [plan, re] of [
+        [{ ops: [{ op: "importWidget", file: "dl/ZzBadge.mpk" }] }, /already installed/],
+        [{ ops: [{ op: "importWidget", file: "dl/ZzBadge-2.mpk" }] }, /already installed .*replace/],
+        [{ ops: [{ op: "importWidget", file: "../../zz-elsewhere.mpk" }] }, /no file|outside/]
+    ]) {
+        const r = await refused(ctx, plan, re);
+        if (r) problems.push(r);
+    }
+    const w2 = await cliRun(ctx, { ops: [{ op: "importWidget", file: "dl/ZzBadge-2.mpk", replace: true }] }, "zz-widget2");
+    const a2 = w2.code ? await cliDo(ctx, cli => cli.apply(copy, w2.code)) : ["no code"];
+    if (!a2.some(l => /^Checked: all/.test(l)) || fs.existsSync(path.join(dir, "widgets", "ZzBadge.mpk")) || !fs.existsSync(path.join(dir, "widgets", "ZzBadge-2.mpk"))) problems.push("replace: " + a2.join(" | ").slice(0, 160));
+    for (let i = 0; i < 2; i++) await cliDo(ctx, cli => cli.restoreCmd(copy));
+    if (fs.existsSync(path.join(dir, "widgets", "ZzBadge.mpk")) || fs.existsSync(path.join(dir, "widgets", "ZzBadge-2.mpk"))) problems.push("widget packages not undone");
+    check("importWidget: new widget package installed with its type reported, same one refused, replace with another version, undone; refused outside the export folder", !problems.length, problems.slice(0, 5).join("; "));
+
+    // a module package: create a module, export it, undo, import it back
+    const P = "ZzPkg";
+    const mk = await cliRun(ctx, { ops: [{ op: "createModule", name: P, roles: ["User"] },
+        { op: "createEntity", module: P, name: "Item", attributes: [{ name: "Title", type: "String(200)" }] },
+        { op: "createConstant", module: P, name: "Endpoint", type: "String", default: "https://example.com", folder: "Config" },
+        { op: "createMicroflow", module: P, name: "ACT_Hello", actions: [{ action: "log", message: "'hello'" }] }] }, "zz-pkg-module");
+    const am = mk.code ? await cliDo(ctx, cli => cli.apply(copy, mk.code)) : ["no code: " + mk.lines.join(" | ")];
+    const pm = [];
+    if (!am.some(l => /^Checked: all/.test(l))) pm.push("create module: " + am.join(" | ").slice(0, 200));
+    const proj = new Project(copy);
+    const extra = { [`javasource/${P.toLowerCase()}/actions/ZzHello.java`]: "package zzpkg.actions;\npublic class ZzHello {}\n", [`themesource/${P.toLowerCase()}/web/main.scss`]: ".zz-pkg { color: red; }\n" };
+    fs.writeFileSync(path.join(dl, "ZzPkg.mpk"), market.exportModule(proj, P, extra));
+    const v = proj.meta._ProductVersion.split(".").map(Number);
+    fs.writeFileSync(path.join(dl, "ZzPkg-newer.mpk"), market.exportModule(proj, P, extra, `${v[0]}.${v[1] + 1}.0`));
+    const mod = [...proj.units.values()].find(u => u.containmentName === "Modules" && proj.read(u.id).Name === P);
+    const sub = [mod];
+    for (let i = 0; i < sub.length; i++) sub.push(...[...proj.units.values()].filter(u => u.containerId === sub[i].id));
+    const orig = new Map(sub.map(u => [u.id, { bytes: proj.readBytes(u.id), containerId: u.containerId, containmentName: u.containmentName, hash: u.hash }]));
+    const undo = await cliDo(ctx, cli => cli.restoreCmd(copy));
+    if (!undo.some(l => /^Restored/.test(l))) pm.push("undo module: " + undo.join(" | "));
+    const fpBefore = new Project(copy).fingerprint();
+    const r1 = await refused(ctx, { ops: [{ op: "importModulePackage", file: "dl/ZzPkg-newer.mpk" }] }, /newer than this app/);
+    if (r1) pm.push(r1);
+    const im = await cliRun(ctx, { ops: [{ op: "importModulePackage", file: "dl/ZzPkg.mpk" }] }, "zz-pkg-import");
+    if (!im.lines.some(l => new RegExp(`module ${P} .*${sub.length} unit\\(s\\); 2 file\\(s\\)`).test(l))) pm.push("dry run: " + im.lines.slice(0, 2).join(" | "));
+    const ai = im.code ? await cliDo(ctx, cli => cli.apply(copy, im.code)) : ["no code"];
+    if (!ai.some(l => /^Checked: all/.test(l))) pm.push("import apply: " + ai.join(" | ").slice(0, 200));
+    const after = new Project(copy);
+    for (const [id, o] of orig) {
+        const u = after.units.get(id);
+        if (!u) pm.push(`unit ${id} missing`);
+        else if (!after.readBytes(id).equals(o.bytes) || u.hash !== o.hash || u.containerId !== o.containerId || u.containmentName !== o.containmentName) pm.push(`unit ${id} (${after.read(id).$Type}) differs from the exported one`);
+    }
+    if (after.fingerprint() === fpBefore) pm.push("model unchanged after import");
+    for (const [rel, body] of Object.entries(extra)) if (!fs.existsSync(path.join(dir, rel)) || fs.readFileSync(path.join(dir, rel), "utf8") !== body) pm.push(`${rel} not copied`);
+    const s = await reopen(copy);
+    const errs = await loadErrors(s);
+    if (!s.model.allModules().some(m => m.name === P)) pm.push(`module ${P} not in the model`);
+    pm.push(...errs);
+    const r2 = await refused(ctx, { ops: [{ op: "importModulePackage", file: "dl/ZzPkg.mpk" }] }, /already has a module/);
+    if (r2) pm.push(r2);
+    const r3 = await refused(ctx, { ops: [{ op: "importModulePackage", file: "dl/ZzBadge.mpk" }] }, /widget package/);
+    if (r3) pm.push(r3);
+    const back = await cliDo(ctx, cli => cli.restoreCmd(copy));
+    if (!back.some(l => /^Restored/.test(l)) || new Project(copy).fingerprint() !== fpBefore || Object.keys(extra).some(rel => fs.existsSync(path.join(dir, rel)))) pm.push("import not undone: " + back.join(" | ").slice(0, 120));
+    check(`importModulePackage: module exported from this app (${sub.length} units, a Java source, a theme file) imported with the same unit ids, bytes, containers and hashes; files copied; reopen 0 errors; refused when the module exists, for a newer Mendix version and for a widget package; undone`, !pm.length, pm.slice(0, 6).join("; "));
+    if (!results) return;
+}
+
 async function phase(ctx) {
     await navPhase(ctx);
     await themePhase(ctx);
+    await packagePhase(ctx);
 }
 
 module.exports = { phase, navTargets };

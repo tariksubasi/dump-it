@@ -84,7 +84,8 @@ class Project {
         const files = [];
         for (const id of new Set([...changes.updated, ...changes.created.keys()])) {
             if (changes.deleted.has(id)) continue;
-            const bytes = bson.encode(fromPlain(this.read(id), hint));
+            // units added as they are (an imported module package): their stored bytes
+            const bytes = this.raw && this.raw.has(id) ? this.raw.get(id) : bson.encode(fromPlain(this.read(id), hint));
             files.push({ id, bytes, hash: crypto.createHash("sha256").update(bytes).digest("base64") });
         }
         const created = [...changes.created].filter(([id]) => !changes.deleted.has(id))

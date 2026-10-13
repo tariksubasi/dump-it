@@ -94,15 +94,22 @@ function diff(a, b, max = 60) {
 }
 
 // Dry-run lines for the staged files.
-function describe(client, files) {
+function describe(client, files, max = 15) {
     const out = [];
-    for (const f of files) {
+    for (const f of files.slice(0, max)) {
         const e = client.fileChanges.get(f.rel);
         const what = e.before === null ? "new file" : e.after === null ? "deleted" : "changed";
         out.push(`  ${what === "new file" ? "+" : what === "deleted" ? "-" : "~"} file ${f.rel} (${what}${e.after ? `, ${e.after.length} bytes` : ""})`);
-        if (e.after && isText(e.after) && (e.before === null || isText(e.before)) && (e.before !== null || e.after.length < 4000)) {
+        // a diff for edited text files (theme SCSS, JSON); new files of a package are only listed
+        const edited = e.before !== null || /^theme(source)?\//.test(f.rel);
+        if (edited && e.after && isText(e.after) && (e.before === null || isText(e.before)) && (e.before !== null || e.after.length < 4000)) {
             out.push(...diff(e.before ? e.before.toString("utf8") : "", e.after.toString("utf8")).map(l => "      " + l));
         }
+    }
+    if (files.length > max) {
+        const by = {};
+        for (const f of files.slice(max)) by[f.rel.split("/")[0]] = (by[f.rel.split("/")[0]] || 0) + 1;
+        out.push(`  ... ${files.length - max} more file(s): ${Object.entries(by).map(([k, n]) => `${k}/ ${n}`).join(", ")}`);
     }
     return out;
 }

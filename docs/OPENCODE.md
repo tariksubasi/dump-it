@@ -650,6 +650,13 @@ The export shows a structure as `json/path: Name type` lines and a mapping as `j
 | `editThemeFile` | **path** (under `theme/` or `themesource/`; `.scss`, `.css`, `.json`), content, edits (`[{"find", "replace", "all"}]`), append | Plain files, not model documents, but the same dry run (it shows a diff), approval code, backup and undo. `find` must match exactly once (or `"all": true`). `content` replaces the whole file or creates it. Refused: paths outside those two folders, a JSON file that would not parse, SCSS whose braces would not balance. Studio Pro compiles `main.scss` of each folder: `@import` a new file there |
 | `addCssClass` | **name** (without the dot), **css** (`"color: #fff; padding: 8px"` or an object), file (default `theme/web/main.scss`) | Appends `.name { ... }`. Refused when the file already has a rule for that class. Use the class with `"class": "name"` on a widget |
 
+### Marketplace packages (.mpk)
+
+| Op | Fields | Notes |
+|---|---|---|
+| `importWidget` | **file** (a `.mpk` inside the export folder, e.g. `downloads/Badge.mpk`), replace | Copies a widget package into `widgets/` and reports its widget id, name and type (pluggable or classic, web or native). Refused when that widget is installed already; `"replace": true` swaps the installed package (another version). Studio Pro loads it when the app opens (or F4) |
+| `importModulePackage` | **file** (a module `.mpk` inside the export folder) | Adds the module's documents with their own ids (as Studio Pro's *Import module package*) and copies its `javasource/`, `userlib/`, `vendorlib/`, `themesource/` and `widgets/` files. Refused: a module of that name exists (updating a module: Studio Pro), the package is for a newer Mendix version, an older package whose documents this Mendix version stores differently (Studio Pro converts those), files that exist with other contents. Widgets the app has already stay as they are. Put it alone in a change; later changes can use the module |
+
 ### Documents, rename and delete
 
 | Op | Fields | Notes |
@@ -815,6 +822,16 @@ Theme: a CSS class for widgets and a new brand color:
 ] }
 ```
 
+Marketplace: a module the user downloaded into the export folder, then a widget:
+
+```json
+{ "ops": [ { "op": "importModulePackage", "file": "downloads/ExternalDatabaseConnector-v6.3.0.mpk" } ] }
+```
+
+```json
+{ "ops": [ { "op": "importWidget", "file": "downloads/com.mendix.widget.web.Badge.mpk" } ] }
+```
+
 ---
 
 ## 8. When no operation fits: gap, Studio Pro steps, or (if allowed) SDK scripts
@@ -832,6 +849,12 @@ JSON structures, consumed REST services, workflows, REST operations with object 
 splits, and setting attributes inherited from System entities (for example `System.User.Name`). For these, write
 `edits/<name>.js` with the Mendix Model SDK, or give the user Studio Pro steps. Prefer Studio Pro steps when the
 change is large or risky.
+
+Navigation, theme and packages: native mobile navigation profiles, menu items of native profiles, layouts and
+design property values on widgets are Studio Pro work. A module package that `importModulePackage` refuses (an older
+Mendix version stored differently, an update of an installed module, a whole-app package) is imported in Studio Pro:
+App Explorer > right-click the app > *Import module package*. Theme files other than `.scss`, `.css` and `.json`
+under `theme/` and `themesource/` (images, fonts, `login.html`) are copied by the user.
 
 ```js
 module.exports = async ({ model, sdk, ops, log }) => {

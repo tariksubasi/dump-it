@@ -18,6 +18,7 @@ const { makeMappings, MAPPING_OPS } = require("./ops-mappings");
 const { makeTexts, TEXT_OPS } = require("./ops-texts");
 const { makeNav, NAV_OPS, MENU_EXTRA, extendedMenuItem } = require("./ops-nav");
 const { makeTheme, THEME_OPS } = require("./theme");
+const { makeMarket, MARKET_OPS } = require("./marketplace");
 
 const OPS = {
     createEntity: {
@@ -92,6 +93,7 @@ const OPS = {
     setHomePage: { doc: "Set the home page (or home microflow) of a navigation profile, for everyone or for some user roles.", fields: HOME_FIELDS },
     ...NAV_OPS,
     ...THEME_OPS,
+    ...MARKET_OPS,
     ...MAPPING_OPS,
     publishRest: {
         doc: "Publish a microflow as a REST operation (creates the service and resource when missing). Microflow parameters become path parameters when the path has {Name}, otherwise query parameters. Object parameters/results need mappings: do those in Studio Pro.",
@@ -412,6 +414,7 @@ function bind(model, client) {
     const pageEdit = makePageEdit({ model, client, get, text, translationsOf, attributeChain, persistable }, pageOps.internals);
     const securityOps = makeSecurity({ model, get });
     const themeOps = makeTheme({ client });
+    const marketOps = makeMarket({ client, model });
     const navOps = makeNav({ model, client, get, exists, text, translationsOf, folder, grantAccess: o => impl.grantAccess(o) }, pageOps.internals);
     const mappingOps = makeMappings({ model, get, exists, entity, folder, attributeChain, loadParents, impl: () => impl });
 
@@ -781,6 +784,7 @@ function bind(model, client) {
         setHomePage: o => pageOps.setHomePage(o),
         ...navOps.impl,
         ...themeOps.impl,
+        ...marketOps.impl,
         async publishRest(o) {
             const mfl = await get(o.microflow);
             if (!(mfl instanceof mf.Microflow)) throw new Error(`'${o.microflow}' is not a microflow`);
@@ -987,6 +991,7 @@ function bind(model, client) {
         setHomePage: o => pageOps.checks.setHomePage(o),
         ...navOps.checks,
         ...themeOps.checks,
+        ...marketOps.checks,
         async publishRest(o) {
             const svc = await get(`${o.module}.${o.service}`);
             const res = svc.resources.find(x => x.name === o.resource);
