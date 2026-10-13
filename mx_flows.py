@@ -499,8 +499,19 @@ class FlowRenderer:
         method = (http.get("HttpMethod") or "").upper()
         self.index.effect("REST CALLS (Call REST service action)", "%s -> %s %s" % (self.qn, method, url))
         sub = ["header %s: %s" % (h.get("Key"), clean(h.get("Value"))) for h in http.get("HttpHeaderEntries") or []]
+        if http.get("UseHttpAuthentication"):
+            sub.append("basic authentication: user %s, password %s" % (clean(http.get("HttpAuthenticationUserName")), clean(http.get("HttpAuthenticationPassword"))))
+        if a.get("RequestProxyType") == "NoProxy":
+            sub.append("proxy: none")
+        elif a.get("RequestProxyType") == "Override":
+            px = a.get("ProxyConfiguration") or {}
+            sub.append("proxy: %s:%s" % (clean(px.get("HostExpression")), clean(px.get("PortExpression"))))
         req = a.get("RequestHandling") or {}
-        if req.get("MappingId"):
+        if req.get("$Type") == "Microflows$FormDataRequestHandling":
+            sub.append("body: form data " + ", ".join("%s=%s" % (p.get("Key"), clean(p.get("Value"))) for p in req.get("Parts") or []))
+        elif req.get("$Type") == "Microflows$BinaryRequestHandling":
+            sub.append("body: file " + clean(req.get("Expression")))
+        elif req.get("MappingId"):
             sub.append("body: export mapping %s of $%s" % (req["MappingId"], req.get("MappingVariableName")))
         elif req:
             body = template(req.get("Template") or req.get("CustomBody") or {}) or compact(req, 200)
@@ -513,6 +524,8 @@ class FlowRenderer:
         line = "%sREST %s %s" % (self._result(var, entity) if var else "", method, url)
         if imp.get("ReturnValueMapping"):
             line += " -> import mapping %s" % imp["ReturnValueMapping"]
+        elif a.get("ResultHandlingType") == "FileDocument":
+            line += " -> file document"
         if a.get("TimeOutExpression") and a.get("UseRequestTimeOut", True):
             line += " (timeout %ss)" % clean(a["TimeOutExpression"])
         return line, sub

@@ -110,6 +110,18 @@ Lists, a REST call, a Java action and an object type decision (fields of one act
   More actions: createList, changeList, validationFeedback, rollback, downloadFile, showHomePage, callJavaScript
   (nanoflows only). Write variable names without $ in variable/list/other/source.
 
+Enumeration switch, a Boolean rule, reduce and a note (a rule: op createRule, returns Boolean or Enum(...)):
+{ "ops": [ { "op": "createMicroflow", "module": "Sales", "name": "ACT_Order_Route", "parameters": [ { "name": "Order", "type": "Sales.Order" } ],
+  "actions": [
+    { "action": "if", "rule": "Sales.RUL_Order_IsLarge", "args": { "Order": "$Order" }, "then": [ { "action": "log", "message": "large" } ] },
+    { "action": "switch", "value": "$Order/Status", "cases": { "Open": [ { "action": "log", "message": "open", "note": "still to pay" } ], "Paid, Cancelled": [] },
+      "empty": [ { "action": "log", "message": "no status" } ] },
+    { "action": "retrieve", "variable": "Lines", "entity": "Sales.OrderLine", "xpath": "[Sales.OrderLine_Order = $Order]" },
+    { "action": "aggregateList", "variable": "Qty", "list": "Lines", "function": "reduce", "initial": "0", "expression": "$currentResult + $currentObject/Quantity" } ] } ] }
+  Java/JavaScript actions: op createJavaAction / createJavaScriptAction (the .java/.js file is written too; code goes
+  between BEGIN USER CODE and END USER CODE). REST options: auth, proxy, formData, binaryBody, response "file".
+  Restructure: moveAction (id, after, branch), extractMicroflow (from, to, name), addAnnotation.
+
 Change and delete existing steps (ids from: @PY@ mx.py steps Sales.ACT_Orders_Process):
 { "ops": [
   { "op": "changeAction", "microflow": "Sales.ACT_Orders_Process", "id": "3f2a9c1b", "xpath": "[Paid = false() and Total > 0]" },

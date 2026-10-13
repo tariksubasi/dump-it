@@ -362,6 +362,46 @@
           "Customer_Summary\\.txt$": "(?s)^(?=.*data: microflow MyFirstModule\\.DS_Customer_LastOrder)(?=.*attr Total)"
         }
       }
+    },
+    {
+      "id": "enumswitch",
+      "setup": [
+        {
+          "op": "createEnumeration",
+          "module": "MyFirstModule",
+          "name": "OrderStatus",
+          "values": [
+            "Open",
+            "Paid",
+            "Cancelled"
+          ]
+        },
+        {
+          "op": "addAttribute",
+          "entity": "MyFirstModule.Order",
+          "name": "Status",
+          "type": "Enum(MyFirstModule.OrderStatus)"
+        }
+      ],
+      "text": "Siparişin Total değeri 1000'den büyük mü diye bakan RUL_Order_IsLarge rule'unu yaz. Sonra ACT_Order_Route microflow'unu yaz: Order parametresi alsın; önce bu rule ile karar versin, büyükse 'büyük sipariş' log'lasın. Sonra Order'ın Status değerine göre: Open ise 'açık', Paid ya da Cancelled ise 'kapalı', Status boşsa 'durum yok' log'lasın.",
+      "checks": {
+        "find": [
+          "MyFirstModule.ACT_Order_Route",
+          "MyFirstModule.RUL_Order_IsLarge"
+        ],
+        "files": {
+          "ACT_Order_Route\\.txt$": "(?s)^(?=.*RUL_Order_IsLarge)(?=.*açık)(?=.*kapalı)(?=.*durum yok)"
+        }
+      }
+    },
+    {
+      "id": "javaaction",
+      "text": "MyFirstModule'e JA_Order_Hash adında bir Java action ekle: Order (Order entity'si) ve Salt (metin) parametreleri alsın, metin döndürsün ve toolbox'ta Orders kategorisinde 'Hash order' adıyla görünsün.",
+      "checks": {
+        "find": [
+          "MyFirstModule.JA_Order_Hash"
+        ]
+      }
     }
   ]
 }

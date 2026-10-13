@@ -1081,6 +1081,12 @@ async function selftest(mpr, keep, { out, relevant }) {
         check("JSON structure, import + export mapping and import/export steps stored like Studio Pro", !mapp.length, mapp.slice(0, 6).join("; "));
         const actp = actionProblems(s2.ctx.project, T, plannedActions);
         check(`newer actions stored with Mendix's keys (${plannedActions.length} kinds: lists, aggregates, object type decision + cast, feedback, rollback, REST${targets.java ? ", Java" : ""}${targets.js ? ", JavaScript" : ""}${targets.importMapping ? ", import mapping" : ""}${targets.file ? ", download" : ""})`, !actp.length, actp.slice(0, 6).join("; "));
+        // phase F: Java/JavaScript actions + files, rules, switch, reduce, metrics, REST options, notes, move, extract
+        {
+            const fp = await require("./selftest-flows").flowsPhase({ copy, mod, T, reopen, layout, layoutProblems, file: targets.file });
+            check(`Java/JavaScript actions with Studio Pro's source files (existing user code kept, restore removes them), rules + rule decisions, enumeration switch, reduce, metrics, REST auth/proxy/form data/file response${targets.file ? "/binary body" : ""}, notes, moveAction, extractMicroflow (${fp.ops} ops): stored like Studio Pro, reopen 0 errors`, !fp.problems.length, fp.problems.slice(0, 6).join("; "));
+            s2 = await reopen(copy);
+        }
         if (pageable) {
             const dash = dashboardProblems(s2.ctx.project, mod, T, web ? userRole : null);
             check("dashboard stored like Studio Pro (listen target, inputs, menu, home pages)", !dash.length, dash.join("; "));

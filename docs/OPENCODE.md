@@ -268,13 +268,13 @@ Actions (inside `"actions": [ { "action": "<name>", ... } ]`). Every action also
 | `showHomePage` | | Microflows only |
 | `createList` | **variable**, **entity** | An empty list |
 | `changeList` | **list**, type (`add`/`remove`/`replace`/`clear`), value (object or list expression; not for clear) | type = add |
-| `aggregateList` | **variable**, **list**, **function** (`count`/`sum`/`average`/`minimum`/`maximum`/`all`/`any`), attribute or expression | count takes neither; the others one of them. sum/average need a number attribute, minimum/maximum a number or date, all/any a Boolean. expression uses `$currentObject`, e.g. `$currentObject/Price * $currentObject/Quantity`. `reduce` is refused |
+| `aggregateList` | **variable**, **list**, **function** (`count`/`sum`/`average`/`minimum`/`maximum`/`all`/`any`), attribute or expression | count takes neither; the others one of them. sum/average need a number attribute, minimum/maximum a number or date, all/any a Boolean. expression uses `$currentObject`, e.g. `$currentObject/Price * $currentObject/Quantity`. `reduce`: initial + expression on `$currentResult` and `$currentObject` (e.g. `$currentResult + $currentObject/Amount`); result type from initial (`0` Integer, `0.0` Decimal, `''` String, `true`, a date, `Module.Enum.Value`, a variable) or `type` |
 | `listOperation` | **variable**, **operation**, **list**, other, attribute + value, expression, sort, offset, limit | `union`/`intersect`/`subtract`/`equals` (Boolean): other = second list; `contains` (Boolean): other = object; `head`/`tail`; `find` (one object)/`filter` (a list): attribute (or `Module.Assoc`) + value, or expression on `$currentObject`; `sort`: `["Attr", {"attribute":"B","descending":true}]`; `range`: limit, offset (default 0) |
 | `validationFeedback` | **variable** (object), **member** (attribute or `Module.Assoc`), **message** (`{1}` = args), args | Text in the default language |
 | `rollback` | **variable** (object or list), refresh | refresh = false |
 | `callJava` | **javaAction** (`Module.JavaAction`), args `{"Param":"expr"}`, variable | Microflows only. Every required parameter needs an arg (`"empty"` for none); an entity type parameter takes `"Module.Entity"`. variable only when the action returns something. Parameters that take a microflow, mapping or file are refused |
 | `callJavaScript` | **jsAction** (`Module.JSAction`), args, variable | Nanoflows only; same rules as `callJava` |
-| `callRest` | **url** (`{1}` = urlArgs), urlArgs, method (default `Get`), headers `{"Name":"expr"}`, timeout (s, default 300), body (`{1}` = bodyArgs) or exportMapping + exportObject, response (`none`/`string`/`Module.ImportMapping`), variable, commit | Microflows only. Write the body as plain text, e.g. `{"name": "{1}"}`: braces are escaped for Mendix. response defaults to `string` with variable, else `none`. An import mapping response gets an object or list of the mapping's root entity; commit `yes`/`no`/`withoutEvents` (default). Authentication, proxy, form data and binary bodies: Studio Pro |
+| `callRest` | **url** (`{1}` = urlArgs), urlArgs, method (default `Get`), headers `{"Name":"expr"}`, timeout (s, default 300), body (`{1}` = bodyArgs) or exportMapping + exportObject, response (`none`/`string`/`Module.ImportMapping`), variable, commit | Microflows only. Write the body as plain text, e.g. `{"name": "{1}"}`: braces are escaped for Mendix. response defaults to `string` with variable, else `none`. An import mapping response gets an object or list of the mapping's root entity; commit `yes`/`no`/`withoutEvents` (default). auth `{"user": "@Module.User", "password": "@Module.Password"}` (expressions, basic authentication); proxy `default`/`none`/`{host, port, user, password}`; formData `{"key": "expr"}` or binaryBody `"$File"` instead of body; response `file` + variable (+ fileEntity, default `System.FileDocument`); errorBody false = do not keep the error response in `$latestHttpResponse` |
 | `importWithMapping` | **mapping** (`Module.ImportMapping`), **source** (String variable with JSON/XML), variable, commit | Microflows only. Mappings that take a parameter are refused |
 | `exportWithMapping` | **mapping** (`Module.ExportMapping`), **object** (variable to export), **variable** (new String) | Microflows only. The object must be the mapping's root entity |
 | `downloadFile` | **variable** (object of a `System.FileDocument` specialization), showInBrowser | Microflows only. showInBrowser = false |
@@ -286,13 +286,16 @@ Flow control (also inside `"actions"`):
 
 | Action | Fields | Notes |
 |---|---|---|
-| `if` | **condition**, then `[...]`, else `[...]`, caption | A branch may end with `end`, `break` or `continue`; open branches join again after the decision |
+| `if` | **condition** (or rule + args), then `[...]`, else `[...]`, caption | A branch may end with `end`, `break` or `continue`; open branches join again after the decision. `"rule": "Module.Rule", "args": {"Param": "expr"}` decides with a Boolean rule |
 | `switch` | **cases** `{"Value": [...], "A, B": [...]}`, value (enumeration expression) or rule + args, enumeration, other `[...]`, empty `[...]`, caption | Enumeration decision: one path per case, `other` for the values not listed, `empty` for no value. Open paths join again |
 | `ifType` | **variable** (object), **cases** `{"Module.Specialization": [...]}`, other `[...]`, empty `[...]`, caption | Object type decision. One path per specialization in cases, `other` for any other type (the variable's own entity), `empty` when there is no object. Start a case with `cast` to use the object as that entity. `currentUser` works as variable (`System.User`) |
 | `loop` | **actions** + either over (list variable), item (default `<List>Item`) or while (expression) | |
 | `end` | value | Required `value` when the flow returns something. Not inside loops |
 | `break` / `continue` | | Only inside a loop |
 | `error` | | Only inside an `onError` handler: ends with the error again |
+
+`"note": "text"` on any action attaches an annotation to it (see also the op `addAnnotation`). `while` loops:
+`{ "action": "loop", "while": "$N < 10", "actions": [...] }` (Mendix 10+; every supported version).
 
 `onError` on an action: `"continue"`, or `{ "rollback": true/false, "actions": [...], "returnValue": "..." }`. A
 handler path that does not end gets an end event automatically (`returnValue` when the flow returns something).
@@ -314,12 +317,12 @@ Inside a loop a handler must end with `break`, `continue` or `error`.
 | validationFeedback | message, args |
 | rollback | refresh |
 | changeList | type, value |
-| aggregateList | function, attribute, expression |
+| aggregateList | function, attribute, expression, initial (reduce; to or from reduce: delete and add again) |
 | listOperation | value (find/filter on an attribute), expression (find/filter by expression), other, offset, limit |
-| callRest | url, urlArgs, method, headers (replaces all), timeout, body, bodyArgs, commit |
+| callRest | url, urlArgs, method, headers (replaces all), timeout, body, bodyArgs, commit, auth (or `"none"`), proxy, errorBody |
 | importWithMapping | commit |
 | downloadFile | showInBrowser |
-| decision (`IF`) | condition, caption |
+| decision (`IF`, also an enumeration decision) | condition, caption; a decision that calls a rule (`IF RULE`): args, caption |
 | object type decision (`IF TYPE OF`) | caption |
 | loop | while (while loop), over (list loop) |
 | end | value |
@@ -686,6 +689,35 @@ Microflow with steps:
     { "action": "message", "text": "Order closed", "type": "Information" } ] } ] }
 ```
 
+Rule, enumeration switch and reduce:
+
+```json
+{ "ops": [
+  { "op": "createRule", "module": "Sales", "name": "RUL_Order_IsLarge", "parameters": [ { "name": "Order", "type": "Sales.Order" } ],
+    "returns": "Boolean", "returnValue": "$Order/Total > 1000" },
+  { "op": "createMicroflow", "module": "Sales", "name": "ACT_Order_Route", "parameters": [ { "name": "Order", "type": "Sales.Order" } ],
+    "actions": [
+      { "action": "if", "rule": "Sales.RUL_Order_IsLarge", "args": { "Order": "$Order" }, "then": [ { "action": "log", "message": "large order" } ] },
+      { "action": "switch", "value": "$Order/Status", "cases": { "Open": [ { "action": "log", "message": "open", "note": "still to pay" } ], "Paid, Cancelled": [ { "action": "log", "message": "done" } ] },
+        "empty": [ { "action": "log", "message": "no status" } ] },
+      { "action": "retrieve", "variable": "Lines", "entity": "Sales.OrderLine", "xpath": "[Sales.OrderLine_Order = $Order]" },
+      { "action": "aggregateList", "variable": "Codes", "list": "Lines", "function": "reduce", "initial": "''", "expression": "$currentResult + $currentObject/Code + ';'" } ] } ] }
+```
+
+Java action with its file, a REST call with authentication and form data, then restructuring (ids from `steps`):
+
+```json
+{ "ops": [
+  { "op": "createJavaAction", "module": "Sales", "name": "JA_Order_Sign", "parameters": [ { "name": "Order", "type": "Sales.Order" }, { "name": "Key", "type": "String" } ],
+    "returns": "String", "exposed": { "caption": "Sign order", "category": "Sales" } },
+  { "op": "addActions", "microflow": "Sales.ACT_Order_Close", "actions": [
+      { "action": "callRest", "method": "Post", "url": "{1}/sign", "urlArgs": ["@Sales.ApiUrl"], "auth": { "user": "@Sales.ApiUser", "password": "@Sales.ApiPassword" },
+        "formData": { "order": "toString($Order/Number)" }, "timeout": 30, "response": "string", "variable": "Signed" } ] },
+  { "op": "moveAction", "microflow": "Sales.ACT_Order_Close", "id": "3f2a9c1b", "after": "7c0d11e2", "branch": "true" },
+  { "op": "extractMicroflow", "microflow": "Sales.ACT_Order_Close", "from": "5b6e0a7d", "to": "9e8f1c2a", "name": "SUB_Order_Totals" }
+] }
+```
+
 Decision, loop and error handler:
 
 ```json
@@ -800,7 +832,12 @@ widgets (pages and snippets take `addWidgets`, `changeWidget`, `deleteWidget`, `
 `createPage` list (template grids, reference set selectors, file managers and pluggable widgets other than a Data
 grid 2, combo box or gallery copied from the project), snippet calls with parameters, design properties, import/export mappings,
 JSON structures, consumed REST services, workflows, REST operations with object bodies or results, inheritance
-splits, and setting attributes inherited from System entities (for example `System.User.Name`). For these, write
+splits, and setting attributes inherited from System entities (for example `System.User.Name`). In flows: publishing a
+business event and calling an ML model (refused with the Studio Pro steps), generate document in a project that has no
+Generate document action yet, moving or extracting steps that have a custom error handler or a decision in between,
+extracting steps that make more than one variable used later, changing a Java/JavaScript action after it was created
+(add parameters in Studio Pro; ops keep the user code when a file exists), and renaming or deleting a Java action's
+file (`rename`/`delete` change the model only). For these, write
 `edits/<name>.js` with the Mendix Model SDK, or give the user Studio Pro steps. Prefer Studio Pro steps when the
 change is large or risky.
 

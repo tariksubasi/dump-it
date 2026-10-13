@@ -580,7 +580,7 @@ function makeFlows(h) {
             const t = datatypes.ObjectType.create(model);
             if (qn === "System.FileDocument") t.__entity.updateWithRawValue(qn);
             else {
-                if (!(await isA(qn, "System.FileDocument"))) throw new Error(`${where}: fileEntity ${qn} does not inherit from System.FileDocument`);
+                if (!(await isA(qn, "System.FileDocument")) && !(await isA(qn, "System.Image"))) throw new Error(`${where}: fileEntity ${qn} does not inherit from System.FileDocument`);
                 t.entity = await h.entity(qn);
             }
             r.variableType = t;
@@ -816,7 +816,7 @@ function makeFlows(h) {
             const m = /^\s*\$(\w+)\s*$/.exec(String(spec.binaryBody));
             if (m) {
                 const ent = await needVariable(f.m, m[1], false, where);
-                if (!(await isA(ent, "System.FileDocument"))) throw new Error(`${where}: binaryBody $${m[1]} is ${ent}, not a file document (an entity that inherits from System.FileDocument)`);
+                if (!(await isA(ent, "System.FileDocument")) && !(await isA(ent, "System.Image"))) throw new Error(`${where}: binaryBody $${m[1]} is ${ent}, not a file document (an entity that inherits from System.FileDocument)`);
             }
             const rq = mf.BinaryRequestHandling.createInRestCallActionUnderRequestHandling(a);
             rq.expression = expr(f.m, spec.binaryBody, `${where} binaryBody`);
@@ -1112,7 +1112,7 @@ function makeFlows(h) {
         const tpl = await h.get(spec.template);
         if (!(tpl instanceof sdk.documenttemplates.DocumentTemplate)) throw new Error(`${where}: '${spec.template}' is not a document template`);
         const ent = await needVariable(f.m, spec.variable, false, where);
-        if (!(await isA(ent, "System.FileDocument"))) throw new Error(`${where}: $${noDollar(spec.variable)} is ${ent}, not a file document`);
+        if (!(await isA(ent, "System.FileDocument")) && !(await isA(ent, "System.Image"))) throw new Error(`${where}: $${noDollar(spec.variable)} is ${ent}, not a file document`);
         const a = mf.GenerateDocumentAction.createIn(act);
         a.documentTemplate = tpl;
         a.fileVariableName = noDollar(spec.variable);
