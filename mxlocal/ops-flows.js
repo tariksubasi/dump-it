@@ -48,8 +48,9 @@ const ACTIONS = {
         fields: { list: "R list variable (no $)", type: "optional add | remove | replace | clear (default add)", value: "object or list expression, e.g. $NewOrder (not for clear)" }
     },
     aggregateList: {
-        doc: "Count, sum, average, minimum or maximum of a list; all/any test a Boolean.",
-        fields: { variable: "R result variable name", list: "R list variable (no $)", function: "R count | sum | average | minimum | maximum | all | any", attribute: "attribute to aggregate (not for count)", expression: "instead of attribute: expression on $currentObject, e.g. $currentObject/Price * $currentObject/Quantity" }
+        doc: "Count, sum, average, minimum or maximum of a list; all/any test a Boolean; reduce folds the list into one value.",
+        fields: { variable: "R result variable name", list: "R list variable (no $)", function: "R count | sum | average | minimum | maximum | all | any | reduce", attribute: "attribute to aggregate (not for count/reduce)", expression: "instead of attribute: expression on $currentObject, e.g. $currentObject/Price * $currentObject/Quantity; reduce: on $currentResult and $currentObject, e.g. $currentResult + $currentObject/Amount",
+            initial: "reduce: initial value expression, e.g. 0", type: "reduce: result type String | Integer | Long | Decimal | Boolean | DateTime | Enum(Module.Enumeration) (required when it cannot be told from initial)" }
     },
     listOperation: {
         doc: "Combine, search, filter, sort or cut a list.",
@@ -63,13 +64,17 @@ const ACTIONS = {
     cast: { doc: "Use the object of an ifType case as that case's entity. Only as the first action of a case.", fields: { variable: "R new variable name" } },
     downloadFile: { doc: "Send a file document to the user's browser (microflows only).", fields: { variable: "R object variable of a System.FileDocument specialization (no $)", showInBrowser: "optional true/false (default false: download)" } },
     callRest: {
-        doc: "Call a REST service (microflows only). Body: text or an export mapping. Response: ignored, a String, or an import mapping.",
+        doc: "Call a REST service (microflows only). Body: text, form data, a file (binary) or an export mapping. Response: ignored, a String, a file document or an import mapping.",
         fields: {
             url: "R location; {1} {2} are filled from urlArgs, e.g. https://api.example.com/orders/{1}", urlArgs: "optional [\"expression\", ...]", method: "optional Get | Post | Put | Patch | Delete | Head | Options (default Get)",
             headers: "optional { \"Header-Name\": \"expression\" }", timeout: "optional seconds (default 300)", body: "optional request body text; {1} {2} are filled from bodyArgs", bodyArgs: "optional [\"expression\", ...]",
             exportMapping: "optional Module.ExportMapping for the body (instead of body)", exportObject: "with exportMapping: variable to export (no $)",
-            response: "optional none | string | Module.ImportMapping (default: string when variable is set, else none)", variable: "result variable: the response text, or the import mapping result",
-            commit: "with an import mapping: yes | no | withoutEvents (default withoutEvents)"
+            formData: "optional form-data body { \"key\": \"expression\" } (instead of body)", binaryBody: "optional file document to send as the body, e.g. $File (instead of body)",
+            auth: "optional basic authentication { \"user\": \"expression\", \"password\": \"expression\" }, e.g. { \"user\": \"@Module.ApiUser\", \"password\": \"@Module.ApiPassword\" }",
+            proxy: "optional default | none | { \"host\": \"expression\", \"port\": \"expression\", \"user\": \"expression\", \"password\": \"expression\" } (default: default = the app's proxy settings)",
+            response: "optional none | string | file | Module.ImportMapping (default: string when variable is set, else none)", variable: "result variable: the response text, the file document or the import mapping result",
+            fileEntity: "with response file: Module.Entity that inherits from System.FileDocument (default System.FileDocument)",
+            commit: "with an import mapping: yes | no | withoutEvents (default withoutEvents)", errorBody: "optional true/false: on an error keep the response in $latestHttpResponse (default true)"
         }
     },
     importWithMapping: {
@@ -79,15 +84,39 @@ const ACTIONS = {
     exportWithMapping: {
         doc: "Export an object (or list) to JSON or XML text with an export mapping (microflows only).",
         fields: { mapping: "R Module.ExportMapping", object: "R variable to export (no $)", variable: "R new String variable for the text" }
+    },
+    metric: {
+        doc: "Record an app metric (microflows only): a counter, an increment by 1, or a gauge value.",
+        fields: { type: "R counter | increment | gauge", name: "R metric name, e.g. orders.created", value: "counter/gauge: number expression (counter default 1)", description: "optional text", tags: "optional { \"tag\": \"expression\" }" }
+    },
+    generateDocument: {
+        doc: "Generate a document from a document template (microflows only; only in projects that already use this action, document templates are deprecated).",
+        fields: { template: "R Module.DocumentTemplate", variable: "R file document variable to fill (no $)", args: "optional { \"Parameter\": \"$Variable\" }", type: "optional PDF | HTML | DOCX | DOC | RTF | ODT (default PDF)" }
     }
+};
+// Mendix actions ops cannot write: refused with the way out (no Studio Pro sample, or the Model SDK cannot write them).
+const REFUSED = {
+    publishBusinessEvent: "publishing a business event is not supported: no Studio Pro sample in the test projects and the Model SDK 4.116 has no such action. Add it in Studio Pro (Toolbox > Business events > Publish business event)",
+    callMLModel: "calling an ML model is not supported: it needs an ML mapping document that only Studio Pro creates. Add it in Studio Pro (Toolbox > Machine learning > Call ML model)",
+    callML: "see callMLModel: add it in Studio Pro",
+    reduce: "reduce is a function of aggregateList: { \"action\": \"aggregateList\", \"function\": \"reduce\", \"initial\": \"0\", \"expression\": \"$currentResult + $currentObject/Amount\", ... }",
+    annotation: "an annotation is not a step: put \"note\": \"text\" on an action, or use the op addAnnotation",
+    while: "a while loop is { \"action\": \"loop\", \"while\": \"condition\", \"actions\": [ ... ] }"
 };
 // Which field of an action names the variable it creates.
 const CREATES = { retrieve: "variable", create: "variable", call: "variable", variable: "name", callJava: "variable", callJavaScript: "variable", createList: "variable", aggregateList: "variable", listOperation: "variable", cast: "variable", callRest: "variable", importWithMapping: "variable", exportWithMapping: "variable" };
-const COMMON = { caption: "optional caption on the box (default: generated)", onError: ON_ERROR };
+const COMMON = { caption: "optional caption on the box (default: generated)", onError: ON_ERROR, note: "optional annotation text attached to this action" };
 
 // Structure (no box of their own, or a special box).
 const CONTROL = {
-    if: { doc: "Decision. Runs 'then' when the condition is true, otherwise 'else'. A branch may end with end/break/continue.", fields: { condition: "R boolean expression, e.g. $Order/Total > 100", then: "optional [ actions ]", else: "optional [ actions ]", caption: "optional text in the diamond (default: the condition)" } },
+    if: {
+        doc: "Decision. Runs 'then' when the condition (or a Boolean rule) is true, otherwise 'else'. A branch may end with end/break/continue.",
+        fields: { condition: "boolean expression, e.g. $Order/Total > 100 (or 'rule')", rule: "instead of condition: Module.Rule that returns a Boolean", args: "with rule: { \"Param\": \"expression\" } (every rule parameter)", then: "optional [ actions ]", else: "optional [ actions ]", caption: "optional text in the diamond (default: the condition or the rule name)" }
+    },
+    switch: {
+        doc: "Enumeration decision: one path per enumeration value (several values may share one: \"A, B\"), 'other' for the values not listed, 'empty' when there is no value. Open paths join again after it.",
+        fields: { value: "enumeration expression, e.g. $Order/Status (or 'rule')", rule: "instead of value: Module.Rule that returns an enumeration", args: "with rule: { \"Param\": \"expression\" }", enumeration: "optional Module.Enumeration when it cannot be told from value", cases: "R { \"Value\": [ actions ], \"Value2, Value3\": [ actions ] }", other: "optional [ actions ] for the values not in cases (default: they go straight on)", empty: "optional [ actions ] when the value is empty (default: straight on)", caption: "optional text in the diamond" }
+    },
     ifType: {
         doc: "Object type decision: runs the case of the object's specialization (start a case with 'cast' to use it as that entity), 'other' for any other type, 'empty' when there is no object.",
         fields: { variable: "R object variable (no $)", cases: "R { \"Module.Specialization\": [ actions ] }", other: "optional [ actions ]", empty: "optional [ actions ]", caption: "optional text in the diamond" }
@@ -112,20 +141,32 @@ function makeFlows(h) {
     const point = (el, x, y) => (el.relativeMiddlePoint = { x: Math.round(x), y: Math.round(y) });
     const size = (el, width, height) => (el.size = { width: Math.round(width), height: Math.round(height) });
     const short = o => o.id.slice(0, 8);
-    const isFlowDoc = d => d instanceof mf.Microflow || d instanceof mf.Nanoflow;
+    const isFlowDoc = d => d instanceof mf.Microflow || d instanceof mf.Nanoflow || d instanceof mf.Rule;
     const errorDefault = f => (f.nano ? mf.ErrorHandlingType.Abort : mf.ErrorHandlingType.Rollback);
     const returnsValue = m => !!m.microflowReturnType && !(m.microflowReturnType instanceof datatypes.VoidType);
 
     async function flowDoc(qn) {
         const d = await h.get(qn);
-        if (!isFlowDoc(d)) throw new Error(`'${qn}' is not a microflow or nanoflow`);
+        if (!isFlowDoc(d)) throw new Error(`'${qn}' is not a microflow, nanoflow or rule`);
         return d;
     }
 
     // ------------------------------------------------ flows (lines)
 
-    // value: null (no case), "true"/"Enum value", or { type: Module.Entity | System.X | "" } (object type decision)
+    // value: null (no case), "true"/"Enum value", [ "Enum value", ... ] (several values on one flow), or
+    // { type: Module.Entity | System.X | "" } (object type decision)
     function addCase(fl, value) {
+        if (Array.isArray(value)) {
+            let many = true;
+            try {
+                many = !!fl.caseValues;
+            } catch (e) {
+                many = false; // before Mendix 10.15 a flow has one case value
+            }
+            if (value.length > 1 && !many) throw new Error("this Mendix version takes one value per flow of a decision; give each value its own case");
+            for (const v of value) addCase(fl, v);
+            return;
+        }
         const typed = value !== null && typeof value === "object";
         const Case = value === null ? mf.NoCase : typed ? mf.InheritanceCase : mf.EnumerationCase;
         let c;
@@ -161,6 +202,7 @@ function makeFlows(h) {
     // The case of a flow, as addCase takes it
     function caseOf(fl) {
         const list = fl.caseValues ? [...fl.caseValues] : fl.caseValue ? [fl.caseValue] : [];
+        if (list.length > 1 && list.every(c => c instanceof mf.EnumerationCase)) return list.map(c => c.value);
         const c = list[0];
         if (!c || c instanceof mf.NoCase) return null;
         if (c instanceof mf.EnumerationCase) return c.value;
@@ -169,7 +211,7 @@ function makeFlows(h) {
     }
     const caseLabel = fl => {
         const c = caseOf(fl);
-        return c && typeof c === "object" ? c.type || "empty" : c;
+        return Array.isArray(c) ? c.join(", ") : c && typeof c === "object" ? c.type || "empty" : c;
     };
 
     // ------------------------------------------------ variables
@@ -261,6 +303,61 @@ function makeFlows(h) {
         }
         if (a.resultHandling) return ofType(a.resultHandling.variableType);
         return { entity: null, list: false };
+    }
+
+    // A data type as ops write it: "String", "Module.Entity", "List(Module.Entity)", "Enum(Module.Enumeration)"; null
+    // when unknown.
+    function typeSpec(t) {
+        if (!t) return null;
+        if (t instanceof datatypes.ListType) return t.entityQualifiedName ? `List(${t.entityQualifiedName})` : null;
+        if (t instanceof datatypes.ObjectType) return t.entityQualifiedName || null;
+        if (t instanceof datatypes.EnumerationType) return t.enumerationQualifiedName ? `Enum(${t.enumerationQualifiedName})` : null;
+        const n = t.structureTypeName.split("$")[1].replace(/Type$/, "");
+        return ["String", "Integer", "Long", "Decimal", "Boolean", "DateTime", "Binary"].includes(n) ? n : null;
+    }
+
+    // The same for a code action (Java/JavaScript) type.
+    function codeTypeSpec(t) {
+        if (!t) return null;
+        if (t instanceof codeactions.EnumerationType) return `Enum(${t.enumerationQualifiedName})`;
+        const n = t.structureTypeName.split("$")[1].replace(/Type$/, "");
+        return ["String", "Integer", "Decimal", "Boolean", "DateTime"].includes(n) ? n : null;
+    }
+
+    // The data type of a variable before this point, as typeSpec gives it; null when ops cannot tell.
+    async function typeOfVariable(m, name, where) {
+        const n = noDollar(name);
+        const v = variablesOf(m).get(n);
+        if (!v) return null;
+        if (v instanceof mf.MicroflowParameterObject) return typeSpec(v.variableType);
+        const a = v.action;
+        if (a instanceof mf.CreateVariableAction) return typeSpec(a.variableType);
+        if (a instanceof mf.AggregateListAction) {
+            const fn = a.aggregateFunction.name;
+            if (fn === "Count") return "Integer";
+            if (fn === "All" || fn === "Any") return "Boolean";
+            if (fn === "Average") return "Decimal";
+            if (fn === "Reduce") return typeSpec(a.reduceReturnDataType);
+            const attr = a.attribute;
+            if (!attr) return null;
+            const t = attr.type.structureTypeName.split("$")[1].replace("AttributeType", "");
+            return t === "AutoNumber" ? "Long" : t;
+        }
+        if (a instanceof mf.ListOperationAction && (a.operation instanceof mf.Contains || a.operation instanceof mf.ListEquals)) return "Boolean";
+        if (a instanceof mf.MicroflowCallAction || a instanceof mf.NanoflowCallAction) {
+            const target = await load(a.microflowCall ? a.microflowCall.microflow : a.nanoflowCall.nanoflow);
+            return target ? typeSpec(target.microflowReturnType) : null;
+        }
+        if (a instanceof mf.JavaActionCallAction || a instanceof mf.JavaScriptActionCallAction) {
+            const target = await load(a.javaAction || a.javaScriptAction);
+            const own = target && codeTypeSpec(target.actionReturnType);
+            if (own) return own;
+        }
+        if (a instanceof mf.ExportXmlAction) return "String";
+        if (a && a.resultHandling && a.resultHandling.variableType && !(a.resultHandling.variableType instanceof datatypes.ObjectType || a.resultHandling.variableType instanceof datatypes.ListType)) return typeSpec(a.resultHandling.variableType);
+        const info = await variableInfo(m, n, where).catch(() => ({ entity: null }));
+        if (!info.entity) return null;
+        return info.list ? `List(${info.entity})` : info.entity;
     }
 
     async function entityOfVariable(m, name, where) {
@@ -441,7 +538,14 @@ function makeFlows(h) {
                 if (String(v).startsWith("$")) throw new Error(`${where}: parameter '${p.name}' of ${qn} takes an entity name like "Module.Entity", not a variable`);
                 mf.EntityTypeCodeActionParameterValue[under](pm).entity = await h.entity(v);
             } else if (t instanceof codeactions.BasicParameterType) mf.BasicCodeActionParameterValue[under](pm).argument = p.name in args ? expr(f.m, v, where) : "";
-            else throw new Error(`${where}: parameter '${p.name}' of ${qn} takes a ${t.structureTypeName.split("$")[1].replace(/(JavaScript|Java)?ActionParameterType$|ParameterType$/, "").toLowerCase() || "value"} argument, which ops cannot fill in; add this call in Studio Pro`);
+            else if (t instanceof javaactions.MicroflowJavaActionParameterType && !js) {
+                const pv = mf.MicroflowParameterValue[under](pm);
+                if (p.name in args && v !== "" && v !== "empty") {
+                    const target = await h.get(String(v).replace(/^'|'$/g, ""));
+                    if (!(target instanceof mf.Microflow)) throw new Error(`${where}: parameter '${p.name}' of ${qn} takes a microflow name like "Module.Microflow"`);
+                    pv.microflow = target;
+                }
+            } else throw new Error(`${where}: parameter '${p.name}' of ${qn} takes a ${t.structureTypeName.split("$")[1].replace(/(JavaScript|Java)?ActionParameterType$|ParameterType$/, "").toLowerCase() || "value"} argument, which ops cannot fill in; add this call in Studio Pro`);
         }
         const isVoid = target.actionReturnType instanceof codeactions.VoidType;
         if (spec.variable && isVoid) throw new Error(`${where}: ${qn} returns nothing; remove 'variable'`);
@@ -469,6 +573,18 @@ function makeFlows(h) {
         if (how === "none") {
             r.variableType = datatypes.VoidType.create(model);
             return "None";
+        }
+        if (how === "file") {
+            if (!variable) throw new Error(`${where}: response "file" needs 'variable' (the name for the new file document)`);
+            const qn = spec.fileEntity || "System.FileDocument";
+            const t = datatypes.ObjectType.create(model);
+            if (qn === "System.FileDocument") t.__entity.updateWithRawValue(qn);
+            else {
+                if (!(await isA(qn, "System.FileDocument"))) throw new Error(`${where}: fileEntity ${qn} does not inherit from System.FileDocument`);
+                t.entity = await h.entity(qn);
+            }
+            r.variableType = t;
+            return "FileDocument";
         }
         const map = await h.get(spec.mapping);
         if (!(map instanceof importmappings.ImportMapping)) throw new Error(`${where}: '${spec.mapping}' is not an import mapping`);
@@ -499,17 +615,18 @@ function makeFlows(h) {
     }
 
     // Microflow-only and nanoflow-only actions.
-    const ONLY = { log: "micro", showHomePage: "micro", callJava: "micro", downloadFile: "micro", callRest: "micro", importWithMapping: "micro", exportWithMapping: "micro", callJavaScript: "nano" };
-    const AGGREGATE = { count: "Count", sum: "Sum", average: "Average", avg: "Average", minimum: "Minimum", min: "Minimum", maximum: "Maximum", max: "Maximum", all: "All", any: "Any" };
+    const ONLY = { log: "micro", showHomePage: "micro", callJava: "micro", downloadFile: "micro", callRest: "micro", importWithMapping: "micro", exportWithMapping: "micro", metric: "micro", generateDocument: "micro", callJavaScript: "nano" };
+    // What a rule may do: read and compute, no changes, pages or calls out.
+    const RULE_ACTIONS = ["retrieve", "variable", "set", "aggregateList", "listOperation", "createList", "changeList"];
+    const METRICS = { counter: "CounterMeterAction", increment: "IncrementCounterMeterAction", gauge: "GaugeMeterAction" };
+    const AGGREGATE = { count: "Count", sum: "Sum", average: "Average", avg: "Average", minimum: "Minimum", min: "Minimum", maximum: "Maximum", max: "Maximum", all: "All", any: "Any", reduce: "Reduce" };
     const LIST_OPS = {
         union: "Union", intersect: "Intersect", subtract: "Subtract", contains: "Contains", equals: "ListEquals",
         head: "Head", tail: "Tail", find: "Find", filter: "Filter", sort: "Sort", range: "ListRange"
     };
     const CHANGE_LIST = { add: "Add", remove: "Remove", replace: "Set", set: "Set", clear: "Clear" };
     // Known to Mendix, but not written by ops: refused with the way out.
-    const NOT_STORED = {
-        reduce: "aggregate function 'reduce' is not supported (its return type cannot be set exactly); add it in Studio Pro"
-    };
+    const NOT_STORED = {};
 
     // An attribute the aggregate function works on: numbers for sum/average, numbers or dates for minimum/maximum,
     // Booleans for all/any.
@@ -524,16 +641,45 @@ function makeFlows(h) {
         return attribute;
     }
 
+    // The result type of a reduce from its initial value, when the expression says it; null when it does not.
+    async function literalType(m, value, where) {
+        const v = String(value).trim();
+        if (/^-?\d+$/.test(v)) return "Integer";
+        if (/^-?\d+\.\d+$/.test(v)) return "Decimal";
+        if (/^'([^']|'')*'$/.test(v)) return "String";
+        if (/^(true|false)$/i.test(v)) return "Boolean";
+        if (/^\[%(CurrentDateTime|BeginOf\w+|EndOf\w+)%\]$|^(dateTime|dateTimeUTC|parseDateTime)\(/.test(v)) return "DateTime";
+        const e = /^([A-Z]\w*)\.(\w+)\.(\w+)$/.exec(v); // Module.Enumeration.Value
+        if (e && model.findEnumerationByQualifiedName && model.findEnumerationByQualifiedName(`${e[1]}.${e[2]}`)) return `Enum(${e[1]}.${e[2]})`;
+        const one = /^\$(\w+)$/.exec(v);
+        if (one && variablesOf(m).has(one[1])) return typeOfVariable(m, one[1], where).catch(() => null);
+        return null;
+    }
+
     async function aggregate(f, a, spec, where) {
-        if (NOT_STORED[String(spec.function).toLowerCase()]) throw new Error(`${where}: ${NOT_STORED[String(spec.function).toLowerCase()]}`);
         const fn = AGGREGATE[String(spec.function).toLowerCase()];
-        if (!fn) fail(`${where}: function '${spec.function}' is not one of count | sum | average | minimum | maximum | all | any`, spec.function, Object.keys(AGGREGATE));
+        if (!fn) fail(`${where}: function '${spec.function}' is not one of count | sum | average | minimum | maximum | all | any | reduce`, spec.function, Object.keys(AGGREGATE));
         const ent = await needVariable(f.m, spec.list, true, where);
+        if (fn !== "Reduce" && (spec.initial !== undefined || spec.type !== undefined)) throw new Error(`${where}: 'initial' and 'type' only apply to reduce`);
         a.inputListVariableName = noDollar(spec.list);
         a.aggregateFunction = mf.AggregateFunctionEnum[fn];
         a.attribute = null;
         a.useExpression = false;
         a.expression = "";
+        if (fn === "Reduce") {
+            if (spec.attribute !== undefined) throw new Error(`${where}: reduce takes 'expression' (on $currentResult and $currentObject), not 'attribute'`);
+            if (spec.initial === undefined || spec.expression === undefined) throw new Error(`${where}: reduce needs 'initial' (start value) and 'expression', e.g. "initial": "0", "expression": "$currentResult + $currentObject/Amount"`);
+            if (!/\$currentResult\b/.test(String(spec.expression))) throw new Error(`${where}: a reduce expression combines $currentResult (the value so far) with $currentObject, e.g. $currentResult + $currentObject/Amount`);
+            const type = spec.type || (await literalType(f.m, spec.initial, where));
+            if (!type) throw new Error(`${where}: cannot tell the result type of reduce from initial '${spec.initial}'; add "type": "Decimal" (String | Integer | Long | Decimal | Boolean | DateTime | Enum(Module.Enumeration))`);
+            const dt = await h.dataType(type);
+            if (dt instanceof datatypes.ObjectType || dt instanceof datatypes.ListType || dt instanceof datatypes.VoidType) throw new Error(`${where}: reduce returns a value (String, Integer, Decimal, ...), not ${type}`);
+            a.useExpression = true;
+            a.expression = expr(f.m, spec.expression, where, ent);
+            a.reduceInitialValueExpression = expr(f.m, spec.initial, where);
+            a.reduceReturnDataType = dt;
+            return;
+        }
         if (fn === "Count") {
             if (spec.attribute !== undefined || spec.expression !== undefined) throw new Error(`${where}: count takes no attribute or expression`);
         } else if ((spec.attribute === undefined) === (spec.expression === undefined)) throw new Error(`${where}: ${spec.function} needs either 'attribute' or 'expression'`);
@@ -600,11 +746,128 @@ function makeFlows(h) {
         op.listVariableName = noDollar(spec.list);
     }
 
+    // An expression field of a REST call (header value, user, password, proxy host): weak models write plain text.
+    function restExpr(f, v, where) {
+        if (!/['$@(]|^\s*(-?\d+(\.\d+)?|empty|true|false)\s*$/.test(String(v))) throw new Error(`${where} is an expression: write '${v}' in single quotes (or a constant @Module.Name, or a $variable)`);
+        return expr(f.m, v, where);
+    }
+
+    function restAuth(f, http, v, where) {
+        if (v === false || v === null || v === "none") {
+            http.useAuthentication = false;
+            http.httpAuthenticationUserName = "";
+            http.authenticationPassword = "";
+            return;
+        }
+        if (!v || typeof v !== "object" || Array.isArray(v)) throw new Error(`${where}: auth must be { "user": "expression", "password": "expression" }`);
+        validate("-", "auth", { fields: { user: "R expression", password: "R expression" } }, v, `${where} auth`);
+        http.useAuthentication = true;
+        http.httpAuthenticationUserName = restExpr(f, v.user, `${where} auth user`);
+        http.authenticationPassword = restExpr(f, v.password, `${where} auth password`);
+    }
+
+    function restProxy(f, a, v, where) {
+        const old = a.proxyConfiguration;
+        if (v === undefined || v === "default") {
+            a.requestProxyType = mf.RequestProxyType.DefaultProxy;
+            if (old) old.delete();
+            return;
+        }
+        if (v === "none" || v === false) {
+            a.requestProxyType = mf.RequestProxyType.NoProxy;
+            if (old) old.delete();
+            return;
+        }
+        if (!v || typeof v !== "object" || Array.isArray(v)) fail(`${where}: proxy must be "default", "none" or { "host": ..., "port": ..., "user": ..., "password": ... }`, v, ["default", "none"]);
+        validate("-", "proxy", { fields: { host: "R expression", port: "R expression", user: "optional expression", password: "optional expression" } }, v, `${where} proxy`);
+        a.requestProxyType = mf.RequestProxyType.Override;
+        const p = old || mf.ProxyConfiguration.createInRestCallActionUnderProxyConfiguration(a);
+        p.hostExpression = restExpr(f, v.host, `${where} proxy host`);
+        p.portExpression = restExpr(f, v.port, `${where} proxy port`);
+        p.usernameExpression = v.user === undefined ? "" : restExpr(f, v.user, `${where} proxy user`);
+        p.passwordExpression = v.password === undefined ? "" : restExpr(f, v.password, `${where} proxy password`);
+        p.useConfigurationExpression = "true";
+    }
+
+    // The body of a REST call: text template, form data, a file document (binary) or an export mapping.
+    async function restBody(f, a, spec, where) {
+        const kinds = ["body", "exportMapping", "formData", "binaryBody"].filter(k => spec[k] !== undefined);
+        if (kinds.length > 1) throw new Error(`${where}: give one body: ${kinds.join(" or ")}`);
+        if (spec.bodyArgs !== undefined && spec.body === undefined) throw new Error(`${where}: bodyArgs fill {1} {2} in 'body'; add body`);
+        if (spec.exportMapping) {
+            const map = await h.get(spec.exportMapping);
+            if (!(map instanceof exportmappings.ExportMapping)) throw new Error(`${where}: '${spec.exportMapping}' is not an export mapping`);
+            await variableInfo(f.m, spec.exportObject, where);
+            const rq = mf.MappingRequestHandling.createInRestCallActionUnderRequestHandling(a);
+            rq.mapping = map;
+            rq.mappingArgumentVariableName = noDollar(spec.exportObject);
+            rq.contentType = contentType(map);
+            a.requestHandlingType = mf.RequestHandlingType.Mapping;
+        } else if (spec.formData !== undefined) {
+            if (!spec.formData || typeof spec.formData !== "object" || Array.isArray(spec.formData) || !Object.keys(spec.formData).length) throw new Error(`${where}: formData must be { "key": "expression", ... }`);
+            const rq = mf.FormDataRequestHandling.createInRestCallActionUnderRequestHandling(a);
+            for (const [k, v] of Object.entries(spec.formData)) {
+                const part = mf.FormDataPart.createIn(rq);
+                part.key = k;
+                part.value = restExpr(f, v, `${where} formData ${k}`);
+            }
+            a.requestHandlingType = mf.RequestHandlingType.FormData;
+        } else if (spec.binaryBody !== undefined) {
+            const m = /^\s*\$(\w+)\s*$/.exec(String(spec.binaryBody));
+            if (m) {
+                const ent = await needVariable(f.m, m[1], false, where);
+                if (!(await isA(ent, "System.FileDocument"))) throw new Error(`${where}: binaryBody $${m[1]} is ${ent}, not a file document (an entity that inherits from System.FileDocument)`);
+            }
+            const rq = mf.BinaryRequestHandling.createInRestCallActionUnderRequestHandling(a);
+            rq.expression = expr(f.m, spec.binaryBody, `${where} binaryBody`);
+            a.requestHandlingType = mf.RequestHandlingType.Binary;
+        } else {
+            const rq = mf.CustomRequestHandling.createInRestCallActionUnderRequestHandling(a);
+            fillTemplate(f, rq.template || mf.StringTemplate.createInCustomRequestHandlingUnderTemplate(rq), spec.body || "", spec.bodyArgs, `${where} body`, true);
+            a.requestHandlingType = mf.RequestHandlingType.Custom;
+        }
+    }
+
+    async function restCall(f, act, spec, where) {
+        if (!spec.exportMapping !== !spec.exportObject) throw new Error(`${where}: 'exportMapping' and 'exportObject' go together`);
+        if (spec.headers !== undefined && (typeof spec.headers !== "object" || Array.isArray(spec.headers) || !spec.headers)) throw new Error(`${where}: headers must be { "Name": "expression" }`);
+        // weak models mix up the text template (url, body) and expressions (args, header values)
+        if (/^\s*['@$]/.test(spec.url)) throw new Error(`${where}: url is text, not an expression: write https://... and put expressions in urlArgs, e.g. "url": "{1}/orders/{2}", "urlArgs": ["@Module.BaseUrl", "$Order/Id"]`);
+        const a = mf.RestCallAction.createIn(act);
+        const http = a.httpConfiguration || mf.HttpConfiguration.createInRestCallActionUnderHttpConfiguration(a);
+        http.overrideLocation = true;
+        fillTemplate(f, http.customLocationTemplate || mf.StringTemplate.createInHttpConfigurationUnderCustomLocationTemplate(http), spec.url, spec.urlArgs, `${where} url`, true);
+        try {
+            http.newHttpMethod = enumValue(services.HttpMethod, spec.method || "Get", "HTTP method");
+        } catch (e) {
+            throw new Error(`${where}: ${e.message}`);
+        }
+        for (const [k, v] of Object.entries(spec.headers || {})) {
+            const e = mf.HttpHeaderEntry.createInHttpConfigurationUnderHeaderEntries(http);
+            e.key = k;
+            e.value = restExpr(f, v, `${where}: header ${k}`);
+        }
+        if (spec.auth !== undefined) restAuth(f, http, spec.auth, where);
+        a.useRequestTimeOut = true;
+        a.timeOutExpression = expr(f.m, spec.timeout === undefined ? "300" : spec.timeout, `${where} timeout`);
+        a.errorResultHandlingType = bool(spec.errorBody, true) ? mf.ErrorResultHandlingType.HttpResponse : mf.ErrorResultHandlingType.None;
+        restProxy(f, a, spec.proxy, where);
+        await restBody(f, a, spec, where);
+        const response = spec.response === undefined ? (spec.variable ? "string" : "none") : String(spec.response);
+        const how = /^none$/i.test(response) ? "none" : /^string$/i.test(response) ? "string" : /^file$/i.test(response) ? "file" : "mapping";
+        if (how === "mapping" && !response.includes(".")) fail(`${where}: response '${response}' is not none, string, file or an import mapping (Module.Mapping)`, response, ["none", "string", "file"]);
+        if (spec.fileEntity !== undefined && how !== "file") throw new Error(`${where}: fileEntity only applies to response "file"`);
+        const r = a.resultHandling || mf.ResultHandling.createInRestCallActionUnderResultHandling(a);
+        a.resultHandlingType = mf.ResultHandlingType[await resultHandling(f, r, how, { ...spec, mapping: response }, where)];
+        return a;
+    }
+
     async function activity(f, spec, x, y, where) {
         const kind = spec.action;
         validate("action", kind, { fields: { ...ACTIONS[kind].fields, ...COMMON } }, spec, where);
         if (ONLY[kind] === "micro" && f.nano) throw new Error(`${where}: '${kind}' is not available in nanoflows${kind === "callJava" ? "; call a microflow that calls the Java action" : ""}`);
         if (ONLY[kind] === "nano" && !f.nano) throw new Error(`${where}: '${kind}' only works in nanoflows (JavaScript runs in the browser); in a microflow use callJava`);
+        if (f.rule && !RULE_ACTIONS.includes(kind)) throw new Error(`${where}: '${kind}' is not allowed in a rule (a rule only reads and computes: ${RULE_ACTIONS.join(", ")}, if, switch, loop, end)`);
         const act = mf.ActionActivity.createIn(f.coll);
         point(act, x, y);
         size(act, 120, 60);
@@ -756,54 +1019,15 @@ function makeFlows(h) {
                 a.showFileInBrowser = bool(spec.showInBrowser, false);
                 break;
             }
-            case "callRest": {
-                if (spec.body !== undefined && spec.exportMapping) throw new Error(`${where}: give 'body' or 'exportMapping', not both`);
-                if (!spec.exportMapping !== !spec.exportObject) throw new Error(`${where}: 'exportMapping' and 'exportObject' go together`);
-                if (spec.headers !== undefined && (typeof spec.headers !== "object" || Array.isArray(spec.headers))) throw new Error(`${where}: headers must be { "Name": "expression" }`);
-                // weak models mix up the text template (url, body) and expressions (args, header values)
-                if (/^\s*['@$]/.test(spec.url)) throw new Error(`${where}: url is text, not an expression: write https://... and put expressions in urlArgs, e.g. "url": "{1}/orders/{2}", "urlArgs": ["@Module.BaseUrl", "$Order/Id"]`);
-                for (const [k, v] of Object.entries(spec.headers || {})) {
-                    if (!/['$@(]|^\s*(-?\d+(\.\d+)?|empty|true|false)\s*$/.test(String(v))) throw new Error(`${where}: header ${k} is an expression: write '${v}' in single quotes`);
-                }
-                a = mf.RestCallAction.createIn(act);
-                const http = a.httpConfiguration || mf.HttpConfiguration.createInRestCallActionUnderHttpConfiguration(a);
-                http.overrideLocation = true;
-                fillTemplate(f, http.customLocationTemplate || mf.StringTemplate.createInHttpConfigurationUnderCustomLocationTemplate(http), spec.url, spec.urlArgs, `${where} url`, true);
-                try {
-                    http.newHttpMethod = enumValue(services.HttpMethod, spec.method || "Get", "HTTP method");
-                } catch (e) {
-                    throw new Error(`${where}: ${e.message}`);
-                }
-                for (const [k, v] of Object.entries(spec.headers || {})) {
-                    const e = mf.HttpHeaderEntry.createInHttpConfigurationUnderHeaderEntries(http);
-                    e.key = k;
-                    e.value = expr(f.m, v, `${where} header ${k}`);
-                }
-                a.useRequestTimeOut = true;
-                a.timeOutExpression = expr(f.m, spec.timeout === undefined ? "300" : spec.timeout, `${where} timeout`);
-                a.errorResultHandlingType = mf.ErrorResultHandlingType.HttpResponse;
-                a.requestProxyType = mf.RequestProxyType.DefaultProxy;
-                if (spec.exportMapping) {
-                    const map = await h.get(spec.exportMapping);
-                    if (!(map instanceof exportmappings.ExportMapping)) throw new Error(`${where}: '${spec.exportMapping}' is not an export mapping`);
-                    await variableInfo(f.m, spec.exportObject, where);
-                    const rq = mf.MappingRequestHandling.createInRestCallActionUnderRequestHandling(a);
-                    rq.mapping = map;
-                    rq.mappingArgumentVariableName = noDollar(spec.exportObject);
-                    rq.contentType = contentType(map);
-                    a.requestHandlingType = mf.RequestHandlingType.Mapping;
-                } else {
-                    const rq = mf.CustomRequestHandling.createInRestCallActionUnderRequestHandling(a);
-                    fillTemplate(f, rq.template || mf.StringTemplate.createInCustomRequestHandlingUnderTemplate(rq), spec.body || "", spec.bodyArgs, `${where} body`, true);
-                    a.requestHandlingType = mf.RequestHandlingType.Custom;
-                }
-                const response = spec.response === undefined ? (spec.variable ? "string" : "none") : String(spec.response);
-                const how = /^none$/i.test(response) ? "none" : /^string$/i.test(response) ? "string" : "mapping";
-                if (how === "mapping" && !response.includes(".")) fail(`${where}: response '${response}' is not none, string or an import mapping (Module.Mapping)`, response, ["none", "string"]);
-                const r = a.resultHandling || mf.ResultHandling.createInRestCallActionUnderResultHandling(a);
-                a.resultHandlingType = mf.ResultHandlingType[await resultHandling(f, r, how, { ...spec, mapping: response }, where)];
+            case "callRest":
+                a = await restCall(f, act, spec, where);
                 break;
-            }
+            case "metric":
+                a = metricAction(f, act, spec, where);
+                break;
+            case "generateDocument":
+                a = await generateDocument(f, act, spec, where);
+                break;
             case "importWithMapping": {
                 const src = await variableInfo(f.m, spec.source, where);
                 if (src.entity) throw new Error(`${where}: source must be a String variable with the JSON/XML text, not ${src.list ? "a list" : "an object"}`);
@@ -835,10 +1059,184 @@ function makeFlows(h) {
             act.caption = String(spec.caption);
             act.autoGenerateCaption = false;
         }
+        if (spec.note !== undefined) annotate(f.m, f.coll, String(spec.note), act);
         return act;
     }
 
+    // An annotation (a note on the canvas), attached to obj with an annotation flow when obj is given; placed above it.
+    function annotate(m, coll, text, obj, at = null) {
+        if (!text.trim()) throw new Error("an annotation needs text");
+        const note = mf.Annotation.createIn(coll);
+        const lines = text.split(/\r?\n/);
+        const width = Math.min(400, Math.max(150, 7 * Math.max(...lines.map(l => l.length)) + 20));
+        size(note, width, Math.max(50, 20 * lines.length + 10));
+        const p = at || (obj ? { x: obj.relativeMiddlePoint.x, y: obj.relativeMiddlePoint.y - 120 } : { x: 100, y: 50 });
+        point(note, p.x, p.y);
+        note.caption = text.replace(/\r?\n/g, "\r\n");
+        if (obj) {
+            const fl = mf.AnnotationFlow.createIn(m);
+            fl.origin = note;
+            fl.destination = obj;
+            fl.originConnectionIndex = 2;
+            fl.destinationConnectionIndex = 0;
+        }
+        return note;
+    }
+
+    function metricAction(f, act, spec, where) {
+        const t = METRICS[String(spec.type).toLowerCase()];
+        if (!t) fail(`${where}: metric type '${spec.type}' is not one of counter | increment | gauge`, spec.type, Object.keys(METRICS));
+        if (!mf[t]) throw new Error(`${where}: metrics are not in this Mendix version`);
+        if (t === "IncrementCounterMeterAction" && spec.value !== undefined) throw new Error(`${where}: increment adds 1 and takes no 'value'; use type counter to add a value`);
+        if (t === "GaugeMeterAction" && spec.value === undefined) throw new Error(`${where}: a gauge needs 'value' (the number to record)`);
+        if (!/^[A-Za-z][\w.\-]*$/.test(String(spec.name))) throw new Error(`${where}: metric name '${spec.name}' must be plain text like orders.created (letters, digits, . _ -), not an expression`);
+        if (spec.tags !== undefined && (!spec.tags || typeof spec.tags !== "object" || Array.isArray(spec.tags))) throw new Error(`${where}: tags must be { "tag": "expression" }`);
+        const a = mf[t].createIn(act);
+        a.name = String(spec.name);
+        a.description = spec.description === undefined ? "" : String(spec.description);
+        if (t !== "IncrementCounterMeterAction") a.value = expr(f.m, spec.value === undefined ? "1" : spec.value, `${where} value`);
+        for (const [k, v] of Object.entries(spec.tags || {})) {
+            const tag = mf.MeterTagMapping.createIn(a);
+            tag.key = k;
+            tag.value = expr(f.m, v, `${where} tag ${k}`);
+        }
+        return a;
+    }
+
+    // Only where Studio Pro already wrote one in this project: document templates are deprecated and no test project
+    // has a sample, so the stored layout cannot be checked otherwise.
+    async function generateDocument(f, act, spec, where) {
+        const cat = h.client && h.client.catalog;
+        const own = cat && cat.types.has("Microflows$GenerateDocumentAction") && !(cat.reference && cat.reference.has("Microflows$GenerateDocumentAction"));
+        if (!own) throw new Error(`${where}: generateDocument is only written in projects that already use a 'Generate document' action (document templates are deprecated; no sample here). Add it in Studio Pro`);
+        const tpl = await h.get(spec.template);
+        if (!(tpl instanceof sdk.documenttemplates.DocumentTemplate)) throw new Error(`${where}: '${spec.template}' is not a document template`);
+        const ent = await needVariable(f.m, spec.variable, false, where);
+        if (!(await isA(ent, "System.FileDocument"))) throw new Error(`${where}: $${noDollar(spec.variable)} is ${ent}, not a file document`);
+        const a = mf.GenerateDocumentAction.createIn(act);
+        a.documentTemplate = tpl;
+        a.fileVariableName = noDollar(spec.variable);
+        a.documentType = enumValue(mf.TargetDocumentType, spec.type || "PDF", "document type");
+        a.languageSetting = mf.LanguageSettingType.CurrentUser;
+        // the template's top-level data widgets are its parameters (by widget name)
+        const params = [...tpl.toplevels].filter(w => w.name && /\$(DataView|DataGrid|TemplateGrid)$/.test(w.structureTypeName));
+        for (const [name, value] of Object.entries(spec.args || {})) {
+            const p = params.find(x => x.name === name);
+            if (!p) fail(`${where}: ${spec.template} has no parameter '${name}'`, name, params.map(x => x.name));
+            const pm = mf.DocumentTemplateParameterMapping.createIn(a);
+            pm.widgetName = name;
+            pm.argument = expr(f.m, value, where);
+        }
+        const missing = params.filter(p => !(p.name in (spec.args || {})));
+        if (missing.length) throw new Error(`${where}: ${spec.template} needs args for: ${missing.map(p => p.name).join(", ")}`);
+        return a;
+    }
+
     // ------------------------------------------------ structured sequences
+
+    // The condition of a decision: an expression (field 'condition' or 'value'), or a rule call ('rule' + 'args').
+    // enumerated: the decision branches on an enumeration (switch); Boolean otherwise. Returns { label, enumeration }.
+    async function decision(f, split, spec, field, where, enumerated) {
+        if ((spec[field] === undefined) === (spec.rule === undefined)) throw new Error(`${where}: give '${field}' (an expression) or 'rule' (Module.Rule), one of them`);
+        if (spec.args !== undefined && spec.rule === undefined) throw new Error(`${where}: 'args' go with 'rule'`);
+        if (spec.rule === undefined) {
+            const cond = mf.ExpressionSplitCondition.createIn(split);
+            cond.expression = expr(f.m, spec[field], where);
+            return { label: String(spec[field]), enumeration: enumerated ? spec.enumeration || (await enumOfExpression(f.m, spec[field], where)) : null };
+        }
+        const rule = await h.get(spec.rule);
+        if (!(rule instanceof mf.Rule)) throw new Error(`${where}: '${spec.rule}' is not a rule` + (isFlowDoc(rule) ? " (a microflow: call it first and decide on its result)" : ""));
+        const rt = rule.microflowReturnType;
+        const isEnum = rt instanceof datatypes.EnumerationType;
+        if (enumerated && !isEnum) throw new Error(`${where}: rule ${spec.rule} returns ${rt ? rt.structureTypeName.split("$")[1].replace("Type", "") : "nothing"}; a switch needs a rule that returns an enumeration (use if for a Boolean rule)`);
+        if (!enumerated && !(rt instanceof datatypes.BooleanType)) throw new Error(`${where}: rule ${spec.rule} returns ${isEnum ? "an enumeration: use switch with rule" : "no Boolean"}`);
+        const args = spec.args || {};
+        if (typeof args !== "object" || Array.isArray(args)) throw new Error(`${where}: args must be { "Param": "expression" }`);
+        const params = rule.objectCollection.objects.filter(o => o instanceof mf.MicroflowParameterObject);
+        for (const name of Object.keys(args)) if (!params.some(p => p.name === name)) fail(`${where}: rule ${spec.rule} has no parameter '${name}'`, name, params.map(p => p.name));
+        const missing = params.filter(p => !(p.name in args));
+        if (missing.length) throw new Error(`${where}: rule ${spec.rule} needs args for: ${missing.map(p => p.name).join(", ")}`);
+        const cond = mf.RuleSplitCondition.createIn(split);
+        const call = mf.RuleCall.createIn(cond);
+        call.rule = rule;
+        for (const p of params) {
+            const pm = mf.RuleCallParameterMapping.createIn(call);
+            pm.__parameter.updateWithRawValue(`${rule.qualifiedName}.${p.name}`); // Studio Pro stores the rule parameter by name
+            pm.argument = expr(f.m, args[p.name], where);
+        }
+        return { label: rule.name, enumeration: isEnum ? rt.enumerationQualifiedName : null };
+    }
+
+    // The enumeration an expression gives: $Var (parameter or variable of an enumeration type) or $Var/Attribute.
+    async function enumOfExpression(m, value, where) {
+        const v = String(value).trim();
+        const hit = /^\$(\w+)(?:\/(\w+))?$/.exec(v);
+        const why = `cannot tell the enumeration of '${v}'; add "enumeration": "Module.Enumeration"`;
+        if (!hit) throw new Error(`${where}: ${why}`);
+        if (!hit[2]) {
+            const t = await typeOfVariable(m, hit[1], where);
+            const e = /^Enum\((.+)\)$/.exec(t || "");
+            if (!e) throw new Error(`${where}: $${hit[1]} is ${t || "not an enumeration"}; a switch needs an enumeration value`);
+            return e[1];
+        }
+        const ent = await entityOfVariable(m, hit[1], where);
+        const { attribute } = await memberOf(ent, hit[2], where);
+        if (!attribute || !(attribute.type instanceof dm.EnumerationAttributeType)) throw new Error(`${where}: ${ent}.${hit[2]} is no enumeration attribute; a switch needs an enumeration value (use if for other values)`);
+        return attribute.type.enumerationQualifiedName;
+    }
+
+    // Enumeration decision: one flow per case (several values on one flow), the rest, and empty; joined by a merge.
+    async function enumSwitch(f, spec, x, y, w) {
+        const split = mf.ExclusiveSplit.createIn(f.coll);
+        point(split, x, y);
+        size(split, 130, 80);
+        split.errorHandlingType = errorDefault(f);
+        const { label, enumeration } = await decision(f, split, spec, "value", w, true);
+        split.caption = String(spec.caption || label);
+        const en = await h.get(enumeration);
+        if (!(en instanceof sdk.enumerations.Enumeration)) throw new Error(`${w}: '${enumeration}' is not an enumeration`);
+        const values = en.values.map(v => v.name);
+        const cases = spec.cases && typeof spec.cases === "object" && !Array.isArray(spec.cases) ? Object.entries(spec.cases) : [];
+        if (!cases.length) throw new Error(`${w}: switch needs cases: { "${values[0] || "Value"}": [ actions ] }`);
+        const used = new Set();
+        const branches = [];
+        for (const [key, acts] of cases) {
+            const names = key.split(",").map(x => x.trim()).filter(Boolean).map(x => x.replace(/^.*\./, "")); // Module.Enum.Value works too
+            for (const n of names) {
+                if (/^\(?empty\)?$/i.test(n)) throw new Error(`${w}: put the empty case in "empty": [ ... ], not in cases`);
+                if (!values.includes(n)) fail(`${w}: ${enumeration} has no value '${n}'`, n, values);
+                if (used.has(n)) throw new Error(`${w}: value ${n} is in two cases`);
+                used.add(n);
+            }
+            if (!Array.isArray(acts)) throw new Error(`${w}: case ${key} must be a list of actions [ ... ]`);
+            branches.push({ values: names, acts, label: key });
+        }
+        const rest = values.filter(v => !used.has(v));
+        if (spec.other !== undefined && !rest.length) throw new Error(`${w}: every value of ${enumeration} has a case; remove 'other'`);
+        if (rest.length) branches.push({ values: rest, acts: spec.other || [], label: "other" });
+        branches.push({ values: ["(empty)"], acts: spec.empty || [], label: "empty" }); // Studio Pro's value for no value
+        let cursor = x + X_STEP;
+        let laneY = y;
+        let width = 0;
+        const open = [];
+        for (const [bi, b] of branches.entries()) {
+            const seg = await buildSeq(f, b.acts, cursor, laneY, { obj: split, originIndex: bi ? 2 : 1, caseValue: b.values.length > 1 ? b.values : b.values[0] }, `${w} ${b.label}`);
+            if (seg.tail) open.push(seg.tail);
+            width = Math.max(width, seg.width);
+            laneY += LANE * Math.max(1, seg.height);
+        }
+        cursor += width;
+        let tail = null;
+        if (open.length > 1) {
+            const merge = mf.ExclusiveMerge.createIn(f.coll);
+            point(merge, cursor, y);
+            size(merge, 60, 60);
+            open.forEach((t, k) => connect(f, t, merge, k ? 2 : 3));
+            tail = { obj: merge, originIndex: 1 };
+            cursor += X_STEP;
+        } else if (open.length === 1) tail = open[0];
+        return { split, tail, cursor, height: (laneY - y) / LANE };
+    }
 
     // f: { m, coll, nano, inLoop, inHandler, returns }. Places specs left to right from (x, y), connecting from prev.
     // Returns { first, tail (null when the sequence ended), width, height (in lanes) }.
@@ -862,6 +1260,7 @@ function makeFlows(h) {
             if (ended) throw new Error(`${w}: unreachable: an earlier action already ended this path (end/break/continue/error)`);
             const kind = spec.action;
             if (/^call(Microflow|Nanoflow)$/i.test(kind)) throw new Error(`${w}: unknown action '${kind}'; use "call" with "microflow": "Module.Flow" (microflows and nanoflows)`);
+            if (REFUSED[kind]) throw new Error(`${w}: ${REFUSED[kind]}`);
             if (!ACTIONS[kind] && !CONTROL[kind]) fail(`${w}: unknown action '${kind}'`, kind, [...Object.keys(ACTIONS), ...Object.keys(CONTROL)]);
             if (CONTROL[kind]) validate("action", kind, CONTROL[kind], spec, w);
             if (kind === "cast" && !(i === 0 && castable)) throw new Error(`${w}: 'cast' must be the first action of a case of an ifType (it casts the object to that case's entity)`);
@@ -910,14 +1309,22 @@ function makeFlows(h) {
                     }
                     break;
                 }
+                case "switch": {
+                    const sw = await enumSwitch(f, spec, cursor, y, w);
+                    link(sw.split);
+                    cursor = sw.cursor;
+                    height = Math.max(height, sw.height);
+                    tail = sw.tail;
+                    if (!tail) ended = true;
+                    break;
+                }
                 case "if": {
                     const split = mf.ExclusiveSplit.createIn(f.coll);
                     point(split, cursor, y);
                     size(split, 130, 80);
-                    split.caption = String(spec.caption || spec.condition);
                     split.errorHandlingType = errorDefault(f);
-                    const cond = mf.ExpressionSplitCondition.createIn(split);
-                    cond.expression = expr(f.m, spec.condition, w);
+                    const { label } = await decision(f, split, spec, "condition", w, false);
+                    split.caption = String(spec.caption || label);
                     link(split);
                     cursor += X_STEP;
                     const thenSeg = await buildSeq(f, spec.then || [], cursor, y, { obj: split, originIndex: 1, caseValue: "true" }, `${w} then`);
@@ -1043,11 +1450,12 @@ function makeFlows(h) {
 
     // ------------------------------------------------ create / insert
 
-    async function createFlow(o, nano, container) {
+    // rule: a rule document (returns a Boolean or an enumeration; only reads and computes)
+    async function createFlow(o, nano, container, rule = false) {
         const qn = `${o.module}.${o.name}`;
-        const m = (nano ? mf.Nanoflow : mf.Microflow).createIn(container);
+        const m = (rule ? mf.Rule : nano ? mf.Nanoflow : mf.Microflow).createIn(container);
         m.name = o.name;
-        const f = { m, coll: m.objectCollection, nano, inLoop: false, inHandler: false, returns: false };
+        const f = { m, coll: m.objectCollection, nano, rule, inLoop: false, inHandler: false, returns: false };
         const start = mf.StartEvent.createIn(m.objectCollection);
         point(start, 100, 200);
         size(start, 20, 20);
@@ -1063,6 +1471,8 @@ function makeFlows(h) {
             m.microflowReturnType = await h.dataType(o.returns);
             f.returns = returnsValue(m);
         }
+        if (rule && !(m.microflowReturnType instanceof datatypes.BooleanType || m.microflowReturnType instanceof datatypes.EnumerationType)) throw new Error(`${qn}: a rule returns Boolean or Enum(Module.Enumeration), not ${o.returns || "nothing"}`);
+        if (o.documentation !== undefined) m.documentation = String(o.documentation);
         const seg = await buildSeq(f, o.actions || [], 100 + X_STEP, 200, { obj: start, originIndex: 1 }, qn);
         if (seg.tail) {
             const end = mf.EndEvent.createIn(m.objectCollection);
@@ -1099,40 +1509,54 @@ function makeFlows(h) {
         return [...m.flows].filter(x => x instanceof mf.SequenceFlow);
     }
 
-    async function addActions(o) {
-        const m = await flowDoc(o.microflow);
-        if (!Array.isArray(o.actions) || !o.actions.length) throw new Error("addActions needs actions: [ ... ]");
+    // The flow new steps go on: after "start", the step that creates a variable, or a step id (branch: which outgoing
+    // flow of a decision, e.g. "true" or an enumeration value); without 'after' the one flow into the single end event.
+    function anchorOf(m, after, branch, where) {
         const sequence = flowsOf(m).filter(x => !x.isErrorHandler);
-        let anchorFlow;
-        if (!o.after) {
+        if (!after) {
+            if (branch !== undefined) throw new Error(`${where}: 'branch' goes with 'after' (the id of a decision)`);
             const ends = [];
             walkObjects(m.objectCollection, x => x instanceof mf.EndEvent && ends.push(x));
-            if (ends.length !== 1) throw new Error(`${o.microflow} has ${ends.length} end events; say where with "after": "start", a variable name, or a step id (see: steps ${o.microflow})`);
+            if (ends.length !== 1) throw new Error(`${where}: ${m.qualifiedName} has ${ends.length} end events; say where with "after": "start", a variable name, or a step id (see: steps ${m.qualifiedName})`);
             const into = sequence.filter(x => x.destination === ends[0]);
-            if (into.length !== 1) throw new Error(`${o.microflow}: ${into.length} flows reach the end event; use "after"`);
-            anchorFlow = into[0];
-        } else {
-            const anchor = o.after === "start" ? m.objectCollection.objects.find(x => x instanceof mf.StartEvent) : variablesOf(m).get(noDollar(o.after)) || findStep(m, o.after, true);
-            if (!anchor || anchor instanceof mf.MicroflowParameterObject) fail(`${o.microflow}: no step creates variable '${o.after}' and no step has that id`, noDollar(o.after), ["start", ...variablesOf(m).keys()]);
-            const out = sequence.filter(x => x.origin === anchor);
-            if (out.length !== 1) throw new Error(`${o.microflow}: '${o.after}' has ${out.length} outgoing flows; pick another point (see: steps ${o.microflow})`);
-            anchorFlow = out[0];
+            if (into.length !== 1) throw new Error(`${where}: ${into.length} flows reach the end event; use "after"`);
+            return into[0];
         }
+        const anchor = after === "start" ? m.objectCollection.objects.find(x => x instanceof mf.StartEvent) : variablesOf(m).get(noDollar(after)) || findStep(m, after, true);
+        if (!anchor || anchor instanceof mf.MicroflowParameterObject) fail(`${where}: no step creates variable '${after}' and no step has that id`, noDollar(after), ["start", ...variablesOf(m).keys()]);
+        const out = sequence.filter(x => x.origin === anchor);
+        if (branch !== undefined) {
+            const labels = out.map(caseLabel).map(String);
+            const hit = out.filter(x => String(caseLabel(x)).split(", ").some(l => l.toLowerCase() === String(branch).toLowerCase() || (String(branch).toLowerCase() === "empty" && /^\(empty\)$|^empty$/.test(l))));
+            if (hit.length !== 1) fail(`${where}: '${after}' has no outgoing flow '${branch}' (it has: ${labels.join(" | ") || "none"})`, String(branch), labels);
+            return hit[0];
+        }
+        if (out.length !== 1) throw new Error(`${where}: '${after}' has ${out.length} outgoing flows; ${out.length > 1 ? `say which with "branch": ${out.map(x => JSON.stringify(String(caseLabel(x)))).join(" | ")}` : "pick another point"} (see: steps ${m.qualifiedName})`);
+        return out[0];
+    }
+
+    // Opens the anchor flow for new steps: returns { f, coll, x, y, tail, to, destIndex, before } and deletes the flow.
+    function openAnchor(m, anchorFlow) {
         const from = anchorFlow.origin;
         const to = anchorFlow.destination;
         const coll = from.container;
-        const f = { m, coll, nano: m instanceof mf.Nanoflow, inLoop: coll.container instanceof mf.LoopedActivity, inHandler: false, returns: returnsValue(m) };
-        const fx = from.relativeMiddlePoint.x;
-        const y = from.relativeMiddlePoint.y;
+        const f = { m, coll, nano: m instanceof mf.Nanoflow, rule: m instanceof mf.Rule, inLoop: coll.container instanceof mf.LoopedActivity, inHandler: false, returns: returnsValue(m) };
+        const branchY = caseOf(anchorFlow) !== null && to.container === coll ? to.relativeMiddlePoint.y : from.relativeMiddlePoint.y;
         const tail = { obj: from, originIndex: anchorFlow.originConnectionIndex, caseValue: caseOf(anchorFlow), errorHandler: anchorFlow.isErrorHandler };
-        const destIndex = anchorFlow.destinationConnectionIndex;
-        const before = new Set(coll.objects.map(x => x.id));
+        const out = { f, coll, x: from.relativeMiddlePoint.x, y: branchY, tail, to, destIndex: anchorFlow.destinationConnectionIndex, before: new Set(coll.objects.map(x => x.id)) };
         anchorFlow.delete();
-        const seg = await buildSeq(f, o.actions, fx + X_STEP, y, tail, o.microflow);
+        return out;
+    }
+
+    async function addActions(o) {
+        const m = await flowDoc(o.microflow);
+        if (!Array.isArray(o.actions) || !o.actions.length) throw new Error("addActions needs actions: [ ... ]");
+        const at = openAnchor(m, anchorOf(m, o.after, o.branch, o.microflow));
+        const seg = await buildSeq(at.f, o.actions, at.x + X_STEP, at.y, at.tail, o.microflow);
         if (!seg.tail) throw new Error(`${o.microflow}: inserted actions must not end the flow (end/break/continue); the steps after them would be cut off`);
-        makeRoom(coll, fx, seg.width, before);
-        connect(f, seg.tail, to, destIndex);
-        return `${o.microflow}: ${o.actions.length} action(s) after ${o.after || "the last step"}`;
+        makeRoom(at.coll, at.x, seg.width, at.before);
+        connect(at.f, seg.tail, at.to, at.destIndex);
+        return `${o.microflow}: ${o.actions.length} action(s) after ${o.after || "the last step"}${o.branch !== undefined ? ` [${o.branch}]` : ""}`;
     }
 
     // ------------------------------------------------ steps (ids), change, delete
@@ -1141,7 +1565,11 @@ function makeFlows(h) {
         if (o instanceof mf.StartEvent) return "START";
         if (o instanceof mf.EndEvent) return "END" + (o.returnValue ? ` return ${o.returnValue}` : "");
         if (o instanceof mf.MicroflowParameterObject) return `PARAMETER $${o.name}`;
-        if (o instanceof mf.ExclusiveSplit) return `IF ${o.splitCondition instanceof mf.ExpressionSplitCondition ? o.splitCondition.expression : o.caption}`;
+        if (o instanceof mf.ExclusiveSplit) {
+            const c = o.splitCondition;
+            if (c instanceof mf.RuleSplitCondition) return `IF RULE ${c.ruleCall ? c.ruleCall.ruleQualifiedName : "?"}(${c.ruleCall ? [...c.ruleCall.parameterMappings].map(pm => `${String(pm.parameterQualifiedName).split(".").pop()} = ${pm.argument}`).join(", ") : ""})`;
+            return `IF ${c instanceof mf.ExpressionSplitCondition ? c.expression : o.caption}`;
+        }
         if (o instanceof mf.InheritanceSplit) return `IF TYPE OF $${o.splitVariableName}`;
         if (o instanceof mf.ExclusiveMerge) return "MERGE";
         if (o instanceof mf.BreakEvent) return "BREAK";
@@ -1241,6 +1669,12 @@ function makeFlows(h) {
             lines.push("NOT CONNECTED:");
             for (const o of rest) visit(o, 1, "");
         }
+        const notes = all.filter(o => o instanceof mf.Annotation);
+        if (notes.length) {
+            lines.push("NOTES (annotations):");
+            const to = new Map([...m.flows].filter(x => x instanceof mf.AnnotationFlow).map(x => [x.origin && x.origin.id, x.destination]));
+            for (const n of notes) lines.push(`  [${short(n)}] "${n.caption.replace(/\r?\n/g, " ").slice(0, 80)}"${to.get(n.id) ? ` -> [${short(to.get(n.id))}]` : ""}`);
+        }
         return lines.join("\n");
     }
 
@@ -1331,6 +1765,11 @@ function makeFlows(h) {
                     const pv = pm.parameterValue;
                     if (pv instanceof mf.EntityTypeCodeActionParameterValue) pv.entity = await h.entity(value);
                     else if (pv instanceof mf.BasicCodeActionParameterValue) pv.argument = expr(f.m, value, where);
+                    else if (pv instanceof mf.MicroflowParameterValue) {
+                        const target = await h.get(String(value).replace(/^'|'$/g, ""));
+                        if (!(target instanceof mf.Microflow)) throw new Error(`${where}: parameter '${name}' takes a microflow name like "Module.Microflow"`);
+                        pv.microflow = target;
+                    }
                     else throw new Error(`${where}: parameter '${name}' takes no expression; change it in Studio Pro`);
                 }
             }
@@ -1356,6 +1795,7 @@ function makeFlows(h) {
             function: async (f, a, v, where, o) => {
                 const fn = AGGREGATE[String(v).toLowerCase()];
                 if (!fn) fail(`function '${v}' is not one of count | sum | average | minimum | maximum | all | any`, v, Object.keys(AGGREGATE));
+                if ((fn === "Reduce") !== (a.aggregateFunction === mf.AggregateFunctionEnum.Reduce)) throw new Error(`${where}: changing to or from reduce changes the result type; delete the step (deleteAction) and add a new aggregateList (addActions)`);
                 a.aggregateFunction = mf.AggregateFunctionEnum[fn];
                 if (fn === "Count") {
                     a.attribute = null;
@@ -1372,8 +1812,13 @@ function makeFlows(h) {
                 a.useExpression = false;
                 a.expression = "";
             },
+            initial: (f, a, v, where) => {
+                if (a.aggregateFunction !== mf.AggregateFunctionEnum.Reduce) throw new Error(`${where}: 'initial' only applies to reduce`);
+                a.reduceInitialValueExpression = expr(f.m, v, where);
+            },
             expression: async (f, a, v, where) => {
                 if (a.aggregateFunction === mf.AggregateFunctionEnum.Count) throw new Error(`${where}: count takes no expression; change 'function' first`);
+                if (a.aggregateFunction === mf.AggregateFunctionEnum.Reduce && !/\$currentResult\b/.test(String(v))) throw new Error(`${where}: a reduce expression combines $currentResult with $currentObject`);
                 a.expression = expr(f.m, v, where, await needVariable(f.m, a.inputListVariableName, true, where));
                 a.useExpression = true;
                 a.attribute = null;
@@ -1427,7 +1872,10 @@ function makeFlows(h) {
                 if (!(a.requestHandling instanceof mf.CustomRequestHandling)) throw new Error("'bodyArgs' only applies to a call with a text body");
                 fillTemplate(f, a.requestHandling.template, null, [].concat(v), where);
             },
-            commit: (f, a, v) => importCommit(a.resultHandling, v)
+            commit: (f, a, v) => importCommit(a.resultHandling, v),
+            auth: (f, a, v, where) => restAuth(f, a.httpConfiguration, v, where),
+            proxy: (f, a, v, where) => restProxy(f, a, v, where),
+            errorBody: (f, a, v) => (a.errorResultHandlingType = bool(v, true) ? mf.ErrorResultHandlingType.HttpResponse : mf.ErrorResultHandlingType.None)
         },
         ImportXmlAction: { commit: (f, a, v) => importCommit(a.resultHandling, v) },
         InheritanceSplit: { caption: (f, o, v) => (o.caption = String(v)) },
@@ -1435,8 +1883,18 @@ function makeFlows(h) {
         ChangeVariableAction: { value: (f, a, v, where) => (a.value = expr(f.m, v, where)) },
         ExclusiveSplit: {
             condition: (f, o, v, where) => {
-                if (!(o.splitCondition instanceof mf.ExpressionSplitCondition)) throw new Error("this decision uses a rule; change it in Studio Pro");
+                if (!(o.splitCondition instanceof mf.ExpressionSplitCondition)) throw new Error("this decision calls a rule: change its 'args', or replace the decision in Studio Pro");
                 o.splitCondition.expression = expr(f.m, v, where);
+            },
+            args: (f, o, v, where) => {
+                const call = o.splitCondition instanceof mf.RuleSplitCondition ? o.splitCondition.ruleCall : null;
+                if (!call) throw new Error("'args' only applies to a decision that calls a rule; this one has a condition");
+                if (!v || typeof v !== "object" || Array.isArray(v)) throw new Error(`${where}: args must be { "Param": "expression" }`);
+                for (const [name, value] of Object.entries(v)) {
+                    const pm = [...call.parameterMappings].find(x => String(x.parameterQualifiedName).split(".").pop() === name);
+                    if (!pm) fail(`${where}: the rule call has no parameter '${name}'`, name, [...call.parameterMappings].map(x => String(x.parameterQualifiedName).split(".").pop()));
+                    pm.argument = expr(f.m, value, where);
+                }
             },
             caption: (f, o, v) => (o.caption = String(v))
         },
@@ -1476,7 +1934,7 @@ function makeFlows(h) {
     async function changeAction(o) {
         const m = await flowDoc(o.microflow);
         const step = findStep(m, o.id);
-        const f = { m, nano: m instanceof mf.Nanoflow, returns: returnsValue(m) };
+        const f = { m, nano: m instanceof mf.Nanoflow, rule: m instanceof mf.Rule, returns: returnsValue(m) };
         const { target, own, common } = changeTable(step);
         const fields = Object.keys(o).filter(k => !["op", "microflow", "id"].includes(k));
         if (!fields.length) throw new Error(`changeAction needs at least one field to change. For this step: ${[...Object.keys(own), ...Object.keys(common)].join(", ") || "(nothing can be changed)"}`);
@@ -1560,7 +2018,9 @@ function makeFlows(h) {
         return lint;
     }
 
-    return { createFlow, addActions, changeAction, deleteAction, steps, describe, variablesOf, walkObjects, flowDoc, lintExpressions, findStep };
+    // for ops-flow-edit.js (moveAction, extractMicroflow, addAnnotation)
+    const internals = { flowDoc, findStep, flowsOf, walkObjects, variablesOf, typeOfVariable, variableInfo, anchorOf, openAnchor, makeRoom, connect, flow, caseOf, caseLabel, activity, annotate, describe, point, size, returnsValue, errorDefault, X_STEP, LANE };
+    return { createFlow, addActions, changeAction, deleteAction, steps, describe, variablesOf, walkObjects, flowDoc, lintExpressions, findStep, internals };
 }
 
 module.exports = { makeFlows, ACTIONS, CONTROL, COMMON, CREATES };
