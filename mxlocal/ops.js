@@ -16,6 +16,7 @@ const { makePageEdit, PAGE_EDIT_OPS, PAGE_EDIT_NAMES, FIELD_SYNONYMS } = require
 const { makeSecurity, SECURITY_OPS } = require("./ops-security");
 const { makeMappings, MAPPING_OPS } = require("./ops-mappings");
 const { makeTexts, TEXT_OPS } = require("./ops-texts");
+const { makeNav, NAV_OPS, MENU_EXTRA, extendedMenuItem } = require("./ops-nav");
 
 const OPS = {
     createEntity: {
@@ -86,8 +87,9 @@ const OPS = {
     },
     createPage: { doc: "Create a page: an edit form for an entity (inputs by attribute type, Save/Cancel), an empty page, or a page from widgets (layout grids, containers, texts, data grids (classic, or a Data grid 2 copied from the project's pages), data views that listen to a grid, list views, buttons, inputs), optionally with a menu item. Uses the layout the project's other pages use.", fields: PAGE_FIELDS },
     ...PAGE_EDIT_OPS,
-    addMenuItem: { doc: "Add a menu item that opens a page to a navigation profile's menu.", fields: MENU_FIELDS },
+    addMenuItem: { doc: "Add a menu item that opens a page (or runs a microflow) to a navigation profile's menu or a menu document.", fields: { ...MENU_FIELDS, ...MENU_EXTRA } },
     setHomePage: { doc: "Set the home page (or home microflow) of a navigation profile, for everyone or for some user roles.", fields: HOME_FIELDS },
+    ...NAV_OPS,
     ...MAPPING_OPS,
     publishRest: {
         doc: "Publish a microflow as a REST operation (creates the service and resource when missing). Microflow parameters become path parameters when the path has {Name}, otherwise query parameters. Object parameters/results need mappings: do those in Studio Pro.",
@@ -407,6 +409,7 @@ function bind(model, client) {
     const pageOps = makePages({ model, client, get, exists, entity, text, translationsOf, folder, attributeChain, loadParents, persistable, grantAccess: o => impl.grantAccess(o) });
     const pageEdit = makePageEdit({ model, client, get, text, translationsOf, attributeChain, persistable }, pageOps.internals);
     const securityOps = makeSecurity({ model, get });
+    const navOps = makeNav({ model, client, get, exists, text, translationsOf, folder, grantAccess: o => impl.grantAccess(o) }, pageOps.internals);
     const mappingOps = makeMappings({ model, get, exists, entity, folder, attributeChain, loadParents, impl: () => impl });
 
     // ------------------------------------------------ operations
@@ -771,8 +774,9 @@ function bind(model, client) {
         changeWidget: o => pageEdit.changeWidget(o),
         deleteWidget: o => pageEdit.deleteWidget(o),
         moveWidget: o => pageEdit.moveWidget(o),
-        addMenuItem: o => pageOps.addMenuItem(o),
+        addMenuItem: o => (extendedMenuItem(o) ? navOps.addMenuItem(o) : pageOps.addMenuItem(o)),
         setHomePage: o => pageOps.setHomePage(o),
+        ...navOps.impl,
         async publishRest(o) {
             const mfl = await get(o.microflow);
             if (!(mfl instanceof mf.Microflow)) throw new Error(`'${o.microflow}' is not a microflow`);
@@ -975,8 +979,9 @@ function bind(model, client) {
         },
         createPage: o => pageOps.checks.createPage(o),
         ...pageEdit.checks,
-        addMenuItem: o => pageOps.checks.addMenuItem(o),
+        addMenuItem: o => (extendedMenuItem(o) ? navOps.checks.addMenuItem(o) : pageOps.checks.addMenuItem(o)),
         setHomePage: o => pageOps.checks.setHomePage(o),
+        ...navOps.checks,
         async publishRest(o) {
             const svc = await get(`${o.module}.${o.service}`);
             const res = svc.resources.find(x => x.name === o.resource);

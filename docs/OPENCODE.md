@@ -325,12 +325,18 @@ Mendix expressions as text: `"'Hello'"`, `"$Order/Total * 2"`, `"empty"`, `"[%Cu
 | Op | Fields | Notes |
 |---|---|---|
 | `createPage` | **module**, **name**, title, entity, fields `["Attr"]`, buttons (default true), widgets, arrange, menu, layout, folder, roles | Without `widgets`: with `entity` an edit form (page parameter, data view, an input per attribute, Save/Cancel), without `entity` an empty page. With `widgets`: the page content from the widget list below; `entity` is then the default entity of grids and data views. `menu` (`"Responsive"` or `{profile, caption, parent}`) adds a menu item, `roles` lets module roles open the page. The layout is the one the project's own pages use most |
-| `addMenuItem` | **page**, profile (default Responsive), caption (default: the page title), parent (caption of an existing menu item) | Only pages without parameters. A page is in a menu once. New items go at the end. A menu item has no roles of its own: it shows for the user roles that may open the page (change that with `grantAccess` / `revokeAccess` on the page). The dry-run line ends with `seen by: <user roles>` |
+| `addMenuItem` | **page** or **microflow**, profile (default Responsive) or menu (a menu document `Module.Menu`), caption (default: the page title), parent (caption or path of an existing item), after / before (a sibling caption), icon | Only pages without parameters. A page is in a menu once. New items go at the end unless after/before. A menu item has no roles of its own: it shows for the user roles that may open the page (change that with `grantAccess` / `revokeAccess` on the page, or `changeMenuItem` roles). The dry-run line ends with `seen by: <user roles>`. `icon`: an icon collection icon `"Atlas_Core.Atlas_Filled.home"`, an image `"Module.Images.Logo"`, a glyph code number (`57377`) |
 | `addWidgets` | **page**, **widgets**, into, slot, after, before, entity | Adds `createPage` widgets (list below) to an existing page or snippet. `into`: a container, data view, list view, group box, tab page, the placeholder (`Main`) or a layout grid column `"layoutGrid1/row 1/column 2"`; `"slot": "footer"` = a data view's footer. `after`/`before`: a widget name in that list (default: at the end). Inputs and `{Attribute}` texts use the entity of the data view or list view around them. New names as Studio Pro gives them (`text3`, `actionButton2`). A new data view listens to a grid or list view (`listenTo`, also one already on the page) or shows the page's own parameter; no op adds a page parameter |
 | `changeWidget` | **page**, **widget**, caption, text, label, placeholder, editable, visible, class, style, textStyle, buttonStyle, columns, xpath, name, action, onClick, onChange | Only the given fields change. `editable`: true/false, or (inputs) an expression or `{"attribute": "Status", "values": ["Open"]}`; `visible`: true, false, an expression `"$currentObject/Active"` or `{"attribute": ...}`. `columns`: `{"add": [...], "remove": [...]}` of a classic grid or Data grid 2. `name` renames; data views listening to it follow. `action` (a button, also a classic grid button), `onClick` (Data grid 2, gallery) and `onChange` (inputs, selectors, combo box) replace the old action: `{"action": "showPage", "page": ..., "params": ...}`. Texts change in the default language only (the dry run warns about other languages) |
 | `deleteWidget` | **page**, **widget** | Deletes the widget with everything in it (also a classic grid column, grid button or tab page). Refused while a data view listens to it or a widget elsewhere refers to it by name |
 | `moveWidget` | **page**, **widget**, into, slot, after, before | Same page only. A widget that shows attributes or acts on the object stays in the same data view or list view |
 | `setHomePage` | **page** or **microflow**, profile (default Responsive), roles (user roles, e.g. `["Administrator"]`) | Without roles: the default home page. Only pages/microflows without parameters |
+| `changeMenuItem` | **item**, profile or menu, caption, page, microflow, action (`"none"`), icon (`"none"` removes it), roles | `item` = the caption (any language), a path `"Parent/Child"`, or the page/microflow the item opens. Only the given fields change. `caption` as text changes the default language only (per language: `{"en_US": ..., "nl_NL": ...}`). `roles` (module roles) are given to the item's page or microflow, since menu items have no roles of their own |
+| `moveMenuItem` | **item**, profile or menu, parent (`""` = top level), after / before (a sibling caption), position (`first` / `last`) | Moves the item with its sub-items: re-order within its parent, or under another item. At most 3 levels; an item cannot go under itself |
+| `deleteMenuItem` | **item**, profile or menu | Deletes the item and its sub-items (the dry run lists them) |
+| `createMenu` | **module**, **name**, folder, items (`[{"caption", "page" or "microflow", "icon", "items": [...]}]`) | A menu document (`Menus$MenuDocument`), as used by menu bars and navigation trees. Show it with `useMenu` |
+| `useMenu` | **document** (layout, page or snippet), widget (the menu widget name; default the only one), menu or profile | Points a menu bar, navigation tree or simple menu bar at a menu document or a navigation profile. On a layout this changes every page that uses it (the dry run says so) |
+| `createNavigationProfile` | **kind** (`Responsive`, `Tablet`, `Phone`, `ResponsiveOffline`, `TabletOffline`, `PhoneOffline`), homePage, copyMenu | A web navigation profile for a device type the project does not have yet (one per device type). Home page default: the Responsive one. `copyMenu: true` copies the Responsive menu. Native mobile profiles: Studio Pro |
 
 Widgets in `"widgets": [ { "widget": "<kind>", ... } ]`, top to bottom. Every widget takes `name` (default as
 Studio Pro: `grid1`, `dataGrid2_1`, `dataView1`, ...) and the common fields `visible` (an expression
@@ -774,6 +780,22 @@ Security:
   { "op": "createModuleRole", "module": "Sales", "name": "Manager" },
   { "op": "grantAccess", "document": "Sales.ACT_Order_Close", "roles": ["Sales.Manager"] },
   { "op": "addAccessRule", "entity": "Sales.Order", "roles": ["Sales.Manager"], "access": "ReadWrite", "create": true, "delete": true }
+] }
+```
+
+Menus and navigation: re-order the Responsive menu, rename an item in two languages, a menu document shown by the
+phone layout's menu bar, and a phone profile:
+
+```json
+{ "ops": [
+  { "op": "moveMenuItem", "item": "Orders", "position": "first" },
+  { "op": "moveMenuItem", "item": "Reports/Monthly", "parent": "Orders", "after": "Open orders" },
+  { "op": "changeMenuItem", "item": "Home", "caption": { "en_US": "Start", "nl_NL": "Begin" }, "icon": "Atlas_Core.Atlas_Filled.home" },
+  { "op": "deleteMenuItem", "item": "Old stuff" },
+  { "op": "createMenu", "module": "Sales", "name": "Phone_Menu", "items": [ { "caption": "Orders", "page": "Sales.Order_List" }, { "caption": "Sync", "microflow": "Sales.ACT_Sync", "icon": 57377 } ] },
+  { "op": "addMenuItem", "menu": "Sales.Phone_Menu", "page": "Sales.Customer_List", "caption": "Customers", "before": "Sync" },
+  { "op": "useMenu", "document": "Atlas_Core.Phone_Default", "menu": "Sales.Phone_Menu" },
+  { "op": "createNavigationProfile", "kind": "Phone", "homePage": "Sales.Order_List" }
 ] }
 ```
 

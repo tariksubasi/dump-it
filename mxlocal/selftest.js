@@ -1188,6 +1188,10 @@ async function selftest(mpr, keep, { out, relevant }) {
             s2 = await reopen(copy);
         }
 
+        // navigation, theme files, packages (selftest-tools.js)
+        await require("./selftest-tools").phase({ src, copy, reopen, check, results, layout, mod, T, layoutProblems, sameOutside });
+        s2 = await reopen(copy);
+
         // phase 3: attribute rename + module rename
         const phase3 = { ops: [{ op: "rename", target: `${E}.Flag`, newName: "Active" }, { op: "rename", target: mod, newName: `${mod}Zz` }] };
         await s2.ops.runPlan(phase3, () => {});
