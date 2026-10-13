@@ -20,6 +20,11 @@ Copied into the export folder by mxcontext.py with CONFIG filled in, so the agen
     python mx.py check                run Studio Pro's mx check on the project (when mx.exe is installed)
     python mx.py ok "<summary>"       mark the current export as the checked state (git commit)
     python mx.py selftest             run every operation on a temporary copy of the project
+    python mx.py mergecheck           after a git merge of the app: which documents each side changed, which
+                                      are resolved automatically, true conflicts with both changes
+    python mx.py mergefix [--pick "<id|Doc>=ours|theirs,..."] [--all ours|theirs]
+                                      dry run of the merge fix (merged unit files + rebuilt unit table); prints
+                                      an approval code for apply
 """
 import datetime
 import glob
@@ -42,7 +47,7 @@ for stream in (sys.stdout, sys.stderr):
         pass
 EDITS = os.path.join(HERE, "edits")
 COMMANDS = ("refresh", "find", "steps", "widgets", "texts", "ops", "api", "dryrun", "rerun", "gap", "apply", "undo", "check", "ok",
-            "selftest")
+            "selftest", "mergecheck", "mergefix")
 last_output = ""
 
 
@@ -267,6 +272,17 @@ def main(argv):
         return code
     if cmd == "selftest":
         return mxlocal("selftest")
+    if cmd == "mergecheck":
+        return mxlocal("mergecheck")
+    if cmd == "mergefix":
+        args = []
+        for flag in ("--pick", "--all"):
+            if flag in rest and rest.index(flag) + 1 < len(rest):
+                args += [flag, rest[rest.index(flag) + 1]]
+        code = mxlocal("mergefix", *args)
+        m = re.search(r"Approval code: (\w+)", last_output)
+        journal(cmd="mergefix", code=m.group(1) if m else None, ok=code == 0)
+        return code
     say("Unknown command '%s'.\n%s" % (cmd, __doc__))
     return 1
 

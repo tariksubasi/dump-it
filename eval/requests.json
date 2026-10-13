@@ -362,6 +362,67 @@
           "Customer_Summary\\.txt$": "(?s)^(?=.*data: microflow MyFirstModule\\.DS_Customer_LastOrder)(?=.*attr Total)"
         }
       }
+    },
+    {
+      "id": "menureorder",
+      "setup": [
+        {
+          "op": "createPage",
+          "module": "MyFirstModule",
+          "name": "Order_List",
+          "widgets": [
+            {
+              "widget": "dataGrid",
+              "entity": "MyFirstModule.Order"
+            }
+          ],
+          "menu": {
+            "caption": "Orders"
+          }
+        },
+        {
+          "op": "createPage",
+          "module": "MyFirstModule",
+          "name": "Customer_List",
+          "widgets": [
+            {
+              "widget": "dataGrid",
+              "entity": "MyFirstModule.Customer"
+            }
+          ],
+          "menu": {
+            "caption": "Customers"
+          }
+        }
+      ],
+      "text": "Responsive menüde 'Customers' öğesinin adını 'Müşteriler' yap ve menünün en üstüne taşı; 'Orders' öğesini 'Müşteriler'in altına (alt menü) koy.",
+      "checks": {
+        "files": {
+          "overview\\.txt$": "(?s)menu \"Müşteriler\" -> open page MyFirstModule\\.Customer_List\\(\\).*\"Orders\" -> open page MyFirstModule\\.Order_List"
+        }
+      }
+    },
+    {
+      "id": "menudoc",
+      "setup": [
+        {
+          "op": "createPage",
+          "module": "MyFirstModule",
+          "name": "Order_List",
+          "widgets": [
+            {
+              "widget": "dataGrid",
+              "entity": "MyFirstModule.Order"
+            }
+          ]
+        }
+      ],
+      "text": "MyFirstModule'de Admin_Menu adında bir menü dokümanı oluştur; içinde Order_List sayfasını açan 'Siparişler' öğesi olsun.",
+      "checks": {
+        "find": [
+          "MyFirstModule.Admin_Menu"
+        ]
+      }
     }
   ]
 }

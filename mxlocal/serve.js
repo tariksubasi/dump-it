@@ -46,6 +46,8 @@ function tools(allowApply) {
             required: ["name", "ops"] } },
         { name: "dryrun", description: "Dry-run a change file that is already in edits/ (e.g. after an undo). Writes nothing; returns the approval code.",
             inputSchema: { type: "object", properties: { file: str("file name in edits/, e.g. add-note.json") }, required: ["file"] } },
+        { name: "mergecheck", description: "After a git merge of the Mendix app: per-document 3-way analysis of mprcontents and the .mpr unit table (resolved automatically / true conflicts with what each side changed). Read-only; the fix is the command python mx.py mergefix (dry run) then apply.",
+            inputSchema: { type: "object", properties: {} } },
         { name: "gap", description: "Record a change that no operation can do yet (edits/gaps.jsonl). Then give the user Studio Pro steps.",
             inputSchema: { type: "object", properties: { need: str("what the user wants, in one sentence") }, required: ["need"] } }
     ];
@@ -187,6 +189,9 @@ class Server {
                     await this.dryrun(file);
                     break;
                 }
+                case "mergecheck":
+                    lines.push(require("./merge").mergecheck(this.mpr));
+                    break;
                 case "gap": {
                     fs.mkdirSync(this.edits, { recursive: true });
                     const gaps = path.join(this.edits, "gaps.jsonl");

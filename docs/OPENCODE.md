@@ -72,9 +72,11 @@ Run all of these from the export folder.
 | `python mx.py check` | Runs Studio Pro's `mx check` (only when `mx.exe` is installed) | no |
 | `python mx.py ok "<summary>"` | Saves the current export as the checked state (git commit) | no |
 | `python mx.py selftest` | Runs every operation on a temporary copy of the project and checks the result | no |
+| `python mx.py mergecheck` | After a `git merge` of the app with conflicts in the `.mpr` or `mprcontents/*.mxunit`: per document, which side changed it (resolved automatically) and the **true conflicts** (both sides changed the same document) with what each side changed. Without a merge: checks the `.mpr` unit table against `mprcontents` | no |
+| `python mx.py mergefix [--pick "<id or Module.Doc>=ours\|theirs,..."] [--all ours\|theirs]` | Dry run of the merge fix: writes nothing, prints the merged documents and an approval code. Every true conflict needs a side (the other side's change to that document is lost; tell the user to redo it in Studio Pro). Then `python mx.py apply <CODE>` writes the merged unit files and rebuilds the unit table; the user finishes with `git add <app>.mpr mprcontents` and `git commit` | no (apply: **yes**) |
 
 The same lookups also exist as tools of the `mendix` MCP server (in OpenCode: `mendix_find`, in Claude Code:
-`mcp__mendix__find`): `find`, `steps`, `widgets`, `texts`, `ops`, `api`, `dryrun`, `gap` and **`plan`**. `plan` takes a short name and the
+`mcp__mendix__find`): `find`, `steps`, `widgets`, `texts`, `ops`, `api`, `dryrun`, `gap`, `mergecheck` and **`plan`**. `plan` takes a short name and the
 ops list, saves `edits/<name>.json` and dry-runs it in one call; the server keeps the model loaded, so this takes a
 fraction of a second. Use the tool or the command; the result is the same. `apply` and `undo` exist only as commands,
 so OpenCode (and Claude Code) asks the user before they run. Commands are lowercase. (Folders exported with
@@ -90,7 +92,7 @@ The user can type these slash commands:
 | `/degistir <request>` | Change the model. Follow section 5 |
 | `/kontrol [what it should do]` | Check the user's own Studio Pro change. Follow section 6. The refresh output is already in the message |
 | `/geri-al` | Run `python mx.py undo` (Studio Pro closed) and report |
-| `/senkron` | After pull/merge/branch switch: `python mx.py refresh`, then `python mx.py ok "sync"`. No review |
+| `/senkron` | After pull/merge/branch switch: `python mx.py refresh`, then `python mx.py ok "sync"`. No review. If git reports conflicts in the `.mpr` or `mprcontents`, or the export fails after a merge: `python mx.py mergecheck` first, show the user the true conflicts, ask ours or theirs per document, `python mx.py mergefix --pick ...`, and apply only with the user's code |
 
 ---
 

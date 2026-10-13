@@ -50,6 +50,12 @@ const USAGE = `mxlocal - Mendix Model SDK offline on a local .mpr (v2)
   node mxlocal.js texts [Module|Module.Doc|menu] [--missing <lang>] --project <app.mpr|folder>
                                         translatable texts (titles, captions, labels, messages, enumeration and menu
                                         captions) in every project language (for setTranslations)
+  node mxlocal.js mergecheck --project ...
+                                        after a git merge: per-unit 3-way analysis of mprcontents and the .mpr unit
+                                        table, true conflicts with what each side changed (read-only)
+  node mxlocal.js mergefix [--pick "<id|Doc>=ours|theirs,..."] [--all ours|theirs] --project ...
+                                        dry run of the merge fix (approval code): merged unit files + rebuilt unit
+                                        table; write it with apply --code
   node mxlocal.js ops [name]            the operations a change.json can use (with a name: its fields)
   node mxlocal.js serve --project ... --edits <dir> [--allow-apply]
                                         MCP server (stdio) with these commands as tools; keeps the project loaded
@@ -404,6 +410,8 @@ async function main() {
         await run(a._[1], mpr, a["allow-js"] === true);
     } else if (cmd === "apply") await apply(mpr, a.code);
     else if (cmd === "restore") restoreCmd(mpr, a.backup, a.force);
+    else if (cmd === "mergecheck") out(require("./merge").mergecheck(mpr));
+    else if (cmd === "mergefix") out(require("./merge").mergefix(mpr, a.pick, a.all).text);
     else if (cmd === "steps") {
         if (!a._[1]) throw new Error("steps needs a microflow or nanoflow, e.g. steps Module.ACT_Save");
         const ctx = await loadProject(mpr);
@@ -472,7 +480,7 @@ function report(e, file) {
     const stack = (e && e.stack ? e.stack : "").split("\n").slice(1);
     const own = file && stack.find(l => l.includes(path.resolve(file)));
     if (own) lines.push("  at " + own.trim().replace(/^at /, ""));
-    else if (!/^(No |Nothing |Code |The model|apply needs|run needs|Studio Pro|Expected|--project|Only|This project|Unknown command|Unknown tool|Op \d|ops must be|name: |widgets: )|is a script\. Scripts are off|is not a tool here/.test(msg)) lines.push(...stack.slice(0, 4).map(l => "  " + l.trim()));
+    else if (!/^(No |Nothing |Code |The model|apply needs|run needs|Studio Pro|Expected|--project|Only|This project|Unknown command|Unknown tool|Op \d|ops must be|name: |widgets: )|is a script\. Scripts are off|is not a tool here|true conflict\(s\) need a side|--pick|--all is|different Mendix versions/.test(msg)) lines.push(...stack.slice(0, 4).map(l => "  " + l.trim()));
     const hint = HINTS.find(([re]) => re.test(full)); // the full text: the type names may be past the cut
     if (hint) lines.push("HINT: " + (typeof hint[1] === "function" ? hint[1](full) : hint[1]));
     return lines.join("\n") + "\n";

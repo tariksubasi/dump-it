@@ -193,15 +193,15 @@ async function navPhase(ctx) {
 }
 
 // Runs a change file through the real dry run / apply (mxlocal.js), output collected. Returns { lines, code }.
-async function cliRun(ctx, plan, name) {
+async function cliRun(ctx, plan, name, mpr = ctx.copy) {
     const cli = require("./mxlocal");
     const lines = [];
     cli.setOutput(s => lines.push(String(s)));
-    const file = path.join(path.dirname(ctx.copy), "edits", name + ".json");
+    const file = path.join(path.dirname(mpr), "edits", name + ".json");
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, JSON.stringify(plan, null, 1));
     try {
-        const r = await cli.run(file, ctx.copy, false);
+        const r = await cli.run(file, mpr, false);
         return { lines, code: r.code };
     } finally {
         cli.setOutput(ctx.out);
@@ -375,10 +375,83 @@ async function packagePhase(ctx) {
     if (!results) return;
 }
 
+// H2: a git repository with the app, two branches that change the same domain model (a true conflict) and other
+// documents (one side each), merged; mergecheck reports the 3-way picture, mergefix + apply rebuild the model.
+async function mergePhase(ctx) {
+    const { copy, check, results, reopen, mod } = ctx;
+    const { execFileSync } = require("child_process");
+    const { Project } = require("./mpr");
+    const merge = require("./merge");
+    const g = path.join(path.dirname(copy), "zz-git");
+    const run = (...a) => execFileSync("git", ["-c", "user.name=mxlocal", "-c", "user.email=mxlocal@example.com", "-c", "commit.gpgsign=false", ...a], { cwd: g, stdio: ["ignore", "pipe", "pipe"] }).toString();
+    try {
+        execFileSync("git", ["--version"], { stdio: "ignore" });
+    } catch {
+        return results.push("SKIP merge helper: git is not installed");
+    }
+    fs.mkdirSync(path.join(g, "app"), { recursive: true });
+    fs.copyFileSync(copy, path.join(g, "app", path.basename(copy)));
+    fs.cpSync(path.join(path.dirname(copy), "mprcontents"), path.join(g, "app", "mprcontents"), { recursive: true });
+    fs.writeFileSync(path.join(g, ".gitignore"), ".mxlocal-backup/\nedits/\n");
+    const app = path.join(g, "app", path.basename(copy));
+    const problems = [];
+    const step = async (plan, name) => {
+        const r = await cliRun(ctx, plan, name, app);
+        const a = r.code ? await cliDo(ctx, cli => cli.apply(app, r.code)) : ["no code: " + r.lines.slice(-2).join(" | ")];
+        if (!a.some(l => /^Checked: all/.test(l))) problems.push(`${name}: ${a.join(" | ").slice(0, 160)}`);
+    };
+    run("init", "-q");
+    run("checkout", "-q", "-b", "zzmain");
+    await step({ ops: [{ op: "createEntity", module: mod, name: "ZzMerge", attributes: [{ name: "Title", type: "String(200)" }] }] }, "zz-merge-base");
+    run("add", "-A");
+    run("commit", "-qm", "base");
+    const before = merge.analyse(app).mismatch.map(m => m.id).sort().join();
+    run("checkout", "-q", "-b", "zztheirs");
+    await step({ ops: [{ op: "addAttribute", entity: `${mod}.ZzMerge`, name: "FromTheirs", type: "Integer" }, { op: "createConstant", module: mod, name: "ZzTheirs", type: "String", default: "t" }] }, "zz-merge-theirs");
+    run("add", "-A");
+    run("commit", "-qm", "theirs");
+    run("checkout", "-q", "zzmain");
+    await step({ ops: [{ op: "addAttribute", entity: `${mod}.ZzMerge`, name: "FromOurs", type: "Boolean" }, { op: "createConstant", module: mod, name: "ZzOurs", type: "String", default: "o" }] }, "zz-merge-ours");
+    run("add", "-A");
+    run("commit", "-qm", "ours");
+    try {
+        run("merge", "zztheirs");
+        problems.push("git merged without a conflict");
+    } catch {
+        // expected: the .mpr and the domain model conflict
+    }
+    const report = merge.mergecheck(app);
+    const want = [/TRUE CONFLICTS \(both sides changed the same document\): 1/, /DomainModels\$DomainModel .*DomainModel/, /added Attribute 'FromOurs'/, /added Attribute 'FromTheirs'/, /from theirs \(1\):\n\s+new: Constants\$Constant .*ZzTheirs/, /kept from ours \(1\):\n\s+new: Constants\$Constant .*ZzOurs/];
+    for (const re of want) if (!re.test(report)) problems.push(`mergecheck lacks ${re}`);
+    try {
+        merge.mergefix(app);
+        problems.push("mergefix without a pick was not refused");
+    } catch (e) {
+        if (!/need a side/.test(e.message)) problems.push(e.message);
+    }
+    const fx = merge.mergefix(app, "DomainModel=theirs");
+    if (!fx.code) problems.push("mergefix: no approval code");
+    const a = fx.code ? await cliDo(ctx, cli => cli.apply(app, fx.code)) : [];
+    if (fx.code && !a.some(l => /^Saved/.test(l))) problems.push("apply: " + a.join(" | ").slice(0, 160));
+    run("add", "-A");
+    run("commit", "-qm", "merged");
+    const after = merge.analyse(app);
+    if (after.mismatch.map(m => m.id).sort().join() !== before) problems.push(`unit table and files disagree after the merge: ${after.mismatch.slice(0, 3).map(m => m.text).join("; ")}`);
+    const s = await reopen(app);
+    const names = new Set(require("./inspect").names(s.client).map(x => x.qn));
+    for (const n of [`${mod}.ZzTheirs`, `${mod}.ZzOurs`, `${mod}.ZzMerge.FromTheirs`]) if (!names.has(n)) problems.push(`${n} missing after the merge`);
+    if (names.has(`${mod}.ZzMerge.FromOurs`)) problems.push("FromOurs still there although theirs was picked");
+    problems.push(...(await loadErrors(s)));
+    const p = new Project(app);
+    if (p.units.size !== fs.readdirSync(path.join(g, "app", "mprcontents"), { recursive: true }).filter(f => String(f).endsWith(".mxunit")).length) problems.push("unit rows and unit files differ in number");
+    check("merge helper: git merge of two branches (same domain model on both = true conflict, one new constant on each side): mergecheck 3-way report, mergefix refused without a pick, picked theirs, apply; unit table matches mprcontents, reopen 0 errors, merge committed", !problems.length, problems.slice(0, 6).join("; "));
+}
+
 async function phase(ctx) {
     await navPhase(ctx);
     await themePhase(ctx);
     await packagePhase(ctx);
+    await mergePhase(ctx);
 }
 
 module.exports = { phase, navTargets };

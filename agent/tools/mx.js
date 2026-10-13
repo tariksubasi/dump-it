@@ -90,3 +90,20 @@ export const gap = {
     args: { need: text("what the user wants, in one sentence") },
     execute: (args, context) => mx(context, ["gap", args.need])
 };
+
+export const mergecheck = {
+    description: "After a git merge of the Mendix app (conflicts in the .mpr or mprcontents): which documents each " +
+        "branch changed, which are resolved automatically, and the true conflicts with what each side changed. Read-only.",
+    args: {},
+    execute: (args, context) => mx(context, ["mergecheck"])
+};
+
+export const mergefix = {
+    description: "Dry run of the merge fix: merged unit files and a rebuilt .mpr unit table; writes nothing, prints an " +
+        "approval code for python mx.py apply. Every true conflict needs a side.",
+    args: {
+        pick: text("\"<unit id or Module.Document>=ours|theirs\" (several comma-separated), or \"\""),
+        all: text("ours or theirs for every remaining conflict, or \"\"")
+    },
+    execute: (args, context) => mx(context, ["mergefix", ...(args.pick ? ["--pick", String(args.pick)] : []), ...(args.all ? ["--all", String(args.all)] : [])])
+};
