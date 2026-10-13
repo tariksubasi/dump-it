@@ -59,7 +59,13 @@ const WIDGETS = {
             buttons: "optional, classic only: control bar buttons [ { \"action\": \"new\" | \"edit\", \"page\": \"Module.Page\" } | { \"action\": \"delete\" } | { \"action\": \"callMicroflow\" | \"callNanoflow\", \"microflow\" / \"nanoflow\": ..., \"params\": ... } ], each with optional caption, style, name; a flow gets the selected row (a List parameter: the selected rows with selection Multi)",
             onClick: "optional, Data grid 2 only: on a row click " + ACTION + "; the row is passed",
             xpath: "optional XPath constraint (source database), e.g. [Active = true()]; inside a data view [Module.Assoc = '[%CurrentObject%]'] shows the committed objects linked to its object (source association also shows new ones)",
-            search: "optional true/false: classic only, source database: Search button + search fields for text, number and enumeration columns (default true)",
+            search: "optional true/false or [ \"Attribute\" ]: classic only, source database: Search button + search fields for text, number and enumeration columns, or for the listed attributes (default true)",
+            sort: "optional default sort order (source database): [ \"Attribute\" | { \"attribute\": \"Name\", \"direction\": \"desc\" } ] (default direction asc)",
+            filters: "optional, Data grid 2: true = a filter in every attribute column header (text, number, date or drop-down filter by attribute type, from widgets/*.mpk); per column { \"attribute\": ..., \"filter\": true / false }",
+            paging: "optional, Data grid 2: buttons | virtualScrolling | loadMore (default buttons)",
+            selectionMethod: "optional, Data grid 2: rowClick | checkbox (default rowClick for Single, checkbox for Multi)",
+            rowClass: "optional, Data grid 2: expression for a CSS class per row, e.g. \"if $currentObject/Active then 'row-active' else ''\"",
+            configAttribute: "optional, Data grid 2: String attribute of the data view around the grid that stores the user's column settings (personalization)",
             selection: "optional Single | SingleAndMaintain | Multi | SimpleMulti | None (default Single; Data grid 2: Single | Multi | None)",
             selectFirst: "optional true/false (default false)",
             rows: "optional rows per page (default 20)",
@@ -68,7 +74,8 @@ const WIDGETS = {
     },
     listView: {
         doc: "list of objects (from the database, over an association or from a microflow/nanoflow), each item with its own widgets (also inputs: an editable list); a data view can listen to it",
-        fields: { entity: "optional Module.Entity (default: the page entity; with association / microflow: what it gives)", ...LIST_SOURCE, xpath: "optional XPath constraint (see dataGrid)", fields: "optional [ \"Attribute\" ] one text per attribute (default: all attributes, unless widgets is given)", widgets: "optional [ widgets ] per item", pageSize: "optional (default 10)" }
+        fields: { entity: "optional Module.Entity (default: the page entity; with association / microflow: what it gives)", ...LIST_SOURCE, xpath: "optional XPath constraint (see dataGrid)", fields: "optional [ \"Attribute\" ] one text per attribute (default: all attributes, unless widgets is given)", widgets: "optional [ widgets ] per item", pageSize: "optional (default 10)",
+            search: "optional [ \"Attribute\" ] (source database): a search box over these attributes", sort: "optional default sort order (source database): [ \"Attribute\" | { \"attribute\": \"Name\", \"direction\": \"desc\" } ] (default direction asc)" }
     },
     actionButton: {
         doc: "a button",
@@ -105,7 +112,8 @@ const WIDGETS = {
         doc: "template grid (classic): objects (database, association or microflow/nanoflow, as listView) as tiles in rows and columns, each with its own widgets, with a control bar like a classic grid; a data view can listen to it",
         fields: { entity: "optional Module.Entity (default: the page entity)", ...LIST_SOURCE, xpath: "optional XPath constraint (source database)", widgets: "optional [ widgets ] per item (default: one text per attribute)",
             columns: "optional tiles per row 1-12 (default 2)", rows: "optional rows per page (default 3)", selection: "optional None | Single | SingleAndMaintain | Multi | SimpleMulti (default Single)", selectFirst: "optional true/false (default false)",
-            buttons: "optional control bar buttons, as dataGrid (new, edit, delete, callMicroflow, callNanoflow)" }
+            buttons: "optional control bar buttons, as dataGrid (new, edit, delete, callMicroflow, callNanoflow)",
+            search: "optional true / [ \"Attribute\" ] (source database): Search button + search fields (true: the text, number and enumeration attributes)", sort: "optional default sort order (source database): [ \"Attribute\" | { \"attribute\": \"Name\", \"direction\": \"desc\" } ] (default direction asc)" }
     },
     pluggable: {
         doc: "any pluggable widget installed in widgets/*.mpk (Data grid 2, Gallery, Combo box, filters, charts, ...), built from its definition with every property at its default, exactly as Studio Pro drops it; then the given properties. widgettype <name> (CLI, MCP tool) lists a widget's properties, types and defaults",
@@ -118,7 +126,7 @@ const WIDGETS = {
     },
     gallery: {
         doc: "Gallery (pluggable, copied from the project's own pages like Data grid 2): objects (database, association or microflow/nanoflow, as listView) as tiles, each item with its own widgets; a data view can listen to it. Without a Studio Pro-saved gallery matching widgets/*.mpk it is refused: use listView",
-        fields: { entity: "optional Module.Entity (default: the page entity)", ...LIST_SOURCE, xpath: "optional XPath constraint", widgets: "optional [ widgets ] per item (default: one text per attribute)", selection: "optional Single | Multi | None (default Single)", pageSize: "optional (default 20)", columns: "optional desktop columns 1-12 (default 1)", onClick: "optional: on an item click " + ACTION + "; the item is passed" }
+        fields: { entity: "optional Module.Entity (default: the page entity)", ...LIST_SOURCE, xpath: "optional XPath constraint", widgets: "optional [ widgets ] per item (default: one text per attribute)", selection: "optional Single | Multi | None (default Single)", pageSize: "optional (default 20)", columns: "optional desktop columns 1-12 (default 1)", onClick: "optional: on an item click " + ACTION + "; the item is passed", sort: "optional default sort order (source database): [ \"Attribute\" | { \"attribute\": \"Name\", \"direction\": \"desc\" } ] (default direction asc)" }
     }
 };
 // Fields every widget kind takes (style: inline CSS, but for text and actionButton it is the text / button style
@@ -912,8 +920,9 @@ function makePages(h) {
         const asked = { classic: "classic", datagrid: "classic", datagrid1: "classic", datagrid2: "datagrid2", dg2: "datagrid2", auto: "auto" }[raw.toLowerCase().replace(/[\s_-]/g, "")];
         if (!asked) fail(`${node.where}: kind '${raw}' is not known (use classic | datagrid2 | auto)`, raw, ["classic", "datagrid2", "auto"]);
         const cols = Array.isArray(s.columns) ? s.columns : [];
-        const dg2Only = [cols.some(c => c && typeof c === "object" && (c.widgets !== undefined || c.dynamicText !== undefined)) && "dynamic text / custom content columns", s.onClick !== undefined && "onClick"].filter(Boolean);
-        const classicOnly = [bool(s.search, false) && "search", cols.some(c => c && typeof c === "object" && c.width !== undefined) && "column width", s.buttons !== undefined && "control bar buttons",
+        const dg2Only = [cols.some(c => c && typeof c === "object" && (c.widgets !== undefined || c.dynamicText !== undefined)) && "dynamic text / custom content columns", s.onClick !== undefined && "onClick",
+            ...["filters", "paging", "selectionMethod", "rowClass", "configAttribute"].filter(k => s[k] !== undefined), cols.some(c => c && typeof c === "object" && c.filter !== undefined) && "column filter"].filter(Boolean);
+        const classicOnly = [(Array.isArray(s.search) || bool(s.search, false)) && "search", cols.some(c => c && typeof c === "object" && c.width !== undefined) && "column width", s.buttons !== undefined && "control bar buttons",
             s.selection !== undefined && !/^(single|multi|none)$/i.test(String(s.selection)) && `selection ${s.selection}`].filter(Boolean);
         node.kindAsked = asked;
         node.gridKind = "classic";
@@ -1302,12 +1311,13 @@ function makePages(h) {
             const at = `${node.where} column ${i + 1}`;
             const shape = s && typeof s === "object" ? ["attribute", "dynamicText", "widgets"].filter(k => s[k] !== undefined) : [];
             if (shape.length !== 1) throw new Error(`${at}: use "Attribute", { "attribute": ..., "caption": ... }, { "dynamicText": "{Name}", "caption": ... } or { "widgets": [...], "caption": ... }`);
-            for (const k of Object.keys(s)) if (![shape[0], "caption"].includes(k)) fail(`${at}: unknown field '${k}' for a Data grid 2 column`, k, [shape[0], "caption"]);
+            const own = [shape[0], "caption", ...(shape[0] === "attribute" ? ["filter"] : [])];
+            for (const k of Object.keys(s)) if (!own.includes(k)) fail(`${at}: unknown field '${k}' for a Data grid 2 column`, k, own);
             if (shape[0] === "dynamicText") return { kind: "dynamicText", text: s.dynamicText, caption: s.caption !== undefined ? String(s.caption) : "" };
             if (shape[0] === "widgets") return { kind: "customContent", nodes: (node.colNodes || [])[i] || [], caption: s.caption !== undefined ? String(s.caption) : "" };
             const attr = attributeOf(ent, s.attribute, node.where);
             if (!ok(attr)) throw new Error(`${node.where}: a Data grid 2 column cannot show '${attr.name}' (${typeOf(attr)}); it shows ${allowed.join(", ")}`);
-            return { kind: "attribute", attr, caption: s.caption !== undefined ? String(s.caption) : humanize(attr.name) };
+            return { kind: "attribute", attr, caption: s.caption !== undefined ? String(s.caption) : humanize(attr.name), filter: s.filter };
         });
         return { cols, dropped: [] };
     }
@@ -1382,6 +1392,78 @@ function makePages(h) {
         if (left.length) throw new Error(`${where}: the ${what} copy still refers to ${[...new Set(left)].slice(0, 3).join(", ")}; ${alt}`);
     }
 
+    // "sort": the default sort order of a database source (Forms$GridSortBar of its XPath source)
+    function sortOrder(node, src, ent) {
+        const s = node.spec.sort;
+        if (s === undefined) return "";
+        if (node.source !== "database") throw new Error(`${node.where}: sort goes with source database (a ${node.source} source gives its own order)`);
+        if (!src || !src.sortBar) throw new Error(`${node.where}: this ${node.kind} has no sort order here`);
+        const out = [];
+        for (const [i, x] of list(Array.isArray(s) ? s : [s], `${node.where}.sort`).entries()) {
+            const o = typeof x === "string" ? { attribute: x } : x;
+            const at = `${node.where} sort ${i + 1}`;
+            if (!o || typeof o !== "object" || o.attribute === undefined) throw new Error(`${at}: use "Attribute" or { "attribute": "Name", "direction": "asc" | "desc" }`);
+            for (const k of Object.keys(o)) if (!["attribute", "direction"].includes(k)) fail(`${at}: unknown field '${k}'`, k, ["attribute", "direction"]);
+            const attr = attributeOf(ent, String(o.attribute), at);
+            const dir = { asc: "Ascending", ascending: "Ascending", desc: "Descending", descending: "Descending" }[String(o.direction || "asc").toLowerCase()];
+            if (!dir) fail(`${at}: direction '${o.direction}' is not known (use asc | desc)`, String(o.direction), ["asc", "desc"]);
+            const item = pages.GridSortItem.create(model);
+            src.sortBar.sortItems.push(item);
+            const ref = dm.AttributeRef.create(model);
+            ref.attribute = attr;
+            item.attributeRef = ref;
+            item.sortDirection = pages.SortDirection[dir];
+            out.push(`${attr.name} ${dir === "Ascending" ? "asc" : "desc"}`);
+        }
+        return `, sorted by ${out.join(", ")}`;
+    }
+
+    // Search fields of a classic grid / template grid search bar: one per text, number or enumeration attribute
+    // (Studio Pro's generated grids); asked: true or a list of attribute names.
+    async function searchFields(src, ent, asked, cols, node, ctx) {
+        const attrs = Array.isArray(asked) ? asked.map(a => ({ attr: attributeOf(ent, String(a), node.where), caption: humanize(String(a)) })) : cols;
+        let fields = 0;
+        for (const c of attrs) {
+            const t = c.attr.type;
+            const text = t instanceof dm.StringAttributeType;
+            const num = [dm.IntegerAttributeType, dm.LongAttributeType, dm.DecimalAttributeType, dm.AutoNumberAttributeType].some(k => t instanceof k);
+            const en = t instanceof dm.EnumerationAttributeType;
+            if (!text && !num && !en) {
+                if (Array.isArray(asked)) throw new Error(`${node.where}: search on ${c.attr.name} (${typeOf(c.attr)}) is not possible; search fields take text, number and enumeration attributes`);
+                continue;
+            }
+            const f = (en ? pages.DropDownSearchField : pages.ComparisonSearchField).create(model);
+            src.searchBar.items.push(f);
+            f.name = ctx.names.next("searchField");
+            const ref = dm.AttributeRef.create(model);
+            ref.attribute = c.attr;
+            f.attributeRef = ref;
+            f.operator = text ? pages.SearchFieldOperator.Contains : pages.SearchFieldOperator.Equal;
+            await textAll(f.caption, c.caption, ctx);
+            fields++;
+        }
+        return fields;
+    }
+
+    // Data grid 2 column filters: the filter widget per attribute type (from widgets/*.mpk)
+    const FILTERS = { text: "com.mendix.widget.web.datagridtextfilter.DatagridTextFilter", number: "com.mendix.widget.web.datagridnumberfilter.DatagridNumberFilter",
+        date: "com.mendix.widget.web.datagriddatefilter.DatagridDateFilter", dropdown: "com.mendix.widget.web.datagriddropdownfilter.DatagridDropdownFilter" };
+    function filterKind(attr) {
+        const t = typeOf(attr);
+        return ["String", "HashString"].includes(t) ? "text" : ["Integer", "Long", "Decimal", "AutoNumber"].includes(t) ? "number" : t === "DateTime" ? "date" : ["Enum", "Boolean"].includes(t) ? "dropdown" : null;
+    }
+    async function dg2Filter(col, attr, node, ctx, where) {
+        const kind = filterKind(attr);
+        if (!kind) throw new Error(`${where}: no column filter for ${attr.name} (${typeOf(attr)})`);
+        const fv = valueOf(col, "filter");
+        if (!fv) throw new Error(`${where}: this Data grid 2 has no column filters`);
+        const fnode = { kind: "pluggable", spec: { widget: "pluggable", type: FILTERS[kind] }, where: `${where} filter`, container: node.container, name: null };
+        if (!pluggable.installed(client.project.dir).get(FILTERS[kind])) throw new Error(`${where}: a ${kind} filter needs widgets/${FILTERS[kind].split(".").slice(0, -1).join(".").replace(/\.\w+$/, "")}.${FILTERS[kind].split(".").pop()}.mpk (Data Widgets); install it in Studio Pro or leave out the filter`);
+        plScan(fnode, node.container, []);
+        await BUILD.pluggable(fnode, fv.widgets, ctx);
+        return `${kind} filter ${fnode.name}`;
+    }
+
     async function dataGrid2(node, target, ctx) {
         const ent = node.ent;
         const info = dg2Live();
@@ -1423,8 +1505,43 @@ function makePages(h) {
             valueOf(grid.object, "pageSize").primitiveValue = String(n);
         }
         if (bool(node.spec.selectFirst, false)) valueOf(grid.object, "autoSelect").primitiveValue = "true"; // checked in gridKind
-        // the copy may refer to nothing but this entity
-        leftovers(grid, [ent], node.where, "Data grid 2", `use "kind": "classic"`);
+        const more = [];
+        const enumProp = (key, v, field) => {
+            const pv = valueOf(grid.object, key);
+            if (!pv) throw new Error(`${node.where}: Data grid 2 ${info.def.version} has no ${field}`);
+            const all = pv.type.enumerationValues.map(e => e.key);
+            const hit = all.find(k => k.toLowerCase() === String(v).toLowerCase());
+            if (!hit) fail(`${node.where}: ${field} '${v}' is not known (use ${all.join(" | ")})`, String(v), all);
+            pv.primitiveValue = hit;
+            more.push(`${field} ${hit}`);
+        };
+        if (node.spec.paging !== undefined) enumProp("pagination", node.spec.paging, "paging");
+        if (node.spec.selectionMethod !== undefined) {
+            if (selName === "None") throw new Error(`${node.where}: selectionMethod goes with selection Single or Multi`);
+            enumProp("itemSelectionMethod", node.spec.selectionMethod, "selectionMethod");
+        } else if (selName === "Multi" && method) method.primitiveValue = "checkbox";
+        if (node.spec.rowClass !== undefined) {
+            const v = valueOf(grid.object, "rowClass");
+            if (!v) throw new Error(`${node.where}: Data grid 2 ${info.def.version} has no rowClass`);
+            exprCheck(String(node.spec.rowClass), { ent }, `${node.where}: rowClass`);
+            v.expression = String(node.spec.rowClass);
+            more.push(`row class ${node.spec.rowClass}`);
+        }
+        if (node.spec.configAttribute !== undefined) {
+            const v = valueOf(grid.object, "configurationAttribute");
+            if (!v) throw new Error(`${node.where}: Data grid 2 ${info.def.version} has no personalization attribute`);
+            const dv = node.container;
+            if (!dv || !dv.ent || dv.kind !== "dataView") throw new Error(`${node.where}: configAttribute is a String attribute of the data view around the grid (e.g. a settings object of the user); put the grid in such a data view`);
+            const a = attributeOf(dv.ent, String(node.spec.configAttribute), node.where);
+            if (typeOf(a) !== "String") throw new Error(`${node.where}: configAttribute ${a.name} is ${typeOf(a)}; it must be a String attribute (unlimited length is best)`);
+            const ref = dm.AttributeRef.create(model);
+            ref.attribute = a;
+            v.attributeRef = ref;
+            more.push(`settings in ${dv.ent.name}.${a.name}`);
+        }
+        const sorted = sortOrder(node, props.get("datasource").value.dataSource, ent);
+        // the copy may refer to nothing but this entity (and the data view's, for the settings attribute)
+        leftovers(grid, [ent, ...(node.spec.configAttribute !== undefined ? [node.container.ent] : [])], node.where, "Data grid 2", `use "kind": "classic"`);
         // what may refer to widgets, texts and actions: after the leftovers check
         const extra = [];
         for (const [i, c] of cols.entries()) {
@@ -1439,10 +1556,16 @@ function makePages(h) {
                 extra.push(`custom content [${inner.join(", ")}]`);
             }
         }
+        for (const [i, c] of cols.entries()) {
+            if (c.kind !== "attribute") continue;
+            const want = c.filter !== undefined ? bool(c.filter, false) : bool(node.spec.filters, false);
+            if (want) extra.push(`column ${i + 1}: ${await dg2Filter(made[i], c.attr, node, ctx, `${node.where} column ${i + 1}`)}`);
+        }
         if (node.spec.onClick !== undefined) extra.push("on click: " + (await pluggableClick(node, props, ctx)));
+        extra.push(...more);
         const why = node.kindAsked === "auto" ? `"kind": "auto"` : `"kind": "datagrid2"`;
         client.warnFirst(`${ctx.qn}: ${grid.name} is a Data grid 2 ${info.def.version} (${why}), ${base.from}; "kind": "classic" for a classic Data grid`);
-        return `${grid.name} (Data grid 2 ${info.def.version}, ${shows}, ${cols.length} column(s), selection ${selName}${extra.length ? "; " + extra.join("; ") : ""})`;
+        return `${grid.name} (Data grid 2 ${info.def.version}, ${shows}${sorted}, ${cols.length} column(s), selection ${selName}${extra.length ? "; " + extra.join("; ") : ""})`;
     }
 
     // Light XPath check: brackets, and the first step of each top-level path is an attribute or association of ent.
@@ -2150,25 +2273,10 @@ function makePages(h) {
                 await classicColumn(grid, c.attr, c.caption, width, ctx);
             }
             // search: Studio Pro's generated grids have a Search button and one search field per text/number/enum column
-            let fields = 0;
-            if (db && bool(node.spec.search, true)) {
-                for (const c of cols) {
-                    const t = c.attr.type;
-                    const text = t instanceof dm.StringAttributeType;
-                    const num = [dm.IntegerAttributeType, dm.LongAttributeType, dm.DecimalAttributeType, dm.AutoNumberAttributeType].some(k => t instanceof k);
-                    const en = t instanceof dm.EnumerationAttributeType;
-                    if (!text && !num && !en) continue;
-                    const f = (en ? pages.DropDownSearchField : pages.ComparisonSearchField).create(model);
-                    src.searchBar.items.push(f);
-                    f.name = ctx.names.next("searchField");
-                    const ref = dm.AttributeRef.create(model);
-                    ref.attribute = c.attr;
-                    f.attributeRef = ref;
-                    f.operator = text ? pages.SearchFieldOperator.Contains : pages.SearchFieldOperator.Equal;
-                    await textAll(f.caption, c.caption, ctx);
-                    fields++;
-                }
-            }
+            const asked = node.spec.search;
+            if (Array.isArray(asked) && !db) throw new Error(`${node.where}: search works with source database only`);
+            const fields = db && (Array.isArray(asked) || bool(asked, true)) ? await searchFields(src, ent, asked, cols, node, ctx) : 0;
+            const sorted = sortOrder(node, db ? src : null, ent);
             if (fields) {
                 const b = pages.GridSearchButton.create(model);
                 grid.controlBar.items.push(b);
@@ -2185,7 +2293,7 @@ function makePages(h) {
                 else if (d2.def) why += `; widgets/ has Data grid 2 ${d2.def.version}, "kind": "datagrid2" makes one`;
             }
             client.warnFirst(`${ctx.qn}: ${grid.name} is a classic Data grid (${why})`);
-            return `${grid.name} (classic Data grid, ${shows}, ${cols.length} column(s)${fields ? `, ${fields} search field(s)` : ""}${bar.length ? `, buttons: ${bar.join(", ")}` : ""})`;
+            return `${grid.name} (classic Data grid, ${shows}${sorted}, ${cols.length} column(s)${fields ? `, ${fields} search field(s)` : ""}${bar.length ? `, buttons: ${bar.join(", ")}` : ""})`;
         },
         async listView(node, target, ctx) {
             const ent = node.ent;
@@ -2194,6 +2302,21 @@ function makePages(h) {
             lv.name = node.name;
             node.widget = lv;
             const shows = listSource(node, lv, false, ctx);
+            let lvMore = sortOrder(node, node.source === "database" ? lv.dataSource : null, ent);
+            if (node.spec.search !== undefined) {
+                if (node.source !== "database") throw new Error(`${node.where}: search works with source database only`);
+                const names = list(node.spec.search, `${node.where}.search`);
+                if (!names.length) throw new Error(`${node.where}: search needs attributes: [ "Name", ... ]`);
+                for (const n of names) {
+                    const a = attributeOf(ent, String(n), node.where);
+                    if (!["String", "Integer", "Long", "Decimal", "AutoNumber", "Enum"].includes(typeOf(a))) throw new Error(`${node.where}: search on ${a.name} (${typeOf(a)}) is not possible; a list view searches text, number and enumeration attributes`);
+                    const ref = dm.AttributeRef.create(model);
+                    lv.dataSource.search.searchRefs.push(ref);
+                    ref.attribute = a;
+                }
+                client.warn(`Forms$ListViewSearch with attributes: first use by ops (SDK layout, no Studio Pro sample); check ${ctx.qn} ${lv.name} in Studio Pro`);
+                lvMore += `, search ${names.join(", ")}`;
+            }
             if (node.spec.pageSize !== undefined) {
                 const n = Number(node.spec.pageSize);
                 if (!Number.isInteger(n) || n < 1) throw new Error(`${node.where}: pageSize must be a whole number >= 1`);
@@ -2206,7 +2329,7 @@ function makePages(h) {
                 inner.push(await build({ kind: "text", spec: { text: `{${attr.name}}` }, where: node.where, container: node }, lv.widgets, ctx));
             }
             for (const ch of node.widgets) inner.push(await build(ch, lv.widgets, ctx));
-            return `${lv.name} (${shows}) [${inner.join(", ")}]`;
+            return `${lv.name} (${shows}${lvMore}) [${inner.join(", ")}]`;
         },
         async actionButton(node, target, ctx) {
             const s = node.spec;
@@ -2458,7 +2581,15 @@ function makePages(h) {
             tg.name = node.name;
             node.widget = tg;
             const shows = listSource(node, tg, false, ctx);
-            if (node.source === "database") tg.dataSource.searchBar.type = pages.SearchBarTypeEnum.None; // no search fields
+            const tgSearch = s.search !== undefined && (Array.isArray(s.search) || bool(s.search, false));
+            if (tgSearch && node.source !== "database") throw new Error(`${node.where}: search works with source database only`);
+            let tgFields = 0;
+            if (tgSearch) {
+                const all = h.attributeChain(ent).attributes.map(a => ({ attr: a, caption: humanize(a.name) }));
+                tgFields = await searchFields(tg.dataSource, ent, Array.isArray(s.search) ? s.search : true, all, node, ctx);
+                if (!tgFields) throw new Error(`${node.where}: ${ent.qualifiedName} has no text, number or enumeration attribute to search on`);
+            } else if (node.source === "database") tg.dataSource.searchBar.type = pages.SearchBarTypeEnum.None; // no search fields
+            const tgSorted = sortOrder(node, node.source === "database" ? tg.dataSource : null, ent);
             const num = (v, k, max) => {
                 const n = Number(v);
                 if (!Number.isInteger(n) || n < 1 || n > max) throw new Error(`${node.where}: ${k} must be a whole number 1-${max}`);
@@ -2473,10 +2604,17 @@ function makePages(h) {
             for (const f of fields) inner.push(await build({ kind: "text", spec: { text: `{${f}}` }, where: node.where, container: node }, tg.contents.widgets, ctx));
             for (const ch of node.widgets) inner.push(await build(ch, tg.contents.widgets, ctx));
             const bar = [];
+            if (tgFields) {
+                const b = pages.GridSearchButton.create(model);
+                tg.controlBar.items.push(b);
+                b.name = ctx.names.next("searchButton");
+                await textAll(b.caption.template, "Search", ctx, true);
+                bar.push(`${b.name} (search, ${tgFields} field(s))`);
+            }
             for (const [i, b] of list(s.buttons, `${node.where}.buttons`).entries()) bar.push(await gridButton(tg, b, node, ctx, `${node.where} button ${i + 1}`));
             if (!bar.length) tg.isControlBarVisible = false;
             client.warn(`Forms$TemplateGrid first use by ops: layout as the Studio Pro 10.24 / 11.12 samples; check ${ctx.qn} ${tg.name} in Studio Pro`);
-            return `${tg.name} (template grid, ${shows}, ${tg.numberOfColumns} x ${tg.numberOfRows}, selection ${tg.selectionMode.name}${bar.length ? `, buttons: ${bar.join(", ")}` : ""}) [${inner.join(", ")}]`;
+            return `${tg.name} (template grid, ${shows}${tgSorted}, ${tg.numberOfColumns} x ${tg.numberOfRows}, selection ${tg.selectionMode.name}${bar.length ? `, buttons: ${bar.join(", ")}` : ""}) [${inner.join(", ")}]`;
         },
         async gallery(node, target, ctx) {
             const s = node.spec, ent = node.ent;
@@ -2497,7 +2635,7 @@ function makePages(h) {
             const { w, props } = base;
             for (const k of ["datasource", "content", "itemSelection"]) if (!props.has(k)) throw new Error(`${node.where}: Gallery ${info.def.version} has no '${k}' property; ${alt}`);
             if (!base.fresh) for (const p of w.object.properties) await blank(p.value, p.type, null, true);
-            const shows = listSource(node, props.get("datasource").value, true, ctx);
+            const shows = listSource(node, props.get("datasource").value, true, ctx) + sortOrder(node, props.get("datasource").value.dataSource, ent);
             const sel = props.get("itemSelection").value;
             if (!sel.type.selectionTypes.some(x => x.name === selName)) throw new Error(`${node.where}: this gallery has no selection ${selName}`);
             sel.selection = cw.CustomWidgetSelectionType[selName];
