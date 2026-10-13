@@ -272,6 +272,7 @@ Actions (inside `"actions": [ { "action": "<name>", ... } ]`). Every action also
 | `importWithMapping` | **mapping** (`Module.ImportMapping`), **source** (String variable with JSON/XML), variable, commit | Microflows only. Mappings that take a parameter are refused |
 | `exportWithMapping` | **mapping** (`Module.ExportMapping`), **object** (variable to export), **variable** (new String) | Microflows only. The object must be the mapping's root entity |
 | `downloadFile` | **variable** (object of a `System.FileDocument` specialization), showInBrowser | Microflows only. showInBrowser = false |
+| `sendRestRequest` | **operation** (`Module.Service.Operation`), args, query, body, variable | Microflows only. Calls an operation of a consumed REST service, see REST services below |
 | `cast` | **variable** | Only as the first action of an `ifType` case: the object as that case's entity |
 
 Flow control (also inside `"actions"`):
@@ -613,7 +614,50 @@ Language > System texts) and the date/time formats of a language.
 |---|---|---|
 | `createConstant` | **module**, **name**, **type**, **default**, exposedToClient, folder | Type String/Integer/Long/Decimal/Boolean/DateTime |
 | `createScheduledEvent` | **module**, **name**, **microflow**, **every** (`Minute`/`Hour`/`Day`/`Week`), interval, at (`HH:MM`), days, enabled (default false), timeZone, onOverlap, folder | The microflow must have no parameters |
-| `publishRest` | **module**, **service**, **resource**, **method**, **microflow**, path (e.g. `{Id}`), servicePath, authentication (default Basic), roles, folder | Microflow parameters become path (`{Name}` in path) or query parameters. Object/list parameters or results need mappings: refused, do those in Studio Pro. Experimental |
+| `publishRest` | see REST services below | |
+
+### REST services (consumed and published)
+
+No Studio Pro-saved consumed REST service, published REST service with mappings, user task page or workflow exists in
+the test projects. These documents are built from the Model SDK metamodel of the project's Mendix version; the dry run
+says `first use ... check it in Studio Pro`. Tell the user to open them in Studio Pro once and look at the
+error list.
+
+| Op | Fields | Notes |
+|---|---|---|
+| `createConsumedRestService` | **module**, **name**, **baseUrl**, **operations**, authentication (`"none"` or `{username, password}`; a value `"@Module.Constant"` uses a constant), folder | Mendix 10.1+ REST client document. Each operation: **name**, **path** (`/orders/{id}`, after the base URL), method (default Get), parameters `{"id": "Integer"}` (types of the `{name}` placeholders in path, headers and body; default String), query `["status"]` or `{"page": {"required": false}}` (Mendix 11; on Mendix 10 they go into the path as `?status={status}`, optional ones are refused), headers `{"Name": "value {param}"}`, body (Post/Put/Patch: a text template with `{param}`, or `{snippet, entity, entities, attributes, skip, create}` = an export mapping of one object), response (`"none"`, or `{snippet, entity, entities, attributes, skip, keys, create}` = an import mapping like `createImportMapping`), timeout (s, 300). Added for Studio Pro's rules: `Accept: application/json` on every operation, `Content-Type: application/json` and a `{}` body for Post/Put/Patch without one |
+| `addRestOperation` | **service** (`Module.Service`) + the operation fields above | Adds one operation to an existing consumed REST service |
+| `publishRest` | **module**, **service**, **resource**, **method**, **microflow**, path (`{Id}`), headers `["Param"]`, importMapping, exportMapping, commit, summary, description, deprecated, create, query, servicePath, version, authentication, roles, folder | Creates the service (version default 1.0.0, shown in its OpenAPI document; authentication default `["Basic"]`) and resource when missing. Microflow parameters: `{Name}` in the path -> path, listed in `headers` -> header, an object/list -> the body (needs `importMapping` of that entity; commit `yes`/`no`/`withoutEvents`, default yes), `System.HttpRequest`/`HttpResponse` -> none, others -> query. An object/list result needs `exportMapping`. `create: true` makes the microflow when it is missing (String parameters from path, headers and `query`, the import mapping's entity, returns String or the export mapping's entity). `roles` may call the service |
+
+Action `sendRestRequest` calls an operation: `{ "action": "sendRestRequest", "operation": "Module.Service.Operation",
+"args": { "id": "$Id" }, "query": { "status": "'open'" }, "body": "Order", "variable": "Result" }`. Every `{param}`
+needs an arg; required query parameters need a value. `body` only for an operation with a mapping body, `variable`
+only for one with a response mapping (an object, or a list for an array). Otherwise the response is in
+`$latestHttpResponse` (`$latestHttpResponse/Content`, `$latestHttpResponse/StatusCode`). No `onError` (Studio Pro
+does not allow a custom error handler here); use `callRest` when the call needs one.
+
+```json
+{ "ops": [
+  { "op": "createConsumedRestService", "module": "Sales", "name": "OrderApi", "baseUrl": "https://api.example.com/v1",
+    "authentication": { "username": "api", "password": "@Sales.ApiPassword" },
+    "operations": [
+      { "name": "GetOrder", "path": "/orders/{id}", "parameters": { "id": "Integer" },
+        "response": { "snippet": "{ \"number\": \"A1\", \"total\": 10.5 }", "entity": "Sales.RemoteOrder", "create": true } },
+      { "name": "CreateOrder", "method": "Post", "path": "/orders", "body": "{ \"number\": \"{number}\" }" } ] },
+  { "op": "createMicroflow", "module": "Sales", "name": "ACT_Order_Fetch", "parameters": [ { "name": "Id", "type": "Integer" } ],
+    "returns": "Sales.RemoteOrder", "returnValue": "$Order",
+    "actions": [ { "action": "sendRestRequest", "operation": "Sales.OrderApi.GetOrder", "args": { "id": "$Id" }, "variable": "Order" } ] }
+] }
+```
+
+Publish an operation with a body and a result (the mappings first, see JSON structures below):
+
+```json
+{ "ops": [
+  { "op": "publishRest", "module": "Sales", "service": "OrderService", "resource": "orders", "method": "Post", "path": "{Shop}",
+    "microflow": "Sales.PRS_Order_Create", "create": true, "headers": ["Token"], "importMapping": "Sales.IMM_Order",
+    "exportMapping": "Sales.EXM_Order", "roles": ["Sales.ApiUser"], "version": "2.0.0" } ] }
+```
 
 ### JSON structures and mappings
 
