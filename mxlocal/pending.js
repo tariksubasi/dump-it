@@ -22,6 +22,12 @@ function save(projectDir, enc, info) {
         fs.writeFileSync(path.join(d, "units", f.id + ".mxunit"), f.bytes);
         h.update(f.id).update(f.bytes);
     }
+    // plain files (theme, packages): stored under files/<n>, keyed by their path
+    const plainFiles = (enc.plainFiles || []).map((f, i) => {
+        if (f.bytes !== null) fs.writeFileSync(path.join(d, "units", `file${i}.bin`), f.bytes);
+        h.update(f.rel).update(f.bytes === null ? "(delete)" : f.bytes).update(String(f.before));
+        return { rel: f.rel, hash: f.hash, before: f.before, data: f.bytes === null ? null : `file${i}.bin` };
+    });
     h.update(JSON.stringify([enc.created, enc.deleted, enc.moved || [], info.plan || null]));
     const code = h.digest("hex").slice(0, 4).toUpperCase();
     const manifest = {
@@ -33,6 +39,7 @@ function save(projectDir, enc, info) {
         created: enc.created,
         deleted: enc.deleted,
         moved: enc.moved || [],
+        plainFiles,
         summary: info.summary,
         plan: info.plan || null,
         content: info.content
@@ -47,6 +54,7 @@ function load(projectDir) {
     if (!fs.existsSync(file)) return null;
     const m = JSON.parse(fs.readFileSync(file, "utf8"));
     m.files = m.files.map(f => ({ ...f, bytes: fs.readFileSync(path.join(d, "units", f.id + ".mxunit")) }));
+    m.plainFiles = (m.plainFiles || []).map(f => ({ ...f, bytes: f.data === null ? null : fs.readFileSync(path.join(d, "units", f.data)) }));
     return m;
 }
 

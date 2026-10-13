@@ -643,6 +643,13 @@ Typical plan: structure, import mapping that creates the entities, export mappin
 
 The export shows a structure as `json/path: Name type` lines and a mapping as `json/path -> Entity via Association [Create/Find/Parameter]`; use those paths in `entities`, `attributes`, `skip`, `keys`. Custom handlers, converters, XML schemas and message definitions: Studio Pro.
 
+### Theme files (SCSS)
+
+| Op | Fields | Notes |
+|---|---|---|
+| `editThemeFile` | **path** (under `theme/` or `themesource/`; `.scss`, `.css`, `.json`), content, edits (`[{"find", "replace", "all"}]`), append | Plain files, not model documents, but the same dry run (it shows a diff), approval code, backup and undo. `find` must match exactly once (or `"all": true`). `content` replaces the whole file or creates it. Refused: paths outside those two folders, a JSON file that would not parse, SCSS whose braces would not balance. Studio Pro compiles `main.scss` of each folder: `@import` a new file there |
+| `addCssClass` | **name** (without the dot), **css** (`"color: #fff; padding: 8px"` or an object), file (default `theme/web/main.scss`) | Appends `.name { ... }`. Refused when the file already has a rule for that class. Use the class with `"class": "name"` on a widget |
+
 ### Documents, rename and delete
 
 | Op | Fields | Notes |
@@ -796,6 +803,15 @@ phone layout's menu bar, and a phone profile:
   { "op": "addMenuItem", "menu": "Sales.Phone_Menu", "page": "Sales.Customer_List", "caption": "Customers", "before": "Sync" },
   { "op": "useMenu", "document": "Atlas_Core.Phone_Default", "menu": "Sales.Phone_Menu" },
   { "op": "createNavigationProfile", "kind": "Phone", "homePage": "Sales.Order_List" }
+] }
+```
+
+Theme: a CSS class for widgets and a new brand color:
+
+```json
+{ "ops": [
+  { "op": "addCssClass", "name": "card-highlight", "css": { "background-color": "#fff8e1", "border-left": "4px solid $brand-warning" } },
+  { "op": "editThemeFile", "path": "theme/web/custom-variables.scss", "edits": [ { "find": "$brand-primary: #264ae5;", "replace": "$brand-primary: #0a7d32;" } ] }
 ] }
 ```
 

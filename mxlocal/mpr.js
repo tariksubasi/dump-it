@@ -99,7 +99,8 @@ class Project {
         return this.writeEncoded(this.encode(changes, hint));
     }
 
-    // enc: { files: [{id, bytes, hash}], created: [{id, containerId, containmentName}], deleted: [id] }
+    // enc: { files: [{id, bytes, hash}], created: [{id, containerId, containmentName}], deleted: [id],
+    //        plainFiles?: [{rel, bytes (null = delete)}] (theme files, packages: files.js) }
     writeEncoded(enc) {
         this.assertClosed();
         const createdIds = new Set(enc.created.map(c => c.id));
@@ -117,18 +118,40 @@ class Project {
             manifest.restore.push(rel);
         }
         for (const id of createdIds) manifest.remove.push(path.relative(this.dir, this.unitFile(id)));
+        // plain files: the old file goes to files/<rel>; one that did not exist is removed again by restore
+        manifest.files = [];
+        for (const f of enc.plainFiles || []) {
+            const file = path.join(this.dir, ...f.rel.split("/"));
+            const existed = fs.existsSync(file);
+            if (existed) {
+                fs.mkdirSync(path.dirname(path.join(backup, "files", ...f.rel.split("/"))), { recursive: true });
+                fs.copyFileSync(file, path.join(backup, "files", ...f.rel.split("/")));
+            }
+            manifest.files.push({ rel: f.rel, existed });
+        }
         fs.writeFileSync(path.join(backup, "manifest.json"), JSON.stringify(manifest, null, 1));
+        const unitChanges = enc.files.length || enc.created.length || enc.deleted.length || (enc.moved || []).length;
 
         try {
+            for (const f of enc.plainFiles || []) {
+                const file = path.join(this.dir, ...f.rel.split("/"));
+                if (f.bytes === null) {
+                    if (fs.existsSync(file)) fs.unlinkSync(file);
+                    continue;
+                }
+                fs.mkdirSync(path.dirname(file), { recursive: true });
+                fs.writeFileSync(file + ".tmp", f.bytes);
+                fs.renameSync(file + ".tmp", file);
+            }
             for (const f of enc.files) {
                 const file = this.unitFile(f.id);
                 fs.mkdirSync(path.dirname(file), { recursive: true });
                 fs.writeFileSync(file + ".tmp", f.bytes);
                 fs.renameSync(file + ".tmp", file);
             }
-            const db = new DatabaseSync(this.mpr);
+            const db = unitChanges ? new DatabaseSync(this.mpr) : null;
             let open = false;
-            try {
+            if (db) try {
                 db.exec("BEGIN IMMEDIATE");
                 open = true;
                 const upd = db.prepare("update Unit set ContentsHash = ? where UnitID = ?");
@@ -158,7 +181,7 @@ class Project {
             throw new Error(`Write failed and the project was restored from ${backup}: ${e.message}`);
         }
         prune(this.dir);
-        return { backup, written: enc.files.length, deleted: enc.deleted.length, moved: (enc.moved || []).length };
+        return { backup, written: enc.files.length, deleted: enc.deleted.length, moved: (enc.moved || []).length, plainFiles: (enc.plainFiles || []).length };
     }
 }
 
@@ -183,6 +206,17 @@ function restore(dir, backup) {
     for (const rel of manifest.restore) {
         fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
         fs.copyFileSync(path.join(backup, rel), path.join(dir, rel));
+    }
+    for (const f of manifest.files || []) {
+        const file = path.join(dir, ...f.rel.split("/"));
+        if (f.existed) {
+            fs.mkdirSync(path.dirname(file), { recursive: true });
+            fs.copyFileSync(path.join(backup, "files", ...f.rel.split("/")), file);
+        } else if (fs.existsSync(file)) {
+            fs.unlinkSync(file);
+            // folders the apply created for it go too
+            for (let d = path.dirname(file); d.startsWith(dir + path.sep) && fs.existsSync(d) && !fs.readdirSync(d).length; d = path.dirname(d)) fs.rmdirSync(d);
+        }
     }
     fs.copyFileSync(path.join(backup, manifest.mpr), path.join(dir, manifest.mpr));
     return manifest;

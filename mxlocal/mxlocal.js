@@ -246,18 +246,21 @@ async function run(file, mpr, allowJs, ctx) {
     }
     await model.flushChanges();
     const s = client.summary();
-    say(`Changes: ${s.created.length} created, ${s.updated.length} updated, ${s.deleted.length} deleted${s.moved.length ? `, ${s.moved.length} moved` : ""} unit(s)`);
+    const plainFiles = require("./files").encode(client);
+    say(`Changes: ${s.created.length} created, ${s.updated.length} updated, ${s.deleted.length} deleted${s.moved.length ? `, ${s.moved.length} moved` : ""} unit(s)${plainFiles.length ? `, ${plainFiles.length} file(s)` : ""}`);
     for (const x of s.created) say("  + " + x);
     for (const x of s.updated) say("  ~ " + x);
     for (const x of s.deleted) say("  - " + x);
     for (const x of s.moved) say("  > " + x);
     for (const x of s.renames) say("  rename " + x);
-    if (!s.created.length && !s.updated.length && !s.deleted.length && !s.moved.length) {
+    for (const x of require("./files").describe(client, plainFiles)) say(x);
+    if (!s.created.length && !s.updated.length && !s.deleted.length && !s.moved.length && !plainFiles.length) {
         pending.clear(client.project.dir);
         out("Nothing to write.");
         return { client };
     }
     const enc = client.encode();
+    enc.plainFiles = plainFiles;
     const lost = lostProperties(client, model, enc);
     const warnings = relevant(client.summary().warnings, enc);
     if (exprWarnings.length) say("EXPRESSION CHECK (Studio Pro will show these as errors; fix the change file):\n" + exprWarnings.map(w => "  ! " + w).join("\n"));
@@ -282,13 +285,19 @@ async function apply(mpr, code) {
         pending.clear(project.dir);
         throw new Error("The model changed since the dry run (Studio Pro save, pull or other apply). Run the dry run again.");
     }
-    const r = project.writeEncoded({ files: p.files, created: p.created, deleted: p.deleted, moved: p.moved || [] });
+    const files = require("./files");
+    const changedFiles = p.plainFiles.filter(f => files.sha(files.onDisk(project.dir, f.rel)) !== f.before).map(f => f.rel);
+    if (changedFiles.length) {
+        pending.clear(project.dir);
+        throw new Error(`The model changed since the dry run: ${changedFiles.join(", ")} changed on disk. Run the dry run again.`);
+    }
+    const r = project.writeEncoded({ files: p.files, created: p.created, deleted: p.deleted, moved: p.moved || [], plainFiles: p.plainFiles });
     // The change itself goes into the backup, so it can be run again after an undo even if edits/ was cleaned.
     fs.writeFileSync(path.join(r.backup, "change.txt"), `Source: ${p.source}\n${p.summary.join("\n")}\n`);
     if (p.content !== undefined) fs.writeFileSync(path.join(r.backup, "change" + path.extname(p.source || ".json")), p.content);
-    fs.writeFileSync(path.join(r.backup, "after.json"), JSON.stringify({ fingerprint: project.fingerprint(), units: unitHashes(project) }));
+    fs.writeFileSync(path.join(r.backup, "after.json"), JSON.stringify({ fingerprint: project.fingerprint(), units: unitHashes(project), files: files.hashes(project.dir, p.plainFiles.map(f => f.rel)) }));
     pending.clear(project.dir);
-    out(`Saved ${r.written} unit file(s), deleted ${r.deleted}${r.moved ? `, moved ${r.moved}` : ""}. Backup: ${path.relative(project.dir, r.backup)}`);
+    out(`Saved ${r.written} unit file(s), deleted ${r.deleted}${r.moved ? `, moved ${r.moved}` : ""}${r.plainFiles ? `, ${r.plainFiles} other file(s)` : ""}. Backup: ${path.relative(project.dir, r.backup)}`);
     if (p.plan) {
         const ctx = await loadProject(mpr);
         const client = new LocalClient(ctx);
@@ -339,8 +348,10 @@ function restoreCmd(mpr, name, force) {
     const afterFile = path.join(backup, "after.json");
     if (fs.existsSync(afterFile)) {
         const after = JSON.parse(fs.readFileSync(afterFile, "utf8"));
-        if (after.fingerprint !== project.fingerprint() && force !== true) {
-            const lines = changedUnits(project, after.units, unitHashes(project));
+        const files = require("./files");
+        const laterFiles = Object.entries(after.files || {}).filter(([rel, h]) => files.sha(files.onDisk(dir, rel)) !== h).map(([rel]) => `changed: file ${rel}`);
+        if ((after.fingerprint !== project.fingerprint() || laterFiles.length) && force !== true) {
+            const lines = [...changedUnits(project, after.units, unitHashes(project)), ...laterFiles];
             throw new Error(`The model changed after this apply (Studio Pro save, pull or a later apply). Undo would erase that work:\n` +
                 lines.slice(0, 15).map(l => "  " + l).join("\n") + (lines.length > 15 ? `\n  ... ${lines.length - 15} more` : "") +
                 `\nUndo the later changes first (newest first), or ask the user whether to undo anyway with --force (that loses the changes above).`);
@@ -358,7 +369,7 @@ function restoreCmd(mpr, name, force) {
     }
     pending.clear(dir);
     fs.renameSync(backup, backup + ".restored");
-    out(`Restored ${pick}: ${m.restore.length} unit file(s) put back, ${m.remove.length} removed, ${m.mpr} restored.` +
+    out(`Restored ${pick}: ${m.restore.length} unit file(s) put back, ${m.remove.length} removed, ${m.mpr} restored${(m.files || []).length ? `, ${m.files.length} other file(s) restored` : ""}.` +
         (orphans.length ? ` ${orphans.length} unit file(s) of later changes moved to ${path.relative(dir, backup)}.restored/orphans.` : ""));
 }
 

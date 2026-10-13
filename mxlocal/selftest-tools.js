@@ -4,6 +4,8 @@
 const sdk = require("mendixmodelsdk");
 const { lostProperties } = require("./lost");
 const bson = require("./bson");
+const fs = require("fs");
+const path = require("path");
 const { toPlain } = require("./convert");
 
 // A page and a microflow without parameters (menu item targets), and the project's menus.
@@ -190,8 +192,105 @@ async function navPhase(ctx) {
     check(`createNavigationProfile ${kind}${resp ? " with the Responsive menu" : ""}: stored like Studio Pro (Name, Kind, home page, app title), second one refused`, !all3.length, all3.slice(0, 6).join("; "));
 }
 
+// Runs a change file through the real dry run / apply (mxlocal.js), output collected. Returns { lines, code }.
+async function cliRun(ctx, plan, name) {
+    const cli = require("./mxlocal");
+    const lines = [];
+    cli.setOutput(s => lines.push(String(s)));
+    const file = path.join(path.dirname(ctx.copy), "edits", name + ".json");
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(plan, null, 1));
+    try {
+        const r = await cli.run(file, ctx.copy, false);
+        return { lines, code: r.code };
+    } finally {
+        cli.setOutput(ctx.out);
+    }
+}
+async function cliDo(ctx, fn) {
+    const cli = require("./mxlocal");
+    const lines = [];
+    cli.setOutput(s => lines.push(String(s)));
+    const exit = process.exitCode;
+    try {
+        await fn(cli);
+    } catch (e) {
+        lines.push("ERROR: " + e.message);
+    } finally {
+        cli.setOutput(ctx.out);
+        process.exitCode = exit;
+    }
+    return lines;
+}
+async function refused(ctx, plan, re) {
+    try {
+        await cliRun(ctx, plan, "zz-refused");
+        return `not refused: ${JSON.stringify(plan.ops[0]).slice(0, 80)}`;
+    } catch (e) {
+        return re.test(e.message) ? "" : `unexpected error: ${e.message.slice(0, 120)}`;
+    }
+}
+
+// E4: theme files through dry run (diff), apply (backup), check and restore; refusals outside theme/ themesource/.
+async function themePhase(ctx) {
+    const { src, copy, check } = ctx;
+    const dir = path.dirname(copy);
+    for (const d of ["theme", "themesource"]) if (fs.existsSync(path.join(src.dir, d)) && !fs.existsSync(path.join(dir, d))) fs.cpSync(path.join(src.dir, d), path.join(dir, d), { recursive: true });
+    const read = rel => (fs.existsSync(path.join(dir, rel)) ? fs.readFileSync(path.join(dir, rel)) : null);
+    const main = "theme/web/main.scss", vars = "theme/web/custom-variables.scss";
+    const before = { [main]: read(main), [vars]: read(vars) };
+    const ops = [];
+    if (!before[main]) ops.push({ op: "editThemeFile", path: main, content: "// app styles\n" });
+    ops.push({ op: "addCssClass", name: "zz-card", css: { "background-color": "#fff", padding: "8px" } });
+    const brand = before[vars] && /^\$brand-primary:[^\n]*$/m.exec(before[vars].toString("utf8"));
+    if (brand) ops.push({ op: "editThemeFile", path: vars, edits: [{ find: brand[0], replace: "$brand-primary: #0a7d32;" }] });
+    else ops.push({ op: "editThemeFile", path: main, edits: [{ find: "padding: 8px;", replace: "padding: 12px;" }] });
+    const modDir = fs.existsSync(path.join(dir, "themesource")) ? fs.readdirSync(path.join(dir, "themesource")).find(m => fs.existsSync(path.join(dir, "themesource", m, "web", "design-properties.json"))) : null;
+    const dp = modDir && `themesource/${modDir}/web/design-properties.json`;
+    const dpBefore = dp && read(dp);
+    let dpJson = null;
+    try {
+        dpJson = dpBefore && JSON.parse(dpBefore.toString("utf8"));
+    } catch {
+        dpJson = null;
+    }
+    if (dpJson && typeof dpJson === "object") ops.push({ op: "editThemeFile", path: dp, content: JSON.stringify({ ...dpJson, ZzWidget: [{ name: "Zz", type: "Toggle", description: "test", class: "zz-card" }] }, null, 4) + "\n" });
+    ops.push({ op: "editThemeFile", path: main, append: "// zz end" });
+    const problems = [];
+    const dry = await cliRun(ctx, { ops }, "zz-theme");
+    if (!dry.code) problems.push("no approval code: " + dry.lines.slice(-3).join(" | "));
+    if (!dry.lines.some(l => /^\s+\+ \.zz-card \{$/.test(l))) problems.push("dry run shows no diff line for .zz-card");
+    const applied = dry.code ? await cliDo(ctx, cli => cli.apply(copy, dry.code)) : [];
+    if (dry.code && !applied.some(l => /^Checked: all/.test(l))) problems.push("apply: " + applied.join(" | ").slice(0, 200));
+    const after = read(main);
+    if (!after || !/\.zz-card \{\n    background-color: #fff;\n    padding: (8|12)px;\n\}/.test(after.toString("utf8"))) problems.push(`${main} has no .zz-card rule`);
+    if (brand && !read(vars).toString("utf8").includes("$brand-primary: #0a7d32;")) problems.push(`${vars} not edited`);
+    if (dp && dpJson && !JSON.parse(read(dp).toString("utf8")).ZzWidget) problems.push(`${dp} not edited`);
+    // refusals: outside the theme folders, a missing find, JSON that would break, unbalanced braces
+    for (const [plan, re] of [
+        [{ ops: [{ op: "editThemeFile", path: "../zz-outside.scss", content: "x" }] }, /outside the project folder/],
+        [{ ops: [{ op: "editThemeFile", path: "javasource/zz.scss", content: "x" }] }, /not under theme\//],
+        [{ ops: [{ op: "editThemeFile", path: main, edits: [{ find: "zz-not-there", replace: "x" }] }] }, /is not in/],
+        [{ ops: [{ op: "editThemeFile", path: main, append: ".zz-open {" }] }, /braces/],
+        ...(dp ? [[{ ops: [{ op: "editThemeFile", path: dp, append: "{" }] }, /valid JSON|braces/]] : []),
+        [{ ops: [{ op: "addCssClass", name: "zz-card", css: "color: red" }] }, /already has a rule/]
+    ]) {
+        const r = await refused(ctx, plan, re);
+        if (r) problems.push(r);
+    }
+    // undo: every file back byte for byte (a created main.scss removed)
+    const undone = await cliDo(ctx, cli => cli.restoreCmd(copy));
+    if (!undone.some(l => /^Restored/.test(l))) problems.push("restore: " + undone.join(" | ").slice(0, 200));
+    for (const [rel, b] of Object.entries({ ...before, ...(dp ? { [dp]: dpBefore } : {}) })) {
+        const now = read(rel);
+        if (b === null ? now !== null : !now || !now.equals(b)) problems.push(`${rel} not restored byte for byte`);
+    }
+    check(`theme files: addCssClass, editThemeFile (find/replace${dp && dpJson ? ", design-properties.json" : ""}, append${before[main] ? "" : ", new main.scss"}) through dry run with diff, apply with backup and check, restore byte for byte; refused outside theme/ themesource/, missing find, broken JSON or braces, duplicate class`, !problems.length, problems.slice(0, 6).join("; "));
+}
+
 async function phase(ctx) {
     await navPhase(ctx);
+    await themePhase(ctx);
 }
 
 module.exports = { phase, navTargets };

@@ -1189,7 +1189,7 @@ async function selftest(mpr, keep, { out, relevant }) {
         }
 
         // navigation, theme files, packages (selftest-tools.js)
-        await require("./selftest-tools").phase({ src, copy, reopen, check, results, layout, mod, T, layoutProblems, sameOutside });
+        await require("./selftest-tools").phase({ src, copy, reopen, check, results, layout, mod, T, layoutProblems, sameOutside, out });
         s2 = await reopen(copy);
 
         // phase 3: attribute rename + module rename
