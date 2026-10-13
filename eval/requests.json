@@ -362,6 +362,31 @@
           "Customer_Summary\\.txt$": "(?s)^(?=.*data: microflow MyFirstModule\\.DS_Customer_LastOrder)(?=.*attr Total)"
         }
       }
+    },
+    {
+      "id": "calcdelete",
+      "text": "Order'a TotalVat adında hesaplanan (calculated) ondalıklı bir alan ekle: Total * 1.2 olsun. Ayrıca siparişi olan bir müşteri silinmek istenirse 'Bu müşterinin siparişleri var' mesajıyla engellensin.",
+      "checks": {
+        "find": [
+          "MyFirstModule.Order.TotalVat"
+        ],
+        "files": {
+          "domain-model\\.txt$": "(?s)^(?=.*TotalVat: Decimal \\(calculated by MyFirstModule\\.)(?=.*deleting a Customer is refused while it has a Order \\(\"Bu müşterinin siparişleri var\"\\))"
+        }
+      }
+    },
+    {
+      "id": "accesssettings",
+      "text": "User rolü siparişleri (Order) sadece okuyabilsin, yalnızca Note alanını düzenleyebilsin ve sipariş silemesin. Uygulama açılırken çalışan, true döndüren ASU_Startup microflow'unu after startup olarak ayarla; haftanın ilk günü Pazartesi olsun.",
+      "checks": {
+        "find": [
+          "MyFirstModule.ASU_Startup"
+        ],
+        "files": {
+          "domain-model\\.txt$": "ACCESS \\[MyFirstModule\\.User\\] (create )?default=ReadOnly\\n    ReadWrite: Note\\n",
+          "overview\\.txt$": "(?s)^(?=.*AFTER STARTUP MICROFLOW: MyFirstModule\\.ASU_Startup)(?=.*first day of week=Monday)"
+        }
+      }
     }
   ]
 }

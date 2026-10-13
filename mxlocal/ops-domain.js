@@ -27,7 +27,7 @@ const DOMAIN_OPS = {
         doc: "Change an entity access rule: member rights, XPath, create/delete, rights for members added later, roles.",
         fields: {
             entity: "R Module.Entity", roles: "R [ \"Module.Role\" ] of the rule to change (as the export shows it)", rule: "optional number when several rules have these roles (1 = first rule of the entity)",
-            setRoles: "optional [ \"Module.Role\" ]: the rule's new roles", access: `optional ${RIGHTS}: every member not in 'members' gets this`,
+            setRoles: "optional [ \"Module.Role\" ]: the rule's new roles", access: `optional ${RIGHTS}: every member not in 'members' gets this (and members added later, unless newMembers)`,
             members: "optional { \"Attribute\": \"ReadOnly\", \"Assoc\": \"None\", \"System.FileDocument.Name\": \"ReadWrite\" }", newMembers: `optional ${RIGHTS}: rights of members added to the entity later`,
             create: "optional true/false", delete: "optional true/false", xpath: "optional XPath, e.g. [Owner = '[%CurrentUser%]'] (\"\" = no constraint)"
         }
@@ -318,7 +318,7 @@ function makeDomain(h) {
         const cap = (m, x) => (m.readOnly && x === dm.MemberAccessRights.ReadWrite ? dm.MemberAccessRights.ReadOnly : x);
         // keep the existing order; add missing members in Studio Pro's order
         const have = new Map(r.memberAccesses.map(ma => [memberOf(ma), ma]));
-        const newDefault = o.newMembers !== undefined ? right(o.newMembers, "newMembers") : fresh ? access : r.defaultMemberAccessRights;
+        const newDefault = o.newMembers !== undefined ? right(o.newMembers, "newMembers") : access || r.defaultMemberAccessRights;
         for (const m of members) {
             let ma = have.get(m.qn);
             if (!ma) {
@@ -331,7 +331,7 @@ function makeDomain(h) {
             if (asked[m.qn] !== undefined) ma.accessRights = asked[m.qn];
             else if (access) ma.accessRights = cap(m, access);
         }
-        if (fresh || o.newMembers !== undefined) r.defaultMemberAccessRights = view && newDefault === dm.MemberAccessRights.ReadWrite ? dm.MemberAccessRights.ReadOnly : newDefault;
+        if (fresh || o.newMembers !== undefined || access) r.defaultMemberAccessRights = view && newDefault === dm.MemberAccessRights.ReadWrite ? dm.MemberAccessRights.ReadOnly : newDefault;
         if (fresh || o.create !== undefined) r.allowCreate = bool(o.create, false);
         if (fresh || o.delete !== undefined) r.allowDelete = bool(o.delete, false);
         if (fresh || o.xpath !== undefined) r.xPathConstraint = lintXpath(o.xpath || "");
@@ -1038,4 +1038,18 @@ function makeDomain(h) {
     return { impl, checks, calculate, associationSettings, assertOwnAttributes, addMemberToRules, capMember, membersOf, isView, isExternal, parseOql };
 }
 
-module.exports = { makeDomain, DOMAIN_OPS, DOMAIN_SYNONYMS, SYSTEM_PARENTS, SYSTEM_MEMBERS, parseOql };
+// checkPlan: a later op of the plan that changes what this op made (only the final state is checked).
+function changedLater(name, o, rest) {
+    const attr = name === "addAttribute" ? `${o.entity}.${o.name}` : name === "changeAttribute" ? o.attribute : null;
+    if (attr && rest.some(x => x.op === "changeAttribute" && x.attribute === attr)) return true;
+    if (name === "addAccessRule" || name === "changeAccessRule") {
+        const roles = [].concat(o.setRoles || o.roles || []).sort().join();
+        if (rest.some(x => ["deleteAccessRule", "changeAccessRule"].includes(x.op) && x.entity === o.entity && [].concat(x.roles || []).sort().join() === roles)) return true;
+    }
+    if (name === "createViewEntity" && rest.some(x => x.op === "changeViewEntity" && x.entity === `${o.module}.${o.name}`)) return true;
+    if (name === "changeViewEntity" && rest.some(x => x.op === "changeViewEntity" && x.entity === o.entity)) return true;
+    if (name === "addAssociation" && rest.some(x => x.op === "changeAssociation")) return true;
+    return false;
+}
+
+module.exports = { changedLater, makeDomain, DOMAIN_OPS, DOMAIN_SYNONYMS, SYSTEM_PARENTS, SYSTEM_MEMBERS, parseOql };
