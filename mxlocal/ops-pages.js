@@ -6,6 +6,7 @@
 // A Data grid 2 is copied from one on the project's own pages whose type matches widgets/*.mpk (see pluggable.js).
 const sdk = require("mendixmodelsdk");
 const { fail, suggest, bool, setIfAvailable, enumValue, validName } = require("./ops-util");
+const { toSdk } = require("./convert");
 const pluggable = require("./pluggable");
 const { userRoleNamed } = require("./ops-security");
 
@@ -106,6 +107,15 @@ const WIDGETS = {
             columns: "optional tiles per row 1-12 (default 2)", rows: "optional rows per page (default 3)", selection: "optional None | Single | SingleAndMaintain | Multi | SimpleMulti (default Single)", selectFirst: "optional true/false (default false)",
             buttons: "optional control bar buttons, as dataGrid (new, edit, delete, callMicroflow, callNanoflow)" }
     },
+    pluggable: {
+        doc: "any pluggable widget installed in widgets/*.mpk (Data grid 2, Gallery, Combo box, filters, charts, ...), built from its definition with every property at its default, exactly as Studio Pro drops it; then the given properties. widgettype <name> (CLI, MCP tool) lists a widget's properties, types and defaults",
+        fields: {
+            type: "R widget id or short name: com.mendix.widget.web.datagrid.Datagrid, Datagrid, \"Data grid 2\" (see widgettype)",
+            properties: "optional { \"<key>\": value } by property type: boolean true/false, integer/decimal a number, string, enumeration a key (or caption), expression \"$currentObject/Price > 0\", textTemplate a text with {Attribute}, attribute \"Name\" (of its data source, else of the data view around it), association Module.Assoc, entity Module.Entity, image Module.Collection.Image, action " + ACTION + ", selection Single | Multi | None, datasource \"Module.Entity\" or { \"entity\", \"xpath\" } (also { \"association\" } / { \"microflow\", \"params\" } / { \"nanoflow\" } for the first one), widgets [ widgets ] (inside a data source item when linked to it), object list [ { key: value } ] (non-list object { key: value })",
+            label: "optional label (widgets with a Label; default: the widget name, as Studio Pro)",
+            editable: EDITABLE
+        }
+    },
     gallery: {
         doc: "Gallery (pluggable, copied from the project's own pages like Data grid 2): objects (database, association or microflow/nanoflow, as listView) as tiles, each item with its own widgets; a data view can listen to it. Without a Studio Pro-saved gallery matching widgets/*.mpk it is refused: use listView",
         fields: { entity: "optional Module.Entity (default: the page entity)", ...LIST_SOURCE, xpath: "optional XPath constraint", widgets: "optional [ widgets ] per item (default: one text per attribute)", selection: "optional Single | Multi | None (default Single)", pageSize: "optional (default 20)", columns: "optional desktop columns 1-12 (default 1)", onClick: "optional: on an item click " + ACTION + "; the item is passed" }
@@ -137,7 +147,7 @@ const SYNONYMS = {
     gallery: { fields: "use \"widgets\" (per item)", rows: "use \"pageSize\"", listenTo: `a gallery cannot listen; ${MASTER_DETAIL}` }
 };
 const KINDS = [...Object.keys(WIDGETS), ...Object.keys(INPUTS)];
-const PREFIX = { layoutGrid: "layoutGrid", container: "container", text: "text", dataView: "dataView", dataGrid: "grid", listView: "listView", actionButton: "actionButton",
+const PREFIX = { pluggable: "widget", layoutGrid: "layoutGrid", container: "container", text: "text", dataView: "dataView", dataGrid: "grid", listView: "listView", actionButton: "actionButton",
     tabContainer: "tabControl", groupBox: "groupBox", snippetCall: "snippetCall", referenceSelector: "referenceSelector", referenceSetSelector: "referenceSetSelector", templateGrid: "templateGrid", comboBox: "comboBox", gallery: "gallery" };
 // enumValue with the widget location in the message
 function choice(cls, value, field, where) {
@@ -358,6 +368,7 @@ function makePages(h) {
                 // Data grid 2 custom content: widgets per row, in the row's object
                 node.colNodes = spec.columns.map((c, ci) => (c && typeof c === "object" && c.widgets !== undefined ? scan(c.widgets, `${node.where} column ${ci + 1}.widgets`, node, nodes) : null));
             }
+            else if (kind === "pluggable") plScan(node, container, nodes);
             else if (kind === "dataView") {
                 node.widgets = scan(spec.widgets, `${node.where}.widgets`, node, nodes);
                 node.footer = scan(spec.footer, `${node.where}.footer`, node, nodes);
@@ -749,7 +760,7 @@ function makePages(h) {
     // page), snippet, ctx }. prepare() first: the entity of lists that do not depend on what is around them, so that
     // names can be given in page order before anything else.
     function prepare(nodes) {
-        for (const n of nodes) if (n.kind === "dataView" || LISTENS.includes(n.kind) || n.kind === "templateGrid") n.source = sourceOf(n);
+        for (const n of nodes) if (n.kind === "dataView" || LISTENS.includes(n.kind) || n.kind === "templateGrid" || (n.kind === "pluggable" && n.dsKey)) n.source = sourceOf(n);
     }
     async function listEntity(n, o) {
         if (n.ent || n.source === "association") return;
@@ -778,7 +789,11 @@ function makePages(h) {
                 if (!n.target.ent) throw new Error(`${n.where}: the entity of ${n.target.name} is not known here; add this data view in Studio Pro`);
                 if (s.entity && s.entity !== n.target.ent.qualifiedName) throw new Error(`${n.where}: listens to ${n.target.name} (${n.target.ent.qualifiedName}), but entity is ${s.entity}; ${MASTER_DETAIL}`);
                 n.ent = n.target.ent;
-                const sel = String(n.target.spec.selection || "Single").toLowerCase();
+                if (n.target.kind === "pluggable") {
+                    const v = (n.target.pspec.properties || {})[n.target.selKey];
+                    if (String(v).toLowerCase() !== "single") throw new Error(`${n.where}: listenTo ${n.target.name} needs its "${n.target.selKey}": "Single" (in its properties)`);
+                }
+                const sel = String(n.target.kind === "pluggable" ? "single" : n.target.spec.selection || "Single").toLowerCase();
                 if ((n.target.gridKind === "datagrid2" || n.target.kind === "gallery") && sel !== "single") throw new Error(`${n.where}: listenTo needs a ${n.target.kind === "gallery" ? "gallery" : "Data grid 2"} with selection Single (${n.target.name} has ${n.target.spec.selection}); leave out "selection"`);
                 if (n.target.kind === "dataGrid" && sel === "none") client.warn(`${ctx.qn}: ${n.name || "the data view"} listens to ${n.target.name}, whose selection is None; select Single so it can show a row`);
                 else if (n.target.kind === "dataGrid" && /multi/.test(sel)) client.warn(`${ctx.qn}: ${n.target.name} allows multi-selection; the listening data view shows one of the selected rows (Single is usual)`);
@@ -1503,7 +1518,7 @@ function makePages(h) {
         return c.text;
     }
 
-    const INPUT_KINDS = ["input", ...Object.keys(INPUTS), "referenceSelector", "referenceSetSelector", "comboBox"];
+    const INPUT_KINDS = ["input", ...Object.keys(INPUTS), "referenceSelector", "referenceSetSelector", "comboBox", "pluggable"];
     // "style": inline CSS, except for a text (text style) and a button (button style) unless it holds CSS (a ':')
     const cssOf = node => (node.spec.style !== undefined && (!["text", "actionButton"].includes(node.kind) || /:/.test(String(node.spec.style))) ? String(node.spec.style) : undefined);
 
@@ -1580,7 +1595,376 @@ function makePages(h) {
         return ", on change: " + (await makeAction(node.spec.onChange, node, ctx, `${node.where}: onChange`, a => (w.onChangeAction = a)));
     }
 
+    // ------------------------------------------------ any pluggable widget, built from its widgets/*.mpk definition
+
+    const plDefs = new Map();
+    // { id, xml, type (CustomWidgetType storage JSON), version, file } of a widget by id or short name
+    function plDef(name, where) {
+        const dir = client.project.dir;
+        const { id, all } = pluggable.findWidget(dir, name);
+        if (!id) return fail(`${where}: no pluggable widget '${name}' in widgets/*.mpk${all.length ? " (widgettype lists them)" : " (this project has none)"}`, String(name), [...all.map(x => x.split(".").pop()), ...all]);
+        if (!plDefs.has(id)) {
+            const xml = pluggable.widgetXml(dir, id);
+            const inst = pluggable.installed(dir).get(id);
+            plDefs.set(id, { id, xml, type: pluggable.typeJson(xml, t => client.catalog.keys(t)), version: inst.version, file: inst.file });
+        }
+        return plDefs.get(id);
+    }
+    const plProps = objType => new Map(objType.PropertyTypes.map(pt => [pt.PropertyKey, pt]));
+    const PL_DS_KEYS = ["entity", "xpath", "source", "association", "microflow", "nanoflow", "params"];
+    // "../datasource" from the object at depth -> { depth, key } of the data source property it names
+    function dsRef(dsp, depth) {
+        let p = String(dsp), d = depth;
+        while (p.startsWith("../")) {
+            p = p.slice(3);
+            d--;
+        }
+        return { depth: d, key: p };
+    }
+    // ops widgettype: the properties of a widget (one line each, nested object properties indented)
+    function plLines(objType, indent = "    ") {
+        const out = [];
+        for (const pt of objType.PropertyTypes) {
+            const v = pt.ValueType, t = v.Type;
+            if (t === "System") continue;
+            const bits = [t === "Object" ? (v.IsList ? "object list" : "object") : t.toLowerCase() + (v.IsList ? " list" : "")];
+            if (v.Required && !["Boolean", "Enumeration", "Integer", "Decimal"].includes(t)) bits.push("required");
+            if (v.DefaultValue !== "") bits.push(`default ${v.DefaultValue}`);
+            if (v.EnumerationValues.length) bits.push(`values ${v.EnumerationValues.map(e => e._Key).join(" | ")}`);
+            if (v.SelectionTypes.length) bits.push(`selection ${v.SelectionTypes.join(" | ")}`);
+            if (v.AllowedTypes.length) bits.push(`types ${v.AllowedTypes.join(", ")}`);
+            if (v.DataSourceProperty) bits.push(`of data source ${v.DataSourceProperty}`);
+            if (v.ReturnType) bits.push(`returns ${v.ReturnType.Type}${v.ReturnType.IsList ? " list" : ""}`);
+            if (v.Translations.length) bits.push(`text "${v.Translations[0].Text}"`);
+            out.push(`${indent}${pt.PropertyKey}: ${bits.join(", ")} - ${pt.Caption} [${pt.Category}]`);
+            if (v.ObjectType) out.push(...plLines(v.ObjectType, indent + "    "));
+        }
+        return out;
+    }
+    function widgetType(name) {
+        const d = plDef(name, "widgettype");
+        const t = d.type;
+        const sys = t.ObjectType.PropertyTypes.filter(pt => pt.ValueType.Type === "System").map(pt => pt.PropertyKey);
+        return [`${t.WidgetName} ${d.version} (${t.WidgetId}, widgets/${d.file}; ${t.SupportedPlatform}${t.WidgetPluginWidget ? "" : ", not pluggable"})`,
+            `  system properties: ${sys.join(", ") || "none"} (Label -> "label", Visibility -> "visible", Editability -> "editable")`,
+            "  properties (\"properties\": { key: value }):", ...plLines(t.ObjectType),
+            `  use: { "widget": "pluggable", "type": "${t.WidgetId.split(".").pop()}", "properties": { ... } }`].join("\n");
+    }
+    function widgetTypes() {
+        const all = [...pluggable.installed(client.project.dir)].map(([id, x]) => `  ${id} ${x.version} (widgets/${x.file})`);
+        return all.length ? `Pluggable widgets in widgets/*.mpk (${all.length}):\n${all.join("\n")}\n  details: widgettype <name>` : "This project has no widgets/*.mpk.";
+    }
+
+    // Checks the properties of a pluggable node against its definition (keys, value shapes, enumeration keys) and
+    // scans its widget lists; the first data source becomes the node's own source (database / association / flow).
+    function plScan(node, container, nodes) {
+        const s = node.spec;
+        node.pl = plDef(s.type, node.where);
+        if (node.pl.type.SupportedPlatform === "Native") throw new Error(`${node.where}: ${node.pl.type.WidgetName} is a native widget; it goes on a native page`);
+        node.pspec = s;
+        node.plWidgets = new Map();
+        const t = node.pl.type, wname = t.WidgetName;
+        const sys = t.ObjectType.PropertyTypes.filter(pt => pt.ValueType.Type === "System").map(pt => pt.PropertyKey);
+        if (s.label !== undefined && !sys.includes("Label")) throw new Error(`${node.where}: ${wname} has no label`);
+        if (s.editable !== undefined && !sys.includes("Editability")) throw new Error(`${node.where}: ${wname} has no editability setting`);
+        const props = s.properties === undefined ? {} : s.properties;
+        if (!props || typeof props !== "object" || Array.isArray(props)) throw new Error(`${node.where}: properties is { "<key>": value } (widgettype ${t.WidgetId.split(".").pop()})`);
+        // the first top-level data source with a value is the node's source
+        for (const pt of t.ObjectType.PropertyTypes) {
+            if (pt.ValueType.Type !== "DataSource" || props[pt.PropertyKey] === undefined) continue;
+            if (pt.ValueType.IsLinked) throw new Error(`${node.where}: ${pt.PropertyKey} links to the data source of another widget; inside a Data grid 2 / gallery header a filter needs none, elsewhere set it in Studio Pro`);
+            const v = props[pt.PropertyKey];
+            const ds = typeof v === "string" ? { entity: v } : v;
+            if (!ds || typeof ds !== "object" || Array.isArray(ds)) throw new Error(`${node.where}: ${pt.PropertyKey} is "Module.Entity" or { "entity": ..., "xpath": ... } (or "association" / "microflow" / "nanoflow")`);
+            for (const k of Object.keys(ds)) if (!PL_DS_KEYS.includes(k)) fail(`${node.where}: unknown field '${k}' in ${pt.PropertyKey}`, k, PL_DS_KEYS);
+            if (!pt.ValueType.IsList) throw new Error(`${node.where}: ${pt.PropertyKey} is a single-object data source; set it in Studio Pro`);
+            node.dsKey = pt.PropertyKey;
+            const sel = t.ObjectType.PropertyTypes.find(x => x.ValueType.Type === "Selection" && x.ValueType.DataSourceProperty === pt.PropertyKey && x.ValueType.SelectionTypes.includes("Single"));
+            node.selKey = sel ? sel.PropertyKey : null;
+            node.spec = { ...s, ...ds };
+            delete node.spec.properties;
+            break;
+        }
+        const check = (objType, values, where, depth, linkedDepth0) => {
+            const map = plProps(objType);
+            const keys = [...map.keys()].filter(k => map.get(k).ValueType.Type !== "System");
+            for (const [k, v] of Object.entries(values)) {
+                const pt = map.get(k), at = `${where}.${k}`;
+                if (!pt) fail(`${where}: ${wname} has no property '${k}'`, k, keys);
+                const vt = pt.ValueType, ty = vt.Type;
+                if (ty === "System") throw new Error(`${at}: ${k} is a system property; use "${{ Label: "label", Visibility: "visible", Editability: "editable", Name: "name" }[k] || k}" on the widget`);
+                const bad = want => {
+                    throw new Error(`${at}: ${ty.toLowerCase()} property; give ${want}`);
+                };
+                const linked = vt.DataSourceProperty ? (r => r.depth === 0 && r.key === node.dsKey)(dsRef(vt.DataSourceProperty, depth)) : false;
+                switch (ty) {
+                    case "Boolean":
+                        if (!(typeof v === "boolean" || /^(true|false)$/.test(String(v)))) bad("true or false");
+                        break;
+                    case "Integer":
+                        if (!Number.isInteger(Number(v)) || v === "" || typeof v === "boolean") bad("a whole number");
+                        break;
+                    case "Decimal":
+                        if (v === "" || typeof v === "boolean" || Number.isNaN(Number(v))) bad("a number");
+                        break;
+                    case "Enumeration": {
+                        const all = vt.EnumerationValues.map(e => e._Key);
+                        if (!vt.EnumerationValues.some(e => e._Key === String(v) || e._Key.toLowerCase() === String(v).toLowerCase() || e.Caption.toLowerCase() === String(v).toLowerCase())) fail(`${at}: '${v}' is not a value (values: ${all.join(" | ")})`, String(v), all);
+                        break;
+                    }
+                    case "Selection":
+                        if (!vt.SelectionTypes.some(x => x.toLowerCase() === String(v).toLowerCase())) fail(`${at}: selection '${v}' is not possible (use ${vt.SelectionTypes.join(" | ")})`, String(v), vt.SelectionTypes);
+                        break;
+                    case "String": case "Expression": case "TextTemplate": case "TranslatableString": case "EntityConstraint":
+                        if (typeof v !== "string" && typeof v !== "number" && typeof v !== "boolean") bad("a text");
+                        break;
+                    case "Attribute": case "Association": case "Entity": case "Image": case "Form": case "Microflow": case "Nanoflow":
+                        if (typeof v !== "string" || !v) bad(ty === "Attribute" ? "an attribute name" : ty === "Image" ? "Module.Collection.Image" : "Module.Name");
+                        break;
+                    case "DataSource":
+                        if (k === node.dsKey && depth === 0) break;
+                        if (!(typeof v === "string" || (v && typeof v === "object" && !Array.isArray(v) && Object.keys(v).every(x => x === "entity" || x === "xpath")))) bad(`"Module.Entity" or { "entity": ..., "xpath": ... } (only the first data source of a widget takes association / microflow / nanoflow)`);
+                        break;
+                    case "Action":
+                        if (!(typeof v === "string" || (v && typeof v === "object" && !Array.isArray(v)))) bad(ACTION);
+                        break;
+                    case "Widgets":
+                        node.plWidgets.set(v, scan(v, at, linked ? node : container, nodes));
+                        break;
+                    case "Object":
+                        if (vt.IsList) {
+                            if (!Array.isArray(v)) bad("a list [ { key: value }, ... ]");
+                            v.forEach((o, i) => {
+                                if (!o || typeof o !== "object" || Array.isArray(o)) throw new Error(`${at}[${i + 1}]: each item is { key: value }`);
+                                check(vt.ObjectType, o, `${at}[${i + 1}]`, depth + 1);
+                            });
+                        } else {
+                            if (!v || typeof v !== "object" || Array.isArray(v)) bad("{ key: value }");
+                            check(vt.ObjectType, v, at, depth + 1);
+                        }
+                        break;
+                    default:
+                        throw new Error(`${at}: ${ty.toLowerCase()} properties are not supported here; set it in Studio Pro`);
+                }
+            }
+        };
+        check(t.ObjectType, props, `${node.where}.properties`, 0);
+    }
+
+    // Studio Pro's name for a dropped widget: its name in camel case + number ("Data grid 2" -> dataGrid2_1)
+    const plPrefix = t => {
+        const words = String(t.WidgetName).replace(/[^A-Za-z0-9 ]/g, " ").trim().split(/\s+/).filter(Boolean);
+        const n = words.map((w, i) => (i ? w[0].toUpperCase() + w.slice(1) : w[0].toLowerCase() + w.slice(1))).join("") || "widget";
+        return /\d$/.test(n) ? n + "_" : n;
+    };
+
+    // Sets the given properties on WidgetObject obj (frames: data source entities per object depth, outer first).
+    async function plApply(node, obj, values, frames, ctx, where) {
+        const props = new Map(obj.properties.map(p => [p.type.key, p]));
+        const depth = frames.length;
+        const frame = new Map();
+        frames = [...frames, frame];
+        const out = [];
+        const entityFor = (vt, at) => {
+            if (vt.dataSourceProperty) {
+                const r = dsRef(vt.dataSourceProperty, depth);
+                const f = frames[r.depth];
+                const ent = f && f.get(r.key);
+                if (!ent) throw new Error(`${at}: give its data source '${vt.dataSourceProperty.replace(/^(\.\.\/)+/, "")}' first`);
+                return ent;
+            }
+            const c = node.container;
+            if (!c || !c.ent) throw new Error(`${at}: needs the object of a data view or list item around the widget`);
+            return c.ent;
+        };
+        // data sources first: attributes and texts of the items refer to them
+        const order = [...Object.keys(values)].sort((a, b) => (props.get(b) && props.get(b).type.valueType.type.name === "DataSource") - (props.get(a) && props.get(a).type.valueType.type.name === "DataSource"));
+        for (const k of order) {
+            const v = values[k], p = props.get(k), vt = p.type.valueType, ty = vt.type.name, val = p.value, at = `${where}.${k}`;
+            const shows = x => out.push(`${k} ${x}`);
+            switch (ty) {
+                case "Boolean":
+                    val.primitiveValue = String(v === true || v === "true");
+                    shows(val.primitiveValue);
+                    break;
+                case "Integer": case "Decimal": case "String":
+                    val.primitiveValue = String(v);
+                    shows(JSON.stringify(String(v)));
+                    break;
+                case "Enumeration": {
+                    const e = vt.enumerationValues.find(x => x.key === String(v)) || vt.enumerationValues.find(x => x.key.toLowerCase() === String(v).toLowerCase() || x.caption.toLowerCase() === String(v).toLowerCase());
+                    val.primitiveValue = e.key;
+                    shows(e.key);
+                    break;
+                }
+                case "Selection": {
+                    const n = vt.selectionTypes.map(x => x.name).find(x => x.toLowerCase() === String(v).toLowerCase());
+                    val.selection = cw.CustomWidgetSelectionType[n];
+                    shows(n);
+                    break;
+                }
+                case "Expression": {
+                    const ent = vt.dataSourceProperty ? entityFor(vt, at) : node.container && node.container.ent;
+                    exprCheck(String(v), ent ? { ent } : null, at);
+                    val.expression = String(v);
+                    shows(String(v));
+                    break;
+                }
+                case "TextTemplate": {
+                    const ent = vt.dataSourceProperty ? entityFor(vt, at) : null;
+                    val.textTemplate = pages.ClientTemplate.create(model);
+                    await textTemplate(val.textTemplate, String(v), { where: at, container: ent ? { ent } : node.container }, ctx);
+                    shows(JSON.stringify(String(v)));
+                    break;
+                }
+                case "TranslatableString":
+                    if (!val.translatableValue) val.translatableValue = sdk.texts.Text.create(model);
+                    await textAll(val.translatableValue, String(v), ctx);
+                    shows(JSON.stringify(String(v)));
+                    break;
+                case "EntityConstraint":
+                    val.xPathConstraint = String(v);
+                    shows(String(v));
+                    break;
+                case "Attribute": {
+                    const ent = entityFor(vt, at);
+                    const attr = attributeOf(ent, String(v), at);
+                    const allowed = vt.attributeTypes.map(x => x.name);
+                    if (allowed.length && !allowed.includes(typeOf(attr))) throw new Error(`${at}: ${attr.name} is ${typeOf(attr)}; ${k} takes ${allowed.join(", ")}`);
+                    const ref = dm.AttributeRef.create(model);
+                    val.attributeRef = ref;
+                    ref.attribute = attr;
+                    shows(`${ent.name}.${attr.name}`);
+                    break;
+                }
+                case "Association": {
+                    const ent = entityFor(vt, at);
+                    const all = await allAssociations(ctx);
+                    const a = all.find(x => x.qualifiedName === String(v));
+                    const mine = all.filter(x => isA(ent, ends(x).from)).map(x => x.qualifiedName);
+                    if (!a) fail(`${at}: no association '${v}'`, String(v), mine);
+                    if (!isA(ent, ends(a).from)) throw new Error(`${at}: ${v} goes from ${ends(a).from}; ${k} starts at ${ent.qualifiedName}` + (mine.length ? ` (its associations: ${mine.join(", ")})` : ""));
+                    const kinds = vt.associationTypes.map(x => x.name);
+                    const kind = a.type === dm.AssociationType.ReferenceSet ? "ReferenceSet" : "Reference";
+                    if (kinds.length && !kinds.includes(kind)) throw new Error(`${at}: ${v} is a ${kind}; ${k} takes ${kinds.join(", ")}`);
+                    const st = dm.EntityRefStep.createIn(dm.IndirectEntityRef.createInWidgetValueUnderEntityRef(val));
+                    st.association = a;
+                    st.destinationEntity = await entityOf(ends(a).to, at);
+                    shows(String(v));
+                    break;
+                }
+                case "Entity": {
+                    const ent = await entityOf(String(v), at);
+                    dm.DirectEntityRef.createInWidgetValueUnderEntityRef(val).entity = ent;
+                    frame.set(k, ent);
+                    shows(ent.qualifiedName);
+                    break;
+                }
+                case "Image":
+                    val.image = await imageNamed(String(v), at);
+                    shows(String(v));
+                    break;
+                case "Form": case "Microflow": case "Nanoflow": {
+                    const d = await h.get(String(v));
+                    const want = { Form: pages.Page, Microflow: mf.Microflow, Nanoflow: mf.Nanoflow }[ty];
+                    if (!(d instanceof want)) throw new Error(`${at}: '${v}' is not a ${ty === "Form" ? "page" : ty.toLowerCase()}`);
+                    val[ty === "Form" ? "page" : ty.toLowerCase()] = d;
+                    shows(String(v));
+                    break;
+                }
+                case "DataSource": {
+                    if (depth === 0 && k === node.dsKey) {
+                        frame.set(k, node.ent);
+                        shows(listSource(node, val, true, ctx));
+                        break;
+                    }
+                    const ds = typeof v === "string" ? { entity: v } : v;
+                    const ent = await entityOf(String(ds.entity), at);
+                    if (!h.persistable(ent)) throw new Error(`${at}: ${ent.qualifiedName} is non-persistable; a database source needs a persistable entity`);
+                    const src = cw.CustomWidgetXPathSource.createInWidgetValueUnderDataSource(val);
+                    dm.DirectEntityRef.createInEntityPathSourceUnderEntityRef(src).entity = ent;
+                    if (ds.xpath) {
+                        checkXPath({ where: at, spec: { xpath: ds.xpath }, container: node.container }, ent);
+                        src.xPathConstraint = String(ds.xpath);
+                    }
+                    frame.set(k, ent);
+                    shows(`${ent.qualifiedName}${ds.xpath ? " " + ds.xpath : ""}`);
+                    break;
+                }
+                case "Action": {
+                    const linked = vt.dataSourceProperty && dsRef(vt.dataSourceProperty, depth);
+                    const item = linked && linked.depth === 0 && linked.key === node.dsKey;
+                    shows(await makeAction(v, { container: item ? node : node.container, name: node.name }, ctx, at, a => (val.action = a)));
+                    break;
+                }
+                case "Widgets": {
+                    const inner = [];
+                    for (const ch of node.plWidgets.get(v) || []) inner.push(await build(ch, val.widgets, ctx));
+                    shows(`[${inner.join(", ")}]`);
+                    break;
+                }
+                case "Object": {
+                    // the objects themselves are made with the widget (plPrefill)
+                    const items = vt.isList ? v : [v];
+                    const texts = [];
+                    for (const [i, o] of items.entries()) {
+                        const inner = await plApply(node, val.objects[i], o, frames, ctx, vt.isList ? `${at}[${i + 1}]` : at);
+                        texts.push(`{${inner.join(", ")}}`);
+                    }
+                    shows(vt.isList ? `[${texts.join(", ")}]` : texts[0]);
+                    break;
+                }
+                default:
+                    throw new Error(`${at}: ${ty} properties are not supported here; set it in Studio Pro`);
+            }
+        }
+        return out;
+    }
+    // The objects of object properties given in values, made in the widget's storage JSON (objJson of objType)
+    function plPrefill(objJson, objType, values, langs) {
+        for (const [k, v] of Object.entries(values || {})) {
+            const pt = objType.PropertyTypes.find(x => x.PropertyKey === k);
+            if (!pt || pt.ValueType.Type !== "Object") continue;
+            const prop = objJson.Properties.find(x => x.TypePointer === pt.$ID);
+            prop.Value.Objects = (pt.ValueType.IsList ? v : [v]).map(o => {
+                const oj = pluggable.objectJson(pt.ValueType.ObjectType, langs);
+                plPrefill(oj, pt.ValueType.ObjectType, o, langs);
+                return oj;
+            });
+        }
+    }
+
+    // Required properties left at an empty default (Studio Pro reports those it shows as errors).
+    function plMissing(obj) {
+        const miss = [];
+        for (const p of obj.properties) {
+            const vt = p.type.valueType, v = p.value, t = vt.type.name;
+            if (!vt.required || vt.isLinked) continue;
+            const empty = { Attribute: !v.attributeRef, Association: !v.entityRef, Entity: !v.entityRef, DataSource: !v.dataSource, Image: !v.imageQualifiedName,
+                Expression: !v.expression, TextTemplate: !v.textTemplate || !v.textTemplate.template.translations.some(x => x.text), Object: vt.isList && !v.objects.length, Action: v.action instanceof pages.NoClientAction }[t];
+            if (empty) miss.push(p.type.key);
+        }
+        return miss;
+    }
+
     const BUILD = {
+        async pluggable(node, target, ctx) {
+            const d = node.pl, s = node.pspec;
+            const langs = await languages();
+            const name = node.name || ctx.names.next(plPrefix(d.type));
+            const json = pluggable.widgetJson(d.xml, name, langs, t => client.catalog.keys(t));
+            plPrefill(json.Object, json.Type.ObjectType, s.properties, langs);
+            const w = sdk.createElementFromJSON(model, toSdk(json, client.schema));
+            target.push(w);
+            node.widget = w;
+            node.name = name;
+            if (s.label !== undefined) await textAll(w.labelTemplate.template, String(s.label), ctx);
+            const set = await plApply(node, w.object, s.properties || {}, [], ctx, `${node.where}.properties`);
+            const miss = plMissing(w.object);
+            if (miss.length) client.warn(`${ctx.qn}: ${name} (${d.type.WidgetName}) leaves required ${miss.join(", ")} empty; Studio Pro reports the ones it shows (widgettype ${d.id.split(".").pop()})`);
+            if (!pluggable.exemplars(client.project, d.id).exemplars.length) client.warnFirst(`${ctx.qn}: ${name} is the first ${d.type.WidgetName} ${d.version} in this project (built from widgets/${d.file}): check it in Studio Pro`);
+            return `${name} (${d.type.WidgetName} ${d.version}${set.length ? `: ${set.join(", ")}` : ""})`;
+        },
         async layoutGrid(node, target, ctx) {
             const lg = pages.LayoutGrid.create(model);
             target.push(lg);
@@ -2287,7 +2671,7 @@ function makePages(h) {
 
     function listenTarget(n, nodes) {
         const want = String(n.spec.listenTo);
-        const listenable = nodes.filter(x => LISTENS.includes(x.kind));
+        const listenable = nodes.filter(x => LISTENS.includes(x.kind) || (x.kind === "pluggable" && x.selKey));
         const cands = listenable.length ? `grids, list views and galleries on this page: ${listenable.map(x => `${x.name} (${x.kind})`).join(", ")}` : `this page has no dataGrid, listView or gallery; add one to "widgets"`;
         const named = nodes.find(x => x.name === want);
         if (named) {
@@ -2459,7 +2843,7 @@ function makePages(h) {
     // the builders and lookups ops-page-edit.js uses on existing pages
     const internals = { scan, build, gridKind, entityOf, attributeOf, names, textAll, templateAll, noPlaceholder, checkXPath, dg2Info,
         isGrid2, isPl, valueOf, humanize, condition, sameCondition, fill, languages, shown, listenTarget, classicColumn, dg2Column, typeOf, isA, list, unitNamed,
-        prepare, listEntity, resolveSources, sourceKind, makeAction };
+        prepare, listEntity, resolveSources, sourceKind, makeAction, plDef, plApply, plScan, widgetType, widgetTypes };
     return { createPage, addMenuItem, setHomePage, checks, internals };
 }
 

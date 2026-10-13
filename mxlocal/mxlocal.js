@@ -47,6 +47,9 @@ const USAGE = `mxlocal - Mendix Model SDK offline on a local .mpr (v2)
   node mxlocal.js widgets <Module.Page> --project <app.mpr|folder>
                                         the widget tree of a page or snippet: names, kinds, entity, where new
                                         widgets can go (for addWidgets/changeWidget/deleteWidget/moveWidget)
+  node mxlocal.js widgettype [name] --project <app.mpr|folder>
+                                        the pluggable widgets in widgets/*.mpk; with a name: its properties
+                                        (types, defaults, values) for { "widget": "pluggable", "properties": ... }
   node mxlocal.js texts [Module|Module.Doc|menu] [--missing <lang>] --project <app.mpr|folder>
                                         translatable texts (titles, captions, labels, messages, enumeration and menu
                                         captions) in every project language (for setTranslations)
@@ -404,6 +407,11 @@ async function main() {
         const client = new LocalClient(ctx);
         const model = await client.open();
         out(await require("./ops").bind(model, client).widgets(a._[1]));
+    } else if (cmd === "widgettype" || cmd === "widgettypes") {
+        const ctx = await loadProject(mpr);
+        const client = new LocalClient(ctx);
+        const model = await client.open();
+        out(await require("./ops").bind(model, client).widgetType(a._.slice(1).join(" ")));
     } else if (cmd === "texts") {
         const ctx = await loadProject(mpr);
         const client = new LocalClient(ctx);
