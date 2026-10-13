@@ -404,8 +404,9 @@ async function widgetTargets(model, project) {
     }
     out.comboInfo = pl.exemplars(project, ops.COMBOBOX);
     out.galleryInfo = pl.exemplars(project, ops.GALLERY);
-    out.combo = out.comboInfo.exemplars.length > 0;
-    out.gallery = out.galleryInfo.exemplars.length > 0;
+    // a Studio Pro-saved one to copy, or the .mpk to build one from
+    out.combo = out.comboInfo.exemplars.length > 0 || !!out.comboInfo.def;
+    out.gallery = out.galleryInfo.exemplars.length > 0 || !!out.galleryInfo.def;
     return out;
 }
 
@@ -1001,10 +1002,11 @@ async function selftest(mpr, keep, { out, relevant }) {
         const userRoles = sec ? (await sec.load()).userRoles.map(u => u.name) : [];
         const userRole = userRoles.includes("Administrator") ? "Administrator" : userRoles[0];
         const grid2 = require("./pluggable").exemplars(s1.ctx.project, "com.mendix.widget.web.datagrid.Datagrid");
-        const { phase1, E, M, role } = plans(mod, T, userRole, grid2.exemplars.length > 0);
+        const grid2Ok = grid2.exemplars.length > 0 || !!grid2.def;
+        const { phase1, E, M, role } = plans(mod, T, userRole, grid2Ok);
         const wt = await widgetTargets(s1.model, s1.ctx.project);
         phase1.ops.push(widgetPlan(mod, T, wt));
-        wt.grid2 = grid2.exemplars.length > 0;
+        wt.grid2 = grid2Ok;
         phase1.ops.push(...relationalPlan(mod, T, wt));
         // pages copy a layout from the project's own pages; a project without any cannot get pages
         const layouts = new Set(s1.model.allLayouts().map(l => l.qualifiedName));
@@ -1084,9 +1086,9 @@ async function selftest(mpr, keep, { out, relevant }) {
         if (pageable) {
             const dash = dashboardProblems(s2.ctx.project, mod, T, web ? userRole : null);
             check("dashboard stored like Studio Pro (listen target, inputs, menu, home pages)", !dash.length, dash.join("; "));
-            if (grid2.exemplars.length) {
+            if (grid2Ok) {
                 const g2 = grid2Problems(s2.ctx.project, mod, T);
-                check(`Data grid 2 ${grid2.def.version} copy (type = .mpk, Single selection, listened to, no old references)`, !g2.length, g2.slice(0, 5).join("; "));
+                check(`Data grid 2 ${grid2.def.version} (built from the .mpk: type = .mpk, Single selection, listened to, no old references)`, !g2.length, g2.slice(0, 5).join("; "));
             } else results.push(`SKIP Data grid 2 page: ${grid2.reason}`);
             const wp = widgetProblems(s2.ctx.project, T, wt);
             const kinds = ["tab container", "group box", "reference selector", wt.snippet && "snippet call", wt.image && "image", wt.imageEntity && "dynamic image", wt.combo && "combo box x2", wt.gallery && "gallery"].filter(Boolean);

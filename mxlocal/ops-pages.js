@@ -887,7 +887,14 @@ function makePages(h) {
         const info = plInfo(id);
         const ids = new Set(model.allUnits().map(u => u.id));
         const exemplars = info.exemplars.filter(e => ids.has(e.unitId));
-        return { ...info, exemplars, reason: info.exemplars.length && !exemplars.length ? "the pages with one to copy from are deleted earlier in this plan" : info.reason };
+        let fresh = false;
+        try {
+            fresh = !!(info.def && plDef(id, id));
+        } catch (e) {
+            fresh = false; // an .mpk this builder cannot read: copy one from the project's pages instead
+        }
+        const ok = fresh || exemplars.length > 0;
+        return { ...info, exemplars, fresh, ok, reason: ok ? "" : info.exemplars.length && !exemplars.length ? "the pages with one to copy from are deleted earlier in this plan" : info.reason };
     }
     const dg2Live = () => plLive(DATAGRID2);
     // attribute types a Data grid 2 column can show (from widgets/*.mpk)
@@ -916,11 +923,11 @@ function makePages(h) {
         const info = dg2Live();
         if (bool(s.selectFirst, false) && info.def && !info.def.lines.some(l => l.startsWith("autoSelect "))) classicOnly.push(`selectFirst (Data grid 2 ${info.def.version} has no autoSelect)`);
         if (asked === "datagrid2") {
-            if (!info.exemplars.length) throw new Error(`${node.where}: "kind": "datagrid2" is not possible here: ${info.reason}. Use "kind": "classic" (a classic Data grid, works in every project)`);
+            if (!info.ok) throw new Error(`${node.where}: "kind": "datagrid2" is not possible here: ${info.reason}. Use "kind": "classic" (a classic Data grid, works in every project)`);
             if (classicOnly.length) throw new Error(`${node.where}: ${classicOnly.join(", ")} ${classicOnly.length > 1 ? "work" : "works"} only with "kind": "classic" (a Data grid 2 gets column filters in Studio Pro; its selection is Single, Multi or None)`);
         }
         // auto: columns a Data grid 2 cannot show (HashedString, ...) make it a classic grid
-        if (asked === "auto" && info.exemplars.length && !classicOnly.length && Array.isArray(s.columns) && node.ent) {
+        if (asked === "auto" && info.ok && !classicOnly.length && Array.isArray(s.columns) && node.ent) {
             try {
                 dg2Cols(node, dg2Types(info));
             } catch (e) {
@@ -928,9 +935,9 @@ function makePages(h) {
                 classicOnly.push(m ? `column ${m[1]} (${m[2]})` : e.message.slice(node.where.length + 2));
             }
         }
-        if (asked === "auto" && dg2Only.length && !info.exemplars.length) throw new Error(`${node.where}: ${dg2Only.join(" and ")} need a Data grid 2, which is not possible here: ${info.reason}`);
-        if (info.exemplars.length && !classicOnly.length) node.gridKind = "datagrid2";
-        else node.autoWhy = info.exemplars.length ? `${classicOnly.join(", ")} ${classicOnly.length > 1 ? "are" : "is"} classic only` : info.reason;
+        if (asked === "auto" && dg2Only.length && !info.ok) throw new Error(`${node.where}: ${dg2Only.join(" and ")} need a Data grid 2, which is not possible here: ${info.reason}`);
+        if (info.ok && !classicOnly.length) node.gridKind = "datagrid2";
+        else node.autoWhy = info.ok ? `${classicOnly.join(", ")} ${classicOnly.length > 1 ? "are" : "is"} classic only` : info.reason;
     }
 
     // ------------------------------------------------ conditions (visible / editable)
@@ -1246,6 +1253,21 @@ function makePages(h) {
         return col;
     }
 
+    // Fills a default column object (made with a fresh Data grid 2) for column c of dg2Cols.
+    async function dg2Fill(col, c, ctx, where) {
+        const show = valueOf(col, "showContentAs");
+        if (c.kind !== "attribute" && (!show || !show.type.enumerationValues.some(e => e.key === c.kind))) throw new Error(`${where}: this Data grid 2 has no ${c.kind} columns`);
+        if (show && show.primitiveValue !== c.kind) show.primitiveValue = c.kind;
+        if (c.kind === "attribute") {
+            const ref = dm.AttributeRef.create(model);
+            ref.attribute = c.attr;
+            valueOf(col, "attribute").attributeRef = ref;
+        }
+        const header = valueOf(col, "header");
+        if (header && c.caption) await templateAll(header, "textTemplate", c.caption, ctx, where);
+        return col;
+    }
+
     // onClick of a Data grid 2 or gallery: the row / item is passed (a page gets it mapped, as Studio Pro stores it)
     async function pluggableClick(node, props, ctx) {
         if (!props.has("onClick")) throw new Error(`${node.where}: this ${node.kind === "gallery" ? "gallery" : "Data grid 2"} has no onClick property`);
@@ -1316,6 +1338,31 @@ function makePages(h) {
         return { w, props: new Map(w.object.properties.map(p => [p.type.key, p])), doc };
     }
 
+    // A new pluggable widget of id at the end of target: built from widgets/*.mpk with Studio Pro's defaults (counts:
+    // { objectListKey: n } default objects made with it), or else a copy of one on the project's pages.
+    // { w, props, doc (the copy's page, or null), fresh, from (for messages) }
+    async function basePluggable(info, id, node, target, ctx, what, alt, counts = {}) {
+        if (info.fresh) {
+            const d = plDef(id, node.where);
+            const langs = await languages();
+            const name = node.name || ctx.names.next(PREFIX[node.kind] || plPrefix(d.type));
+            const json = pluggable.widgetJson(d.xml, name, langs, t => client.catalog.keys(t));
+            for (const [k, n] of Object.entries(counts)) {
+                const pt = json.Type.ObjectType.PropertyTypes.find(x => x.PropertyKey === k);
+                json.Object.Properties.find(x => x.TypePointer === pt.$ID).Value.Objects = Array.from({ length: n }, () => pluggable.objectJson(pt.ValueType.ObjectType, langs));
+            }
+            const w = sdk.createElementFromJSON(model, toSdk(json, client.schema));
+            target.push(w);
+            node.widget = w;
+            w.name = node.name = name;
+            return { w, props: new Map(w.object.properties.map(p => [p.type.key, p])), doc: null, fresh: true, from: `built from widgets/${d.file} with Studio Pro's defaults` };
+        }
+        const pick = info.exemplars[0];
+        if (!pick) throw new Error(`${node.where}: a ${what} is not possible here: ${info.reason}; ${alt}`);
+        const r = await copyPluggable(pick, node, target, ctx, what, alt);
+        return { ...r, fresh: false, from: `copied from ${r.doc.qualifiedName}.${pick.name} with every setting back to its default` };
+    }
+
     // Refuses a pluggable widget copy that still refers to something of the original: widgets, other entities and
     // attributes than those of ents, actions, page variables, documents.
     function leftovers(w, ents, where, what, alt) {
@@ -1338,25 +1385,30 @@ function makePages(h) {
     async function dataGrid2(node, target, ctx) {
         const ent = node.ent;
         const info = dg2Live();
-        const pick = info.exemplars[0];
-        if (!pick) throw new Error(`${node.where}: "kind": "datagrid2" is not possible here: ${info.reason}. Use "kind": "classic"`);
+        if (!info.ok) throw new Error(`${node.where}: "kind": "datagrid2" is not possible here: ${info.reason}. Use "kind": "classic"`);
         // columns first: a refused column must not leave a half-made copy on the page
         const { cols, dropped } = dg2Cols(node, dg2Types(info));
         if (!cols.length) throw new Error(`${node.where}: a Data grid 2 needs at least one column`);
-        const { w: grid, props, doc } = await copyPluggable(pick, node, target, ctx, "Data grid 2", `use "kind": "classic"`);
+        const base = await basePluggable(info, DATAGRID2, node, target, ctx, "Data grid 2", `use "kind": "classic"`, { columns: cols.length });
+        const { w: grid, props } = base;
         for (const k of ["datasource", "columns", "itemSelection"]) if (!props.has(k)) throw new Error(`${node.where}: this Data grid 2 version has no '${k}' property; use "kind": "classic"`);
-        // columns: one per attribute, shaped like an attribute column of the original
         const colProp = props.get("columns");
         const colType = colProp.type.valueType.objectType;
-        const olds = [...colProp.value.objects];
-        const pattern = olds.find(o => (valueOf(o, "showContentAs") || {}).primitiveValue === "attribute") || olds[0] || null;
         if (dropped.length) client.warn(`${ctx.qn}: ${grid.name} leaves out ${dropped.join(", ")}: a Data grid 2 column cannot show that type (give "columns", or "kind": "classic")`);
         const made = [];
-        for (const c of cols) made.push(c.kind === "attribute" ? await dg2Column(colType, pattern, c.attr, c.caption, ctx, node.where) : await dg2Other(colType, pattern, c, ctx, node.where));
-        // everything else back to the widget's defaults, without the original's references
-        for (const p of grid.object.properties) if (p.type.key !== "columns") await blank(p.value, p.type, null);
-        colProp.value.objects.clear();
-        for (const col of made) colProp.value.objects.push(col);
+        if (base.fresh) {
+            // the columns came with the widget, each at its defaults
+            for (const [i, c] of cols.entries()) made.push(await dg2Fill(colProp.value.objects[i], c, ctx, node.where));
+        } else {
+            // columns: one per attribute, shaped like an attribute column of the original
+            const olds = [...colProp.value.objects];
+            const pattern = olds.find(o => (valueOf(o, "showContentAs") || {}).primitiveValue === "attribute") || olds[0] || null;
+            for (const c of cols) made.push(c.kind === "attribute" ? await dg2Column(colType, pattern, c.attr, c.caption, ctx, node.where) : await dg2Other(colType, pattern, c, ctx, node.where));
+            // everything else back to the widget's defaults, without the original's references
+            for (const p of grid.object.properties) if (p.type.key !== "columns") await blank(p.value, p.type, null);
+            colProp.value.objects.clear();
+            for (const col of made) colProp.value.objects.push(col);
+        }
         const shows = listSource(node, props.get("datasource").value, true, ctx);
         // selection (Single: row click, as Studio Pro's own master-detail grids)
         const selName = { single: "Single", multi: "Multi", none: "None" }[String(node.spec.selection || "Single").toLowerCase()];
@@ -1389,7 +1441,7 @@ function makePages(h) {
         }
         if (node.spec.onClick !== undefined) extra.push("on click: " + (await pluggableClick(node, props, ctx)));
         const why = node.kindAsked === "auto" ? `"kind": "auto"` : `"kind": "datagrid2"`;
-        client.warnFirst(`${ctx.qn}: ${grid.name} is a Data grid 2 ${info.def.version} (${why}), copied from ${doc.qualifiedName}.${pick.name} with its filters, actions and personalization left empty; "kind": "classic" for a classic Data grid`);
+        client.warnFirst(`${ctx.qn}: ${grid.name} is a Data grid 2 ${info.def.version} (${why}), ${base.from}; "kind": "classic" for a classic Data grid`);
         return `${grid.name} (Data grid 2 ${info.def.version}, ${shows}, ${cols.length} column(s), selection ${selName}${extra.length ? "; " + extra.join("; ") : ""})`;
     }
 
@@ -2130,6 +2182,7 @@ function makePages(h) {
             if (node.kindAsked === "classic") {
                 const d2 = dg2Info();
                 if (d2.exemplars.length) why += `; this project uses Data grid 2 (${d2.exemplars.length + d2.stale}x), "kind": "datagrid2" makes one`;
+                else if (d2.def) why += `; widgets/ has Data grid 2 ${d2.def.version}, "kind": "datagrid2" makes one`;
             }
             client.warnFirst(`${ctx.qn}: ${grid.name} is a classic Data grid (${why})`);
             return `${grid.name} (classic Data grid, ${shows}, ${cols.length} column(s)${fields ? `, ${fields} search field(s)` : ""}${bar.length ? `, buttons: ${bar.join(", ")}` : ""})`;
@@ -2361,11 +2414,12 @@ function makePages(h) {
             }
             const alt = `use "widget": "${mode === "association" ? "referenceSelector" : mode === "boolean" ? "checkBox" : "dropDown"}" (a classic widget, works in every project)`;
             const info = plLive(COMBOBOX);
-            if (!info.exemplars.length) throw new Error(`${node.where}: a combo box is not possible here: ${info.reason}; ${alt}`);
-            const { w, props } = await copyPluggable(info.exemplars[0], node, target, ctx, "combo box", alt);
+            if (!info.ok) throw new Error(`${node.where}: a combo box is not possible here: ${info.reason}; ${alt}`);
+            const base = await basePluggable(info, COMBOBOX, node, target, ctx, "combo box", alt);
+            const { w, props } = base;
             const key = { enumeration: "attributeEnumeration", boolean: "attributeBoolean", association: "attributeAssociation" }[mode];
             for (const k of ["optionsSourceType", key, ...(other ? ["optionsSourceAssociationDataSource", "optionsSourceAssociationCaptionAttribute"] : [])]) if (!props.has(k)) throw new Error(`${node.where}: Combo box ${info.def.version} has no '${k}' property; ${alt}`);
-            for (const p of w.object.properties) await blank(p.value, p.type, null, true);
+            if (!base.fresh) for (const p of w.object.properties) await blank(p.value, p.type, null, true);
             const type = props.get("optionsSourceType").value;
             if (!type.type.enumerationValues.some(e => e.key === mode)) throw new Error(`${node.where}: Combo box ${info.def.version} has no ${mode} mode; ${alt}`);
             type.primitiveValue = mode;
@@ -2394,7 +2448,7 @@ function makePages(h) {
                 const v = props.get("onChangeEvent").value;
                 oc = ", on change: " + (await makeAction(s.onChange, node, ctx, `${node.where}: onChange`, a => (v.action = a)));
             }
-            client.warnFirst(`${ctx.qn}: ${w.name} is a Combo box ${info.def.version}, copied from ${info.exemplars[0].unitName} with every setting back to its default`);
+            client.warnFirst(`${ctx.qn}: ${w.name} is a Combo box ${info.def.version}, ${base.from}`);
             return `${w.name} (Combo box ${info.def.version}, ${attr ? attr.name : `${s.association} -> ${other.name}.${cap.name}`}${oc})`;
         },
         async templateGrid(node, target, ctx) {
@@ -2428,7 +2482,7 @@ function makePages(h) {
             const s = node.spec, ent = node.ent;
             const info = plLive(GALLERY);
             const alt = `use "widget": "listView" (works in every project)`;
-            if (!info.exemplars.length) throw new Error(`${node.where}: a gallery is not possible here: ${info.reason}; ${alt}`);
+            if (!info.ok) throw new Error(`${node.where}: a gallery is not possible here: ${info.reason}; ${alt}`);
             const selName = { single: "Single", multi: "Multi", none: "None" }[String(s.selection || "Single").toLowerCase()];
             if (!selName) fail(`${node.where}: selection '${s.selection}' is not known (use Single | Multi | None)`, String(s.selection), ["Single", "Multi", "None"]);
             const num = (v, k, max) => {
@@ -2439,9 +2493,10 @@ function makePages(h) {
             const pageSize = s.pageSize !== undefined ? num(s.pageSize, "pageSize", 10000) : null;
             const cols = s.columns !== undefined ? num(s.columns, "columns", 12) : null;
             if (s.xpath) checkXPath(node, ent);
-            const { w, props } = await copyPluggable(info.exemplars[0], node, target, ctx, "gallery", alt);
+            const base = await basePluggable(info, GALLERY, node, target, ctx, "gallery", alt);
+            const { w, props } = base;
             for (const k of ["datasource", "content", "itemSelection"]) if (!props.has(k)) throw new Error(`${node.where}: Gallery ${info.def.version} has no '${k}' property; ${alt}`);
-            for (const p of w.object.properties) await blank(p.value, p.type, null, true);
+            if (!base.fresh) for (const p of w.object.properties) await blank(p.value, p.type, null, true);
             const shows = listSource(node, props.get("datasource").value, true, ctx);
             const sel = props.get("itemSelection").value;
             if (!sel.type.selectionTypes.some(x => x.name === selName)) throw new Error(`${node.where}: this gallery has no selection ${selName}`);
@@ -2456,7 +2511,7 @@ function makePages(h) {
             for (const f of fields) inner.push(await build({ kind: "text", spec: { text: `{${f}}` }, where: node.where, container: node }, content, ctx));
             for (const ch of node.widgets) inner.push(await build(ch, content, ctx));
             const click = s.onClick !== undefined ? `, on click: ${await pluggableClick(node, props, ctx)}` : "";
-            client.warnFirst(`${ctx.qn}: ${w.name} is a Gallery ${info.def.version}, copied from ${info.exemplars[0].unitName} with every setting back to its default`);
+            client.warnFirst(`${ctx.qn}: ${w.name} is a Gallery ${info.def.version}, ${base.from}`);
             return `${w.name} (Gallery ${info.def.version}, ${shows}, selection ${selName}${click}) [${inner.join(", ")}]`;
         },
         async input(node, target, ctx) {
