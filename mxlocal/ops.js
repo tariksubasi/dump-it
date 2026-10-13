@@ -16,17 +16,20 @@ const { makePageEdit, PAGE_EDIT_OPS, PAGE_EDIT_NAMES, FIELD_SYNONYMS } = require
 const { makeSecurity, SECURITY_OPS } = require("./ops-security");
 const { makeMappings, MAPPING_OPS } = require("./ops-mappings");
 const { makeTexts, TEXT_OPS } = require("./ops-texts");
+const { makeDomain, DOMAIN_OPS, DOMAIN_SYNONYMS, SYSTEM_PARENTS } = require("./ops-domain");
 
 const OPS = {
     createEntity: {
         doc: "Create an entity in a module's domain model.",
-        fields: { module: "R module name", name: "R entity name", persistable: "optional true/false (default true)", generalization: "optional Module.ParentEntity", attributes: "optional [ { \"name\": ..., \"type\": ..., \"default\": ... } ]" }
+        fields: { module: "R module name", name: "R entity name", persistable: "optional true/false (default true)", generalization: "optional Module.ParentEntity (also System.FileDocument, System.Image, System.User)", attributes: "optional [ { \"name\": ..., \"type\": ..., \"default\": ..., \"calculated\": ... } ]" }
     },
-    addAttribute: { doc: "Add an attribute to an entity.", fields: { entity: "R Module.Entity", name: "R attribute name", type: "R " + ATTRIBUTE_TYPES, default: "optional default value (as Studio Pro shows it)" } },
-    changeAttribute: { doc: "Change the type and/or default of an attribute.", fields: { attribute: "R Module.Entity.Attribute", type: "optional new type", default: "optional new default value" } },
+    addAttribute: { doc: "Add an attribute to an entity (stored, or calculated by a microflow).", fields: { entity: "R Module.Entity", name: "R attribute name", type: "R " + ATTRIBUTE_TYPES, default: "optional default value (as Studio Pro shows it)", calculated: "optional Module.Microflow that computes the value (not stored): no parameter or one of the entity, returns the attribute type" } },
+    changeAttribute: { doc: "Change the type, default, or stored/calculated of an attribute.", fields: { attribute: "R Module.Entity.Attribute", type: "optional new type", default: "optional new default value", calculated: "optional Module.Microflow: make it calculated (its column is dropped)", stored: "optional true: make a calculated attribute stored again" } },
     addAssociation: {
         doc: "Add an association. 'from' stores the reference: many 'from' objects point to one 'to' object (Reference), or to many (ReferenceSet).",
-        fields: { from: "R Module.Entity (owner side)", to: "R Module.Entity or OtherModule.Entity", name: "optional (default From_To)", type: "optional Reference | ReferenceSet (default Reference)", owner: "optional Default | Both" }
+        fields: { from: "R Module.Entity (owner side)", to: "R Module.Entity or OtherModule.Entity", name: "optional (default From_To)", type: "optional Reference | ReferenceSet (default Reference)", owner: "optional Default | Both",
+            storage: "optional Table | Column (default: the app's setting for a Reference with owner Default, else Table)", onDeleteFrom: "optional keep | delete | prevent (default keep): when a 'from' object is deleted", onDeleteTo: "optional keep | delete | prevent: when a 'to' object is deleted",
+            messageFrom: "prevent on onDeleteFrom: message", messageTo: "prevent on onDeleteTo: message" }
     },
     createEnumeration: { doc: "Create an enumeration.", fields: { module: "R module name", name: "R enumeration name", values: "R [ \"Value\" or { \"name\": ..., \"caption\": ... } ]", folder: "optional folder path, e.g. Enums/Order" } },
     addEnumerationValue: { doc: "Add a value to an enumeration.", fields: { enumeration: "R Module.Enumeration", name: "R value name", caption: "optional caption (default the name)" } },
@@ -37,8 +40,9 @@ const OPS = {
     ...TEXT_OPS,
     addAccessRule: {
         doc: "Add an entity access rule. Members not listed in 'members' get 'access'.",
-        fields: { entity: "R Module.Entity", roles: "R [ \"Module.Role\" ]", access: "optional ReadWrite | ReadOnly | None (default ReadOnly)", members: "optional { \"Attribute\": \"ReadWrite\", \"Module.Assoc\": \"ReadOnly\" }", create: "optional true/false", delete: "optional true/false", xpath: "optional XPath, e.g. [Owner = '[%CurrentUser%]']" }
+        fields: { entity: "R Module.Entity", roles: "R [ \"Module.Role\" ]", access: "optional ReadWrite | ReadOnly | None (default ReadOnly)", members: "optional { \"Attribute\": \"ReadWrite\", \"Module.Assoc\": \"ReadOnly\", \"System.FileDocument.Name\": \"ReadWrite\" }", create: "optional true/false", delete: "optional true/false", xpath: "optional XPath, e.g. [Owner = '[%CurrentUser%]']", newMembers: "optional ReadWrite | ReadOnly | None: rights of members added later (default: access)" }
     },
+    ...DOMAIN_OPS,
     createMicroflow: {
         doc: "Create a microflow: start -> actions (with if/loop/onError) -> end.",
         fields: { module: "R module name", name: "R microflow name", folder: "optional folder path", parameters: "optional [ { \"name\": ..., \"type\": " + JSON.stringify(DATA_TYPES) + " } ]", returns: "optional return type (default nothing)", returnValue: "required when returns is set: return expression", actions: "optional [ actions, see ACTIONS ]", roles: "optional [ \"Module.Role\" ]" }
@@ -203,7 +207,7 @@ function bind(model, client) {
         }
         const unit = model.allUnits().find(u => {
             try {
-                return u.qualifiedName === qn;
+                return u.qualifiedName === qn && !(dm.ViewEntitySourceDocument && u instanceof dm.ViewEntitySourceDocument); // a view entity's OQL document has its name
             } catch (e) {
                 return false;
             }
@@ -408,6 +412,13 @@ function bind(model, client) {
     const pageEdit = makePageEdit({ model, client, get, text, translationsOf, attributeChain, persistable }, pageOps.internals);
     const securityOps = makeSecurity({ model, get });
     const mappingOps = makeMappings({ model, get, exists, entity, folder, attributeChain, loadParents, impl: () => impl });
+    const domainOps = makeDomain({ model, client, get, exists, entity, folder, text, attributeType, loadParents, persistable, domainModel, isFresh: qn => isFresh(qn), markFresh: qn => fresh.add(qn) });
+    // a parent: a project entity, or a System entity (by name, as Studio Pro stores it)
+    async function setParent(e, qn) {
+        const g = dm.Generalization.createIn(e);
+        if (SYSTEM_PARENTS.includes(qn)) g.__generalization.updateWithRawValue(qn);
+        else g.generalization = await entity(qn);
+    }
 
     // ------------------------------------------------ operations
 
@@ -458,11 +469,9 @@ function bind(model, client) {
             e.name = o.name;
             const xs = d.entities.filter(x => x !== e).map(x => x.location.x);
             e.location = { x: xs.length ? Math.max(...xs) + 250 : 100, y: 100 };
-            if (o.generalization) {
-                const g = dm.Generalization.createIn(e);
-                g.generalization = await entity(o.generalization);
-            } else if (e.generalization instanceof dm.NoGeneralization) e.generalization.persistable = bool(o.persistable, true);
-            const attrSpec = { fields: { name: "R attribute name", type: "R " + ATTRIBUTE_TYPES, default: "optional default value" } };
+            if (o.generalization) await setParent(e, o.generalization);
+            else if (e.generalization instanceof dm.NoGeneralization) e.generalization.persistable = bool(o.persistable, true);
+            const attrSpec = { fields: { name: "R attribute name", type: "R " + ATTRIBUTE_TYPES, default: "optional default value", calculated: "optional Module.Microflow" } };
             for (const [i, a] of (o.attributes || []).entries()) {
                 validate("-", "attribute", attrSpec, a || {}, `${o.module}.${o.name} attribute ${i + 1}`);
                 await impl.addAttribute({ entity: `${o.module}.${o.name}`, ...a }, e);
@@ -475,24 +484,43 @@ function bind(model, client) {
             if (!o.name || !o.type) throw new Error(`addAttribute needs name and type (${o.entity})`);
             validName(o.name, "attribute name");
             if (e.attributes.some(a => a.name === o.name)) throw new Error(`${o.entity}.${o.name} already exists`);
+            domainOps.assertOwnAttributes(e, o.entity);
+            if (o.calculated !== undefined && o.default !== undefined) throw new Error(`${o.entity}.${o.name}: a calculated attribute has no default`);
             const a = dm.Attribute.createIn(e);
             a.name = o.name;
             const dflt = await attributeType(a, o.type);
             setDefault(a, o.default !== undefined ? o.default : dflt);
-            return `${o.entity}.${o.name}: ${o.type}`;
+            if (o.calculated !== undefined) await domainOps.calculate(a, o.calculated);
+            if (!loaded) await domainOps.addMemberToRules(e, a);
+            return `${o.entity}.${o.name}: ${o.type}` + (o.calculated ? ` calculated by ${o.calculated}` : "");
         },
         async changeAttribute(o) {
             const a = await get(o.attribute);
             if (!(a instanceof dm.Attribute)) throw new Error(`'${o.attribute}' is not an attribute`);
-            if (o.type === undefined && o.default === undefined) throw new Error("changeAttribute needs 'type' and/or 'default'");
+            if (o.type === undefined && o.default === undefined && o.calculated === undefined && o.stored === undefined) throw new Error("changeAttribute needs 'type', 'default', 'calculated' or 'stored'");
+            domainOps.assertOwnAttributes(a.containerAsEntity, o.attribute.split(".").slice(0, 2).join("."));
+            if (o.calculated !== undefined && bool(o.stored, false)) throw new Error("changeAttribute: give 'calculated' or 'stored', not both");
+            const wasCalc = a.value instanceof dm.CalculatedValue;
+            const calcAfter = o.calculated !== undefined || (wasCalc && !bool(o.stored, false));
+            if (o.default !== undefined && calcAfter) throw new Error(`${o.attribute} is calculated: it has no default (add "stored": true to store it)`);
             const before = a.type.structureTypeName;
+            const oldFlow = wasCalc ? a.value.microflowQualifiedName : null;
             if (o.type !== undefined) {
                 const dflt = await attributeType(a, o.type);
-                if (o.default === undefined) setDefault(a, dflt);
+                if (o.default === undefined && !calcAfter) setDefault(a, dflt);
             }
             if (o.default !== undefined) setDefault(a, o.default);
-            const changed = a.type.structureTypeName !== before && persistable(a.containerAsEntity) && !isFresh(o.attribute);
-            return o.attribute + (changed ? `\n      DATA LOSS: existing values are converted on the next app start; values that do not convert to ${o.type} are lost` : "");
+            let note = "";
+            if (o.calculated !== undefined) note = await domainOps.calculate(a, o.calculated);
+            else if (wasCalc && o.type !== undefined && calcAfter) note = await domainOps.calculate(a, oldFlow);
+            else if (wasCalc && bool(o.stored, false) && !(a.value instanceof dm.StoredValue)) setDefault(a, o.default !== undefined ? o.default : "");
+            const stored = persistable(a.containerAsEntity) && !isFresh(o.attribute);
+            const changed = a.type.structureTypeName !== before && stored && !wasCalc && !calcAfter;
+            const lines = [];
+            if (changed) lines.push(`DATA LOSS: existing values are converted on the next app start; values that do not convert to ${o.type} are lost`);
+            if (!wasCalc && calcAfter && stored) lines.push(`DATA LOSS: ${a.name} is no longer stored: its column and values are dropped when the app next starts`);
+            if (wasCalc && !calcAfter && stored) lines.push(`NOTE: ${a.name} is stored now: existing objects get the default value, not the calculated one`);
+            return o.attribute + (calcAfter ? ` (calculated by ${a.value.microflowQualifiedName})` : wasCalc ? " (stored)" : "") + note + lines.map(l => `\n      ${l}`).join("");
         },
         async addAssociation(o) {
             const from = await entity(o.from);
@@ -508,7 +536,11 @@ function bind(model, client) {
             a.type = enumValue(dm.AssociationType, o.type || "Reference", "association type");
             a.owner = enumValue(dm.AssociationOwner, o.owner || "Default", "association owner");
             fresh.add(`${o.from.split(".")[0]}.${name}`);
-            return `${o.from.split(".")[0]}.${name}: ${o.from} -> ${o.to}`;
+            const { notes } = await domainOps.associationSettings(a, o, true);
+            await domainOps.addMemberToRules(from, a);
+            if (a.owner === dm.AssociationOwner.Both && to !== from) await domainOps.addMemberToRules(to, a);
+            const extra = [a.storageFormat && a.storageFormat !== dm.AssociationStorage.Table ? `stored in a ${a.storageFormat.name.toLowerCase()}` : "", ...notes.filter(n => n.startsWith("deleting"))].filter(Boolean);
+            return `${o.from.split(".")[0]}.${name}: ${o.from} -> ${o.to}` + (extra.length ? ` (${extra.join("; ")})` : "");
         },
         async createEnumeration(o) {
             validName(o.name, "enumeration name");
@@ -569,42 +601,7 @@ function bind(model, client) {
             return `${o.document} <- ${[].concat(o.roles).join(", ")}`;
         },
 
-        async addAccessRule(o) {
-            const e = await entity(o.entity);
-            await loadParents(e);
-            const rule = dm.AccessRule.createInEntityUnderAccessRules(e);
-            for (const qn of [].concat(o.roles)) {
-                const r = await get(qn);
-                if (!(r instanceof security.ModuleRole)) throw new Error(`'${qn}' is not a module role`);
-                rule.moduleRoles.push(r);
-            }
-            const dflt = enumValue(dm.MemberAccessRights, o.access || "ReadOnly", "access");
-            rule.defaultMemberAccessRights = dflt;
-            rule.allowCreate = bool(o.create, false);
-            rule.allowDelete = bool(o.delete, false);
-            rule.xPathConstraint = o.xpath || "";
-            const members = { ...(o.members || {}) };
-            const readOnlyTypes = [dm.AutoNumberAttributeType];
-            for (const a of allAttributes(e)) {
-                const ma = dm.MemberAccess.createIn(rule);
-                ma.attribute = a;
-                let r = members[a.name] !== undefined ? enumValue(dm.MemberAccessRights, members[a.name], `access of ${a.name}`) : dflt;
-                const readOnly = readOnlyTypes.some(t => a.type instanceof t) || a.value instanceof dm.CalculatedValue;
-                if (readOnly && r === dm.MemberAccessRights.ReadWrite) r = dm.MemberAccessRights.ReadOnly;
-                ma.accessRights = r;
-                delete members[a.name];
-            }
-            const d = e.containerAsDomainModel;
-            for (const assoc of [...d.associations, ...d.crossAssociations].filter(x => x.parent === e)) {
-                const ma = dm.MemberAccess.createIn(rule);
-                ma.association = assoc;
-                const key = Object.keys(members).find(k => k === assoc.name || k === assoc.qualifiedName);
-                ma.accessRights = key ? enumValue(dm.MemberAccessRights, members[key], `access of ${key}`) : dflt;
-                if (key) delete members[key];
-            }
-            if (Object.keys(members).length) throw new Error(`addAccessRule ${o.entity}: unknown members ${Object.keys(members).join(", ")}`);
-            return `${o.entity} for ${[].concat(o.roles).join(", ")}`;
-        },
+        addAccessRule: o => domainOps.impl.addAccessRule(o),
         async createMicroflow(o) {
             return createFlowOp(o, false);
         },
@@ -621,6 +618,10 @@ function bind(model, client) {
                 const g = dm.NoGeneralization.createIn(e);
                 g.persistable = bool(o.persistable, true);
                 return `${o.entity}: no parent`;
+            }
+            if (SYSTEM_PARENTS.includes(o.generalization)) {
+                await setParent(e, o.generalization);
+                return `${o.entity} inherits from ${o.generalization} (check access rules and pages that use ${o.entity} in Studio Pro)`;
             }
             const parent = await entity(o.generalization);
             for (let p = parent, i = 0; p && i < 20; i++) {
@@ -854,6 +855,7 @@ function bind(model, client) {
         },
         ...securityOps.impl,
         ...mappingOps.impl,
+        ...domainOps.impl,
         ...textOps.impl
     };
 
@@ -870,12 +872,16 @@ function bind(model, client) {
             const a = await get(`${o.entity}.${o.name}`);
             const want = String(o.type).replace(/\(.*$/, "").toLowerCase().replace("enumeration", "enum");
             const got = typeName(a.type).toLowerCase().replace("enumeration", "enum");
-            return got === want ? [] : [`${o.entity}.${o.name} has type ${typeName(a.type)}, expected ${o.type}`];
+            const r = got === want ? [] : [`${o.entity}.${o.name} has type ${typeName(a.type)}, expected ${o.type}`];
+            if (o.calculated !== undefined && !(a.value instanceof dm.CalculatedValue && a.value.microflowQualifiedName === o.calculated)) r.push(`${o.entity}.${o.name} is not calculated by ${o.calculated}`);
+            return r;
         },
         async changeAttribute(o) {
             const a = await get(o.attribute);
             const r = [];
             if (o.default !== undefined && a.value.defaultValue !== String(o.default)) r.push(`${o.attribute} default is '${a.value.defaultValue}'`);
+            if (o.calculated !== undefined && !(a.value instanceof dm.CalculatedValue && a.value.microflowQualifiedName === o.calculated)) r.push(`${o.attribute} is not calculated by ${o.calculated}`);
+            if (bool(o.stored, false) && !(a.value instanceof dm.StoredValue)) r.push(`${o.attribute} is not stored`);
             return r;
         },
         async addAssociation(o) {
@@ -1003,6 +1009,7 @@ function bind(model, client) {
         },
         ...securityOps.checks,
         ...mappingOps.checks,
+        ...domainOps.checks,
         ...textOps.checks
     };
 
@@ -1012,7 +1019,7 @@ function bind(model, client) {
         const name = Object.keys(OPS).find(k => k.toLowerCase() === String(o.op).toLowerCase());
         if (!name) fail(`${where}: unknown op '${o.op}'`, o.op, Object.keys(OPS));
         if (name === "addMenuItem" && o.roles !== undefined) throw new Error(`${where} (addMenuItem): ${NO_MENU_ROLES(o.page)}`);
-        for (const [k, hint] of Object.entries(FIELD_SYNONYMS[name] || {})) if (o[k] !== undefined && !OPS[name].fields[k]) throw new Error(`${where} (${name}): unknown field '${k}': ${hint}`);
+        for (const [k, hint] of Object.entries({ ...(DOMAIN_SYNONYMS[name] || {}), ...(FIELD_SYNONYMS[name] || {}) })) if (o[k] !== undefined && !OPS[name].fields[k]) throw new Error(`${where} (${name}): unknown field '${k}': ${hint}`);
         validate("op", name, OPS[name], o, where);
         return { name, where };
     }

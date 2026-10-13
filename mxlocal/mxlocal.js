@@ -232,6 +232,7 @@ async function run(file, mpr, allowJs, ctx) {
     const fingerprint = ctx.project.fingerprint();
     const client = new LocalClient(ctx);
     const model = await client.open();
+    client.changeFile = path.resolve(file); // files an op reads (addImage) are relative to the export folder
     const ops = require("./ops").bind(model, client);
     const lines = [];
     const say = s => {
