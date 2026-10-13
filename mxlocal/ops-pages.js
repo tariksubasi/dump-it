@@ -116,6 +116,14 @@ const WIDGETS = {
             buttons: "optional control bar buttons, as dataGrid (new, edit, delete, callMicroflow, callNanoflow)",
             search: "optional true / [ \"Attribute\" ] (source database): Search button + search fields (true: the text, number and enumeration attributes)", sort: "optional default sort order (source database): [ \"Attribute\" | { \"attribute\": \"Name\", \"direction\": \"desc\" } ] (default direction asc)" }
     },
+    fileManager: {
+        doc: "upload / download the file of the data view around it (classic file manager; its entity inherits System.FileDocument)",
+        fields: { type: "optional upload | download | both (default both)", label: "optional label (default: File)", maxFileSize: "optional MB (default 5)", allowedExtensions: "optional e.g. \"pdf;docx\" (default: any)", showInBrowser: "optional true/false: open in the browser instead of downloading (default false)", editable: EDITABLE }
+    },
+    imageUploader: {
+        doc: "upload the image of the data view around it (classic image uploader; its entity inherits System.Image)",
+        fields: { label: "optional label (default: Upload image)", maxFileSize: "optional MB (default 5)", allowedExtensions: "optional e.g. \"png;jpg\" (default: any image)", thumbnail: "optional thumbnail size \"100x75\" (default)", editable: EDITABLE }
+    },
     pluggable: {
         doc: "any pluggable widget installed in widgets/*.mpk (Data grid 2, Gallery, Combo box, filters, charts, ...), built from its definition with every property at its default, exactly as Studio Pro drops it; then the given properties. widgettype <name> (CLI, MCP tool) lists a widget's properties, types and defaults",
         fields: {
@@ -157,7 +165,7 @@ const SYNONYMS = {
     gallery: { fields: "use \"widgets\" (per item)", rows: "use \"pageSize\"", listenTo: `a gallery cannot listen; ${MASTER_DETAIL}` }
 };
 const KINDS = [...Object.keys(WIDGETS), ...Object.keys(INPUTS)];
-const PREFIX = { pluggable: "widget", layoutGrid: "layoutGrid", container: "container", text: "text", dataView: "dataView", dataGrid: "grid", listView: "listView", actionButton: "actionButton",
+const PREFIX = { fileManager: "fileManager", imageUploader: "imageUploader", pluggable: "widget", layoutGrid: "layoutGrid", container: "container", text: "text", dataView: "dataView", dataGrid: "grid", listView: "listView", actionButton: "actionButton",
     tabContainer: "tabControl", groupBox: "groupBox", snippetCall: "snippetCall", referenceSelector: "referenceSelector", referenceSetSelector: "referenceSetSelector", templateGrid: "templateGrid", comboBox: "comboBox", gallery: "gallery" };
 // enumValue with the widget location in the message
 function choice(cls, value, field, where) {
@@ -180,7 +188,7 @@ const DATAGRID2 = "com.mendix.widget.web.datagrid.Datagrid";
 const COMBOBOX = "com.mendix.widget.web.combobox.Combobox";
 const GALLERY = "com.mendix.widget.web.gallery.Gallery";
 // Studio Pro's own captions for buttons it creates, in Dutch (the only other language in the test projects)
-const NL = { Search: "Zoeken", Save: "Opslaan", Cancel: "Annuleren", "Close page": "Pagina sluiten", Delete: "Verwijderen", New: "Nieuw", Edit: "Bewerken" };
+const NL = { "Upload image": "Upload afbeelding", Search: "Zoeken", Save: "Opslaan", Cancel: "Annuleren", "Close page": "Pagina sluiten", Delete: "Verwijderen", New: "Nieuw", Edit: "Bewerken" };
 
 const widgetHelp = () => Object.entries(WIDGETS).map(([k, w]) => `\n        ${k}: ${w.doc}` + Object.entries(w.fields).map(([f, d]) => `\n            ${f}: ${d}`).join("")).join("") +
     "\n        every kind also takes:" + Object.entries(COMMON_FIELDS).map(([f, d]) => `\n            ${f}: ${d}`).join("");
@@ -318,7 +326,7 @@ function makePages(h) {
         if (raw === undefined) throw new Error(`${where}: missing "widget". Supported: ${KINDS.join(", ")}`);
         if (typeof raw !== "string") throw new Error(`${where}: "widget" must be a kind name such as "text" (supported: ${KINDS.join(", ")})`);
         const kind = widgetKind(raw);
-        if (!kind) fail(`${where}: unknown widget '${raw}'. Supported: ${KINDS.join(", ")} (other widgets, e.g. a file manager or image uploader: add them in Studio Pro)`, raw, KINDS);
+        if (!kind) fail(`${where}: unknown widget '${raw}'. Supported: ${KINDS.join(", ")} (other pluggable widgets: "widget": "pluggable", "type": ... ; see widgettype)`, raw, KINDS);
         const own = [...new Set([...Object.keys((WIDGETS[kind] || WIDGETS.input).fields), ...Object.keys(COMMON_FIELDS)])];
         const known = ["widget", "type", "name", ...own];
         for (const k of Object.keys(spec)) {
@@ -396,7 +404,7 @@ function makePages(h) {
                     return { caption: String(t.caption), name: t.name !== undefined ? String(t.name) : null, where: at, widgets: scan(t.widgets, `${at}.widgets`, container, nodes) };
                 });
             }
-            if ((INPUTS[kind] || kind === "input" || kind === "referenceSelector" || kind === "referenceSetSelector" || kind === "comboBox") && (!container || !OBJECT_KINDS.includes(container.kind))) throw new Error(`${node.where}: inputs go inside a dataView (its "widgets" or "fields"), or a listView / gallery item (an editable list)`);
+            if ((INPUTS[kind] || kind === "input" || kind === "fileManager" || kind === "imageUploader" || kind === "referenceSelector" || kind === "referenceSetSelector" || kind === "comboBox") && (!container || !OBJECT_KINDS.includes(container.kind))) throw new Error(`${node.where}: inputs go inside a dataView (its "widgets" or "fields"), or a listView / gallery item (an editable list)`);
             if (kind === "actionButton") {
                 const a = String(spec.action).toLowerCase();
                 if (["save", "cancel"].includes(a) && !around(node, "dataView")) throw new Error(`${node.where}: a ${a} button goes inside a dataView (or a list item inside one)`);
@@ -1722,7 +1730,7 @@ function makePages(h) {
         return c.text;
     }
 
-    const INPUT_KINDS = ["input", ...Object.keys(INPUTS), "referenceSelector", "referenceSetSelector", "comboBox", "pluggable"];
+    const INPUT_KINDS = ["input", ...Object.keys(INPUTS), "referenceSelector", "referenceSetSelector", "comboBox", "pluggable", "fileManager", "imageUploader"];
     // "style": inline CSS, except for a text (text style) and a button (button style) unless it holds CSS (a ':')
     const cssOf = node => (node.spec.style !== undefined && (!["text", "actionButton"].includes(node.kind) || /:/.test(String(node.spec.style))) ? String(node.spec.style) : undefined);
 
@@ -2156,7 +2164,46 @@ function makePages(h) {
         return miss;
     }
 
+    // file manager / image uploader in a data view of a System.FileDocument / System.Image specialization
+    async function fileWidget(node, target, ctx, image) {
+        const s = node.spec, dv = node.container, base = image ? "System.Image" : "System.FileDocument";
+        if (!dv || dv.kind !== "dataView") throw new Error(`${node.where}: a${image ? "n image uploader" : " file manager"} goes in a data view (of an entity that inherits ${base})`);
+        if (!inherits(dv.ent, base) && !(!image && inherits(dv.ent, "System.Image"))) throw new Error(`${node.where}: ${dv.ent.qualifiedName} does not inherit ${base}; a${image ? "n image uploader" : " file manager"} needs a data view of such an entity${image ? "" : " (an image entity is a file document too)"}`);
+        const w = (image ? pages.ImageUploader : pages.FileManager).create(model);
+        target.push(w);
+        w.name = node.name || ctx.names.next(PREFIX[node.kind]);
+        node.widget = w;
+        const bits = [];
+        if (s.maxFileSize !== undefined) {
+            const n = Number(s.maxFileSize);
+            if (!(n > 0)) throw new Error(`${node.where}: maxFileSize is a number of MB > 0`);
+            w.maxFileSize = n;
+            bits.push(`max ${n} MB`);
+        } else if (w.maxFileSize !== 5) w.maxFileSize = 5; // Studio Pro's default
+        if (s.allowedExtensions !== undefined) {
+            w.allowedExtensions = String(s.allowedExtensions).replace(/[,\s]+/g, ";").replace(/\.(\w)/g, "$1");
+            bits.push(`extensions ${w.allowedExtensions}`);
+        }
+        if (image) {
+            const m = s.thumbnail !== undefined ? /^\s*(\d+)\s*[x;*,]\s*(\d+)\s*$/i.exec(String(s.thumbnail)) : ["", "100", "75"];
+            if (!m) throw new Error(`${node.where}: thumbnail is "<width>x<height>", e.g. "100x75"`);
+            w.thumbnailSize = { width: Number(m[1]), height: Number(m[2]) };
+        } else {
+            const t = { upload: "Upload", download: "Download", both: "Both" }[String(s.type || "both").toLowerCase()];
+            if (!t) fail(`${node.where}: type '${s.type}' is not known (use upload | download | both)`, String(s.type), ["upload", "download", "both"]);
+            w.type = pages.FileManagerType[t];
+            w.showFileInBrowser = bool(s.showInBrowser, false);
+            bits.push(t.toLowerCase());
+        }
+        await templateAll(w, "labelTemplate", s.label !== undefined ? s.label : image ? "Upload image" : "File", ctx, node.where, s.label === undefined && image);
+        ctx.count.inputs++;
+        if (!image) client.warn(`Forms$FileManager first use by ops (no Studio Pro sample in the test projects): check ${ctx.qn} ${w.name} in Studio Pro`);
+        return `${w.name} (${image ? "image uploader" : "file manager"} of ${dv.ent.name}${bits.length ? ", " + bits.join(", ") : ""})`;
+    }
+
     const BUILD = {
+        fileManager: (node, target, ctx) => fileWidget(node, target, ctx, false),
+        imageUploader: (node, target, ctx) => fileWidget(node, target, ctx, true),
         async pluggable(node, target, ctx) {
             const d = node.pl, s = node.pspec;
             const langs = await languages();
