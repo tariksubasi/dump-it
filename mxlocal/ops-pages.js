@@ -180,7 +180,7 @@ const NO_MENU_ROLES = page => `menu items have no roles: who sees one = the user
 const LISTENABLE = { datagrid: "dataGrid", grid: "dataGrid", listview: "listView", list: "listView", gallery: "gallery", templategrid: "templateGrid" };
 const LISTENS = ["dataGrid", "listView", "gallery", "templateGrid"]; // kinds a data view can listen to
 const ITEM_KINDS = ["listView", "gallery", "templateGrid", "pluggable", "dataGrid"]; // dataGrid: a Data grid 2 custom content column // each item is an object (also existing ones: pluggable)
-const OBJECT_KINDS = ["dataView", "listView", "gallery", "templateGrid", "dataGrid"];
+const OBJECT_KINDS = ["dataView", "listView", "gallery", "templateGrid", "dataGrid", "pluggable"];
 const ROW_KINDS = ["dataGrid", "gallery", "templateGrid", "pluggable"]; // a page opened from a row gets it mapped explicitly (Studio Pro stores Widget = the grid) // inputs and {Attribute} use their object
 const DV_SOURCES = ["parameter", "listen", "context", "association", "microflow", "nanoflow"];
 const LIST_SOURCES = ["database", "association", "microflow", "nanoflow"];

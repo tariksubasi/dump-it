@@ -13,7 +13,7 @@ const { pages, domainmodels: dm, customwidgets: cw, datatypes, texts } = sdk;
 
 const PLACE = {
     into: "optional where: a container, data view, list view, group box or tab page name, a layout grid column \"layoutGrid1/row 1/column 2\", or the placeholder (\"Main\"). Default: the list of after/before, else the page's only placeholder (or the snippet)",
-    slot: "optional footer: with a data view in into, its footer (default: its body)",
+    slot: "optional footer: with a data view in into, its footer (default: its body); with a pluggable widget in into (Data grid 2, gallery, ...), its widget list: \"content\", \"emptyPlaceholder\", \"columns 2/content\" (see: widgets Module.Page)",
     after: "optional name of a widget in that list: right after it (default: at the end)",
     before: "optional name of a widget in that list: right before it"
 };
@@ -347,9 +347,46 @@ function makePageEdit(h, I) {
             out = slotOf(P, c.el.widgets, c, c.label);
         } else if (el instanceof pages.TabContainer) throw new Error(`${where}: into '${s}': widgets go into one of its tab pages: ${node.children.filter(c => c.el instanceof pages.TabPage).map(c => c.name).join(", ")}`);
         else if (el instanceof pages.DataGrid) throw new Error(`${where}: into '${s}': a classic data grid holds columns, not widgets (changeWidget "columns")`);
-        else if (el instanceof cw.CustomWidget) throw new Error(`${where}: into '${s}': content of a pluggable widget (${kindOf(el)}) is not supported; add it in Studio Pro`);
+        else if (el instanceof cw.CustomWidget) return plSlot(P, node, slot, where);
         else throw new Error(`${where}: into '${s}' is a ${kindOf(el)}; widgets go into a container, data view, list view, group box, tab page, layout grid column or the placeholder (see: widgets ${P.qn})`);
         return checkSlot(out, slot, where);
+    }
+
+    // The widget lists of a pluggable widget: [{ key: "content" | "columns 2/content", value }]
+    function plLists(el) {
+        const out = [];
+        const walk = (obj, prefix) => {
+            for (const p of obj.properties) {
+                const vt = p.type && p.type.valueType;
+                if (!vt) continue;
+                if (vt.type === cw.WidgetValueTypeEnum.Widgets) out.push({ key: prefix + p.type.key, value: p.value });
+                else if (vt.type === cw.WidgetValueTypeEnum.Object) p.value.objects.forEach((o, i) => walk(o, `${prefix}${p.type.key} ${i + 1}/`));
+            }
+        };
+        if (el.object) walk(el.object, "");
+        return out;
+    }
+    // A widget list of pluggable node (slot = its key, e.g. "content", "columns 2/content"); widgets in a list linked
+    // to the widget's data source get its item as their object, others the object around the widget.
+    function plSlot(P, node, slot, where) {
+        const lists = plLists(node.el);
+        if (!lists.length) throw new Error(`${where}: ${node.name} (${kindOf(node.el)}) holds no widgets`);
+        let hit;
+        if (slot === undefined) {
+            if (lists.length > 1) throw new Error(`${where}: ${node.name} (${kindOf(node.el)}) has several widget lists; give "slot": ${lists.map(l => `"${l.key}"`).join(", ")}`);
+            hit = lists[0];
+        } else {
+            const want = String(slot).trim().replace(/\[(\d+)\]/g, " $1").replace(/\./g, "/").replace(/\s*\/\s*/g, "/").replace(/\s+/g, " ").toLowerCase();
+            hit = lists.find(l => l.key.toLowerCase() === want) || fail(`${where}: ${node.name} has no widget list '${slot}' (slots: ${lists.map(l => l.key).join(", ")})`, String(slot), lists.map(l => l.key));
+        }
+        const obj = hit.value.containerAsWidgetProperty && hit.value.containerAsWidgetProperty.containerAsWidgetObject;
+        const show = obj && obj.properties.find(p => p.type && p.type.key === "showContentAs");
+        if (show && show.value.primitiveValue !== "customContent" && /\/content$/.test(hit.key)) client.warn(`${where}: ${node.name} ${hit.key.split("/")[0]} shows ${show.value.primitiveValue}, so its custom content stays hidden; set that column's "Show" to Custom content in Studio Pro`);
+        return plSlotOf(P, node, hit.value, `${node.name}/${hit.key}`);
+    }
+    function plSlotOf(P, node, value, label) {
+        const linked = !!(value.type && value.type.dataSourceProperty);
+        return linked ? slotOf(P, value.widgets, node, label) : { list: value.widgets, label, node, dc: node.ctx || null };
     }
 
     function checkSlot(out, slot, where) {
@@ -360,6 +397,11 @@ function makePageEdit(h, I) {
     // The list a node is in, as a slot.
     function slotOfNode(P, node, where) {
         const holder = node.holder;
+        if (holder instanceof cw.WidgetValue) {
+            const owner = node.parent;
+            const l = plLists(owner.el).find(x => x.value === holder);
+            return plSlotOf(P, owner, holder, `${owner.name}/${l ? l.key : holder.type.containerAsWidgetPropertyType.key}`);
+        }
         const list = holder && holder[node.prop];
         if (!list || typeof list.indexOf !== "function") throw new Error(`${where}: ${node.label} is not in a list of widgets`);
         const owner = node.parent && !node.parent.root ? node.parent : null;
@@ -390,7 +432,6 @@ function makePageEdit(h, I) {
         }
         const word = o.after !== undefined ? "after" : "before";
         const sib = find(P, sibName, `${where}: ${word}`);
-        if (sib.holder instanceof cw.WidgetValue) throw new Error(`${where}: ${sib.label} is content of a pluggable widget; widgets there are not supported (use Studio Pro)`);
         const own = slotOfNode(P, sib, where);
         if (slot && slot.list !== own.list) throw new Error(`${where}: ${sib.label} is not in ${slot.label} (it is in ${own.label}); leave out "into" or name a widget in ${slot.label}`);
         slot = slot || own;
@@ -796,7 +837,6 @@ function makePageEdit(h, I) {
             if (needs) throw e;
             return null;
         });
-        if (dc && !["dataView", "listView", "templateGrid"].includes(dc.kind)) throw new Error(`${where}: widgets inside a pluggable widget are not supported; add them in Studio Pro`);
         const nodes = [];
         const top = I.scan(o.widgets, "widgets", dc, nodes);
         if (!top.length) throw new Error(`${where}: 'widgets' is empty`);
@@ -1054,6 +1094,7 @@ function makePageEdit(h, I) {
             let line = "  ".repeat(depth) + (n.label || "(no name)");
             if (!n.placeholder) line += "  " + (await describe(P, n));
             if (INTO(el)) line += el instanceof pages.DataView ? `  [into] (footer: "slot": "footer")` : "  [into]";
+            else if (el instanceof cw.CustomWidget && plLists(el).length) line += `  [into] (slot: ${plLists(el).map(l => `"${l.key}"`).slice(0, 8).join(", ")}${plLists(el).length > 8 ? ", ..." : ""})`;
             if (isDataContainer(el)) {
                 const { qn: e } = await containerEntity(P, n);
                 if (e && (el instanceof pages.DataView || el instanceof pages.ListView)) line += `  {${e}}`;
