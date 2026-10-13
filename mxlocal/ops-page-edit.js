@@ -7,6 +7,7 @@
 // (selftest: add + change + delete on one of the project's own pages gives the page back byte for byte).
 const sdk = require("mendixmodelsdk");
 const { fail, bool, setIfAvailable, enumValue, validName } = require("./ops-util");
+const design = require("./design");
 
 const { pages, domainmodels: dm, customwidgets: cw, datatypes, texts } = sdk;
 
@@ -30,8 +31,9 @@ const PAGE_EDIT_OPS = {
             label: "label of an input (\"\" = no label)",
             placeholder: "placeholder of a text box, text area or date picker",
             editable: "true | false (input or data view); an input also takes an expression \"$currentObject/Open\" or { \"attribute\": \"Status\", \"values\": [\"Open\"] } (editable only then)",
-            visible: "true (always) | false (never) | an expression \"$currentObject/Active\" | { \"attribute\": \"Active\" } (Boolean: visible when true) | { \"attribute\": \"Status\", \"values\": [\"Open\", \"Paid\"] }; the attribute is of the data view or list view around the widget",
+            visible: "true (always) | false (never) | an expression \"$currentObject/Active\" | { \"attribute\": \"Active\" } (Boolean: visible when true) | { \"attribute\": \"Status\", \"values\": [\"Open\", \"Paid\"] }; the attribute is of the data view or list view around the widget; { \"roles\": [\"Module.Role\"] } only for users with one of these module roles",
             class: "CSS class(es); replaces the current ones (\"\" = none)",
+            design: "Atlas design properties of the theme: { \"Spacing\": { \"margin-top\": \"M\" }, \"Spacing top\": \"Large\", \"Full width\": true, \"Style\": \"Primary\" }; given keys change, null / false removes one, others stay",
             style: "inline CSS, e.g. \"font-weight: bold;\" (\"\" = none)",
             textStyle: "Text | Paragraph | H1 | H2 | H3 | H4 | H5 | H6 (a text)",
             buttonStyle: "Default | Primary | Success | Info | Warning | Danger | Inverse (a button)",
@@ -52,7 +54,7 @@ const PAGE_EDIT_OPS = {
         fields: { page: "R Module.Page or Module.Snippet", widget: "R widget name", ...PLACE }
     }
 };
-const CHANGE_FIELDS = ["caption", "text", "label", "placeholder", "editable", "visible", "class", "style", "textStyle", "buttonStyle", "columns", "xpath", "name", "action", "onClick", "onChange"];
+const CHANGE_FIELDS = ["caption", "text", "label", "placeholder", "editable", "visible", "class", "design", "style", "textStyle", "buttonStyle", "columns", "xpath", "name", "action", "onClick", "onChange"];
 // fields a weak model takes from elsewhere -> what to write instead (checked before the generic "unknown field")
 const FIELD_SYNONYMS = {
     addWidgets: { in: "use \"into\"", inside: "use \"into\"", target: "use \"into\"", container: "use \"into\"", parent: "use \"into\"", widget: "use \"widgets\": [ { \"widget\": ... } ] (a list)", footer: "use \"into\": \"<data view>\", \"slot\": \"footer\"", position: "use \"after\" or \"before\" (a widget name)" },
@@ -543,6 +545,11 @@ function makePageEdit(h, I) {
             if (ap.class !== String(v)) ap.class = String(v);
             return `class "${v}"`;
         },
+        async design(P, node, v, dc, ctx, where) {
+            const ap = prop(node.el, "appearance");
+            if (!ap) throw new Error(`${where}: a ${kindOf(node.el)} has no design properties`);
+            return `design ${design.apply(sdk, model, node.el, design.resolve(client.project.dir, node.el, v, `${where}: design`)) || "unchanged"}`;
+        },
         async style(P, node, v, dc, ctx, where) {
             const ap = prop(node.el, "appearance");
             if (!ap) throw new Error(`${where}: a ${kindOf(node.el)} has no CSS style`);
@@ -1008,9 +1015,17 @@ function makePageEdit(h, I) {
         if (cv) bits.push(cv.attributeQualifiedName ? `visible if ${cv.attributeQualifiedName.split(".").pop()} = ${cv.conditions.filter(c => c.editableVisible).map(c => c.attributeValue).join(" or ")}` : cv.expression ? `visible if ${short(cv.expression)}` : "visibility by role");
         const ap = prop(el, "appearance");
         if (ap && ap.class) bits.push(`class "${short(ap.class)}"`);
+        if (ap && ap.designProperties && ap.designProperties.length) bits.push(`design ${ap.designProperties.map(designText).join("; ")}`);
         return bits.join(", ");
     }
 
+    const designText = d => {
+        const v = d.value;
+        if (v instanceof pages.OptionDesignPropertyValue) return `${d.key}: ${v.option}`;
+        if (v instanceof pages.CompoundDesignPropertyValue) return `${d.key}: ${v.properties.map(designText).join(", ")}`;
+        if (v instanceof pages.CustomDesignPropertyValue) return `${d.key}: ${v.value}`;
+        return d.key;
+    };
     const INTO = el => el instanceof pages.TemplateGrid || el instanceof pages.LayoutCallArgument || el instanceof pages.LayoutGridColumn || el instanceof pages.DivContainer || el instanceof pages.GroupBox || el instanceof pages.TabPage || el instanceof pages.ListView || el instanceof pages.DataView;
 
     async function widgets(qn) {
@@ -1118,6 +1133,7 @@ function makePageEdit(h, I) {
                 else say(cv && (o.visible.expression !== undefined ? cv.expression === String(o.visible.expression) : (cv.attributeQualifiedName || "").endsWith("." + o.visible.attribute)), "visibility condition differs");
             }
             for (const k of ["class", "style"]) if (o[k] !== undefined) say(w.appearance[k] === String(o[k]), `${k} is "${w.appearance[k]}"`);
+            if (o.design && typeof o.design === "object") for (const [k, v] of Object.entries(o.design)) if (v !== null && v !== false && typeof v !== "object") say(w.appearance.designProperties.some(d => d.key.toLowerCase() === k.toLowerCase() || (d.value instanceof pages.CompoundDesignPropertyValue)), `design ${k} missing`);
             if (o.textStyle !== undefined) say(w.renderMode.name.toLowerCase() === String(o.textStyle).toLowerCase(), `text style is ${w.renderMode.name}`);
             if (o.buttonStyle !== undefined) say(w.buttonStyle.name.toLowerCase() === String(o.buttonStyle).toLowerCase(), `button style is ${w.buttonStyle.name}`);
             if (o.xpath !== undefined) {

@@ -8,6 +8,7 @@ const sdk = require("mendixmodelsdk");
 const { fail, suggest, bool, setIfAvailable, enumValue, validName } = require("./ops-util");
 const { toSdk } = require("./convert");
 const pluggable = require("./pluggable");
+const design = require("./design");
 const { userRoleNamed } = require("./ops-security");
 
 const { pages, domainmodels: dm, datatypes, menus, navigation, microflows: mf, customwidgets: cw, enumerations } = sdk;
@@ -132,7 +133,8 @@ const WIDGETS = {
 // Fields every widget kind takes (style: inline CSS, but for text and actionButton it is the text / button style
 // unless it contains ':').
 const COMMON_FIELDS = {
-    visible: "optional true | an expression \"$currentObject/Active\" | { \"attribute\": \"Status\", \"values\": [\"Open\"] } (Boolean attribute: visible when true); the attribute is of the data view / list view / gallery around the widget",
+    visible: "optional true | an expression \"$currentObject/Active\" | { \"attribute\": \"Status\", \"values\": [\"Open\"] } (Boolean attribute: visible when true); the attribute is of the data view / list view / gallery around the widget; { \"roles\": [\"Module.Role\"] } shows it only to users with one of these module roles (also with attribute / expression)",
+    design: "optional Atlas design properties of the theme (themesource/*/web/design-properties.json): { \"Spacing\": { \"margin-top\": \"M\" }, \"Spacing top\": \"Large\", \"Full width\": true, \"Style\": \"Primary\" }; null / false removes one",
     class: "optional CSS class(es)",
     style: "optional inline CSS, e.g. \"margin-top: 8px;\""
 };
@@ -978,7 +980,25 @@ function makePages(h) {
             return { attribute: null, values: [], expression: spec, text: `${what} if ${spec}` };
         }
         if (!spec || typeof spec !== "object" || Array.isArray(spec)) throw new Error(`${where}: ${what} is true, false, an expression "$currentObject/Active", or { "attribute": "Status", "values": ["Open"] }`);
-        for (const k of Object.keys(spec)) if (!["attribute", "values", "expression"].includes(k)) fail(`${where}: unknown field '${k}' in ${what}`, k, ["attribute", "values", "expression"]);
+        const ckeys = what === "visible" ? ["attribute", "values", "expression", "roles"] : ["attribute", "values", "expression"];
+        for (const k of Object.keys(spec)) if (!ckeys.includes(k)) fail(`${where}: unknown field '${k}' in ${what}${k === "roles" ? " (module roles: only for visible)" : ""}`, k, ckeys);
+        if (spec.roles !== undefined) {
+            // visible for these module roles (Studio Pro: "Visible ... Module roles"), with or without a condition
+            const roles = [].concat(spec.roles).map(String);
+            if (!roles.length) throw new Error(`${where}: roles needs at least one module role, e.g. ["Sales.Manager"]`);
+            const known = [];
+            for (const ms of model.allModuleSecurities()) {
+                const l = ms.isLoaded ? ms : await ms.load();
+                for (const r of l.moduleRoles) known.push(r);
+            }
+            const picked = roles.map(r => known.find(x => x.qualifiedName === r) || fail(`${where}: ${what}: no module role '${r}'`, r, known.map(x => x.qualifiedName)));
+            const rest = { ...spec };
+            delete rest.roles;
+            const c = Object.keys(rest).length ? await condition(rest, dc, where, what) : { attribute: null, values: [], expression: "", text: what };
+            c.roles = picked;
+            c.text = `${c.text === what ? what : c.text} for ${roles.join(" or ")}`;
+            return c;
+        }
         if (spec.expression !== undefined) {
             if (spec.attribute !== undefined) throw new Error(`${where}: ${what}: give attribute or expression, not both`);
             return condition(String(spec.expression), dc, where, what);
@@ -1003,10 +1023,19 @@ function makePages(h) {
     }
 
     const sameCondition = (s, c) => !!s && (s.attributeQualifiedName || null) === (c.attribute ? c.attribute.qualifiedName : null) && s.expression === c.expression &&
+        (!has(s, "moduleRoles") || s.moduleRolesQualifiedNames.join() === (c.roles || []).map(r => r.qualifiedName).join()) &&
         s.conditions.length === c.values.length && s.conditions.every((x, i) => x.attributeValue === c.values[i][0] && x.editableVisible === c.values[i][1]);
 
     // Fills ConditionalVisibility/EditabilitySettings s from condition c.
     function fill(s, c) {
+        if (c.roles || (has(s, "moduleRoles") && s.moduleRoles.length)) {
+            const want = (c.roles || []).map(r => r.qualifiedName);
+            if (s.moduleRolesQualifiedNames.join() !== want.join()) {
+                s.moduleRoles.clear();
+                for (const r of c.roles || []) s.moduleRoles.push(r);
+            }
+            if (c.roles) client.warn("Forms$ConditionalVisibilitySettings with module roles: first use by ops (no Studio Pro sample in the test projects); check it in Studio Pro");
+        }
         if ((s.attributeQualifiedName || null) !== (c.attribute ? c.attribute.qualifiedName : null)) s.attribute = c.attribute;
         if (s.expression !== c.expression) s.expression = c.expression;
         // the same values: only the on/off flags change (as when one ticks them in Studio Pro)
@@ -1708,6 +1737,11 @@ function makePages(h) {
             if (css !== undefined && w.appearance.style !== css) w.appearance.style = css;
             if (s.class) out.push(`class "${s.class}"`);
             if (css) out.push(`style "${css}"`);
+        }
+        if (s.design !== undefined) {
+            if (!has(w, "appearance")) throw new Error(`${node.where}: a ${node.kind} has no design properties`);
+            const t = design.apply(sdk, model, w, design.resolve(client.project.dir, w, s.design, `${node.where}: design`));
+            if (t) out.push(`design ${t}`);
         }
         if (s.visible !== undefined && s.visible !== true && s.visible !== "true") {
             if (s.visible === false || s.visible === "false") throw new Error(`${node.where}: "visible": false hides the widget for everyone; leave the widget out, or give a condition`);

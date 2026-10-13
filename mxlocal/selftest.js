@@ -991,6 +991,21 @@ async function selftest(mpr, keep, { out, relevant }) {
         fs.copyFileSync(src.mpr, path.join(tmp, path.basename(src.mpr)));
         fs.cpSync(src.contents, path.join(tmp, "mprcontents"), { recursive: true });
         if (fs.existsSync(path.join(src.dir, "widgets"))) fs.cpSync(path.join(src.dir, "widgets"), path.join(tmp, "widgets"), { recursive: true });
+        // design properties of the theme (only the design-properties.json files)
+        for (const base of ["themesource", "theme"]) {
+            const from = path.join(src.dir, base);
+            if (!fs.existsSync(from)) continue;
+            const walkDp = (d, rel) => {
+                for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+                    if (e.isDirectory() && rel.split(path.sep).length < 3) walkDp(path.join(d, e.name), path.join(rel, e.name));
+                    else if (e.name === "design-properties.json") {
+                        fs.mkdirSync(path.join(tmp, base, rel), { recursive: true });
+                        fs.copyFileSync(path.join(d, e.name), path.join(tmp, base, rel, e.name));
+                    }
+                }
+            };
+            walkDp(from, "");
+        }
         const copy = path.join(tmp, path.basename(src.mpr));
         const T = "ZzMxlocalTest";
 
