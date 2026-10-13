@@ -19,7 +19,7 @@ const ASSOC_ONE = "with source association: Module.Assoc (or a path A/B) from th
 // source fields of the list kinds (dataGrid, listView, gallery)
 const LIST_SOURCE = {
     source: "optional database | association | microflow | nanoflow (default database; association / microflow / nanoflow when that field is given)",
-    association: "with source association: Module.Assoc from the object around it (data view, list view or gallery item) to many objects: a reference set it owns, or the reference another entity has to it (OrderLine_Order in a data view of Order)",
+    association: "with source association: Module.Assoc from the object around it (data view, list view or gallery item) to many objects: a reference set it owns, or the reference another entity has to it (OrderLine_Order in a data view of Order); also a path A/B whose steps go to one object and the last to many (OrderLine_Order/Order_Customer... e.g. \"Sales.Order_Customer/Sales.Address_Customer\": the addresses of the order's customer), and the reverse of a reference set the other side owns",
     microflow: "with source microflow: Module.Microflow that returns a list (of entity)",
     nanoflow: "with source nanoflow: Module.Nanoflow that returns a list",
     params: "with source microflow / nanoflow: its parameters, " + PARAMS.slice(9)
@@ -700,11 +700,11 @@ function makePages(h) {
     async function assocSteps(ent, spec, where, many, ctx) {
         const names = String(spec).split("/").map(x => x.trim()).filter(Boolean);
         if (!names.length) throw new Error(`${where}: association is empty; give Module.Assoc`);
-        if (many && names.length > 1) throw new Error(`${where}: a list over an association takes one association ('${spec}' is a path); for a longer path use a microflow source or "source": "database" with an XPath`);
         const all = await allAssociations(ctx);
         const steps = [];
         let cur = ent;
-        for (const name of names) {
+        for (const [i, name] of names.entries()) {
+            const last = i === names.length - 1;
             const mine = all.filter(a => isA(cur, ends(a).from) || isA(cur, ends(a).to)).map(a => a.qualifiedName);
             const a = all.find(x => x.qualifiedName === name);
             if (!a) fail(`${where}: no association '${name}'${mine.length ? ` (associations of ${cur.qualifiedName}: ${mine.join(", ")})` : ` (${cur.qualifiedName} has no association)`}`, name, mine);
@@ -713,17 +713,21 @@ function makePages(h) {
             const fwd = isA(cur, from), rev = isA(cur, to);
             if (!fwd && !rev) throw new Error(`${where}: ${name} links ${from} and ${to}, not the ${cur.qualifiedName} around it` + (mine.length ? `; associations of ${cur.qualifiedName}: ${mine.join(", ")}` : ""));
             let dest;
-            if (many) {
+            if (many && last) {
                 if (fwd && set) dest = to;
                 else if (rev && !set) dest = from;
                 else if (rev && set && both) dest = from;
-                else if (fwd) throw new Error(`${where}: ${name} is a reference: a ${short(from)} has one ${short(to)}; show it in a dataView with "source": "association", "association": "${name}"`);
-                else throw new Error(`${where}: ${name} is a reference set that ${short(from)} owns; from a ${short(to)} it cannot be listed: use "source": "database" with "xpath": "[${name} = '[%CurrentObject%]']"`);
+                else if (fwd) throw new Error(`${where}: ${name} is a reference: a ${short(from)} has one ${short(to)}; show it in a dataView with "source": "association", "association": "${name}"${names.length > 1 ? " (in a path every step but the last goes to one object, the last to many)" : ""}`);
+                else {
+                    // the reverse of a reference set the other side owns: Studio Pro 10+ lists it in the association source
+                    dest = from;
+                    client.warn(`${where}: ${name} is a reference set owned by ${short(from)}, listed from the ${short(to)} side: first use by ops (no Studio Pro sample); check it in Studio Pro`);
+                }
             } else {
                 if (fwd && !set) dest = to;
                 else if (rev && !set && both) dest = from;
-                else if (set) throw new Error(`${where}: ${name} is a reference set (many ${short(fwd ? to : from)}); a data view shows one object: use a listView or dataGrid with "source": "association", "association": "${name}"`);
-                else throw new Error(`${where}: ${name} goes from ${from} to ${to}: a ${short(to)} has many ${short(from)}; a data view shows one object: use a listView or dataGrid with "source": "association", "association": "${name}"`);
+                else if (set) throw new Error(`${where}: ${name} is a reference set (many ${short(fwd ? to : from)}); ${many ? "in a path every step but the last goes to one object" : `a data view shows one object: use a listView or dataGrid with "source": "association", "association": "${name}"`}`);
+                else throw new Error(`${where}: ${name} goes from ${from} to ${to}: a ${short(to)} has many ${short(from)}; ${many ? "in a path every step but the last goes to one object" : `a data view shows one object: use a listView or dataGrid with "source": "association", "association": "${name}"`}`);
             }
             const other = await entityOf(dest, where).catch(() => {
                 throw new Error(`${where}: ${name} leads to ${dest}, which ops cannot read (System module); use a microflow source`);
