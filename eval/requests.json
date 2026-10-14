@@ -483,6 +483,52 @@
           "Order_Admin\\.txt$": "(?s)^(?=.*Yönetim[^\\n]*design Spacing: margin-top L)(?=.*visible if user has role MyFirstModule\\.Manager)"
         }
       }
+    },
+    {
+      "id": "gridpath",
+      "setup": [
+        {
+          "op": "createPage",
+          "module": "MyFirstModule",
+          "name": "Order_NewEdit",
+          "entity": "MyFirstModule.Order"
+        }
+      ],
+      "text": "Order_List sayfası yap: siparişleri Number, Total ve müşterinin adı (Customer/Name) kolonlarıyla bir grid'de listele. Ayrıca Customer_Detail sayfası yap: müşteriyi (sayfa parametresi) gösteren bir data view olsun; içinde bu müşteriye bağlı yeni bir sipariş oluşturup Order_NewEdit sayfasında açan 'Yeni sipariş' butonu bulunsun.",
+      "checks": {
+        "find": [
+          "MyFirstModule.Order_List",
+          "MyFirstModule.Customer_Detail"
+        ],
+        "files": {
+          "Order_List\\.txt$": "attr MyFirstModule\\.Order_Customer/MyFirstModule\\.Customer/Name",
+          "Customer_Detail\\.txt$": "create MyFirstModule\\.Order linked to the object around it over MyFirstModule\\.Order_Customer, open page MyFirstModule\\.Order_NewEdit"
+        }
+      }
+    },
+    {
+      "id": "formvalidation",
+      "text": "Order_Form sayfası yap: bir siparişi (sayfa parametresi) düzenleyen form. Note alanı zorunlu olsun, boş bırakılırsa 'Not gerekli' mesajı çıksın; Total negatif olamasın ('Toplam negatif olamaz' mesajıyla) ve basamak gruplamalı gösterilsin; Kaydet butonu olsun.",
+      "checks": {
+        "find": [
+          "MyFirstModule.Order_Form"
+        ],
+        "files": {
+          "Order_Form\\.txt$": "(?s)^(?=.*attr Note[^\\n]*required \\(\"Not gerekli\"\\))(?=.*attr Total[^\\n]*group digits)(?=.*attr Total[^\\n]*validation [^\\n]*\\$value[^\\n]*Toplam negatif olamaz)"
+        }
+      }
+    },
+    {
+      "id": "deleteconfirm",
+      "text": "Order_Cleanup sayfası yap: siparişleri bir list view'da göster (Number ve Total), her siparişin yanında 'Sil' butonu olsun. Butona basınca 'Bu sipariş silinsin mi?' diye onay sorsun ve silme sırasında ilerleme çubuğu göstersin (gerekirse siparişi silen bir microflow yaz).",
+      "checks": {
+        "find": [
+          "MyFirstModule.Order_Cleanup"
+        ],
+        "files": {
+          "Order_Cleanup\\.txt$": "microflow MyFirstModule\\.\\w+\\([^)]*\\) \\(asks \"Bu sipariş silinsin mi\\?\"; (blocking|non-blocking) progress"
+        }
+      }
     }
   ]
 }
