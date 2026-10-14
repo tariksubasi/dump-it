@@ -283,6 +283,7 @@ Actions (inside `"actions": [ { "action": "<name>", ... } ]`). Every action also
 | `importWithMapping` | **mapping** (`Module.ImportMapping`), **source** (String variable with JSON/XML), variable, commit | Microflows only. Mappings that take a parameter are refused |
 | `exportWithMapping` | **mapping** (`Module.ExportMapping`), **object** (variable to export), **variable** (new String) | Microflows only. The object must be the mapping's root entity |
 | `downloadFile` | **variable** (object of a `System.FileDocument` specialization), showInBrowser | Microflows only. showInBrowser = false |
+| `sendRestRequest` | **operation** (`Module.Service.Operation`), args, query, body, variable | Microflows only. Calls an operation of a consumed REST service, see REST services below |
 | `cast` | **variable** | Only as the first action of an `ifType` case: the object as that case's entity |
 | `metric` | **type** (`counter`/`increment`/`gauge`), **name** (plain text, e.g. `orders.created`), value (counter: default 1; gauge: required), description, tags `{"tag":"expr"}` | Microflows only. First use in a project: check it in Studio Pro |
 | `generateDocument` | **template** (`Module.DocumentTemplate`), **variable** (file document), args `{"Widget":"$Var"}`, type (`PDF` default) | Microflows only, and only in projects that already have a Generate document action (document templates are deprecated); otherwise refused |
@@ -645,7 +646,108 @@ date/time formats of a language. System texts (App > Language > System texts) ar
 |---|---|---|
 | `createConstant` | **module**, **name**, **type**, **default**, exposedToClient, folder | Type String/Integer/Long/Decimal/Boolean/DateTime |
 | `createScheduledEvent` | **module**, **name**, **microflow**, **every** (`Minute`/`Hour`/`Day`/`Week`), interval, at (`HH:MM`), days, enabled (default false), timeZone, onOverlap, folder | The microflow must have no parameters |
-| `publishRest` | **module**, **service**, **resource**, **method**, **microflow**, path (e.g. `{Id}`), servicePath, authentication (default Basic), roles, folder | Microflow parameters become path (`{Name}` in path) or query parameters. Object/list parameters or results need mappings: refused, do those in Studio Pro. Experimental |
+| `publishRest` | see REST services below | |
+
+### REST services (consumed and published)
+
+No Studio Pro-saved consumed REST service, published REST service with mappings, user task page or workflow exists in
+the test projects. These documents are built from the Model SDK metamodel of the project's Mendix version; the dry run
+says `first use ... check it in Studio Pro`. Tell the user to open them in Studio Pro once and look at the
+error list.
+
+| Op | Fields | Notes |
+|---|---|---|
+| `createConsumedRestService` | **module**, **name**, **baseUrl**, **operations**, authentication (`"none"` or `{username, password}`; a value `"@Module.Constant"` uses a constant), folder | Mendix 10.1+ REST client document. Each operation: **name**, **path** (`/orders/{id}`, after the base URL), method (default Get), parameters `{"id": "Integer"}` (types of the `{name}` placeholders in path, headers and body; default String), query `["status"]` or `{"page": {"required": false}}` (Mendix 11; on Mendix 10 they go into the path as `?status={status}`, optional ones are refused), headers `{"Name": "value {param}"}`, body (Post/Put/Patch: a text template with `{param}`, or `{snippet, entity, entities, attributes, skip, create}` = an export mapping of one object), response (`"none"`, or `{snippet, entity, entities, attributes, skip, keys, create}` = an import mapping like `createImportMapping`), timeout (s, 300). Added for Studio Pro's rules: `Accept: application/json` on every operation, `Content-Type: application/json` and a `{}` body for Post/Put/Patch without one |
+| `addRestOperation` | **service** (`Module.Service`) + the operation fields above | Adds one operation to an existing consumed REST service |
+| `publishRest` | **module**, **service**, **resource**, **method**, **microflow**, path (`{Id}`), headers `["Param"]`, importMapping, exportMapping, commit, summary, description, deprecated, create, query, servicePath, version, authentication, roles, folder | Creates the service (version default 1.0.0, shown in its OpenAPI document; authentication default `["Basic"]`) and resource when missing. Microflow parameters: `{Name}` in the path -> path, listed in `headers` -> header, an object/list -> the body (needs `importMapping` of that entity; commit `yes`/`no`/`withoutEvents`, default yes), `System.HttpRequest`/`HttpResponse` -> none, others -> query. An object/list result needs `exportMapping`. `create: true` makes the microflow when it is missing (String parameters from path, headers and `query`, the import mapping's entity, returns String or the export mapping's entity). `roles` may call the service |
+
+Action `sendRestRequest` calls an operation: `{ "action": "sendRestRequest", "operation": "Module.Service.Operation",
+"args": { "id": "$Id" }, "query": { "status": "'open'" }, "body": "Order", "variable": "Result" }`. Every `{param}`
+needs an arg; required query parameters need a value. `body` only for an operation with a mapping body, `variable`
+only for one with a response mapping (an object, or a list for an array). Otherwise the response is in
+`$latestHttpResponse` (`$latestHttpResponse/Content`, `$latestHttpResponse/StatusCode`). No `onError` (Studio Pro
+does not allow a custom error handler here); use `callRest` when the call needs one.
+
+```json
+{ "ops": [
+  { "op": "createConsumedRestService", "module": "Sales", "name": "OrderApi", "baseUrl": "https://api.example.com/v1",
+    "authentication": { "username": "api", "password": "@Sales.ApiPassword" },
+    "operations": [
+      { "name": "GetOrder", "path": "/orders/{id}", "parameters": { "id": "Integer" },
+        "response": { "snippet": "{ \"number\": \"A1\", \"total\": 10.5 }", "entity": "Sales.RemoteOrder", "create": true } },
+      { "name": "CreateOrder", "method": "Post", "path": "/orders", "body": "{ \"number\": \"{number}\" }" } ] },
+  { "op": "createMicroflow", "module": "Sales", "name": "ACT_Order_Fetch", "parameters": [ { "name": "Id", "type": "Integer" } ],
+    "returns": "Sales.RemoteOrder", "returnValue": "$Order",
+    "actions": [ { "action": "sendRestRequest", "operation": "Sales.OrderApi.GetOrder", "args": { "id": "$Id" }, "variable": "Order" } ] }
+] }
+```
+
+Publish an operation with a body and a result (the mappings first, see JSON structures below):
+
+```json
+{ "ops": [
+  { "op": "publishRest", "module": "Sales", "service": "OrderService", "resource": "orders", "method": "Post", "path": "{Shop}",
+    "microflow": "Sales.PRS_Order_Create", "create": true, "headers": ["Token"], "importMapping": "Sales.IMM_Order",
+    "exportMapping": "Sales.EXM_Order", "roles": ["Sales.ApiUser"], "version": "2.0.0" } ] }
+```
+
+### Workflows
+
+| Op | Fields | Notes |
+|---|---|---|
+| `createWorkflow` | **module**, **name**, **context** (a stored `Module.Entity`), **steps**, title, description, dueDate, adminPage, roles, folder | The context is `$WorkflowContext` in every expression (`$WorkflowContext/Amount > 1000`); `$Workflow` is the `System.Workflow`. `roles` may open the task pages and the admin page (workflow security: who sees a task is the step's `assignee`). Steps run top to bottom; the end of the main flow is added (`end1`, and on Mendix 11 a `start1`). Activities get Studio Pro's names (`userTask1`, `decision1`, `parallelSplit1`, `callMicroflow1`, ...) unless the step has `name`. The fields of one step kind: `ops userTask` |
+| `createPage` with `"kind": "userTaskPage"` | **module**, **name**, **outcomes** `["Approve","Reject"]`, entity + **workflow** + fields + editable, title, folder, layout, roles | The page a user task opens: parameter `WorkflowUserTask` (`System.WorkflowUserTask`), a data view of it with one Complete-user-task button per outcome and a Close button. With `entity`: the context object read-only (`editable: true` to edit) in a data view inside it, from a new microflow `<Page>_Context` that retrieves the workflow context; `workflow` may be created later in the same plan |
+
+Steps (`{ "step": "<kind>", "name": "optional", ... }`):
+
+| Step | Fields | Notes |
+|---|---|---|
+| `userTask` | **page** (a user task page), **outcomes** `["Approve","Reject"]` or `{"Approve": [steps], "Reject": [steps]}`, assignee, caption, taskName, description, dueDate, onCreated, autoAssign | assignee: `{"userRoles": ["HRManager"]}` (user roles of the project), `{"xpath": "[...]"}` on the user entity, or `{"microflow": "Module.Flow"}` (parameters: the context or `System.Workflow`; returns a list of users). Without: every user may pick it up. One outcome: no steps of its own (the workflow continues after the task) |
+| `decision` | **condition**, **outcomes** `{"true": [...], "false": [...]}` or `{"Module.Enum.Value": [...], "": [...]}` | Boolean: both outcomes are made. Enumeration: one outcome per value and one for no value (`""`), as Studio Pro requires; leave values out to give them no steps |
+| `parallelSplit` | **paths** `[[steps], [steps]]` | Two or more paths; the workflow continues when all are done. A path cannot `end` the workflow |
+| `callMicroflow` | **microflow**, args `{"Param": "expression"}`, outcomes | The parameter of the context entity gets `$WorkflowContext` (System.Workflow: `$Workflow`). A microflow returning a Boolean or enumeration gets its outcomes (give steps in `outcomes`) |
+| `callWorkflow` | **workflow**, context (default `$WorkflowContext`), async | |
+| `jumpTo` | **target** (an activity name) | Last step of a branch. Not to an end, jump or start |
+| `waitForTimer` | **delay** (DateTime expression) | Mendix 10.6+ |
+| `waitForNotification` | | A microflow continues it with `notifyWorkflow` (give the step a `name`) |
+| `end` | | Ends the workflow; last step of a user task outcome or decision branch, not in a parallel path |
+
+Workflow actions (in microflows; System variables are written by name, e.g. a parameter of type
+`System.WorkflowUserTask` or `System.Workflow`):
+
+| Action | Fields | Notes |
+|---|---|---|
+| `callWorkflow` | **workflow**, **context** (object variable), variable | Starts the workflow; variable gets the `System.Workflow` |
+| `completeUserTask` | **task** (`System.WorkflowUserTask` variable), **outcome** | Studio Pro: Complete user task. The task must be assigned to the current user (open it with `openUserTask`, or a task page) |
+| `changeWorkflowState` | **workflow**, **operation** (`abort`/`pause`/`unpause`/`continue`/`restart`/`retry`), reason (abort) | |
+| `retrieveWorkflowContext` | **workflow** (`System.Workflow` variable), **definition** (`Module.Workflow`), **variable** | The context object |
+| `retrieveWorkflows` | **context**, **variable** | Mendix 10.4+: the workflows of an object (a list) |
+| `retrieveActivityRecords` | **workflow**, **variable** | Mendix 10.4+: list of `System.WorkflowActivityRecord` |
+| `generateJumpToOptions` | **workflow**, **variable** | A `System.WorkflowJumpToDetails` to pick the jump target in |
+| `applyJumpTo` | **details**, variable | Moves the workflow to the chosen option |
+| `lockWorkflow` | **workflow** (`Module.Workflow`), unlock, pauseAll | Lock: no new instances (pauseAll pauses running ones); unlock: true (pauseAll resumes them) |
+| `notifyWorkflow` | **workflow**, **definition**, **activity** (name of a `waitForNotification` step), variable | variable: Boolean, true when it continued |
+| `openUserTask` | **task**, assign (default true) | Opens the task page |
+| `openWorkflow` | **workflow** | Opens the workflow admin page |
+
+`retrieve` also follows System associations: `{ "action": "retrieve", "variable": "Wf", "from": "Task", "association":
+"System.WorkflowUserTask_Workflow" }`.
+
+```json
+{ "ops": [
+  { "op": "createPage", "kind": "userTaskPage", "module": "Sales", "name": "Order_Approve_Task", "entity": "Sales.Order",
+    "workflow": "Sales.WF_OrderApproval", "fields": ["Number", "Total"], "outcomes": ["Approve", "Reject"], "roles": ["Sales.Manager"] },
+  { "op": "createWorkflow", "module": "Sales", "name": "WF_OrderApproval", "context": "Sales.Order", "title": "Order approval",
+    "steps": [
+      { "step": "userTask", "caption": "Approve order", "page": "Sales.Order_Approve_Task", "assignee": { "userRoles": ["Manager"] },
+        "outcomes": { "Approve": [], "Reject": [ { "step": "callMicroflow", "microflow": "Sales.ACT_Order_Reject" }, { "step": "end" } ] } },
+      { "step": "decision", "condition": "$WorkflowContext/Total > 1000",
+        "outcomes": { "true": [ { "step": "userTask", "page": "Sales.Order_Approve_Task", "outcomes": ["Approve", "Reject"], "assignee": { "userRoles": ["Director"] } } ], "false": [] } },
+      { "step": "callMicroflow", "microflow": "Sales.ACT_Order_Confirm" } ] },
+  { "op": "createMicroflow", "module": "Sales", "name": "ACT_Order_StartApproval", "parameters": [ { "name": "Order", "type": "Sales.Order" } ],
+    "actions": [ { "action": "callWorkflow", "workflow": "Sales.WF_OrderApproval", "context": "Order" } ] }
+] }
+```
 
 ### JSON structures and mappings
 
@@ -667,7 +769,33 @@ Typical plan: structure, import mapping that creates the entities, export mappin
                  { "action": "exportWithMapping", "mapping": "Sales.EXM_Order", "object": "Order", "variable": "Out" } ] } ] }
 ```
 
-The export shows a structure as `json/path: Name type` lines and a mapping as `json/path -> Entity via Association [Create/Find/Parameter]`; use those paths in `entities`, `attributes`, `skip`, `keys`. Custom handlers, converters, XML schemas and message definitions: Studio Pro.
+The export shows a structure as `json/path: Name type` lines and a mapping as `json/path -> Entity via Association [Create/Find/Parameter]`; use those paths in `entities`, `attributes`, `skip`, `keys`. Custom handlers and converters: Studio Pro. XML schemas and message definitions: see below.
+
+### OData, XML schemas, message definitions
+
+| Op | Fields | Notes |
+|---|---|---|
+| `publishOData` | **module**, **name**, **entities**, path (default `odata/<name>/v1/`), version (1.0.0), namespace (DefaultNamespace), authentication (`["Basic"]`), roles, associations (default true), summary, description, folder | Mendix 10.4+. Each entity: `"Module.Entity"` or `{entity, exposedName, attributes, key, insert, update, delete, count, topSkip, pageSize}`. key: `"ID"` (default for stored entities) or `["Attr"]` (required for non-stored entities). insert/update/delete: `true` (write to the database) or `"Module.Microflow"`; default read-only. Enumeration attributes publish their enumeration; associations between published entities become navigation properties. Binary and hashed string attributes are left out. Layout as the one Studio Pro sample (TestApp 11.14); check associations, enumerations and write modes in Studio Pro |
+| `createXmlSchema` | **module**, **name**, **file** (`.xsd` path, relative to the current or the project folder), folder | Stores the XSD as Studio Pro does. One file only: `xs:import`/`xs:include` are refused |
+| `createMessageDefinition` | **module**, **name** (collection), **entity**, definition (default the entity name), attributes, associations `["Module.Assoc"]`, folder | A list of the entity (`<Entity>s` with items `<Entity>`), its attributes (all but binary) and per association the other entity with its attributes. Layout of the Mendix 8.18 sample |
+| `createXmlImportMapping` | **module**, **name**, xmlSchema + rootElement, or messageDefinition (`Module.Collection.Definition`), entity, entities, attributes, skip, keys, create, persistable, folder | Like `createImportMapping`, over an XML schema element or a message definition. Paths are the element names joined with `/` from the root: `Order/Line/Sku`. A message definition says its entities (no entity/entities/create). XSD support: sequences/all-groups of elements with built-in types, named and anonymous complex types, repeated complex elements; attributes, choices, extensions and repeated simple elements are refused |
+| `createXmlExportMapping` | same fields, no keys | Like `createExportMapping` |
+| `consumeODataService`, `consumeWebService`, `createBusinessEvent` | | Not supported: refused with the Studio Pro steps (consumed OData from `$metadata`, consumed SOAP web services from a WSDL, business events). They are contracts Studio Pro reads and keeps in sync |
+
+Mappings over XML schemas have no Studio Pro sample in the test projects: the dry run says to check them in Studio
+Pro (if a path does not match, Studio Pro shows an error on the mapping; right-click it and choose to update it).
+
+```json
+{ "ops": [
+  { "op": "publishOData", "module": "Sales", "name": "SalesOData", "roles": ["Sales.ApiUser"],
+    "entities": [ "Sales.Customer", { "entity": "Sales.Order", "insert": true, "update": "Sales.ACT_Order_Update", "pageSize": 500 } ] },
+  { "op": "createXmlSchema", "module": "Sales", "name": "XSD_Order", "file": "order.xsd" },
+  { "op": "createXmlImportMapping", "module": "Sales", "name": "IMM_OrderXml", "xmlSchema": "Sales.XSD_Order", "rootElement": "Order",
+    "entity": "Sales.OrderIn", "entities": { "Order/Line": "Sales.OrderLineIn" }, "create": true },
+  { "op": "createMessageDefinition", "module": "Sales", "name": "MD_Orders", "entity": "Sales.Order", "associations": ["Sales.Order_Customer"] },
+  { "op": "createXmlExportMapping", "module": "Sales", "name": "EXM_OrdersXml", "messageDefinition": "Sales.MD_Orders.Order" }
+] }
+```
 
 ### Documents, rename and delete
 
@@ -877,10 +1005,12 @@ refuses them.
 
 Operations cannot do these things: changing layouts, page parameters, button actions or data sources of existing
 widgets (pages and snippets take `addWidgets`, `changeWidget`, `deleteWidget`, `moveWidget`), widgets outside the
-`createPage` list (template grids, reference set selectors, file managers and pluggable widgets other than a Data
-grid 2, combo box or gallery copied from the project), snippet calls with parameters, design properties, import/export mappings,
-JSON structures, consumed REST services, workflows, REST operations with object bodies or results, inheritance
-splits, and setting attributes inherited from System entities (for example `System.User.Name`). In flows: publishing a
+`createPage` list (file managers and pluggable widgets other than a Data grid 2, combo box or gallery copied from the
+project), design properties, consumed OData services, consumed SOAP web services and business events (refused with
+the Studio Pro steps), XML schemas of several files or with attributes/choices/extensions, OpenAPI imports of
+consumed REST services, binary REST bodies, multi-user tasks, boundary events and event sub-processes of workflows,
+changing an existing workflow (only `createWorkflow`), custom mapping handlers and converters, and setting attributes
+inherited from System entities (for example `System.User.Name`). In flows: publishing a
 business event and calling an ML model (refused with the Studio Pro steps), generate document in a project that has no
 Generate document action yet, moving or extracting steps that have a custom error handler or a decision in between,
 extracting steps that make more than one variable used later, changing a Java/JavaScript action after it was created

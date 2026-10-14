@@ -179,13 +179,6 @@
       }
     },
     {
-      "id": "gap",
-      "text": "Sipariş onayı için iki adımlı bir onay workflow'u (Workflow dokümanı) oluştur.",
-      "checks": {
-        "gap": true
-      }
-    },
-    {
       "id": "pageedit",
       "setup": [
         {
@@ -425,6 +418,38 @@
         "files": {
           "domain-model\\.txt$": "ACCESS \\[MyFirstModule\\.User\\] (create )?default=ReadOnly\\n    ReadWrite: Note\\n",
           "overview\\.txt$": "(?s)^(?=.*AFTER STARTUP MICROFLOW: MyFirstModule\\.ASU_Startup)(?=.*first day of week=Monday)"
+        }
+      }
+    },
+    {
+      "id": "workflow",
+      "text": "Sipariş onayı için iki adımlı bir onay workflow'u (Workflow dokümanı) oluştur: önce Administrator rolündeki biri siparişi onaylasın ya da reddetsin; Total 1000'den büyükse ikinci bir onay adımı gelsin. Görev sayfalarını da yap.",
+      "checks": {
+        "files": {
+          "workflows\\.txt$": "(?s)WORKFLOW MyFirstModule\\.\\w+.*context: MyFirstModule\\.Order.*user task.*user task"
+        }
+      }
+    },
+    {
+      "id": "restclient",
+      "text": "https://api.example.com/v1 adresindeki sipariş API'si için bir REST istemcisi (consumed REST service) oluştur: GET /orders/{id} operasyonu olsun. Bu operasyonu verilen id ile çağırıp cevabın içeriğini loglayan ACT_Order_FetchRemote microflow'unu yaz.",
+      "checks": {
+        "find": [
+          "MyFirstModule.ACT_Order_FetchRemote"
+        ],
+        "files": {
+          "integrations/.*\\.txt$": "CONSUMED REST SERVICE",
+          "ACT_Order_FetchRemote\\.txt$": "SEND REST REQUEST"
+        }
+      }
+    },
+    {
+      "id": "restpublish",
+      "text": "Order'ları dışarıya açan bir published REST servisi (OrderService) yap: orders kaynağında GET {Number} ile tek siparişi JSON olarak döndürsün. Gereken microflow, JSON structure ve export mapping'i de oluştur; User rolü çağırabilsin.",
+      "checks": {
+        "files": {
+          "integrations/.*\\.txt$": "PUBLISHED REST SERVICE",
+          "entry-points\\.txt$": "GET /rest/\\S+/orders/\\{Number\\}"
         }
       }
     }

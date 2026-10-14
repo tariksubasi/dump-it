@@ -63,7 +63,11 @@ class Schema {
     // null when this storage type has no SDK counterpart
     sdkType(storageType) {
         const t = this.storageToSdk[storageType];
-        return t === undefined ? storageType : t;
+        if (t === undefined) return storageType;
+        // a storage name taken over by a newer type (Workflows$CallMicroflowTask = CallMicroflowActivity from 11.9):
+        // before that version the old type of the same name is meant
+        if (t !== storageType && !this.info(t) && this.info(storageType)) return storageType;
+        return t;
     }
 
     cls(sdkType) {

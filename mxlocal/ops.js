@@ -19,6 +19,10 @@ const { makeTexts, TEXT_OPS } = require("./ops-texts");
 const { makeCode, CODE_OPS } = require("./ops-code");
 const { makeFlowEdit, FLOW_EDIT_OPS } = require("./ops-flow-edit");
 const { makeDomain, DOMAIN_OPS, DOMAIN_SYNONYMS, SYSTEM_PARENTS, changedLater } = require("./ops-domain");
+const { makeRest, REST_OPS } = require("./ops-rest");
+const { makeOData, ODATA_OPS } = require("./ops-odata");
+const { makeXml, XML_OPS } = require("./ops-xml");
+const { makeWorkflows, WORKFLOW_OPS, USER_TASK_PAGE_FIELDS, SYSTEM_ENTITIES, STEP_FIELDS, STEP_COMMON } = require("./ops-workflows");
 
 const OPS = {
     createEntity: {
@@ -94,15 +98,15 @@ const OPS = {
         doc: "Run a microflow (without parameters) on a schedule.",
         fields: { module: "R module name", name: "R event name", microflow: "R Module.Microflow", every: "R Minute | Hour | Day | Week", interval: "optional number for Minute/Hour (default 1)", at: "optional time HH:MM for Day/Week, minutes MM for Hour (default 00:00)", days: "Week: [ \"Monday\", ... ]", enabled: "optional true/false (default false)", timeZone: "optional UTC | Server (default UTC)", onOverlap: "optional DelayNext | SkipNext (default DelayNext)", folder: "optional folder path" }
     },
-    createPage: { doc: "Create a page: an edit form for an entity (inputs by attribute type, Save/Cancel), an empty page, or a page from widgets (layout grids, containers, texts, data grids (classic, or a Data grid 2 copied from the project's pages), data views that listen to a grid, list views, buttons, inputs), optionally with a menu item. Uses the layout the project's other pages use.", fields: PAGE_FIELDS },
+    createPage: { doc: "Create a page (or with kind userTaskPage a workflow user task page): an edit form for an entity (inputs by attribute type, Save/Cancel), an empty page, or a page from widgets (layout grids, containers, texts, data grids (classic, or a Data grid 2 copied from the project's pages), data views that listen to a grid, list views, buttons, inputs), optionally with a menu item. Uses the layout the project's other pages use.", fields: { ...PAGE_FIELDS, ...USER_TASK_PAGE_FIELDS } },
     ...PAGE_EDIT_OPS,
     addMenuItem: { doc: "Add a menu item that opens a page to a navigation profile's menu.", fields: MENU_FIELDS },
     setHomePage: { doc: "Set the home page (or home microflow) of a navigation profile, for everyone or for some user roles.", fields: HOME_FIELDS },
     ...MAPPING_OPS,
-    publishRest: {
-        doc: "Publish a microflow as a REST operation (creates the service and resource when missing). Microflow parameters become path parameters when the path has {Name}, otherwise query parameters. Object parameters/results need mappings: do those in Studio Pro.",
-        fields: { module: "R module name", service: "R service name, e.g. OrderAPI", resource: "R resource name, e.g. orders", method: "R Get | Post | Put | Patch | Delete", microflow: "R Module.Microflow", path: "optional operation path, e.g. {OrderId} (default empty)", servicePath: "optional base path for a new service (default rest/<service>/v1)", authentication: "optional [ \"Basic\" | \"Session\" | \"Microflow\" | \"None\" ] for a new service (default [\"Basic\"])", roles: "optional [ \"Module.Role\" ] allowed to call the service", folder: "optional folder path for a new service" }
-    },
+    ...REST_OPS,
+    ...ODATA_OPS,
+    ...XML_OPS,
+    ...WORKFLOW_OPS,
     moveDocument: { doc: "Move a document to another folder of the same module.", fields: { document: "R Module.Document", folder: "optional folder path, e.g. Orders/Actions (missing or \"\" = the module root)" } },
     rename: { doc: "Rename a module, document, entity, attribute, association or enumeration value. Updates references, reports names left in expressions/XPath/Java.", fields: { target: "R qualified name, e.g. Module.Entity.Attribute", newName: "R new short name" } },
     delete: { doc: "Delete a document, entity, attribute, association, enumeration value or module role. Lists what still uses it.", fields: { target: "R qualified name" } }
@@ -133,6 +137,8 @@ function help(name) {
         }
         const widget = widgetFields(name);
         if (widget) return widget;
+        const step = Object.keys(STEP_FIELDS).find(k => k.toLowerCase() === String(name).toLowerCase());
+        if (step) return [`workflow step ${step} (inside createWorkflow "steps"): ${STEP_FIELDS[step].doc}`, ...Object.entries({ ...STEP_FIELDS[step].fields, ...STEP_COMMON }).map(([f, d]) => `    ${f}: ${d}`)].join("\n");
         const all = groups.flatMap(([, t]) => Object.keys(t));
         const s = suggest(name, all, 3);
         throw new Error(`No operation or action '${name}'.${s.length ? ` Did you mean: ${s.join(", ")}?` : ""} All names: ops (widget fields: ops createPage)`);
@@ -358,7 +364,8 @@ function bind(model, client) {
             const kind = m[1].toLowerCase();
             if (kind === "list") {
                 const t = datatypes.ListType.create(model);
-                t.entity = await entity(m[2]);
+                if (SYSTEM_ENTITIES.includes(m[2])) t.__entity.updateWithRawValue(m[2]); // System module: by name
+                else t.entity = await entity(m[2]);
                 return t;
             }
             if (kind === "enum" || kind === "enumeration") {
@@ -373,6 +380,11 @@ function bind(model, client) {
             }
         }
         if (simple[s.toLowerCase()]) return simple[s.toLowerCase()].create(model);
+        if (SYSTEM_ENTITIES.includes(s)) {
+            const t = datatypes.ObjectType.create(model);
+            t.__entity.updateWithRawValue(s); // System module: not in the project, stored by name
+            return t;
+        }
         if (s.includes(".")) {
             const t = datatypes.ObjectType.create(model);
             t.entity = await entity(s);
@@ -427,6 +439,12 @@ function bind(model, client) {
         if (SYSTEM_PARENTS.includes(qn)) g.__generalization.updateWithRawValue(qn);
         else g.generalization = await entity(qn);
     }
+    const version = client.project.version;
+    const restOps = makeRest({ model, client, get, exists, folder, version, mappingInternals: mappingOps.internals, impl: () => impl });
+    const odataOps = makeOData({ model, client, get, exists, entity, folder, version, persistable, attributeChain, loadParents });
+    const xmlOps = makeXml({ model, client, get, exists, entity, folder, version, attributeChain, loadParents, mappingInternals: mappingOps.internals });
+    const workflowOps = makeWorkflows({ model, client, get, exists, entity, folder, version, persistable, attributeChain, loadParents, grantAccess: o => impl.grantAccess(o), impl: () => impl,
+        textAll: (owner, prop, value) => pageOps.internals.templateAll(owner, prop, value, null, "", true) });
 
     // ------------------------------------------------ operations
 
@@ -775,68 +793,19 @@ function bind(model, client) {
             } else fail(`'every' must be Minute | Hour | Day | Week, got '${o.every}'`, o.every, ["Minute", "Hour", "Day", "Week"]);
             return `${qn}: every ${unit === "minute" || unit === "hour" ? interval + " " : ""}${unit}${unit === "day" || unit === "week" ? " at " + String(hour).padStart(2, "0") + ":" + String(minute).padStart(2, "0") : ""} -> ${o.microflow}${ev.enabled ? "" : " (disabled)"}`;
         },
-        createPage: o => pageOps.createPage(o), // grants o.roles, adds o.menu
+        createPage(o) { // grants o.roles, adds o.menu
+            const kind = o.kind === undefined ? "" : String(o.kind);
+            if (kind && kind !== "userTaskPage") fail(`createPage kind '${kind}' is not userTaskPage (leave kind out for a normal page)`, kind, ["userTaskPage"]);
+            if (kind) return workflowOps.userTaskPage(o, x => pageOps.createPage(x));
+            for (const k of ["outcomes", "workflow", "editable"]) if (o[k] !== undefined) throw new Error(`createPage: '${k}' only applies with "kind": "userTaskPage"`);
+            return pageOps.createPage(o);
+        },
         addWidgets: o => pageEdit.addWidgets(o),
         changeWidget: o => pageEdit.changeWidget(o),
         deleteWidget: o => pageEdit.deleteWidget(o),
         moveWidget: o => pageEdit.moveWidget(o),
         addMenuItem: o => pageOps.addMenuItem(o),
         setHomePage: o => pageOps.setHomePage(o),
-        async publishRest(o) {
-            const mfl = await get(o.microflow);
-            if (!(mfl instanceof mf.Microflow)) throw new Error(`'${o.microflow}' is not a microflow`);
-            const special = t => t && t.entity && ["System.HttpRequest", "System.HttpResponse"].includes(t.entityQualifiedName);
-            const ret = mfl.microflowReturnType;
-            if (ret && (ret instanceof datatypes.ObjectType || ret instanceof datatypes.ListType) && !special(ret)) throw new Error(`${o.microflow} returns an object/list; that needs an export mapping. Return a String or System.HttpResponse, or publish it in Studio Pro`);
-            const qn = `${o.module}.${o.service}`;
-            let svc;
-            if (await exists(qn)) {
-                svc = await get(qn);
-                if (!(svc instanceof rest.PublishedRestService)) throw new Error(`${qn} exists and is not a published REST service`);
-            } else {
-                svc = rest.PublishedRestService.createIn(folder(o.module, o.folder));
-                svc.name = o.service;
-                svc.serviceName = o.service;
-                svc.version = "1.0.0";
-                svc.path = o.servicePath || `rest/${o.service.toLowerCase()}/v1`;
-                svc.authenticationTypes.clear();
-                for (const a of [].concat(o.authentication || ["Basic"])) svc.authenticationTypes.push(enumValue(rest.RestAuthenticationType, a, "authentication"));
-            }
-            for (const r of [].concat(o.roles || [])) {
-                const role = await get(r);
-                if (!(role instanceof security.ModuleRole)) throw new Error(`'${r}' is not a module role`);
-                if (!svc.allowedRoles.includes(role)) svc.allowedRoles.push(role);
-            }
-            let res = svc.resources.find(x => x.name === o.resource);
-            if (!res) {
-                res = rest.PublishedRestServiceResource.createIn(svc);
-                res.name = o.resource;
-            }
-            const method = enumValue(sdk.services.HttpMethod, o.method, "method");
-            const path = String(o.path || "");
-            if (res.operations.some(x => x.httpMethod === method && x.path === path)) throw new Error(`${qn}/${o.resource}: ${o.method} '${path}' already exists`);
-            const op = rest.PublishedRestServiceOperation.createIn(res);
-            op.httpMethod = method;
-            op.path = path;
-            op.microflow = mfl;
-            op.commit = mf.CommitEnum.No;
-            const inPath = new Set([...path.matchAll(/\{(\w+)\}/g)].map(m => m[1]));
-            for (const p of mfl.objectCollection.objects.filter(x => x instanceof mf.MicroflowParameterObject)) {
-                const t = p.variableType;
-                if (special(t)) continue; // System.HttpRequest/HttpResponse are passed by the runtime
-                if (t instanceof datatypes.ObjectType || t instanceof datatypes.ListType) throw new Error(`${o.microflow} parameter '${p.name}' is an object/list; that needs an import mapping. Publish it in Studio Pro`);
-                const rp = rest.RestOperationParameter.createInPublishedRestServiceOperationUnderParameters(op);
-                rp.name = p.name;
-                rp.microflowParameter = p;
-                rp.parameterType = inPath.has(p.name) ? rest.RestOperationParameterType.Path : rest.RestOperationParameterType.Query;
-                const copy = sdk.datatypes[t.structureTypeName.split("$")[1]].create(model);
-                if (copy instanceof datatypes.EnumerationType) copy.enumeration = t.enumeration;
-                rp.type = copy;
-                inPath.delete(p.name);
-            }
-            if (inPath.size) throw new Error(`path has {${[...inPath].join("}, {")}} but ${o.microflow} has no such parameter`);
-            return `${qn}: ${o.method.toUpperCase()} /${svc.path}/${o.resource}${path ? "/" + path : ""} -> ${o.microflow} (experimental: check in Studio Pro)`;
-        },
         async moveDocument(o) {
             const doc = await get(o.document);
             if (!(doc instanceof projects.Document)) throw new Error(`'${o.document}' is not a document`);
@@ -866,7 +835,11 @@ function bind(model, client) {
         ...codeOps.impl,
         ...flowEdit.impl,
         ...domainOps.impl,
-        ...textOps.impl
+        ...textOps.impl,
+        ...restOps.impl,
+        ...odataOps.impl,
+        ...xmlOps.impl,
+        ...workflowOps.impl
     };
 
     // ------------------------------------------------ checks (run after apply on a freshly loaded model)
@@ -989,16 +962,9 @@ function bind(model, client) {
             const ev = await get(`${o.module}.${o.name}`);
             return ev.microflowQualifiedName === o.microflow && ev.schedule ? [] : [`${o.module}.${o.name} is incomplete`];
         },
-        createPage: o => pageOps.checks.createPage(o),
         ...pageEdit.checks,
         addMenuItem: o => pageOps.checks.addMenuItem(o),
         setHomePage: o => pageOps.checks.setHomePage(o),
-        async publishRest(o) {
-            const svc = await get(`${o.module}.${o.service}`);
-            const res = svc.resources.find(x => x.name === o.resource);
-            const ok = res && res.operations.some(x => x.microflowQualifiedName === o.microflow);
-            return ok ? [] : [`${o.module}.${o.service}/${o.resource} has no operation for ${o.microflow}`];
-        },
         async moveDocument(o) {
             const doc = await get(o.document);
             const path = [];
@@ -1022,7 +988,12 @@ function bind(model, client) {
         ...codeOps.checks,
         ...flowEdit.checks,
         ...domainOps.checks,
-        ...textOps.checks
+        ...textOps.checks,
+        ...restOps.checks,
+        ...odataOps.checks,
+        ...xmlOps.checks,
+        createWorkflow: o => workflowOps.checks.createWorkflow(o),
+        createPage: o => (o.kind === "userTaskPage" ? workflowOps.checks.userTaskPage(o) : pageOps.checks.createPage(o))
     };
 
     function opOf(o, i) {

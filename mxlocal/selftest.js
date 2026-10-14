@@ -1147,6 +1147,26 @@ async function selftest(mpr, keep, { out, relevant }) {
 
         // phase D: domain model details and app settings (selftest-domain.js)
         s2 = await require("./selftest-domain").domainPhase({ s2, reopen, copy, tmp, mod, T, E, role, layout, check, results, layoutProblems, lostProperties, src });
+        // integration and workflow phases (selftest-integ.js): documents with no Studio Pro sample in the test projects
+        {
+            const integ = require("./selftest-integ");
+            const env = { reopen, copy, layout, layoutProblems };
+            const phases = [
+                ["REST", "consumed REST service (Basic auth with a constant, path/header/query parameters, template and mapping bodies, response mapping), sendRestRequest x4, published REST with path/header/query/body parameters, import/export mappings, a created microflow, roles, version",
+                    () => integ.restPlan(mod, T, src.version), p => integ.restProblems(p, T)],
+                ["workflows", `two workflows (${pageable ? "user tasks with task pages, targeting by user role and microflow, outcomes with steps, " : ""}decisions on a Boolean and an enumeration, call microflow with outcomes, jump, timer, parallel split, call workflow, notification wait, end in a branch)${pageable ? ", user task pages (WorkflowUserTask parameter, context from a data source microflow, outcome buttons)" : ""}, workflow actions (call, context, notify, jump-to options, state, lock/unlock, open, complete task)`,
+                    () => integ.workflowPlan(mod, T, src.version, pageable, userRole), p => integ.workflowProblems(p, T, src.version, pageable)],
+                ["OData/XML", `${require("./versions").cmp(src.version, "10.4.0") >= 0 ? "published OData (2 entities: ID and attribute key, enumeration, association, insert/update by microflow/delete, paging), " : ""}XML schema from an .xsd, XML import/export mappings over it, message definition with associations and mappings over it, import/export steps; consumed OData, SOAP and business events refused with Studio Pro steps`,
+                    () => integ.odataPlan(mod, T, src.version, tmp), p => integ.odataProblems(p, T, src.version)]
+            ];
+            if (!pageable) results.push("SKIP workflow user tasks and user task pages: this project has no page with a layout to copy (a user task needs a task page)");
+            for (const [name, what, plan, verify] of phases) {
+                const r = await integ.runPhase(env, s2, plan(), verify);
+                s2 = r.s;
+                check(`${name}: ${what}; ${r.created} new unit(s) reopen with 0 errors, roundtrip byte for byte`, !r.problems.length, r.problems.slice(0, 6).join("; "));
+                if (r.firstUse.length) results.push(`NOTE ${name}: no Studio Pro sample of ${r.firstUse.length} type(s) in this project (built from the SDK metamodel): ${r.firstUse.slice(0, 8).join(", ")}${r.firstUse.length > 8 ? ", ..." : ""}`);
+            }
+        }
 
         // phase 4 + 5: change a page Studio Pro saved (add into a column, change a caption and a class), then move the
         // text into the new container, delete that and put the class back: the page must be byte for byte what it was

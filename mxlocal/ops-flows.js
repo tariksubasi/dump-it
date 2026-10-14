@@ -103,8 +103,16 @@ const REFUSED = {
     annotation: "an annotation is not a step: put \"note\": \"text\" on an action, or use the op addAnnotation",
     while: "a while loop is { \"action\": \"loop\", \"while\": \"condition\", \"actions\": [ ... ] }"
 };
+// Actions defined next to their documents (consumed REST, workflows): { doc, fields, only: "micro" | "nano", creates,
+// type: () => SDK action class, build(c, act, spec, where) -> action, info(a, c) -> { entity, list }, vars(a) -> [names],
+// describe(a) -> text }. c: { f, h, model, expr, variableInfo, needVariable, fillTemplate }.
+const EXTRA_ACTIONS = { ...require("./ops-rest").REST_ACTIONS, ...require("./ops-workflows").WORKFLOW_ACTIONS };
+const { SYSTEM_ASSOCIATIONS } = require("./ops-workflows");
+Object.assign(ACTIONS, EXTRA_ACTIONS);
 // Which field of an action names the variable it creates.
 const CREATES = { retrieve: "variable", create: "variable", call: "variable", variable: "name", callJava: "variable", callJavaScript: "variable", createList: "variable", aggregateList: "variable", listOperation: "variable", cast: "variable", callRest: "variable", importWithMapping: "variable", exportWithMapping: "variable" };
+for (const [n, x] of Object.entries(EXTRA_ACTIONS)) if (x.creates) CREATES[n] = x.creates;
+const extraOf = a => a && Object.values(EXTRA_ACTIONS).find(x => a instanceof x.type());
 const COMMON = { caption: "optional caption on the box (default: generated)", onError: ON_ERROR, note: "optional annotation text attached to this action" };
 
 // Structure (no box of their own, or a special box).
@@ -234,13 +242,15 @@ function makeFlows(h) {
                 const r = a.resultHandling; // REST call, import with mapping
                 if (r && r.storeInVariable && r.outputVariableName) out.set(r.outputVariableName, o);
                 if (a.outputMethod && a.outputMethod.outputVariableName) out.set(a.outputMethod.outputVariableName, o); // export with mapping
+                const x = extraOf(a);
+                if (x && x.vars) for (const v of x.vars(a)) out.set(v, o);
             } else if (o instanceof mf.LoopedActivity && o.loopSource instanceof mf.IterableList && o.loopSource.variableName) out.set(o.loopSource.variableName, o);
         });
         return out;
     }
 
     const load = async x => (x && !x.isLoaded && x.load ? x.load() : x);
-    const ofType = t => ({ entity: t && t.entity ? t.entityQualifiedName : null, list: t instanceof datatypes.ListType });
+    const ofType = t => ({ entity: (t && (t.entity ? t.entityQualifiedName : "entityQualifiedName" in t && t.entityQualifiedName)) || null, list: t instanceof datatypes.ListType }); // System entities: by name only
 
     // What a code action (Java/JavaScript) call returns.
     async function codeResult(a) {
@@ -264,6 +274,7 @@ function makeFlows(h) {
     async function variableInfo(m, name, where) {
         const n = noDollar(name);
         if (n === "currentUser") return { entity: "System.User", list: false };
+        if (n === "latestHttpResponse") return { entity: "System.HttpResponse", list: false }; // after a REST call
         const vars = variablesOf(m);
         const v = vars.get(n);
         if (!v) fail(`${where}: no variable '${name}' before this action in ${m.qualifiedName}`, n, [...vars.keys()]);
@@ -273,6 +284,8 @@ function makeFlows(h) {
         if (a instanceof mf.RetrieveAction) {
             const src = a.retrieveSource;
             if (src instanceof mf.DatabaseRetrieveSource) return { entity: src.entityQualifiedName, list: !(src.range instanceof mf.ConstantRange && src.range.singleObject) };
+            const sys = SYSTEM_ASSOCIATIONS[src.associationQualifiedName];
+            if (sys) return { entity: sys[1], list: sys[2] }; // System association, from its owner
             const assoc = await load(src.association);
             const end = k => (assoc && assoc[k] ? assoc[k].qualifiedName : null) || (assoc && assoc[k + "QualifiedName"]) || null; // cross associations: child by name
             if (!end("parent")) return { entity: null, list: false };
@@ -302,6 +315,8 @@ function makeFlows(h) {
             return ofType(target && target.microflowReturnType);
         }
         if (a.resultHandling) return ofType(a.resultHandling.variableType);
+        const x = extraOf(a);
+        if (x && x.info) return x.info(a, { h, model, m });
         return { entity: null, list: false };
     }
 
@@ -615,7 +630,8 @@ function makeFlows(h) {
     }
 
     // Microflow-only and nanoflow-only actions.
-    const ONLY = { log: "micro", showHomePage: "micro", callJava: "micro", downloadFile: "micro", callRest: "micro", importWithMapping: "micro", exportWithMapping: "micro", metric: "micro", generateDocument: "micro", callJavaScript: "nano" };
+    const ONLY = { log: "micro", showHomePage: "micro", callJava: "micro", downloadFile: "micro", callRest: "micro", importWithMapping: "micro", exportWithMapping: "micro", metric: "micro", generateDocument: "micro", callJavaScript: "nano",
+        ...Object.fromEntries(Object.entries(EXTRA_ACTIONS).filter(([, x]) => x.only).map(([n, x]) => [n, x.only])) };
     // What a rule may do: read and compute, no changes, pages or calls out.
     const RULE_ACTIONS = ["retrieve", "variable", "set", "aggregateList", "listOperation", "createList", "changeList"];
     const METRICS = { counter: "CounterMeterAction", increment: "IncrementCounterMeterAction", gauge: "GaugeMeterAction" };
@@ -880,7 +896,8 @@ function makeFlows(h) {
                     if (!spec.from || !spec.association) throw new Error(`${where}: association retrieve needs both 'from' and 'association'`);
                     const src = mf.AssociationRetrieveSource.createIn(a);
                     src.startVariableName = noDollar(spec.from);
-                    src.association = await h.get(spec.association);
+                    if (SYSTEM_ASSOCIATIONS[spec.association]) src.__association.updateWithRawValue(spec.association); // not in the project
+                    else src.association = await h.get(spec.association);
                 } else {
                     if (!spec.entity) throw new Error(`${where}: retrieve needs 'entity' (database) or 'from' + 'association'`);
                     const src = mf.DatabaseRetrieveSource.createIn(a);
@@ -1052,6 +1069,10 @@ function makeFlows(h) {
                 rq.contentType = contentType(map);
                 mf.VariableExport.createIn(a).outputVariableName = noDollar(spec.variable);
                 break;
+            }
+            default: {
+                const c = { f, h, model, expr: (v, w) => expr(f.m, v, w), variableInfo: (n, w) => variableInfo(f.m, n, w), needVariable: (n, l, w) => needVariable(f.m, n, l, w), fillTemplate: (t, text, args, w) => fillTemplate(f, t, text, args, w) };
+                a = await EXTRA_ACTIONS[kind].build(c, act, spec, where);
             }
         }
         a.errorHandlingType = errorDefault(f);
@@ -1631,6 +1652,7 @@ function makeFlows(h) {
             s = `EXPORT $${r ? r.mappingArgumentVariableName : "?"} WITH ${r ? r.mappingQualifiedName : "?"}${a.outputMethod && a.outputMethod.outputVariableName ? " -> $" + a.outputMethod.outputVariableName : ""}`;
         } else if (a instanceof mf.MeterAction) s = `METRIC ${t.replace(/MeterAction$/, "").replace(/([a-z])([A-Z])/g, "$1 $2").toUpperCase()} ${a.name}${a.value ? " " + a.value : ""}`;
         else if (a instanceof mf.GenerateDocumentAction) s = `GENERATE DOCUMENT ${a.documentTemplateQualifiedName} -> $${a.fileVariableName}`;
+        else if (extraOf(a) && extraOf(a).describe) s = extraOf(a).describe(a);
         else s = t.replace(/Action$/, "").toUpperCase();
         return s + off;
     }
@@ -1990,7 +2012,7 @@ function makeFlows(h) {
                         continue;
                     }
                     entityQn = current;
-                } else if (variable === "currentUser") continue;
+                } else if (["currentUser", "latestHttpResponse", "latestSoapFault", "latestError"].includes(variable)) continue; // built-in variables
                 else {
                     const v = variablesOf(m).get(variable);
                     if (!v) {
@@ -2003,7 +2025,7 @@ function makeFlows(h) {
                         continue; // primitive variable or unknown: nothing to check
                     }
                 }
-                if (!entityQn) continue;
+                if (!entityQn || entityQn.startsWith("System.")) continue; // System entities are not in the project
                 const ent = await h.entity(entityQn);
                 await h.loadParents(ent);
                 const first = member.split("/")[0];
