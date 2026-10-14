@@ -3,7 +3,7 @@
 // code; every op validates its fields, explains mistakes ("did you mean"), and can check itself after apply.
 const sdk = require("mendixmodelsdk");
 
-const { domainmodels: dm, microflows: mf, datatypes, enumerations, texts, security, projects, constants, scheduledevents, rest } = sdk;
+const { domainmodels: dm, microflows: mf, datatypes, enumerations, texts, security, projects, constants, scheduledevents, rest, pages } = sdk;
 const { ATTRIBUTE_TYPES, DATA_TYPES, suggest, fail, validate, bool, noDollar, enumValue, validName } = require("./ops-util");
 
 
@@ -84,7 +84,8 @@ const OPS = {
         doc: "Run a microflow (without parameters) on a schedule.",
         fields: { module: "R module name", name: "R event name", microflow: "R Module.Microflow", every: "R Minute | Hour | Day | Week", interval: "optional number for Minute/Hour (default 1)", at: "optional time HH:MM for Day/Week, minutes MM for Hour (default 00:00)", days: "Week: [ \"Monday\", ... ]", enabled: "optional true/false (default false)", timeZone: "optional UTC | Server (default UTC)", onOverlap: "optional DelayNext | SkipNext (default DelayNext)", folder: "optional folder path" }
     },
-    createPage: { doc: "Create a page: an edit form for an entity (inputs by attribute type, Save/Cancel), an empty page, or a page from widgets (layout grids, containers, texts, data grids (classic, or a Data grid 2 copied from the project's pages), data views that listen to a grid, list views, buttons, inputs), optionally with a menu item. Uses the layout the project's other pages use.", fields: PAGE_FIELDS },
+    createLayout: { doc: "Create a layout as a copy of an existing one (its placeholders, header, sidebar and menu widgets), to change in Studio Pro or use in createPage \"layout\".", fields: { module: "R module name", name: "R layout name", from: "R Module.Layout to copy (e.g. Atlas_Core.Atlas_Default)", folder: "optional folder path" } },
+    createPage: { doc: "Create a page: an edit form for an entity (inputs by attribute type, Save/Cancel), an empty page, or a page from widgets (layout grids, containers, texts, data grids (classic, or a Data grid 2 built from widgets/*.mpk), data views that listen to a grid, list views, buttons, inputs), optionally with a menu item. Uses the layout the project's other pages use.", fields: PAGE_FIELDS },
     ...PAGE_EDIT_OPS,
     addMenuItem: { doc: "Add a menu item that opens a page to a navigation profile's menu.", fields: MENU_FIELDS },
     setHomePage: { doc: "Set the home page (or home microflow) of a navigation profile, for everyone or for some user roles.", fields: HOME_FIELDS },
@@ -785,6 +786,22 @@ function bind(model, client) {
         moveWidget: o => pageEdit.moveWidget(o),
         changePage: o => pageEdit.changePage(o),
         addMenuItem: o => pageOps.addMenuItem(o),
+        async createLayout(o) {
+            validName(o.name, "layout name");
+            const qn = `${o.module}.${o.name}`;
+            if (await exists(qn)) throw new Error(`${qn} already exists`);
+            const src = await get(o.from);
+            if (!(src instanceof pages.Layout)) throw new Error(`'${o.from}' is not a layout`);
+            const l = pages.Layout.createIn(folder(o.module, o.folder));
+            l.name = o.name;
+            for (const k of ["canvasWidth", "canvasHeight"]) if (l[k] !== src[k]) l[k] = src[k];
+            l.content = src.content.deepCopy(model);
+            if (src.appearance) l.appearance = src.appearance.deepCopy(model);
+            const phs = [];
+            l.traverse(el => el instanceof pages.Placeholder && phs.push(el.name));
+            client.warn(`${qn}: first layout made by ops (copy of ${src.qualifiedName}); check it in Studio Pro`);
+            return `${qn} (copy of ${src.qualifiedName}; placeholders ${phs.join(", ") || "none"})`;
+        },
         setHomePage: o => pageOps.setHomePage(o),
         async publishRest(o) {
             const mfl = await get(o.microflow);
@@ -987,6 +1004,9 @@ function bind(model, client) {
             return ev.microflowQualifiedName === o.microflow && ev.schedule ? [] : [`${o.module}.${o.name} is incomplete`];
         },
         createPage: o => pageOps.checks.createPage(o),
+        async createLayout(o) {
+            return (await exists(`${o.module}.${o.name}`)) ? [] : [`${o.module}.${o.name} missing`];
+        },
         ...pageEdit.checks,
         addMenuItem: o => pageOps.checks.addMenuItem(o),
         setHomePage: o => pageOps.checks.setHomePage(o),

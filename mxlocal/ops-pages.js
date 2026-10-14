@@ -222,7 +222,9 @@ const PAGE_FIELDS = {
     url: "optional page URL, e.g. \"orders\" or \"order/{Order/Id}\" (a parameter's attribute); unique in the app",
     popupWidth: "optional pop-up width in pixels (0 = auto)", popupHeight: "optional pop-up height in pixels (0 = auto)", popupResizable: "optional true/false (pop-up layouts)",
     folder: "optional folder path",
-    roles: "optional [ \"Module.Role\" ] that may open the page"
+    roles: "optional [ \"Module.Role\" ] that may open the page",
+    from: "optional page template or building block of the project (Module.Name or its display name): its widgets are copied first (data widgets in it stay unconfigured, as in Studio Pro), then \"widgets\"",
+    native: "optional true: a native mobile page (a NativePhone layout of the project; widgets: text, container, actionButton, dataView, listView, input / textBox / checkBox / datePicker); refused when the project has no native layout"
 };
 const MENU_FIELDS = {
     page: "R Module.Page (without page parameters)",
@@ -258,8 +260,14 @@ function makePages(h) {
         const uses = layoutUse().filter(u => known.has(u.layout)); // a page may refer to a layout whose module is gone
         if (wanted) {
             const hit = uses.find(u => u.layout === wanted);
-            if (!hit) fail(`no page in the project uses layout '${wanted}', so its placeholder is unknown`, wanted, [...new Set(uses.map(u => u.layout))]);
-            return hit;
+            if (hit) return hit;
+            if (!known.has(wanted)) fail(`no layout '${wanted}'`, wanted, [...known]);
+            // a layout no page uses yet: its own placeholders (Main, or the only one)
+            const info = layoutInfo(wanted);
+            const ph = info.placeholders.includes("Main") ? "Main" : info.placeholders.length === 1 ? info.placeholders[0] : null;
+            if (!ph) throw new Error(`layout '${wanted}' has placeholders ${info.placeholders.join(", ") || "none"}; no page uses it, so the one for the content is unknown: create the first page with it in Studio Pro`);
+            client.warn(`layout ${wanted}: no page of the project uses it yet; the content goes in its placeholder ${ph} (check the page in Studio Pro)`);
+            return { layout: wanted, placeholder: `${wanted}.${ph}` };
         }
         // a page without an object is usually a full page: prefer layouts that are not popups
         let pool = uses.filter(u => u.withParameter === withParameter);
@@ -271,6 +279,28 @@ function makePages(h) {
         const [layout, placeholder] = best[0].split("|");
         return { layout, placeholder };
     }
+
+    // { native, placeholders } of a layout, read from the saved model (or the SDK for a new one)
+    function layoutInfo(qn) {
+        const l = model.allLayouts().find(x => x.qualifiedName === qn);
+        if (!l) return { native: false, placeholders: [] };
+        if (client.project.units.has(l.id)) {
+            const u = client.project.read(l.id);
+            const phs = [];
+            const walk = o => {
+                if (Array.isArray(o)) return o.forEach(walk);
+                if (!o || typeof o !== "object" || Buffer.isBuffer(o)) return;
+                if (o.$Type === "Forms$Placeholder" && o.Name) phs.push(o.Name);
+                for (const v of Object.values(o)) if (v && typeof v === "object") walk(v);
+            };
+            walk(u.Content);
+            return { native: !!(u.Content && u.Content.$Type === "Forms$NativeLayoutContent"), placeholders: phs };
+        }
+        const phs = [];
+        if (l.isLoaded) l.traverse(el => el instanceof pages.Placeholder && phs.push(el.name));
+        return { native: !!(l.isLoaded && l.content instanceof pages.NativeLayoutContent), placeholders: phs };
+    }
+    const nativeLayouts = () => model.allLayouts().map(l => l.qualifiedName).filter(qn => layoutInfo(qn).native);
 
     const humanize = s => s.replace(/_/g, " ").replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/^./, c => c.toUpperCase());
 
@@ -2893,14 +2923,22 @@ function makePages(h) {
 
     // A page from a widget list; without "widgets": an edit form (one data view of the entity) or an empty page.
     async function widgetPage(o, qn) {
-        const form = o.widgets === undefined;
+        const form = o.widgets === undefined && o.from === undefined;
         if (form && o.fields !== undefined && !o.entity) throw new Error(`${qn}: 'fields' needs 'entity'`);
         if (!form) for (const k of ["fields", "buttons"]) if (o[k] !== undefined) throw new Error(`${qn}: '${k}' goes in a dataView widget when 'widgets' is given`);
         if (o.arrange !== undefined && !/^(auto|rows)$/i.test(String(o.arrange))) fail(`${qn}: arrange must be auto or rows`, o.arrange, ["auto", "rows"]);
-        const specs = !form ? o.widgets : !o.entity ? [] : [{ widget: "dataView", ...(o.fields !== undefined ? { fields: o.fields } : {}), ...(o.buttons !== undefined ? { buttons: o.buttons } : {}) }];
+        const specs = !form ? o.widgets || [] : !o.entity ? [] : [{ widget: "dataView", ...(o.fields !== undefined ? { fields: o.fields } : {}), ...(o.buttons !== undefined ? { buttons: o.buttons } : {}) }];
         const nodes = [];
         const top = scan(specs, form ? "form" : "widgets", null, nodes);
-        if (!top.length && !form) throw new Error(`${qn}: 'widgets' is empty; leave it out for an empty page`);
+        if (!top.length && !form && o.from === undefined) throw new Error(`${qn}: 'widgets' is empty; leave it out for an empty page`);
+        // native pages: a native layout and the widgets native pages have
+        const nativeAsked = bool(o.native, false) || (o.layout !== undefined && layoutInfo(String(o.layout)).native);
+        if (nativeAsked) {
+            const ok = ["text", "container", "actionButton", "dataView", "listView", "input", "textBox", "checkBox", "datePicker"];
+            for (const n of nodes) if (!ok.includes(n.kind)) throw new Error(`${n.where}: a native page takes ${ok.join(", ")}; not ${n.kind}`);
+            if (o.menu !== undefined) throw new Error(`${qn}: menu items of native pages go in the native navigation profile; add it in Studio Pro`);
+            if (o.from !== undefined) throw new Error(`${qn}: "from" makes web pages; leave it out for a native page`);
+        }
         const ctx = { qn, names: names(), params: new Map(), count: { inputs: 0 }, untranslated: 0, ents: new Set(), scope: nodes, after: [] };
         // sources; entities of lists that do not depend on the object around them, grid kinds, names (given ones first,
         // also tab pages; then grids, list views and galleries in page order, which listenTo needs); then every source
@@ -2925,12 +2963,24 @@ function makePages(h) {
             }
         }
         const withParameter = nodes.some(n => n.kind === "dataView" && n.source === "parameter");
-        const { layout, placeholder } = pickLayout(o.layout, withParameter);
+        const tpl = o.from !== undefined ? await templateOf(String(o.from), qn) : null;
+        let wantLayout = o.layout !== undefined ? String(o.layout) : tpl && tpl.layout ? tpl.layout : undefined;
+        if (nativeAsked && !wantLayout) {
+            const natives = nativeLayouts();
+            if (!natives.length) throw new Error(`${qn}: this project has no native layout (Atlas NativePhone_*), so it has no native pages; add a native navigation profile and layout in Studio Pro`);
+            const used = layoutUse().filter(u => natives.includes(u.layout)).map(u => u.layout);
+            wantLayout = used[0] || natives.find(l => /NativePhone_Default$/.test(l)) || natives[0];
+        }
+        if (nativeAsked) {
+            arranged = top; // no layout grids on native pages
+            client.warn(`${qn}: native page (layout ${wantLayout}): first use by ops (no Studio Pro-saved native page in the test projects); check it in Studio Pro`);
+        } else if (wantLayout && layoutInfo(wantLayout).native) throw new Error(`${qn}: ${wantLayout} is a native layout; give "native": true`);
+        const { layout, placeholder } = pickLayout(wantLayout, withParameter);
         const layoutDoc = await h.get(layout);
         const page = pages.Page.createIn(h.folder(o.module, o.folder));
         ctx.page = page;
         page.name = o.name;
-        if (pages.Autofocus && pages.Autofocus.DesktopOnly) setIfAvailable(page, "autofocus", pages.Autofocus.DesktopOnly); // Studio Pro's default (11.1+)
+        if (!nativeAsked && pages.Autofocus && pages.Autofocus.DesktopOnly) setIfAvailable(page, "autofocus", pages.Autofocus.DesktopOnly); // Studio Pro's default (11.1+)
         await textAll(page.title, o.title || humanize(o.name), ctx);
         const call = pages.LayoutCall.createInPageUnderLayoutCall(page);
         call.layout = layoutDoc;
@@ -2943,10 +2993,79 @@ function makePages(h) {
         if (!lp) throw new Error(`layout ${layout} has no placeholder '${short}'`);
         arg.parameter = lp;
         const parts = [];
+        if (tpl) parts.push(await copyTemplate(tpl, call, arg, layoutDoc, ctx));
         for (const n of arranged) parts.push(await build(n, arg.widgets, ctx));
         for (const f of ctx.after) f(); // parameter mappings: every widget they name exists now
-        if (form) return { ctx, text: `${qn} (layout ${layout}${o.entity ? `, form for ${o.entity} with ${ctx.count.inputs} input(s)` : ""})` };
+        if (form && !tpl) return { ctx, text: `${qn} (layout ${layout}${o.entity ? `, form for ${o.entity} with ${ctx.count.inputs} input(s)` : ""})` };
         return { ctx, text: `${qn} (layout ${layout}${ctx.params.size ? `, parameter ${[...ctx.params.values()].map(p => p.name).join(", ")}` : ""})\n      widgets: ${parts.join("; ")}` };
+    }
+
+    // A page template or building block by qualified or display name: { doc, kind, layout (template's) }
+    async function templateOf(name, where) {
+        const all = [...model.allPageTemplates(), ...model.allBuildingBlocks()];
+        const norm = x => String(x).toLowerCase().replace(/[\s_-]+/g, "");
+        const want = norm(name);
+        let u = all.find(x => x.qualifiedName === name) || all.find(x => norm(x.qualifiedName) === want || norm(x.name) === want);
+        if (!u) {
+            for (const x of all) {
+                const d = client.project.units.has(x.id) ? client.project.read(x.id).DisplayName : null;
+                if (d && norm(d) === want) u = x;
+            }
+        }
+        if (!u) fail(`${where}: no page template or building block '${name}'${all.length ? "" : " (this project has none)"}`, name, all.map(x => x.qualifiedName));
+        const doc = await u.load();
+        const kind = doc instanceof pages.PageTemplate ? "page template" : "building block";
+        if (doc instanceof pages.BuildingBlock && doc.platform && doc.platform.name === "Native") throw new Error(`${where}: ${doc.qualifiedName} is a native building block; give "native": true is not supported for "from"`);
+        return { doc, kind, layout: doc instanceof pages.PageTemplate && doc.layoutCall ? doc.layoutCall.layoutQualifiedName : null };
+    }
+
+    // Copies the widgets of a template (per placeholder) or building block into the new page.
+    async function copyTemplate(tpl, call, mainArg, layoutDoc, ctx) {
+        const copied = [];
+        const put = (list, widgets) => {
+            for (const w of widgets) {
+                const c = w.deepCopy(model);
+                list.push(c);
+                copied.push(c);
+            }
+        };
+        if (tpl.doc instanceof pages.PageTemplate) {
+            for (const a of tpl.doc.layoutCall.arguments) {
+                const ph = String(a.parameterQualifiedName || "").split(".").pop();
+                let arg = call.arguments.find(x => String(x.parameterQualifiedName || "").split(".").pop() === ph);
+                if (!arg) {
+                    let lp = null;
+                    layoutDoc.traverse(el => {
+                        if (!lp && el instanceof pages.Placeholder && el.name === ph) lp = el;
+                    });
+                    if (!lp) {
+                        client.warn(`${ctx.qn}: ${tpl.doc.qualifiedName} fills placeholder ${ph}, which ${layoutDoc.qualifiedName} lacks; left out`);
+                        continue;
+                    }
+                    arg = pages.LayoutCallArgument.createIn(call);
+                    arg.parameter = lp;
+                }
+                put(arg.widgets, a.widgets);
+            }
+        } else put(mainArg.widgets, tpl.doc.widgets);
+        // names stay unique on the page; data widgets without an entity wait for Studio Pro (as after "new page from template")
+        const open = [];
+        for (const c of copied) {
+            c.traverse(el => {
+                if (el instanceof pages.Widget && el.name) {
+                    try {
+                        ctx.names.reserve(el.name, ctx.qn);
+                    } catch (e) {
+                        const base = el.name.replace(/\d+$/, "");
+                        el.name = ctx.names.next(base || "widget");
+                    }
+                }
+                const src = el instanceof pages.EntityWidget || el instanceof pages.ListView || el instanceof pages.DataView ? el.dataSource : null;
+                if (el instanceof pages.Widget && (el instanceof pages.DataView || el instanceof pages.ListView || el instanceof pages.TemplateGrid || el instanceof pages.DataGrid) && (!src || !src.entityRef)) open.push(el.name);
+            });
+        }
+        if (open.length) client.warn(`${ctx.qn}: from ${tpl.doc.qualifiedName}: ${open.join(", ")} still need${open.length > 1 ? "" : "s"} a data source and entity (set them in Studio Pro, or build them with "widgets")`);
+        return `${copied.length} widget(s) from ${tpl.kind} ${tpl.doc.qualifiedName}`;
     }
 
     function listenTarget(n, nodes) {
