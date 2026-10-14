@@ -3,7 +3,7 @@
 // code; every op validates its fields, explains mistakes ("did you mean"), and can check itself after apply.
 const sdk = require("mendixmodelsdk");
 
-const { domainmodels: dm, microflows: mf, datatypes, enumerations, texts, security, projects, constants, scheduledevents, rest } = sdk;
+const { domainmodels: dm, microflows: mf, datatypes, enumerations, texts, security, projects, constants, scheduledevents, rest, pages } = sdk;
 const { ATTRIBUTE_TYPES, DATA_TYPES, suggest, fail, validate, bool, noDollar, enumValue, validName } = require("./ops-util");
 
 
@@ -19,17 +19,26 @@ const { makeTexts, TEXT_OPS } = require("./ops-texts");
 const { makeNav, NAV_OPS, MENU_EXTRA, extendedMenuItem } = require("./ops-nav");
 const { makeTheme, THEME_OPS } = require("./theme");
 const { makeMarket, MARKET_OPS } = require("./marketplace");
+const { makeCode, CODE_OPS } = require("./ops-code");
+const { makeFlowEdit, FLOW_EDIT_OPS } = require("./ops-flow-edit");
+const { makeDomain, DOMAIN_OPS, DOMAIN_SYNONYMS, SYSTEM_PARENTS, changedLater } = require("./ops-domain");
+const { makeRest, REST_OPS } = require("./ops-rest");
+const { makeOData, ODATA_OPS } = require("./ops-odata");
+const { makeXml, XML_OPS } = require("./ops-xml");
+const { makeWorkflows, WORKFLOW_OPS, USER_TASK_PAGE_FIELDS, SYSTEM_ENTITIES, STEP_FIELDS, STEP_COMMON } = require("./ops-workflows");
 
 const OPS = {
     createEntity: {
         doc: "Create an entity in a module's domain model.",
-        fields: { module: "R module name", name: "R entity name", persistable: "optional true/false (default true)", generalization: "optional Module.ParentEntity", attributes: "optional [ { \"name\": ..., \"type\": ..., \"default\": ... } ]" }
+        fields: { module: "R module name", name: "R entity name", persistable: "optional true/false (default true)", generalization: "optional Module.ParentEntity (also System.FileDocument, System.Image, System.User)", attributes: "optional [ { \"name\": ..., \"type\": ..., \"default\": ..., \"calculated\": ... } ]" }
     },
-    addAttribute: { doc: "Add an attribute to an entity.", fields: { entity: "R Module.Entity", name: "R attribute name", type: "R " + ATTRIBUTE_TYPES, default: "optional default value (as Studio Pro shows it)" } },
-    changeAttribute: { doc: "Change the type and/or default of an attribute.", fields: { attribute: "R Module.Entity.Attribute", type: "optional new type", default: "optional new default value" } },
+    addAttribute: { doc: "Add an attribute to an entity (stored, or calculated by a microflow).", fields: { entity: "R Module.Entity", name: "R attribute name", type: "R " + ATTRIBUTE_TYPES, default: "optional default value (as Studio Pro shows it)", calculated: "optional Module.Microflow that computes the value (not stored): no parameter or one of the entity, returns the attribute type" } },
+    changeAttribute: { doc: "Change the type, default, or stored/calculated of an attribute.", fields: { attribute: "R Module.Entity.Attribute", type: "optional new type", default: "optional new default value", calculated: "optional Module.Microflow: make it calculated (its column is dropped)", stored: "optional true: make a calculated attribute stored again" } },
     addAssociation: {
         doc: "Add an association. 'from' stores the reference: many 'from' objects point to one 'to' object (Reference), or to many (ReferenceSet).",
-        fields: { from: "R Module.Entity (owner side)", to: "R Module.Entity or OtherModule.Entity", name: "optional (default From_To)", type: "optional Reference | ReferenceSet (default Reference)", owner: "optional Default | Both" }
+        fields: { from: "R Module.Entity (owner side)", to: "R Module.Entity or OtherModule.Entity", name: "optional (default From_To)", type: "optional Reference | ReferenceSet (default Reference)", owner: "optional Default | Both",
+            storage: "optional Table | Column (default: the app's setting for a Reference with owner Default, else Table)", onDeleteFrom: "optional keep | delete | prevent (default keep): when a 'from' object is deleted", onDeleteTo: "optional keep | delete | prevent: when a 'to' object is deleted",
+            messageFrom: "prevent on onDeleteFrom: message", messageTo: "prevent on onDeleteTo: message" }
     },
     createEnumeration: { doc: "Create an enumeration.", fields: { module: "R module name", name: "R enumeration name", values: "R [ \"Value\" or { \"name\": ..., \"caption\": ... } ]", folder: "optional folder path, e.g. Enums/Order" } },
     addEnumerationValue: { doc: "Add a value to an enumeration.", fields: { enumeration: "R Module.Enumeration", name: "R value name", caption: "optional caption (default the name)" } },
@@ -40,8 +49,9 @@ const OPS = {
     ...TEXT_OPS,
     addAccessRule: {
         doc: "Add an entity access rule. Members not listed in 'members' get 'access'.",
-        fields: { entity: "R Module.Entity", roles: "R [ \"Module.Role\" ]", access: "optional ReadWrite | ReadOnly | None (default ReadOnly)", members: "optional { \"Attribute\": \"ReadWrite\", \"Module.Assoc\": \"ReadOnly\" }", create: "optional true/false", delete: "optional true/false", xpath: "optional XPath, e.g. [Owner = '[%CurrentUser%]']" }
+        fields: { entity: "R Module.Entity", roles: "R [ \"Module.Role\" ]", access: "optional ReadWrite | ReadOnly | None (default ReadOnly)", members: "optional { \"Attribute\": \"ReadWrite\", \"Module.Assoc\": \"ReadOnly\", \"System.FileDocument.Name\": \"ReadWrite\" }", create: "optional true/false", delete: "optional true/false", xpath: "optional XPath, e.g. [Owner = '[%CurrentUser%]']", newMembers: "optional ReadWrite | ReadOnly | None: rights of members added later (default: access)" }
     },
+    ...DOMAIN_OPS,
     createMicroflow: {
         doc: "Create a microflow: start -> actions (with if/loop/onError) -> end.",
         fields: { module: "R module name", name: "R microflow name", folder: "optional folder path", parameters: "optional [ { \"name\": ..., \"type\": " + JSON.stringify(DATA_TYPES) + " } ]", returns: "optional return type (default nothing)", returnValue: "required when returns is set: return expression", actions: "optional [ actions, see ACTIONS ]", roles: "optional [ \"Module.Role\" ]" }
@@ -52,7 +62,7 @@ const OPS = {
     },
     addActions: {
         doc: "Insert actions into an existing microflow or nanoflow. Default: just before the end event (needs exactly one end event).",
-        fields: { microflow: "R Module.Microflow or Module.Nanoflow", after: "optional \"start\", the variable name an existing step creates, or a step id (see: steps)", actions: "R [ actions ]" }
+        fields: { microflow: "R Module.Microflow or Module.Nanoflow", after: "optional \"start\", the variable name an existing step creates, or a step id (see: steps)", branch: "with after = a decision: which outgoing flow, e.g. \"true\" or an enumeration value", actions: "R [ actions ]" }
     },
     changeAction: {
         doc: "Change one existing step. Get its id with: steps Module.Flow. Give only the fields to change.",
@@ -61,17 +71,21 @@ const OPS = {
             xpath: "retrieve: new XPath", first: "retrieve: true/false", entity: "retrieve: Module.Entity",
             set: "create/change: { \"Attr\": \"expression\" } (adds or replaces)", unset: "create/change: [ \"Attr\" ] to remove",
             commit: "create/change: true/false; callRest/importWithMapping (import mapping): yes | no | withoutEvents", refresh: "change/commit/rollback: true/false", events: "commit: true/false",
-            args: "call/callJava/callJavaScript: { \"Param\": \"expression\" }; validationFeedback: [\"expression\"]", message: "log/validationFeedback: text", level: "log: level", text: "message: text",
+            args: "call/callJava/callJavaScript/rule decision: { \"Param\": \"expression\" }; validationFeedback: [\"expression\"]", message: "log/validationFeedback: text", level: "log: level", text: "message: text",
             type: "message: Information | Warning | Error; changeList: add | remove | replace | clear", blocking: "message: true/false",
             value: "variable/set/end/changeList: expression; listOperation find/filter: value", condition: "decision: expression", caption: "decision, ifType or action: caption",
             disabled: "action: true/false", while: "while loop: expression", over: "list loop: list variable",
             function: "aggregateList: count | sum | average | minimum | maximum | all | any", attribute: "aggregateList: attribute", expression: "aggregateList, listOperation find/filter by expression: expression",
             other: "listOperation: second list or object variable", offset: "listOperation range: expression", limit: "listOperation range: expression",
             showInBrowser: "downloadFile: true/false", url: "callRest: location text", urlArgs: "callRest: [\"expression\"]", method: "callRest: Get | Post | ...",
-            headers: "callRest: { \"Name\": \"expression\" } (replaces all)", timeout: "callRest: seconds", body: "callRest: body text", bodyArgs: "callRest: [\"expression\"]"
+            headers: "callRest: { \"Name\": \"expression\" } (replaces all)", timeout: "callRest: seconds", body: "callRest: body text", bodyArgs: "callRest: [\"expression\"]",
+            auth: "callRest: { \"user\": \"expression\", \"password\": \"expression\" } or \"none\"", proxy: "callRest: default | none | { host, port, user, password }", errorBody: "callRest: true/false",
+            initial: "aggregateList reduce: initial value expression"
         }
     },
     deleteAction: { doc: "Delete one action or loop from a flow and reconnect the line. Get its id with: steps Module.Flow.", fields: { microflow: "R Module.Microflow or Module.Nanoflow", id: "R step id from 'steps'" } },
+    ...FLOW_EDIT_OPS,
+    ...CODE_OPS,
     setGeneralization: { doc: "Make an entity inherit from another entity, or from none.", fields: { entity: "R Module.Entity", generalization: "R Module.Parent, or \"\" / \"none\" for no parent", persistable: "optional true/false when there is no parent (default true)" } },
     addValidationRule: {
         doc: "Add a validation rule to an attribute.",
@@ -87,7 +101,8 @@ const OPS = {
         doc: "Run a microflow (without parameters) on a schedule.",
         fields: { module: "R module name", name: "R event name", microflow: "R Module.Microflow", every: "R Minute | Hour | Day | Week", interval: "optional number for Minute/Hour (default 1)", at: "optional time HH:MM for Day/Week, minutes MM for Hour (default 00:00)", days: "Week: [ \"Monday\", ... ]", enabled: "optional true/false (default false)", timeZone: "optional UTC | Server (default UTC)", onOverlap: "optional DelayNext | SkipNext (default DelayNext)", folder: "optional folder path" }
     },
-    createPage: { doc: "Create a page: an edit form for an entity (inputs by attribute type, Save/Cancel), an empty page, or a page from widgets (layout grids, containers, texts, data grids (classic, or a Data grid 2 copied from the project's pages), data views that listen to a grid, list views, buttons, inputs), optionally with a menu item. Uses the layout the project's other pages use.", fields: PAGE_FIELDS },
+    createLayout: { doc: "Create a layout as a copy of an existing one (its placeholders, header, sidebar and menu widgets), to change in Studio Pro or use in createPage \"layout\".", fields: { module: "R module name", name: "R layout name", from: "R Module.Layout to copy (e.g. Atlas_Core.Atlas_Default)", folder: "optional folder path" } },
+    createPage: { doc: "Create a page (or with kind userTaskPage a workflow user task page): an edit form for an entity (inputs by attribute type, Save/Cancel), an empty page, or a page from widgets (layout grids, containers, texts, data grids (classic, or a Data grid 2 built from widgets/*.mpk), data views that listen to a grid, list views, buttons, inputs), optionally with a menu item. Uses the layout the project's other pages use.", fields: { ...PAGE_FIELDS, ...USER_TASK_PAGE_FIELDS } },
     ...PAGE_EDIT_OPS,
     addMenuItem: { doc: "Add a menu item that opens a page (or runs a microflow) to a navigation profile's menu or a menu document.", fields: { ...MENU_FIELDS, ...MENU_EXTRA } },
     setHomePage: { doc: "Set the home page (or home microflow) of a navigation profile, for everyone or for some user roles.", fields: HOME_FIELDS },
@@ -95,10 +110,10 @@ const OPS = {
     ...THEME_OPS,
     ...MARKET_OPS,
     ...MAPPING_OPS,
-    publishRest: {
-        doc: "Publish a microflow as a REST operation (creates the service and resource when missing). Microflow parameters become path parameters when the path has {Name}, otherwise query parameters. Object parameters/results need mappings: do those in Studio Pro.",
-        fields: { module: "R module name", service: "R service name, e.g. OrderAPI", resource: "R resource name, e.g. orders", method: "R Get | Post | Put | Patch | Delete", microflow: "R Module.Microflow", path: "optional operation path, e.g. {OrderId} (default empty)", servicePath: "optional base path for a new service (default rest/<service>/v1)", authentication: "optional [ \"Basic\" | \"Session\" | \"Microflow\" | \"None\" ] for a new service (default [\"Basic\"])", roles: "optional [ \"Module.Role\" ] allowed to call the service", folder: "optional folder path for a new service" }
-    },
+    ...REST_OPS,
+    ...ODATA_OPS,
+    ...XML_OPS,
+    ...WORKFLOW_OPS,
     moveDocument: { doc: "Move a document to another folder of the same module.", fields: { document: "R Module.Document", folder: "optional folder path, e.g. Orders/Actions (missing or \"\" = the module root)" } },
     rename: { doc: "Rename a module, document, entity, attribute, association or enumeration value. Updates references, reports names left in expressions/XPath/Java.", fields: { target: "R qualified name, e.g. Module.Entity.Attribute", newName: "R new short name" } },
     delete: { doc: "Delete a document, entity, attribute, association, enumeration value or module role. Lists what still uses it.", fields: { target: "R qualified name" } }
@@ -129,6 +144,8 @@ function help(name) {
         }
         const widget = widgetFields(name);
         if (widget) return widget;
+        const step = Object.keys(STEP_FIELDS).find(k => k.toLowerCase() === String(name).toLowerCase());
+        if (step) return [`workflow step ${step} (inside createWorkflow "steps"): ${STEP_FIELDS[step].doc}`, ...Object.entries({ ...STEP_FIELDS[step].fields, ...STEP_COMMON }).map(([f, d]) => `    ${f}: ${d}`)].join("\n");
         const all = groups.flatMap(([, t]) => Object.keys(t));
         const s = suggest(name, all, 3);
         throw new Error(`No operation or action '${name}'.${s.length ? ` Did you mean: ${s.join(", ")}?` : ""} All names: ops (widget fields: ops createPage)`);
@@ -209,7 +226,7 @@ function bind(model, client) {
         }
         const unit = model.allUnits().find(u => {
             try {
-                return u.qualifiedName === qn;
+                return u.qualifiedName === qn && !(dm.ViewEntitySourceDocument && u instanceof dm.ViewEntitySourceDocument); // a view entity's OQL document has its name
             } catch (e) {
                 return false;
             }
@@ -354,7 +371,8 @@ function bind(model, client) {
             const kind = m[1].toLowerCase();
             if (kind === "list") {
                 const t = datatypes.ListType.create(model);
-                t.entity = await entity(m[2]);
+                if (SYSTEM_ENTITIES.includes(m[2])) t.__entity.updateWithRawValue(m[2]); // System module: by name
+                else t.entity = await entity(m[2]);
                 return t;
             }
             if (kind === "enum" || kind === "enumeration") {
@@ -369,6 +387,11 @@ function bind(model, client) {
             }
         }
         if (simple[s.toLowerCase()]) return simple[s.toLowerCase()].create(model);
+        if (SYSTEM_ENTITIES.includes(s)) {
+            const t = datatypes.ObjectType.create(model);
+            t.__entity.updateWithRawValue(s); // System module: not in the project, stored by name
+            return t;
+        }
         if (s.includes(".")) {
             const t = datatypes.ObjectType.create(model);
             t.entity = await entity(s);
@@ -409,7 +432,9 @@ function bind(model, client) {
 
     const textOps = makeTexts({ model, client, get, resetLanguage });
     const translationsOf = textOps.translationsOf;
-    const flows = makeFlows({ model, get, entity, text, dataType, attributeChain, loadParents });
+    const flows = makeFlows({ model, client, get, entity, text, dataType, attributeChain, loadParents });
+    const codeOps = makeCode({ model, client, get, exists, entity, folder, createFlow: (...a) => flows.createFlow(...a) });
+    const flowEdit = makeFlowEdit({ model, exists, createFlow: (o, nano) => flows.createFlow(o, nano, folder(o.module, o.folder)) }, flows);
     const pageOps = makePages({ model, client, get, exists, entity, text, translationsOf, folder, attributeChain, loadParents, persistable, grantAccess: o => impl.grantAccess(o) });
     const pageEdit = makePageEdit({ model, client, get, text, translationsOf, attributeChain, persistable }, pageOps.internals);
     const securityOps = makeSecurity({ model, get });
@@ -417,6 +442,19 @@ function bind(model, client) {
     const marketOps = makeMarket({ client, model });
     const navOps = makeNav({ model, client, get, exists, text, translationsOf, folder, grantAccess: o => impl.grantAccess(o) }, pageOps.internals);
     const mappingOps = makeMappings({ model, get, exists, entity, folder, attributeChain, loadParents, impl: () => impl });
+    const domainOps = makeDomain({ model, client, get, exists, entity, folder, text, attributeType, loadParents, persistable, domainModel, isFresh: qn => isFresh(qn), markFresh: qn => fresh.add(qn) });
+    // a parent: a project entity, or a System entity (by name, as Studio Pro stores it)
+    async function setParent(e, qn) {
+        const g = dm.Generalization.createIn(e);
+        if (SYSTEM_PARENTS.includes(qn)) g.__generalization.updateWithRawValue(qn);
+        else g.generalization = await entity(qn);
+    }
+    const version = client.project.version;
+    const restOps = makeRest({ model, client, get, exists, folder, version, mappingInternals: mappingOps.internals, impl: () => impl });
+    const odataOps = makeOData({ model, client, get, exists, entity, folder, version, persistable, attributeChain, loadParents });
+    const xmlOps = makeXml({ model, client, get, exists, entity, folder, version, attributeChain, loadParents, mappingInternals: mappingOps.internals });
+    const workflowOps = makeWorkflows({ model, client, get, exists, entity, folder, version, persistable, attributeChain, loadParents, grantAccess: o => impl.grantAccess(o), impl: () => impl,
+        textAll: (owner, prop, value) => pageOps.internals.templateAll(owner, prop, value, null, "", true) });
 
     // ------------------------------------------------ operations
 
@@ -467,11 +505,9 @@ function bind(model, client) {
             e.name = o.name;
             const xs = d.entities.filter(x => x !== e).map(x => x.location.x);
             e.location = { x: xs.length ? Math.max(...xs) + 250 : 100, y: 100 };
-            if (o.generalization) {
-                const g = dm.Generalization.createIn(e);
-                g.generalization = await entity(o.generalization);
-            } else if (e.generalization instanceof dm.NoGeneralization) e.generalization.persistable = bool(o.persistable, true);
-            const attrSpec = { fields: { name: "R attribute name", type: "R " + ATTRIBUTE_TYPES, default: "optional default value" } };
+            if (o.generalization) await setParent(e, o.generalization);
+            else if (e.generalization instanceof dm.NoGeneralization) e.generalization.persistable = bool(o.persistable, true);
+            const attrSpec = { fields: { name: "R attribute name", type: "R " + ATTRIBUTE_TYPES, default: "optional default value", calculated: "optional Module.Microflow" } };
             for (const [i, a] of (o.attributes || []).entries()) {
                 validate("-", "attribute", attrSpec, a || {}, `${o.module}.${o.name} attribute ${i + 1}`);
                 await impl.addAttribute({ entity: `${o.module}.${o.name}`, ...a }, e);
@@ -484,24 +520,43 @@ function bind(model, client) {
             if (!o.name || !o.type) throw new Error(`addAttribute needs name and type (${o.entity})`);
             validName(o.name, "attribute name");
             if (e.attributes.some(a => a.name === o.name)) throw new Error(`${o.entity}.${o.name} already exists`);
+            domainOps.assertOwnAttributes(e, o.entity);
+            if (o.calculated !== undefined && o.default !== undefined) throw new Error(`${o.entity}.${o.name}: a calculated attribute has no default`);
             const a = dm.Attribute.createIn(e);
             a.name = o.name;
             const dflt = await attributeType(a, o.type);
             setDefault(a, o.default !== undefined ? o.default : dflt);
-            return `${o.entity}.${o.name}: ${o.type}`;
+            if (o.calculated !== undefined) await domainOps.calculate(a, o.calculated);
+            if (!loaded) await domainOps.addMemberToRules(e, a);
+            return `${o.entity}.${o.name}: ${o.type}` + (o.calculated ? ` calculated by ${o.calculated}` : "");
         },
         async changeAttribute(o) {
             const a = await get(o.attribute);
             if (!(a instanceof dm.Attribute)) throw new Error(`'${o.attribute}' is not an attribute`);
-            if (o.type === undefined && o.default === undefined) throw new Error("changeAttribute needs 'type' and/or 'default'");
+            if (o.type === undefined && o.default === undefined && o.calculated === undefined && o.stored === undefined) throw new Error("changeAttribute needs 'type', 'default', 'calculated' or 'stored'");
+            domainOps.assertOwnAttributes(a.containerAsEntity, o.attribute.split(".").slice(0, 2).join("."));
+            if (o.calculated !== undefined && bool(o.stored, false)) throw new Error("changeAttribute: give 'calculated' or 'stored', not both");
+            const wasCalc = a.value instanceof dm.CalculatedValue;
+            const calcAfter = o.calculated !== undefined || (wasCalc && !bool(o.stored, false));
+            if (o.default !== undefined && calcAfter) throw new Error(`${o.attribute} is calculated: it has no default (add "stored": true to store it)`);
             const before = a.type.structureTypeName;
+            const oldFlow = wasCalc ? a.value.microflowQualifiedName : null;
             if (o.type !== undefined) {
                 const dflt = await attributeType(a, o.type);
-                if (o.default === undefined) setDefault(a, dflt);
+                if (o.default === undefined && !calcAfter) setDefault(a, dflt);
             }
             if (o.default !== undefined) setDefault(a, o.default);
-            const changed = a.type.structureTypeName !== before && persistable(a.containerAsEntity) && !isFresh(o.attribute);
-            return o.attribute + (changed ? `\n      DATA LOSS: existing values are converted on the next app start; values that do not convert to ${o.type} are lost` : "");
+            let note = "";
+            if (o.calculated !== undefined) note = await domainOps.calculate(a, o.calculated);
+            else if (wasCalc && o.type !== undefined && calcAfter) note = await domainOps.calculate(a, oldFlow);
+            else if (wasCalc && bool(o.stored, false) && !(a.value instanceof dm.StoredValue)) setDefault(a, o.default !== undefined ? o.default : "");
+            const stored = persistable(a.containerAsEntity) && !isFresh(o.attribute);
+            const changed = a.type.structureTypeName !== before && stored && !wasCalc && !calcAfter;
+            const lines = [];
+            if (changed) lines.push(`DATA LOSS: existing values are converted on the next app start; values that do not convert to ${o.type} are lost`);
+            if (!wasCalc && calcAfter && stored) lines.push(`DATA LOSS: ${a.name} is no longer stored: its column and values are dropped when the app next starts`);
+            if (wasCalc && !calcAfter && stored) lines.push(`NOTE: ${a.name} is stored now: existing objects get the default value, not the calculated one`);
+            return o.attribute + (calcAfter ? ` (calculated by ${a.value.microflowQualifiedName})` : wasCalc ? " (stored)" : "") + note + lines.map(l => `\n      ${l}`).join("");
         },
         async addAssociation(o) {
             const from = await entity(o.from);
@@ -517,7 +572,11 @@ function bind(model, client) {
             a.type = enumValue(dm.AssociationType, o.type || "Reference", "association type");
             a.owner = enumValue(dm.AssociationOwner, o.owner || "Default", "association owner");
             fresh.add(`${o.from.split(".")[0]}.${name}`);
-            return `${o.from.split(".")[0]}.${name}: ${o.from} -> ${o.to}`;
+            const { notes } = await domainOps.associationSettings(a, o, true);
+            await domainOps.addMemberToRules(from, a);
+            if (a.owner === dm.AssociationOwner.Both && to !== from) await domainOps.addMemberToRules(to, a);
+            const extra = [a.storageFormat && a.storageFormat !== dm.AssociationStorage.Table ? `stored in a ${a.storageFormat.name.toLowerCase()}` : "", ...notes.filter(n => n.startsWith("deleting"))].filter(Boolean);
+            return `${o.from.split(".")[0]}.${name}: ${o.from} -> ${o.to}` + (extra.length ? ` (${extra.join("; ")})` : "");
         },
         async createEnumeration(o) {
             validName(o.name, "enumeration name");
@@ -578,42 +637,7 @@ function bind(model, client) {
             return `${o.document} <- ${[].concat(o.roles).join(", ")}`;
         },
 
-        async addAccessRule(o) {
-            const e = await entity(o.entity);
-            await loadParents(e);
-            const rule = dm.AccessRule.createInEntityUnderAccessRules(e);
-            for (const qn of [].concat(o.roles)) {
-                const r = await get(qn);
-                if (!(r instanceof security.ModuleRole)) throw new Error(`'${qn}' is not a module role`);
-                rule.moduleRoles.push(r);
-            }
-            const dflt = enumValue(dm.MemberAccessRights, o.access || "ReadOnly", "access");
-            rule.defaultMemberAccessRights = dflt;
-            rule.allowCreate = bool(o.create, false);
-            rule.allowDelete = bool(o.delete, false);
-            rule.xPathConstraint = o.xpath || "";
-            const members = { ...(o.members || {}) };
-            const readOnlyTypes = [dm.AutoNumberAttributeType];
-            for (const a of allAttributes(e)) {
-                const ma = dm.MemberAccess.createIn(rule);
-                ma.attribute = a;
-                let r = members[a.name] !== undefined ? enumValue(dm.MemberAccessRights, members[a.name], `access of ${a.name}`) : dflt;
-                const readOnly = readOnlyTypes.some(t => a.type instanceof t) || a.value instanceof dm.CalculatedValue;
-                if (readOnly && r === dm.MemberAccessRights.ReadWrite) r = dm.MemberAccessRights.ReadOnly;
-                ma.accessRights = r;
-                delete members[a.name];
-            }
-            const d = e.containerAsDomainModel;
-            for (const assoc of [...d.associations, ...d.crossAssociations].filter(x => x.parent === e)) {
-                const ma = dm.MemberAccess.createIn(rule);
-                ma.association = assoc;
-                const key = Object.keys(members).find(k => k === assoc.name || k === assoc.qualifiedName);
-                ma.accessRights = key ? enumValue(dm.MemberAccessRights, members[key], `access of ${key}`) : dflt;
-                if (key) delete members[key];
-            }
-            if (Object.keys(members).length) throw new Error(`addAccessRule ${o.entity}: unknown members ${Object.keys(members).join(", ")}`);
-            return `${o.entity} for ${[].concat(o.roles).join(", ")}`;
-        },
+        addAccessRule: o => domainOps.impl.addAccessRule(o),
         async createMicroflow(o) {
             return createFlowOp(o, false);
         },
@@ -630,6 +654,10 @@ function bind(model, client) {
                 const g = dm.NoGeneralization.createIn(e);
                 g.persistable = bool(o.persistable, true);
                 return `${o.entity}: no parent`;
+            }
+            if (SYSTEM_PARENTS.includes(o.generalization)) {
+                await setParent(e, o.generalization);
+                return `${o.entity} inherits from ${o.generalization} (check access rules and pages that use ${o.entity} in Studio Pro)`;
             }
             const parent = await entity(o.generalization);
             for (let p = parent, i = 0; p && i < 20; i++) {
@@ -775,71 +803,49 @@ function bind(model, client) {
             } else fail(`'every' must be Minute | Hour | Day | Week, got '${o.every}'`, o.every, ["Minute", "Hour", "Day", "Week"]);
             return `${qn}: every ${unit === "minute" || unit === "hour" ? interval + " " : ""}${unit}${unit === "day" || unit === "week" ? " at " + String(hour).padStart(2, "0") + ":" + String(minute).padStart(2, "0") : ""} -> ${o.microflow}${ev.enabled ? "" : " (disabled)"}`;
         },
-        createPage: o => pageOps.createPage(o), // grants o.roles, adds o.menu
+        // grants o.roles, adds o.menu; URL and pop-up size as changePage does
+        async createPage(o) {
+            const kind = o.kind === undefined ? "" : String(o.kind);
+            if (kind && kind !== "userTaskPage") fail(`createPage kind '${kind}' is not userTaskPage (leave kind out for a normal page)`, kind, ["userTaskPage"]);
+            if (kind) return workflowOps.userTaskPage(o, x => pageOps.createPage(x));
+            for (const k of ["outcomes", "workflow", "editable"]) if (o[k] !== undefined) throw new Error(`createPage: '${k}' only applies with "kind": "userTaskPage"`);
+            const text = await pageOps.createPage(o);
+            const set = Object.fromEntries(["url", "popupWidth", "popupHeight", "popupResizable"].filter(k => o[k] !== undefined).map(k => [k, o[k]]));
+            if (!Object.keys(set).length) return text;
+            try {
+                return `${text}\n      ${(await pageEdit.changePage({ page: `${o.module}.${o.name}`, ...set })).replace(/^[^:]*: /, "")}`;
+            } catch (e) {
+                const p = model.allPages().find(x => x.qualifiedName === `${o.module}.${o.name}`);
+                if (p) p.delete();
+                throw new Error(e.message.replace(/^changePage /, "createPage "));
+            }
+        },
         addWidgets: o => pageEdit.addWidgets(o),
         changeWidget: o => pageEdit.changeWidget(o),
         deleteWidget: o => pageEdit.deleteWidget(o),
         moveWidget: o => pageEdit.moveWidget(o),
+        changePage: o => pageEdit.changePage(o),
         addMenuItem: o => (extendedMenuItem(o) ? navOps.addMenuItem(o) : pageOps.addMenuItem(o)),
-        setHomePage: o => pageOps.setHomePage(o),
         ...navOps.impl,
         ...themeOps.impl,
         ...marketOps.impl,
-        async publishRest(o) {
-            const mfl = await get(o.microflow);
-            if (!(mfl instanceof mf.Microflow)) throw new Error(`'${o.microflow}' is not a microflow`);
-            const special = t => t && t.entity && ["System.HttpRequest", "System.HttpResponse"].includes(t.entityQualifiedName);
-            const ret = mfl.microflowReturnType;
-            if (ret && (ret instanceof datatypes.ObjectType || ret instanceof datatypes.ListType) && !special(ret)) throw new Error(`${o.microflow} returns an object/list; that needs an export mapping. Return a String or System.HttpResponse, or publish it in Studio Pro`);
-            const qn = `${o.module}.${o.service}`;
-            let svc;
-            if (await exists(qn)) {
-                svc = await get(qn);
-                if (!(svc instanceof rest.PublishedRestService)) throw new Error(`${qn} exists and is not a published REST service`);
-            } else {
-                svc = rest.PublishedRestService.createIn(folder(o.module, o.folder));
-                svc.name = o.service;
-                svc.serviceName = o.service;
-                svc.version = "1.0.0";
-                svc.path = o.servicePath || `rest/${o.service.toLowerCase()}/v1`;
-                svc.authenticationTypes.clear();
-                for (const a of [].concat(o.authentication || ["Basic"])) svc.authenticationTypes.push(enumValue(rest.RestAuthenticationType, a, "authentication"));
-            }
-            for (const r of [].concat(o.roles || [])) {
-                const role = await get(r);
-                if (!(role instanceof security.ModuleRole)) throw new Error(`'${r}' is not a module role`);
-                if (!svc.allowedRoles.includes(role)) svc.allowedRoles.push(role);
-            }
-            let res = svc.resources.find(x => x.name === o.resource);
-            if (!res) {
-                res = rest.PublishedRestServiceResource.createIn(svc);
-                res.name = o.resource;
-            }
-            const method = enumValue(sdk.services.HttpMethod, o.method, "method");
-            const path = String(o.path || "");
-            if (res.operations.some(x => x.httpMethod === method && x.path === path)) throw new Error(`${qn}/${o.resource}: ${o.method} '${path}' already exists`);
-            const op = rest.PublishedRestServiceOperation.createIn(res);
-            op.httpMethod = method;
-            op.path = path;
-            op.microflow = mfl;
-            op.commit = mf.CommitEnum.No;
-            const inPath = new Set([...path.matchAll(/\{(\w+)\}/g)].map(m => m[1]));
-            for (const p of mfl.objectCollection.objects.filter(x => x instanceof mf.MicroflowParameterObject)) {
-                const t = p.variableType;
-                if (special(t)) continue; // System.HttpRequest/HttpResponse are passed by the runtime
-                if (t instanceof datatypes.ObjectType || t instanceof datatypes.ListType) throw new Error(`${o.microflow} parameter '${p.name}' is an object/list; that needs an import mapping. Publish it in Studio Pro`);
-                const rp = rest.RestOperationParameter.createInPublishedRestServiceOperationUnderParameters(op);
-                rp.name = p.name;
-                rp.microflowParameter = p;
-                rp.parameterType = inPath.has(p.name) ? rest.RestOperationParameterType.Path : rest.RestOperationParameterType.Query;
-                const copy = sdk.datatypes[t.structureTypeName.split("$")[1]].create(model);
-                if (copy instanceof datatypes.EnumerationType) copy.enumeration = t.enumeration;
-                rp.type = copy;
-                inPath.delete(p.name);
-            }
-            if (inPath.size) throw new Error(`path has {${[...inPath].join("}, {")}} but ${o.microflow} has no such parameter`);
-            return `${qn}: ${o.method.toUpperCase()} /${svc.path}/${o.resource}${path ? "/" + path : ""} -> ${o.microflow} (experimental: check in Studio Pro)`;
+        async createLayout(o) {
+            validName(o.name, "layout name");
+            const qn = `${o.module}.${o.name}`;
+            if (await exists(qn)) throw new Error(`${qn} already exists`);
+            const src = await get(o.from);
+            if (!(src instanceof pages.Layout)) throw new Error(`'${o.from}' is not a layout`);
+            const l = pages.Layout.createIn(folder(o.module, o.folder));
+            l.name = o.name;
+            for (const k of ["canvasWidth", "canvasHeight"]) if (l[k] !== src[k]) l[k] = src[k];
+            l.content = src.content.deepCopy(model);
+            if (src.appearance) l.appearance = src.appearance.deepCopy(model);
+            const phs = [];
+            l.traverse(el => el instanceof pages.Placeholder && phs.push(el.name));
+            client.warn(`${qn}: first layout made by ops (copy of ${src.qualifiedName}); check it in Studio Pro`);
+            return `${qn} (copy of ${src.qualifiedName}; placeholders ${phs.join(", ") || "none"})`;
         },
+        setHomePage: o => pageOps.setHomePage(o),
         async moveDocument(o) {
             const doc = await get(o.document);
             if (!(doc instanceof projects.Document)) throw new Error(`'${o.document}' is not a document`);
@@ -866,7 +872,14 @@ function bind(model, client) {
         },
         ...securityOps.impl,
         ...mappingOps.impl,
-        ...textOps.impl
+        ...codeOps.impl,
+        ...flowEdit.impl,
+        ...domainOps.impl,
+        ...textOps.impl,
+        ...restOps.impl,
+        ...odataOps.impl,
+        ...xmlOps.impl,
+        ...workflowOps.impl
     };
 
     // ------------------------------------------------ checks (run after apply on a freshly loaded model)
@@ -882,12 +895,16 @@ function bind(model, client) {
             const a = await get(`${o.entity}.${o.name}`);
             const want = String(o.type).replace(/\(.*$/, "").toLowerCase().replace("enumeration", "enum");
             const got = typeName(a.type).toLowerCase().replace("enumeration", "enum");
-            return got === want ? [] : [`${o.entity}.${o.name} has type ${typeName(a.type)}, expected ${o.type}`];
+            const r = got === want ? [] : [`${o.entity}.${o.name} has type ${typeName(a.type)}, expected ${o.type}`];
+            if (o.calculated !== undefined && !(a.value instanceof dm.CalculatedValue && a.value.microflowQualifiedName === o.calculated)) r.push(`${o.entity}.${o.name} is not calculated by ${o.calculated}`);
+            return r;
         },
         async changeAttribute(o) {
             const a = await get(o.attribute);
             const r = [];
             if (o.default !== undefined && a.value.defaultValue !== String(o.default)) r.push(`${o.attribute} default is '${a.value.defaultValue}'`);
+            if (o.calculated !== undefined && !(a.value instanceof dm.CalculatedValue && a.value.microflowQualifiedName === o.calculated)) r.push(`${o.attribute} is not calculated by ${o.calculated}`);
+            if (bool(o.stored, false) && !(a.value instanceof dm.StoredValue)) r.push(`${o.attribute} is not stored`);
             return r;
         },
         async addAssociation(o) {
@@ -985,19 +1002,15 @@ function bind(model, client) {
             const ev = await get(`${o.module}.${o.name}`);
             return ev.microflowQualifiedName === o.microflow && ev.schedule ? [] : [`${o.module}.${o.name} is incomplete`];
         },
-        createPage: o => pageOps.checks.createPage(o),
+        async createLayout(o) {
+            return (await exists(`${o.module}.${o.name}`)) ? [] : [`${o.module}.${o.name} missing`];
+        },
         ...pageEdit.checks,
         addMenuItem: o => (extendedMenuItem(o) ? navOps.checks.addMenuItem(o) : pageOps.checks.addMenuItem(o)),
         setHomePage: o => pageOps.checks.setHomePage(o),
         ...navOps.checks,
         ...themeOps.checks,
         ...marketOps.checks,
-        async publishRest(o) {
-            const svc = await get(`${o.module}.${o.service}`);
-            const res = svc.resources.find(x => x.name === o.resource);
-            const ok = res && res.operations.some(x => x.microflowQualifiedName === o.microflow);
-            return ok ? [] : [`${o.module}.${o.service}/${o.resource} has no operation for ${o.microflow}`];
-        },
         async moveDocument(o) {
             const doc = await get(o.document);
             const path = [];
@@ -1018,7 +1031,15 @@ function bind(model, client) {
         },
         ...securityOps.checks,
         ...mappingOps.checks,
-        ...textOps.checks
+        ...codeOps.checks,
+        ...flowEdit.checks,
+        ...domainOps.checks,
+        ...textOps.checks,
+        ...restOps.checks,
+        ...odataOps.checks,
+        ...xmlOps.checks,
+        createWorkflow: o => workflowOps.checks.createWorkflow(o),
+        createPage: o => (o.kind === "userTaskPage" ? workflowOps.checks.userTaskPage(o) : pageOps.checks.createPage(o))
     };
 
     function opOf(o, i) {
@@ -1027,7 +1048,7 @@ function bind(model, client) {
         const name = Object.keys(OPS).find(k => k.toLowerCase() === String(o.op).toLowerCase());
         if (!name) fail(`${where}: unknown op '${o.op}'`, o.op, Object.keys(OPS));
         if (name === "addMenuItem" && o.roles !== undefined) throw new Error(`${where} (addMenuItem): ${NO_MENU_ROLES(o.page)}`);
-        for (const [k, hint] of Object.entries(FIELD_SYNONYMS[name] || {})) if (o[k] !== undefined && !OPS[name].fields[k]) throw new Error(`${where} (${name}): unknown field '${k}': ${hint}`);
+        for (const [k, hint] of Object.entries({ ...(DOMAIN_SYNONYMS[name] || {}), ...(FIELD_SYNONYMS[name] || {}) })) if (o[k] !== undefined && !OPS[name].fields[k]) throw new Error(`${where} (${name}): unknown field '${k}': ${hint}`);
         validate("op", name, OPS[name], o, where);
         return { name, where };
     }
@@ -1055,14 +1076,14 @@ function bind(model, client) {
             const rest = plan.ops.slice(i + 1);
             const later = rest.some(x => ["rename", "delete"].includes(x.op));
             const qn = o.module && o.name ? `${o.module}.${o.name}` : null;
-            const edited = qn && rest.some(x => ["addActions", "changeAction", "deleteAction"].includes(x.op) && x.microflow === qn);
+            const edited = qn && rest.some(x => ["addActions", "changeAction", "deleteAction", "moveAction", "extractMicroflow", "addAnnotation"].includes(x.op) && x.microflow === qn);
             const opposite = { grantAccess: "revokeAccess", revokeAccess: "grantAccess" }[name];
             const undone = opposite && rest.some(x => x.op === opposite && x.document === o.document);
             // a later page edit of the same page that deletes, moves or renames one of this op's widgets (or changes it again)
             const mine = PAGE_EDIT_NAMES.includes(name) ? pageEdit.touched(o) : [];
             const undoes = x => ["deleteWidget", "moveWidget"].includes(x.op) || (x.op === "changeWidget" && (x.name !== undefined || name === "changeWidget"));
             const reworked = mine.length && rest.some(x => x.page === o.page && undoes(x) && pageEdit.touched(x).some(n => mine.includes(n)));
-            if ((later && name !== "rename" && name !== "delete") || edited || undone || reworked) continue;
+            if ((later && name !== "rename" && name !== "delete") || edited || undone || reworked || changedLater(name, o, rest)) continue;
             try {
                 failed.push(...(await checks[name](name === "setTranslations" ? o : await textOps.prepare(o, false))).map(f => `${i + 1}. ${name}: ${f}`));
             } catch (e) {
@@ -1072,7 +1093,7 @@ function bind(model, client) {
         return failed;
     }
 
-    const api = { get, runPlan, checkPlan, dataType, folder, lintExpressions: () => flows.lintExpressions(), steps: qn => flows.steps(qn), widgets: qn => pageEdit.widgets(qn), texts: (scope, missing) => textOps.list(scope, missing) };
+    const api = { get, runPlan, checkPlan, dataType, folder, lintExpressions: () => flows.lintExpressions(), steps: qn => flows.steps(qn), widgets: qn => pageEdit.widgets(qn), widgetType: name => (name ? pageOps.internals.widgetType(name) : pageOps.internals.widgetTypes()), texts: (scope, missing) => textOps.list(scope, missing) };
     for (const name of Object.keys(OPS)) {
         api[name] = o => {
             validate("op", name, OPS[name], o || {}, `ops.${name}`);

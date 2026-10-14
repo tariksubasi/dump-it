@@ -47,6 +47,9 @@ const USAGE = `mxlocal - Mendix Model SDK offline on a local .mpr (v2)
   node mxlocal.js widgets <Module.Page> --project <app.mpr|folder>
                                         the widget tree of a page or snippet: names, kinds, entity, where new
                                         widgets can go (for addWidgets/changeWidget/deleteWidget/moveWidget)
+  node mxlocal.js widgettype [name] --project <app.mpr|folder>
+                                        the pluggable widgets in widgets/*.mpk; with a name: its properties
+                                        (types, defaults, values) for { "widget": "pluggable", "properties": ... }
   node mxlocal.js texts [Module|Module.Doc|menu] [--missing <lang>] --project <app.mpr|folder>
                                         translatable texts (titles, captions, labels, messages, enumeration and menu
                                         captions) in every project language (for setTranslations)
@@ -237,8 +240,8 @@ async function run(file, mpr, allowJs, ctx) {
     ctx = ctx || (await loadProject(mpr));
     const fingerprint = ctx.project.fingerprint();
     const client = new LocalClient(ctx);
-    client.changeFile = path.resolve(file); // files an op names (packages) are looked up next to it
     const model = await client.open();
+    client.changeFile = path.resolve(file); // files an op reads (addImage) are relative to the export folder
     const ops = require("./ops").bind(model, client);
     const lines = [];
     const say = s => {
@@ -261,7 +264,8 @@ async function run(file, mpr, allowJs, ctx) {
     for (const x of s.moved) say("  > " + x);
     for (const x of s.renames) say("  rename " + x);
     for (const x of require("./files").describe(client, plainFiles)) say(x);
-    if (!s.created.length && !s.updated.length && !s.deleted.length && !s.moved.length && !plainFiles.length) {
+    for (const [rel, x] of client.extraFiles || []) say(`  ${x.before ? "~" : "+"} file ${rel}`);
+    if (!s.created.length && !s.updated.length && !s.deleted.length && !s.moved.length && !plainFiles.length && !(client.extraFiles && client.extraFiles.size)) {
         pending.clear(client.project.dir);
         out("Nothing to write.");
         return { client };
@@ -293,18 +297,18 @@ async function apply(mpr, code) {
         throw new Error("The model changed since the dry run (Studio Pro save, pull or other apply). Run the dry run again.");
     }
     const files = require("./files");
-    const changedFiles = p.plainFiles.filter(f => files.sha(files.onDisk(project.dir, f.rel)) !== f.before).map(f => f.rel);
+    const changedFiles = (p.plainFiles || []).filter(f => files.sha(files.onDisk(project.dir, f.rel)) !== f.before).map(f => f.rel);
     if (changedFiles.length) {
         pending.clear(project.dir);
         throw new Error(`The model changed since the dry run: ${changedFiles.join(", ")} changed on disk. Run the dry run again.`);
     }
-    const r = project.writeEncoded({ files: p.files, created: p.created, deleted: p.deleted, moved: p.moved || [], plainFiles: p.plainFiles });
+    const r = project.writeEncoded({ files: p.files, created: p.created, deleted: p.deleted, moved: p.moved || [], plainFiles: p.plainFiles || [], extra: p.extra || [] });
     // The change itself goes into the backup, so it can be run again after an undo even if edits/ was cleaned.
     fs.writeFileSync(path.join(r.backup, "change.txt"), `Source: ${p.source}\n${p.summary.join("\n")}\n`);
     if (p.content !== undefined) fs.writeFileSync(path.join(r.backup, "change" + path.extname(p.source || ".json")), p.content);
-    fs.writeFileSync(path.join(r.backup, "after.json"), JSON.stringify({ fingerprint: project.fingerprint(), units: unitHashes(project), files: files.hashes(project.dir, p.plainFiles.map(f => f.rel)) }));
+    fs.writeFileSync(path.join(r.backup, "after.json"), JSON.stringify({ fingerprint: project.fingerprint(), units: unitHashes(project), files: fileHashes(project.dir, r.files), plainFiles: files.hashes(project.dir, (p.plainFiles || []).map(f => f.rel)) }));
     pending.clear(project.dir);
-    out(`Saved ${r.written} unit file(s), deleted ${r.deleted}${r.moved ? `, moved ${r.moved}` : ""}${r.plainFiles ? `, ${r.plainFiles} other file(s)` : ""}. Backup: ${path.relative(project.dir, r.backup)}`);
+    out(`Saved ${r.written} unit file(s), deleted ${r.deleted}${r.moved ? `, moved ${r.moved}` : ""}${r.plainFiles ? `, ${r.plainFiles} other file(s)` : ""}${r.files.length ? `, wrote ${r.files.join(", ")}` : ""}. Backup: ${path.relative(project.dir, r.backup)}`);
     if (p.plan) {
         const ctx = await loadProject(mpr);
         const client = new LocalClient(ctx);
@@ -314,6 +318,11 @@ async function apply(mpr, code) {
         else out(`Checked: all ${p.plan.ops.length} operation(s) are in the saved model.`);
         process.exitCode = failed.length ? 1 : 0;
     }
+}
+
+// rel -> sha256 of files apply wrote (Java/JavaScript sources), to notice later edits before an undo.
+function fileHashes(dir, rels) {
+    return Object.fromEntries((rels || []).map(rel => [rel, fs.existsSync(path.join(dir, rel)) ? require("crypto").createHash("sha256").update(fs.readFileSync(path.join(dir, rel))).digest("hex") : null]));
 }
 
 // UnitID -> ContentsHash of the saved model.
@@ -356,12 +365,23 @@ function restoreCmd(mpr, name, force) {
     if (fs.existsSync(afterFile)) {
         const after = JSON.parse(fs.readFileSync(afterFile, "utf8"));
         const files = require("./files");
-        const laterFiles = Object.entries(after.files || {}).filter(([rel, h]) => files.sha(files.onDisk(dir, rel)) !== h).map(([rel]) => `changed: file ${rel}`);
+        const laterFiles = Object.entries(after.plainFiles || {}).filter(([rel, h]) => files.sha(files.onDisk(dir, rel)) !== h).map(([rel]) => `changed: file ${rel}`);
         if ((after.fingerprint !== project.fingerprint() || laterFiles.length) && force !== true) {
             const lines = [...changedUnits(project, after.units, unitHashes(project)), ...laterFiles];
             throw new Error(`The model changed after this apply (Studio Pro save, pull or a later apply). Undo would erase that work:\n` +
                 lines.slice(0, 15).map(l => "  " + l).join("\n") + (lines.length > 15 ? `\n  ... ${lines.length - 15} more` : "") +
                 `\nUndo the later changes first (newest first), or ask the user whether to undo anyway with --force (that loses the changes above).`);
+        }
+    }
+    // source files apply wrote and the user changed since (e.g. implemented the Java action): never lost silently
+    if (fs.existsSync(afterFile)) {
+        const files = JSON.parse(fs.readFileSync(afterFile, "utf8")).files || {};
+        const edited = Object.keys(files).filter(rel => fileHashes(dir, [rel])[rel] !== files[rel]);
+        if (edited.length && force !== true) throw new Error(`These files changed after the apply; undo would replace or remove them:\n${edited.map(e => "  " + e).join("\n")}\nSave your code elsewhere, or undo anyway with --force (the edited files are kept in the backup's orphans folder).`);
+        for (const rel of edited) {
+            if (!fs.existsSync(path.join(dir, rel))) continue;
+            fs.mkdirSync(path.dirname(path.join(backup, "orphans", rel)), { recursive: true });
+            fs.copyFileSync(path.join(dir, rel), path.join(backup, "orphans", rel));
         }
     }
     const before = new Set(project.units.keys());
@@ -424,6 +444,11 @@ async function main() {
         const client = new LocalClient(ctx);
         const model = await client.open();
         out(await require("./ops").bind(model, client).widgets(a._[1]));
+    } else if (cmd === "widgettype" || cmd === "widgettypes") {
+        const ctx = await loadProject(mpr);
+        const client = new LocalClient(ctx);
+        const model = await client.open();
+        out(await require("./ops").bind(model, client).widgetType(a._.slice(1).join(" ")));
     } else if (cmd === "texts") {
         const ctx = await loadProject(mpr);
         const client = new LocalClient(ctx);
@@ -480,7 +505,7 @@ function report(e, file) {
     const stack = (e && e.stack ? e.stack : "").split("\n").slice(1);
     const own = file && stack.find(l => l.includes(path.resolve(file)));
     if (own) lines.push("  at " + own.trim().replace(/^at /, ""));
-    else if (!/^(No |Nothing |Code |The model|apply needs|run needs|Studio Pro|Expected|--project|Only|This project|Unknown command|Unknown tool|Op \d|ops must be|name: |widgets: )|is a script\. Scripts are off|is not a tool here|true conflict\(s\) need a side|--pick|--all is|different Mendix versions/.test(msg)) lines.push(...stack.slice(0, 4).map(l => "  " + l.trim()));
+    else if (!/^(No |Nothing |Code |The model|apply needs|run needs|Studio Pro|Expected|--project|Only|This project|Unknown command|Unknown tool|Op \d|ops must be|name: |widgets: )|is a script\. Scripts are off|is not a tool here|true conflict\(s\) need a side|--pick|--all is|different Mendix versions|changed since the dry run|changed after the apply/.test(msg)) lines.push(...stack.slice(0, 4).map(l => "  " + l.trim()));
     const hint = HINTS.find(([re]) => re.test(full)); // the full text: the type names may be past the cut
     if (hint) lines.push("HINT: " + (typeof hint[1] === "function" ? hint[1](full) : hint[1]));
     return lines.join("\n") + "\n";

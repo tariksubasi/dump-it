@@ -41,6 +41,13 @@ export const widgets = {
     execute: (args, context) => mx(context, ["widgets", args.page])
 };
 
+export const widgettype = {
+    description: "Pluggable widgets installed in the project (widgets/*.mpk); with a name: its properties with types, " +
+        "defaults and enumeration values, for { \"widget\": \"pluggable\", \"type\": ..., \"properties\": { ... } }.",
+    args: { name: text("widget id or short name, e.g. Datagrid, or \"\" for the list") },
+    execute: (args, context) => mx(context, ["widgettype", ...(args.name ? [args.name] : [])])
+};
+
 export const texts = {
     description: "Translatable texts (page titles, widget captions/labels, messages, enumeration and menu captions) " +
         "with their text in every project language. Use the listed where [part] in setTranslations.",

@@ -314,6 +314,9 @@ class FlowRenderer:
             value = m.get("Argument")
             if value is None:
                 v = m.get("Value") or m.get("ParameterValue") or {}
+                if isinstance(v, str):  # Send REST request: the expression itself
+                    out.append("%s=%s" % (short(m.get("Parameter") or m.get("QueryParameter")), clean(v)))
+                    continue
                 value = v.get("Argument") or v.get("Entity") or v.get("Microflow") or v.get("Nanoflow") or compact(v)
             out.append("%s=%s" % (short(m.get("Parameter")), clean(value)))
         return ", ".join(out)
@@ -499,8 +502,19 @@ class FlowRenderer:
         method = (http.get("HttpMethod") or "").upper()
         self.index.effect("REST CALLS (Call REST service action)", "%s -> %s %s" % (self.qn, method, url))
         sub = ["header %s: %s" % (h.get("Key"), clean(h.get("Value"))) for h in http.get("HttpHeaderEntries") or []]
+        if http.get("UseHttpAuthentication"):
+            sub.append("basic authentication: user %s, password %s" % (clean(http.get("HttpAuthenticationUserName")), clean(http.get("HttpAuthenticationPassword"))))
+        if a.get("RequestProxyType") == "NoProxy":
+            sub.append("proxy: none")
+        elif a.get("RequestProxyType") == "Override":
+            px = a.get("ProxyConfiguration") or {}
+            sub.append("proxy: %s:%s" % (clean(px.get("HostExpression")), clean(px.get("PortExpression"))))
         req = a.get("RequestHandling") or {}
-        if req.get("MappingId"):
+        if req.get("$Type") == "Microflows$FormDataRequestHandling":
+            sub.append("body: form data " + ", ".join("%s=%s" % (p.get("Key"), clean(p.get("Value"))) for p in req.get("Parts") or []))
+        elif req.get("$Type") == "Microflows$BinaryRequestHandling":
+            sub.append("body: file " + clean(req.get("Expression")))
+        elif req.get("MappingId"):
             sub.append("body: export mapping %s of $%s" % (req["MappingId"], req.get("MappingVariableName")))
         elif req:
             body = template(req.get("Template") or req.get("CustomBody") or {}) or compact(req, 200)
@@ -513,6 +527,8 @@ class FlowRenderer:
         line = "%sREST %s %s" % (self._result(var, entity) if var else "", method, url)
         if imp.get("ReturnValueMapping"):
             line += " -> import mapping %s" % imp["ReturnValueMapping"]
+        elif a.get("ResultHandlingType") == "FileDocument":
+            line += " -> file document"
         if a.get("TimeOutExpression") and a.get("UseRequestTimeOut", True):
             line += " (timeout %ss)" % clean(a["TimeOutExpression"])
         return line, sub
@@ -525,11 +541,13 @@ class FlowRenderer:
         body = a.get("BodyVariable") or {}
         body_var = body.get("VariableName") if isinstance(body, dict) else None
         self.index.effect("REST REQUESTS (Send REST request action)", "%s -> %s" % (self.qn, operation or compact(a, 150)))
-        line = "%sSEND REST REQUEST %s(%s)" % ("$%s = " % var if var else "", operation, self._args(a.get("ParameterMappings")))
+        args = self._args(a.get("ParameterMappings"))
+        query = self._args([m for m in a.get("QueryParameterMappings") or [] if m.get("Included") != "No"])
+        line = "%sSEND REST REQUEST %s(%s)" % ("$%s = " % var if var else "", operation, ", ".join(x for x in (args, query) if x))
         if body_var:
             line += " body=$" + body_var
         known = {"$ID", "$Type", "Operation", "RestOperation", "OutputVariable", "OutputVariableName", "BodyVariable",
-                 "ParameterMappings", "ErrorHandlingType"}
+                 "ParameterMappings", "QueryParameterMappings", "BaseUrlParameterMapping", "ErrorHandlingType"}
         rest = compact({k: v for k, v in a.items() if k not in known}, 300)
         return line, ["details: " + rest] if rest else []
 

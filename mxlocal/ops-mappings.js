@@ -372,13 +372,15 @@ function makeMappings(h) {
         return T.create(model);
     }
 
-    function writeMapping(doc, plan, imp) {
+    // rootCreate: makes the root element somewhere else than a mapping document (a consumed REST operation's inline
+    // response or body mapping)
+    function writeMapping(doc, plan, imp, rootCreate = null) {
         const OBJ = imp ? im.ImportObjectMappingElement : em.ExportObjectMappingElement;
         const VAL = imp ? im.ImportValueMappingElement : em.ExportValueMappingElement;
         const common = (el, s) => {
             el.exposedName = s.name;
-            el.jsonPath = s.path;
-            el.xmlPath = "";
+            el.jsonPath = s.jsonPath !== undefined ? s.jsonPath : s.path; // XML schemas and message definitions: own paths
+            el.xmlPath = s.xmlPath || "";
             el.minOccurs = s.min;
             el.maxOccurs = s.max;
             el.nillable = s.nillable;
@@ -399,7 +401,7 @@ function makeMappings(h) {
                 setIfAvailable(v, "originalValue", "");
                 return;
             }
-            const el = isRoot ? OBJ.createInMappingDocumentUnderRootMappingElements(container) : OBJ.createInObjectMappingElementUnderChildren(container);
+            const el = isRoot ? (rootCreate ? rootCreate(OBJ) : OBJ.createInMappingDocumentUnderRootMappingElements(container)) : OBJ.createInObjectMappingElementUnderChildren(container);
             common(el, n.schema);
             el.isDefaultType = false;
             if (n.entityObj) el.entity = n.entityObj;
@@ -492,7 +494,8 @@ function makeMappings(h) {
         createExportMapping: o => mappingProblems(o, false)
     };
 
-    return { impl, checks };
+    // planMapping/resolve/writeMapping for mappings outside a mapping document (ops-rest.js)
+    return { impl, checks, internals: { planMapping, resolve, writeMapping } };
 }
 
 module.exports = { makeMappings, MAPPING_OPS, snippetTree, parseJson, userPath };

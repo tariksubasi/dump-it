@@ -33,12 +33,24 @@ def render_domain_model(dm, module, index):
             multiplicity = {("Reference", "Default"): "many-to-one", ("Reference", "Both"): "one-to-one",
                             ("ReferenceSet", "Default"): "many-to-many", ("ReferenceSet", "Both"): "many-to-many (both own)"}
             kind = multiplicity.get((a.get("Type"), a.get("Owner")), "%s/%s" % (a.get("Type"), a.get("Owner")))
-            line = "  %s.%s: %s -> %s [%s]" % (module.name, a.get("Name"), qn_by_id.get(a.get("ParentPointer")), child, kind)
+            parent = qn_by_id.get(a.get("ParentPointer"))
+            line = "  %s.%s: %s -> %s [%s%s]" % (module.name, a.get("Name"), parent, child, kind,
+                                                ", stored in a column" if a.get("StorageFormat") == "Column" else "")
             db = a.get("DeleteBehavior") or {}
-            rules = ["%s=%s" % (side, db.get(side + "DeleteBehavior")) for side in ("Parent", "Child")
-                     if db.get(side + "DeleteBehavior") not in (None, DEFAULT_DELETE)]
+            rules = []
+            for side, me, other in (("Parent", parent, child), ("Child", child, parent)):
+                how = db.get(side + "DeleteBehavior")
+                if how in (None, DEFAULT_DELETE):
+                    continue
+                if how == "DeleteMeAndReferences":
+                    rules.append("deleting a %s also deletes its %s" % (short(me), short(other)))
+                elif how == "DeleteMeIfNoReferences":
+                    msg = text(db.get(side + "ErrorMessage"))
+                    rules.append("deleting a %s is refused while it has a %s%s" % (short(me), short(other), " (\"%s\")" % msg if msg else ""))
+                else:
+                    rules.append("%s=%s" % (side, how))
             if rules:
-                line += " on delete: " + ", ".join(rules)
+                line += " ON DELETE: " + "; ".join(rules)
             if clean(a.get("Documentation")):
                 line += "  // " + clean(a["Documentation"])
             out.append(line)
@@ -48,11 +60,21 @@ def render_domain_model(dm, module, index):
 def _entity(e, qn, attr_by_id, index, source):
     gen = e.get("MaybeGeneralization") or {}
     head = "ENTITY " + qn
+    src = e.get("Source") or {}
     if gen.get("Generalization"):
         head += " extends " + gen["Generalization"]
     elif gen.get("Persistable") is False:
         head += " (non-persistable)"
+    if src.get("$Type") == "DomainModels$OqlViewEntitySource":
+        head += " (VIEW ENTITY, read-only: OQL %s, see VIEW ENTITY OQL in _module.txt)" % (src.get("SourceDocument") or "")
+        index.entry("VIEW ENTITIES", "%s <- OQL %s" % (qn, src.get("SourceDocument") or src.get("Oql") or ""))
+    elif "RemoteEntitySource" in (src.get("$Type") or ""):
+        head += " (EXTERNAL ENTITY from %s, entity set %s; change it in Studio Pro)" % (
+            src.get("SourceDocument") or "?", src.get("EntitySetName") or src.get("EntitySet") or src.get("RemoteName") or "?")
+        index.entry("EXTERNAL ENTITIES", "%s <- %s" % (qn, src.get("SourceDocument") or "?"))
     out = [head]
+    if src.get("Oql"):
+        out.append("  OQL: " + " ".join(str(src["Oql"]).split()))
     system = [n for k, n in (("HasCreatedDateAttr", "createdDate"), ("HasChangedDateAttr", "changedDate"),
                              ("HasOwnerAttr", "owner"), ("HasChangedByAttr", "changedBy")) if gen.get(k)]
     if system:
@@ -65,6 +87,10 @@ def _entity(e, qn, attr_by_id, index, source):
         if value.get("Microflow"):
             line += " (calculated by %s)" % value["Microflow"]
             index.entry("CALCULATED ATTRIBUTES", "%s.%s -> %s" % (qn, a.get("Name"), value["Microflow"]))
+        elif value.get("$Type") == "DomainModels$OqlViewValue":
+            line += " (column %s)" % value.get("Reference")
+        elif value.get("RemoteName"):
+            line += " (remote %s)" % value.get("RemoteName")
         elif value.get("DefaultValue") not in (None, ""):
             line += " = " + clean(value["DefaultValue"])
         if clean(a.get("Documentation")):
@@ -254,7 +280,7 @@ class PageRenderer:
             facts = self._facts(w)
             caption = self._caption(w)
             kids = self._children(w)
-            if not facts and not caption and (kind in TRANSPARENT or not kids):
+            if not facts and not caption and w["$Type"] != CUSTOM and (kind in TRANSPARENT or not kids):
                 self._widgets(kids, indent)
                 continue
             line = "%s- %s %s" % ("  " * indent, kind, w.get("Name"))
@@ -295,7 +321,7 @@ class PageRenderer:
             keys, self._defaults = {}, {}
             self._property_keys(w.get("Type"), keys)
             self._widget_object(w.get("Object"), keys, "", out)
-            for k in ("ConditionalVisibilitySettings", "ConditionalEditabilitySettings"):
+            for k in ("ConditionalVisibilitySettings", "ConditionalEditabilitySettings", "Appearance"):
                 self._scan(w.get(k), k, out)
             return out
         if w.get("Image"):
@@ -332,6 +358,10 @@ class PageRenderer:
             cond = self._condition(value)
             if cond:
                 out.append(("visible if " if "Visibility" in name else "editable if ") + cond)
+        elif name == "Appearance":
+            design = [_design(d) for d in value.get("DesignProperties") or []]
+            if design:
+                out.append("design " + "; ".join(design))
         elif name == "NoAction":
             return
         elif t.startswith("Forms$") and name.endswith("Action"):
@@ -381,6 +411,8 @@ class PageRenderer:
             for k in ("Microflow", "Nanoflow", "Form"):
                 if v.get(k):
                     out.append("%s: %s %s" % (key, k.lower(), v[k]))
+            if v.get("PrimitiveValue") not in (None, "") and v["PrimitiveValue"] not in default:
+                out.append("%s: %s" % (key, v["PrimitiveValue"]))
             if v.get("Selection") not in (None, "None"):
                 out.append("%s: selection %s" % (key, v["Selection"]))
             if clean(v.get("XPathConstraint")):
@@ -416,6 +448,13 @@ class PageRenderer:
         xpath = clean(ds.get("XPathConstraint"))
         if xpath:
             parts.append("WHERE " + xpath)
+        sort = [(short((i.get("AttributeRef") or {}).get("Attribute") or "?"), "desc" if i.get("SortOrder") == "Descending" else "asc")
+                for i in ((ds.get("SortBar") or {}).get("SortItems") or [])]
+        if sort:
+            parts.append("SORT BY " + ", ".join("%s %s" % x for x in sort))
+        search = [short((r or {}).get("Attribute") or "?") for r in ((ds.get("Search") or {}).get("SearchRefs") or [])]
+        if search:
+            parts.append("SEARCH " + ", ".join(search))
         return " ".join(p for p in parts if p)
 
     def _condition(self, c):
@@ -428,6 +467,19 @@ class PageRenderer:
         if c.get("ModuleRoles"):
             parts.append("user has role " + " or ".join(c["ModuleRoles"]))
         return " and ".join(parts)
+
+
+def _design(d):
+    """Atlas design property value: Key: Option, a toggle (its key), or Spacing: margin-top M, ..."""
+    v = d.get("Value") or {}
+    t = v.get("$Type", "")
+    if t.endswith("OptionDesignPropertyValue"):
+        return "%s: %s" % (d.get("Key"), v.get("Option"))
+    if t.endswith("CompoundDesignPropertyValue"):
+        return "%s: %s" % (d.get("Key"), ", ".join(_design(x).replace(": ", " ") for x in v.get("Properties") or []))
+    if t.endswith("CustomDesignPropertyValue"):
+        return "%s: %s" % (d.get("Key"), v.get("Value"))
+    return str(d.get("Key"))
 
 
 def params_text(mappings):
@@ -838,4 +890,28 @@ def settings_lines(doc, index):
                 out.append("%s MICROFLOW: %s" % (label, part[key]))
                 index.entry("APP LIFECYCLE", "%s -> %s" % (label, part[key]))
         out.append("TIME ZONE: default=%s, scheduled events=%s" % (part.get("DefaultTimeZoneCode"), part.get("ScheduledEventTimeZoneCode")))
+        out.append("RUNTIME: hash=%s%s, rounding=%s, first day of week=%s" % (
+            part.get("HashAlgorithm"), " (cost %s)" % part.get("BcryptCost") if part.get("HashAlgorithm") == "BCrypt" and part.get("BcryptCost") else "",
+            part.get("RoundingMode"), part.get("FirstDayOfWeek")))
+    for part in doc.get("Settings") or []:
+        if part.get("$Type") != "Settings$ConfigurationSettings":
+            continue
+        for c in part.get("Configurations") or []:
+            consts = [v.get("Constant") for v in c.get("ConstantValues") or []]
+            custom = [v.get("Name") for v in c.get("CustomSettings") or []]
+            line = "CONFIGURATION %s: root URL %s" % (c.get("Name"), c.get("ApplicationRootUrl"))
+            if consts:
+                line += "; constant values set: " + ", ".join(consts)
+            if custom:
+                line += "; custom settings: " + ", ".join(custom)
+            out.append(line)
     return out
+
+
+def view_entity_lines(doc, qn):
+    return ["%s:" % qn] + ["    " + l for l in str(doc.get("Oql") or "").splitlines()]
+
+
+def image_collection_line(doc, qn):
+    imgs = ["%s (%s)" % (i.get("Name"), i.get("ImageFormat")) for i in doc.get("Images") or []]
+    return "%s: %s" % (qn, ", ".join(imgs) or "(empty)")

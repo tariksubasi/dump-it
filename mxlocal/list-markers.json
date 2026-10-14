@@ -103,6 +103,8 @@
 "Microflows$MicroflowObjectCollection.Objects":3,
 "Microflows$Nanoflow.AllowedModuleRoles":1,
 "Microflows$Nanoflow.Flows":3,
+"Microflows$Rule.Flows":3,
+"Microflows$RuleCall.ParameterMappings":2,
 "Microflows$NanoflowCall.ParameterMappings":2,
 "Microflows$SequenceFlow.CaseValues":2,
 "Microflows$SortingsList.Sortings":2,

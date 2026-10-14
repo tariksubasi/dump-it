@@ -203,10 +203,13 @@ The live list is `python mx.py ops`. If it differs from this table, trust the li
 
 | Op | Fields | Notes |
 |---|---|---|
-| `createEntity` | **module**, **name**, persistable (default true), generalization (`Module.Parent`), attributes `[{name, type, default}]` | Placed to the right of existing entities |
-| `addAttribute` | **entity**, **name**, **type**, default | Default when not given: Integer/Long/Decimal `0`, Boolean `false`, AutoNumber `1`, others empty |
-| `changeAttribute` | **attribute** (`Module.Entity.Attr`), type, default | At least one of type/default |
-| `addAssociation` | **from**, **to**, name (default `From_To`), type (`Reference`/`ReferenceSet`), owner (`Default`/`Both`) | `from` stores the reference: many `from` → one `to` for Reference. Other module in `to` → cross-module association |
+| `createEntity` | **module**, **name**, persistable (default true), generalization (`Module.Parent`, or `System.FileDocument` / `System.Image` / `System.User`), attributes `[{name, type, default, calculated}]` | Placed to the right of existing entities |
+| `addAttribute` | **entity**, **name**, **type**, default, calculated (`Module.Microflow`) | Default when not given: Integer/Long/Decimal `0`, Boolean `false`, AutoNumber `1`, others empty. `calculated`: the value comes from the microflow (not stored, no default); it has no parameter or one of the entity and returns the attribute's type (Long/Integer: Integer). Existing access rules get the new member with their "new members" rights |
+| `changeAttribute` | **attribute** (`Module.Entity.Attr`), type, default, calculated, stored (`true`) | At least one field. `calculated` makes a stored attribute calculated (`DATA LOSS`: its column is dropped); `"stored": true` stores a calculated one again (existing objects get the default). ReadWrite rights on a now calculated attribute become ReadOnly |
+| `addAssociation` | **from**, **to**, name (default `From_To`), type (`Reference`/`ReferenceSet`), owner (`Default`/`Both`), storage (`Table`/`Column`), onDeleteFrom, onDeleteTo (`keep`/`delete`/`prevent`), messageFrom, messageTo | `from` stores the reference: many `from` → one `to` for Reference. Other module in `to` → cross-module association. Storage default: the app's setting (Mendix 11 apps: Column) for a Reference with owner Default, else Table |
+| `changeAssociation` | **association**, type, owner, storage, onDeleteFrom, onDeleteTo, messageFrom, messageTo | `onDeleteFrom`: what happens when a `from` (owner) object is deleted: `keep` its `to` objects (default), `delete` them too, or `prevent` the delete while linked (needs `messageFrom`, the text shown). `onDeleteTo` the same for a `to` object. Changing the type prints `DATA LOSS` (ReferenceSet → Reference keeps one link per object). Column storage: Reference with owner Default only (a reference set moves to Table). Owner Both adds the association to the `to` entity's access rules. Rename with `rename`; the two ends cannot change |
+| `createViewEntity` | **module**, **name**, **oql**, attributes `[{name, type}]`, folder | Mendix 11+ (Mendix 10 refuses: create it in Studio Pro). A read-only entity whose objects come from the OQL query, with an OQL document of the same name. Every column needs a name (`x.Total * 2 as Twice`); columns that select an attribute (`o.Total as Total`) take its type (AutoNumber → Long), the others need `attributes`. Studio Pro checks the OQL itself when it opens the app |
+| `changeViewEntity` | **entity**, **oql**, attributes | New OQL; attributes follow the columns (new ones added, missing ones removed with `STILL USED BY`) |
 | `setGeneralization` | **entity**, **generalization** (`Module.Parent` or `"none"`), persistable | Refuses loops. Check access rules and pages of the entity afterwards |
 | `addValidationRule` | **entity**, **attribute**, **rule** (`required`/`unique`/`maxLength`/`range`/`regex`/`equals`), **message**, maxLength, min, max, regex, value | |
 | `addEventHandler` | **entity**, **moment** (`Before`/`After`), **event** (`Create`/`Commit`/`Delete`/`RollBack`), **microflow**, passObject (default true), raiseErrorOnFalse | The microflow needs one parameter of the entity (when passObject) and must return Boolean for `Before` |
@@ -225,7 +228,9 @@ The default of an `Enum` attribute is the value name, e.g. `"default": "Open"`.
 | `createModule` | **name**, roles `["RoleName"]` | New module with its domain model, module security and settings (as Studio Pro makes them). Then `addModuleRoles` to give its roles to user roles. A plan that needs a module that does not exist yet starts with this op |
 | `createModuleRole` | **module**, **name**, description | |
 | `grantAccess` | **document** (microflow, nanoflow or page), **roles** `["Module.Role"]` | Adds to the allowed roles; existing roles stay |
-| `addAccessRule` | **entity**, **roles**, access (`ReadWrite`/`ReadOnly`/`None`, default `ReadOnly`), members `{"Attr":"ReadWrite"}`, create, delete, xpath | Every attribute and owned association gets a member right. AutoNumber and calculated attributes are never more than ReadOnly |
+| `addAccessRule` | **entity**, **roles**, access (`ReadWrite`/`ReadOnly`/`None`, default `ReadOnly`), members `{"Attr":"ReadWrite"}`, create, delete, xpath, newMembers | Every member gets a right, in Studio Pro's order: own attributes, parents' attributes, owned associations (also the `to` side of an owner-Both association). Members of `System.FileDocument`/`System.Image` parents are listed too (`"Name"` or `"System.FileDocument.Name"`; FileID, HasContents, Size, PublicThumbnailPath read-only). `System.User` members (Name, Password, ...) are not part of a specialization's rule (Studio Pro does not list them either): refused with that reason. AutoNumber, calculated and view entity attributes are never more than ReadOnly. `newMembers`: rights of attributes/associations added later (default: access). A view entity rule cannot create/delete |
+| `changeAccessRule` | **entity**, **roles** (of the rule), rule (number, when several rules have these roles), setRoles, access, members, newMembers, create, delete, xpath | Changes only the given fields; `access` sets every member not in `members` (and the rights of members added later, unless `newMembers`). `xpath: ""` removes the constraint. XPath must be in brackets. Errors list the rules (`rule 2 [Module.User]`) |
+| `deleteAccessRule` | **entity**, **roles**, rule | Says when the roles lose all access to the entity |
 | `revokeAccess` | **document**, **roles** | The opposite of `grantAccess` |
 | `createUserRole` | **name**, **moduleRoles** `["Module.Role"]`, description, manageAllRoles | Project-level role that users get. Gets its own GUID, checks security. `System.User` / `System.Administrator` are accepted (written by name, as Studio Pro stores them) |
 | `addModuleRoles` | **userRole** (e.g. `Administrator`), **moduleRoles** | Typical after a new module role: give it to the user roles that need it |
@@ -241,6 +246,12 @@ The default of an `Enum` attribute is the value name, e.g. `"default": "Open"`.
 | `addActions` | **microflow** (or nanoflow), **actions**, after (`"start"`, a variable name, or a step id) | Without `after`: before the single end event. Works inside loops too. Inserted actions must not end the flow |
 | `changeAction` | **microflow**, **id** (from `steps`), and the fields to change | See the table below |
 | `deleteAction` | **microflow**, **id** | Deletes one action or loop and reconnects the line. Refuses steps with an error handler, decisions, merges and events |
+| `moveAction` | **microflow**, **id**, **after** (`"start"`, a variable, a step id), branch (with a decision: `"true"`, `"false"`, an enumeration value, `"empty"`) | Moves one action or loop (keeps its id), also into a branch or a loop. Refused when the step then uses a variable made after it, or has an error handler |
+| `extractMicroflow` | **microflow**, **from** (step id), to (step id, default from), **name**, module, folder | The steps from..to (one line, no decisions or error handlers) go into a new microflow (nanoflow in a nanoflow) that the old place calls. Parameters = the variables they use; returns the one variable they make that is used later (more than one: refused) |
+| `addAnnotation` | **microflow**, **text**, to (step id) | A note, attached to a step or free. On a new action use `"note": "text"` instead |
+| `createJavaAction` | **module**, **name**, folder, parameters `[{name, type, description, required}]`, returns (default `Boolean`; `Nothing` for none), documentation, exposed `{caption, category}` | Also writes `javasource/<module>/actions/<Name>.java` as Studio Pro generates it. Types: `String`, `Integer`/`Long`, `Decimal`, `Boolean`, `DateTime`, `Module.Entity`, `List(Module.Entity)`, `Enum(Module.Enum)`, `EntityType(T)` (declares type parameter T), `Object(T)`, `List(T)`, `Microflow`. A file that exists keeps its imports, user code and extra code |
+| `createJavaScriptAction` | same as `createJavaAction`, platform (`All`/`Web`/`Native`) | Writes `javascriptsource/<module>/actions/<Name>.js`. `Nanoflow` instead of `Microflow` as parameter type |
+| `createRule` | **module**, **name**, **returns** (`Boolean` or `Enum(...)`), **returnValue**, parameters, actions, folder, documentation | Rules only read and compute: retrieve, variable, set, aggregateList, listOperation, createList, changeList, if, switch, loop, end. Use it in `if`/`switch` with `"rule"` + `"args"` |
 
 Data types for parameters, variables and returns: `String`, `Integer`, `Long`, `Decimal`, `Boolean`, `DateTime`,
 `Module.Entity` (one object), `List(Module.Entity)`, `Enum(Module.Enumeration)`.
@@ -264,28 +275,35 @@ Actions (inside `"actions": [ { "action": "<name>", ... } ]`). Every action also
 | `showHomePage` | | Microflows only |
 | `createList` | **variable**, **entity** | An empty list |
 | `changeList` | **list**, type (`add`/`remove`/`replace`/`clear`), value (object or list expression; not for clear) | type = add |
-| `aggregateList` | **variable**, **list**, **function** (`count`/`sum`/`average`/`minimum`/`maximum`/`all`/`any`), attribute or expression | count takes neither; the others one of them. sum/average need a number attribute, minimum/maximum a number or date, all/any a Boolean. expression uses `$currentObject`, e.g. `$currentObject/Price * $currentObject/Quantity`. `reduce` is refused |
+| `aggregateList` | **variable**, **list**, **function** (`count`/`sum`/`average`/`minimum`/`maximum`/`all`/`any`), attribute or expression | count takes neither; the others one of them. sum/average need a number attribute, minimum/maximum a number or date, all/any a Boolean. expression uses `$currentObject`, e.g. `$currentObject/Price * $currentObject/Quantity`. `reduce`: initial + expression on `$currentResult` and `$currentObject` (e.g. `$currentResult + $currentObject/Amount`); result type from initial (`0` Integer, `0.0` Decimal, `''` String, `true`, a date, `Module.Enum.Value`, a variable) or `type` |
 | `listOperation` | **variable**, **operation**, **list**, other, attribute + value, expression, sort, offset, limit | `union`/`intersect`/`subtract`/`equals` (Boolean): other = second list; `contains` (Boolean): other = object; `head`/`tail`; `find` (one object)/`filter` (a list): attribute (or `Module.Assoc`) + value, or expression on `$currentObject`; `sort`: `["Attr", {"attribute":"B","descending":true}]`; `range`: limit, offset (default 0) |
 | `validationFeedback` | **variable** (object), **member** (attribute or `Module.Assoc`), **message** (`{1}` = args), args | Text in the default language |
 | `rollback` | **variable** (object or list), refresh | refresh = false |
 | `callJava` | **javaAction** (`Module.JavaAction`), args `{"Param":"expr"}`, variable | Microflows only. Every required parameter needs an arg (`"empty"` for none); an entity type parameter takes `"Module.Entity"`. variable only when the action returns something. Parameters that take a microflow, mapping or file are refused |
 | `callJavaScript` | **jsAction** (`Module.JSAction`), args, variable | Nanoflows only; same rules as `callJava` |
-| `callRest` | **url** (`{1}` = urlArgs), urlArgs, method (default `Get`), headers `{"Name":"expr"}`, timeout (s, default 300), body (`{1}` = bodyArgs) or exportMapping + exportObject, response (`none`/`string`/`Module.ImportMapping`), variable, commit | Microflows only. Write the body as plain text, e.g. `{"name": "{1}"}`: braces are escaped for Mendix. response defaults to `string` with variable, else `none`. An import mapping response gets an object or list of the mapping's root entity; commit `yes`/`no`/`withoutEvents` (default). Authentication, proxy, form data and binary bodies: Studio Pro |
+| `callRest` | **url** (`{1}` = urlArgs), urlArgs, method (default `Get`), headers `{"Name":"expr"}`, timeout (s, default 300), body (`{1}` = bodyArgs) or exportMapping + exportObject, response (`none`/`string`/`Module.ImportMapping`), variable, commit | Microflows only. Write the body as plain text, e.g. `{"name": "{1}"}`: braces are escaped for Mendix. response defaults to `string` with variable, else `none`. An import mapping response gets an object or list of the mapping's root entity; commit `yes`/`no`/`withoutEvents` (default). auth `{"user": "@Module.User", "password": "@Module.Password"}` (expressions, basic authentication); proxy `default`/`none`/`{host, port, user, password}`; formData `{"key": "expr"}` or binaryBody `"$File"` instead of body; response `file` + variable (+ fileEntity, default `System.FileDocument`); errorBody false = do not keep the error response in `$latestHttpResponse` |
 | `importWithMapping` | **mapping** (`Module.ImportMapping`), **source** (String variable with JSON/XML), variable, commit | Microflows only. Mappings that take a parameter are refused |
 | `exportWithMapping` | **mapping** (`Module.ExportMapping`), **object** (variable to export), **variable** (new String) | Microflows only. The object must be the mapping's root entity |
 | `downloadFile` | **variable** (object of a `System.FileDocument` specialization), showInBrowser | Microflows only. showInBrowser = false |
+| `sendRestRequest` | **operation** (`Module.Service.Operation`), args, query, body, variable | Microflows only. Calls an operation of a consumed REST service, see REST services below |
 | `cast` | **variable** | Only as the first action of an `ifType` case: the object as that case's entity |
+| `metric` | **type** (`counter`/`increment`/`gauge`), **name** (plain text, e.g. `orders.created`), value (counter: default 1; gauge: required), description, tags `{"tag":"expr"}` | Microflows only. First use in a project: check it in Studio Pro |
+| `generateDocument` | **template** (`Module.DocumentTemplate`), **variable** (file document), args `{"Widget":"$Var"}`, type (`PDF` default) | Microflows only, and only in projects that already have a Generate document action (document templates are deprecated); otherwise refused |
 
 Flow control (also inside `"actions"`):
 
 | Action | Fields | Notes |
 |---|---|---|
-| `if` | **condition**, then `[...]`, else `[...]`, caption | A branch may end with `end`, `break` or `continue`; open branches join again after the decision |
+| `if` | **condition** (or rule + args), then `[...]`, else `[...]`, caption | A branch may end with `end`, `break` or `continue`; open branches join again after the decision. `"rule": "Module.Rule", "args": {"Param": "expr"}` decides with a Boolean rule |
+| `switch` | **cases** `{"Value": [...], "A, B": [...]}`, value (enumeration expression) or rule + args, enumeration, other `[...]`, empty `[...]`, caption | Enumeration decision: one path per case, `other` for the values not listed, `empty` for no value. Open paths join again |
 | `ifType` | **variable** (object), **cases** `{"Module.Specialization": [...]}`, other `[...]`, empty `[...]`, caption | Object type decision. One path per specialization in cases, `other` for any other type (the variable's own entity), `empty` when there is no object. Start a case with `cast` to use the object as that entity. `currentUser` works as variable (`System.User`) |
 | `loop` | **actions** + either over (list variable), item (default `<List>Item`) or while (expression) | |
 | `end` | value | Required `value` when the flow returns something. Not inside loops |
 | `break` / `continue` | | Only inside a loop |
 | `error` | | Only inside an `onError` handler: ends with the error again |
+
+`"note": "text"` on any action attaches an annotation to it (see also the op `addAnnotation`). `while` loops:
+`{ "action": "loop", "while": "$N < 10", "actions": [...] }` (Mendix 10+; every supported version).
 
 `onError` on an action: `"continue"`, or `{ "rollback": true/false, "actions": [...], "returnValue": "..." }`. A
 handler path that does not end gets an end event automatically (`returnValue` when the flow returns something).
@@ -307,12 +325,12 @@ Inside a loop a handler must end with `break`, `continue` or `error`.
 | validationFeedback | message, args |
 | rollback | refresh |
 | changeList | type, value |
-| aggregateList | function, attribute, expression |
+| aggregateList | function, attribute, expression, initial (reduce; to or from reduce: delete and add again) |
 | listOperation | value (find/filter on an attribute), expression (find/filter by expression), other, offset, limit |
-| callRest | url, urlArgs, method, headers (replaces all), timeout, body, bodyArgs, commit |
+| callRest | url, urlArgs, method, headers (replaces all), timeout, body, bodyArgs, commit, auth (or `"none"`), proxy, errorBody |
 | importWithMapping | commit |
 | downloadFile | showInBrowser |
-| decision (`IF`) | condition, caption |
+| decision (`IF`, also an enumeration decision) | condition, caption; a decision that calls a rule (`IF RULE`): args, caption |
 | object type decision (`IF TYPE OF`) | caption |
 | loop | while (while loop), over (list loop) |
 | end | value |
@@ -326,10 +344,12 @@ Mendix expressions as text: `"'Hello'"`, `"$Order/Total * 2"`, `"empty"`, `"[%Cu
 
 | Op | Fields | Notes |
 |---|---|---|
-| `createPage` | **module**, **name**, title, entity, fields `["Attr"]`, buttons (default true), widgets, arrange, menu, layout, folder, roles | Without `widgets`: with `entity` an edit form (page parameter, data view, an input per attribute, Save/Cancel), without `entity` an empty page. With `widgets`: the page content from the widget list below; `entity` is then the default entity of grids and data views. `menu` (`"Responsive"` or `{profile, caption, parent}`) adds a menu item, `roles` lets module roles open the page. The layout is the one the project's own pages use most |
+| `createPage` | **module**, **name**, title, entity, fields `["Attr"]`, buttons (default true), widgets, arrange, menu, layout, folder, roles, url, popupWidth, popupHeight, popupResizable, from, native | `from`: a page template or building block of the project (`"Dashboard_Action_Center"`, its display name or `Module.Name`): its widgets are copied first, data widgets in it stay unconfigured (the dry run lists them), then `widgets`. `native: true`: a native mobile page on the project's NativePhone layout (text, container, actionButton, dataView, listView, inputs; refused without a native layout). `layout` may also be a layout no page uses yet (its placeholder `Main`). Without `widgets`: with `entity` an edit form (page parameter, data view, an input per attribute, Save/Cancel), without `entity` an empty page. With `widgets`: the page content from the widget list below; `entity` is then the default entity of grids and data views. `menu` (`"Responsive"` or `{profile, caption, parent}`) adds a menu item, `roles` lets module roles open the page. The layout is the one the project's own pages use most |
+| `createLayout` | **module**, **name**, **from** (a layout), folder | A copy of an existing layout (placeholders, header, sidebar, menu widgets) to change in Studio Pro; `createPage` takes it in `layout` (the content goes in its placeholder `Main`, or its only one). Layout widgets are not edited by ops |
 | `addMenuItem` | **page** or **microflow**, profile (default Responsive) or menu (a menu document `Module.Menu`), caption (default: the page title), parent (caption or path of an existing item), after / before (a sibling caption), icon | Only pages without parameters. A page is in a menu once. New items go at the end unless after/before. A menu item has no roles of its own: it shows for the user roles that may open the page (change that with `grantAccess` / `revokeAccess` on the page, or `changeMenuItem` roles). The dry-run line ends with `seen by: <user roles>`. `icon`: an icon collection icon `"Atlas_Core.Atlas_Filled.home"`, an image `"Module.Images.Logo"`, a glyph code number (`57377`) |
-| `addWidgets` | **page**, **widgets**, into, slot, after, before, entity | Adds `createPage` widgets (list below) to an existing page or snippet. `into`: a container, data view, list view, group box, tab page, the placeholder (`Main`) or a layout grid column `"layoutGrid1/row 1/column 2"`; `"slot": "footer"` = a data view's footer. `after`/`before`: a widget name in that list (default: at the end). Inputs and `{Attribute}` texts use the entity of the data view or list view around them. New names as Studio Pro gives them (`text3`, `actionButton2`). A new data view listens to a grid or list view (`listenTo`, also one already on the page) or shows the page's own parameter; no op adds a page parameter |
-| `changeWidget` | **page**, **widget**, caption, text, label, placeholder, editable, visible, class, style, textStyle, buttonStyle, columns, xpath, name, action, onClick, onChange | Only the given fields change. `editable`: true/false, or (inputs) an expression or `{"attribute": "Status", "values": ["Open"]}`; `visible`: true, false, an expression `"$currentObject/Active"` or `{"attribute": ...}`. `columns`: `{"add": [...], "remove": [...]}` of a classic grid or Data grid 2. `name` renames; data views listening to it follow. `action` (a button, also a classic grid button), `onClick` (Data grid 2, gallery) and `onChange` (inputs, selectors, combo box) replace the old action: `{"action": "showPage", "page": ..., "params": ...}`. Texts change in the default language only (the dry run warns about other languages) |
+| `addWidgets` | **page**, **widgets**, into, slot, after, before, entity | Adds `createPage` widgets (list below) to an existing page or snippet. `into`: a container, data view, list view, group box, tab page, the placeholder (`Main`), a layout grid column `"layoutGrid1/row 1/column 2"`, or a pluggable widget (gallery, Data grid 2, ...) with `slot` = its widget list (`"content"`, `"emptyPlaceholder"`, `"columns 2/content"`; `widgets` lists them); `"slot": "footer"` = a data view's footer. `after`/`before`: a widget name in that list (default: at the end). Inputs and `{Attribute}` texts use the entity of the data view or list view around them. New names as Studio Pro gives them (`text3`, `actionButton2`). A new data view listens to a grid or list view (`listenTo`, also one already on the page) or shows the page's own parameter; no op adds a page parameter |
+| `changeWidget` | **page**, **widget**, caption, text, label, placeholder, editable, visible, class, design, style, textStyle, buttonStyle, columns, xpath, name, action, onClick, onChange | Only the given fields change. `design`: Atlas design properties (below); given keys change, `null` removes one. `visible` also `{"roles": ["Module.Role"]}`. `editable`: true/false, or (inputs) an expression or `{"attribute": "Status", "values": ["Open"]}`; `visible`: true, false, an expression `"$currentObject/Active"` or `{"attribute": ...}`. `columns`: `{"add": [...], "remove": [...]}` of a classic grid or Data grid 2. `name` renames; data views listening to it follow. `action` (a button, also a classic grid button), `onClick` (Data grid 2, gallery) and `onChange` (inputs, selectors, combo box) replace the old action: `{"action": "showPage", "page": ..., "params": ...}`. Texts change in the default language only (the dry run warns about other languages) |
+| `changePage` | **page**, title, url, popupWidth, popupHeight, popupResizable, addParameter `{name, type, required}`, removeParameter, renameParameter `{from, to}` | Page settings and parameters of an existing page. `url`: `"orders"` or `"order/{Order/Id}"` (a parameter's attribute; unique in the app). Parameters only when no caller breaks: a new required parameter is refused while a button, menu item, grid or microflow opens the page (the error lists them; Mendix 11.5+: `"required": false`); `removeParameter` is refused while a widget or the URL uses it, and removes the callers' mappings of it; `renameParameter` keeps callers, widgets and the URL in step. `createPage` takes `url` and the pop-up fields too |
 | `deleteWidget` | **page**, **widget** | Deletes the widget with everything in it (also a classic grid column, grid button or tab page). Refused while a data view listens to it or a widget elsewhere refers to it by name |
 | `moveWidget` | **page**, **widget**, into, slot, after, before | Same page only. A widget that shows attributes or acts on the object stays in the same data view or list view |
 | `setHomePage` | **page** or **microflow**, profile (default Responsive), roles (user roles, e.g. `["Administrator"]`) | Without roles: the default home page. Only pages/microflows without parameters |
@@ -343,7 +363,10 @@ Mendix expressions as text: `"'Hello'"`, `"$Order/Total * 2"`, `"empty"`, `"[%Cu
 Widgets in `"widgets": [ { "widget": "<kind>", ... } ]`, top to bottom. Every widget takes `name` (default as
 Studio Pro: `grid1`, `dataGrid2_1`, `dataView1`, ...) and the common fields `visible` (an expression
 `"$currentObject/Active"`, or `{"attribute": "Status", "values": ["Open"]}` of the data view / list view / gallery
-around it; a Boolean attribute alone = visible when true), `class` and `style` (inline CSS; for `text` and
+around it; a Boolean attribute alone = visible when true; `{"roles": ["Sales.Manager"]}` = only for users with one of these
+module roles, also together with `attribute` / `expression`), `design` (Atlas design properties of the theme's
+`themesource/*/web/design-properties.json` for that widget type: `{"Spacing": {"margin-top": "M"}, "Spacing top": "Large",
+"Full width": true, "Style": "Primary"}`; a wrong name or option is an error with the valid ones), `class` and `style` (inline CSS; for `text` and
 `actionButton` `style` is the text / button style unless it contains `:`). Inputs, `referenceSelector` and `comboBox`
 also take `editable` (true, false or a condition like `visible`). Full field list: `python mx.py ops createPage`.
 
@@ -352,9 +375,9 @@ also take `editable` (true, false or a condition like `visible`). Full field lis
 | `layoutGrid` | columns `[8, 4]` or `[{"weight": 8, "widgets": [...]}]`, or rows `[{"columns": [...]}]`, width | Weights 1-12 or `"auto"`; `tablet`/`phone` weights per column |
 | `container` | widgets, class | |
 | `text` | **text**, style (`Text`, `Paragraph`, `H1`-`H6`) | Inside a data view or list view, `{Attribute}` shows the value. `{1}` is refused (a Mendix placeholder). `"widget": "heading"` = a text with style H2 |
-| `dataGrid` | entity, source, association, microflow, nanoflow, columns (`"Attr"` or `{attribute, caption, width}`; Data grid 2 also `{dynamicText, caption}` and `{widgets, caption}`), xpath, search, selection (default Single), selectFirst, rows, kind, buttons (classic), onClick (Data grid 2) | Data source: see the source table below; the database source needs a persistable entity, search only with it. `kind`: `classic` (default; search bar), `datagrid2` (a Data grid 2 copied from one on this project's pages; refused when the project has none or its widget differs from `widgets/*.mpk`), `auto` (datagrid2 when possible, else classic; also classic when a column type does not fit a Data grid 2). `width`: whole numbers (weights, 100 in total). Classic `buttons`: `[{"action": "new" \| "edit", "page": ...}, {"action": "delete"}, {"action": "callMicroflow", "microflow": ..., "params": ...}]` (+ caption, style, name); a flow gets the selected row, a List parameter the selected rows (`"selection": "Multi"`); edit is the default (double-click) button; export buttons are refused. Data grid 2: `onClick` (an action, the row is passed), dynamic text columns (`{Attribute}`) and custom content columns (widgets per row; a button that opens a page gets the row mapped, as Studio Pro stores it) |
+| `dataGrid` | entity, source, association, microflow, nanoflow, columns (`"Attr"` or `{attribute, caption, width}`; Data grid 2 also `{attribute, filter}`, `{dynamicText, caption}` and `{widgets, caption}`), xpath, search, sort, selection (default Single), selectFirst, rows, kind, buttons (classic), onClick, filters, paging, selectionMethod, rowClass, configAttribute (Data grid 2) | Data source: see the source table below; the database source needs a persistable entity, search and `sort` (`[{"attribute": "Date", "direction": "desc"}, "Name"]`, the default order) only with it. Classic `search`: true or `["Attr"]`. `kind`: `classic` (default; search bar), `datagrid2` (a Data grid 2 built from `widgets/*.mpk` with Studio Pro's defaults; a copy of one on the project's pages when the .mpk cannot be read; refused without the .mpk), `auto` (datagrid2 when possible, else classic; also classic when a column type does not fit a Data grid 2). Data grid 2: `filters: true` puts a text / number / date / drop-down filter (by attribute type, from `widgets/*.mpk`) in every attribute column header (`filter` per column), `paging` `buttons` / `virtualScrolling` / `loadMore`, `selectionMethod` `rowClick` / `checkbox`, `rowClass` an expression, `configAttribute` a String attribute of the data view around it (personalization). `width`: whole numbers (weights, 100 in total). Classic `buttons`: `[{"action": "new" \| "edit", "page": ...}, {"action": "delete"}, {"action": "callMicroflow", "microflow": ..., "params": ...}]` (+ caption, style, name); a flow gets the selected row, a List parameter the selected rows (`"selection": "Multi"`); edit is the default (double-click) button; export buttons are refused. Data grid 2: `onClick` (an action, the row is passed), dynamic text columns (`{Attribute}`) and custom content columns (widgets per row; a button that opens a page gets the row mapped, as Studio Pro stores it) |
 | `dataView` | entity, source, listenTo, association, microflow, nanoflow, editable (default true), fields, buttons, widgets, footer | Data source: see the source table below. `listenTo`: the name of a grid or list view, or `dataGrid` / `listView` when the page has exactly one (a Data grid 2 needs selection Single). A page parameter (Save/Cancel when editable) only outside list items. An editable data view without a save button (also none in a data view around it) gets a warning |
-| `listView` | entity, source, association, microflow, nanoflow, xpath, fields, widgets, pageSize (whole number) | Data source: see the source table below. Each item is an object: inputs, reference selectors and data views (source context) go inside (an editable list). A data view can listen to it |
+| `listView` | entity, source, association, microflow, nanoflow, xpath, fields, widgets, pageSize (whole number), search `["Attr"]`, sort | Data source: see the source table below; `search` (a search box over those attributes) and `sort` with the database source. Each item is an object: inputs, reference selectors and data views (source context) go inside (an editable list). A data view can listen to it |
 | `actionButton` | **action** (`save`, `cancel`, `close`, `delete`, `showPage`, `callMicroflow`, `callNanoflow`), caption, page, microflow, nanoflow, params, style, closePage | Without `params` it passes the objects around it (a target whose parameters are all such objects, or none); `params` maps each parameter (table below). save/cancel `closePage` default: true in a parameter data view, false in a listening one (the dashboard stays open; Studio Pro's own default is true). `close` = `closePageButton1` "Close page" |
 | `input`, `textBox`, `textArea`, `checkBox`, `datePicker`, `radioButtons`, `dropDown` | **attribute**, label, editable, onChange | Inside a data view or a list view / gallery item; `input` picks the widget by attribute type (an enumeration gets radio buttons, as on Studio Pro's pages) |
 | `tabContainer` | **tabs** `[{"caption": "General", "widgets": [...], "name": ...}]` | Tab pages `tabPage1`, ...; addWidgets `into` a tab page by its name |
@@ -363,9 +386,12 @@ also take `editable` (true, false or a condition like `visible`). Full field lis
 | `image` | image, association, width, height | `image`: a static image `Module.Collection.Image` (`Did you mean`). Without it: the image of the object around it (data view, list view or gallery of an entity that inherits `System.Image`, or over `association`). Size: pixels `200`, `"50%"` or `"auto"` |
 | `referenceSelector` | **association**, attribute, label, xpath, selectableMicroflow, editable, onChange | Inside a data view whose entity owns the reference (`Module.Order_Customer` in a data view of Order); `attribute` of the other entity (default: its first String attribute). `selectableMicroflow`: a microflow that returns the selectable objects (instead of `xpath`) |
 | `referenceSetSelector` | **association**, attribute, label, xpath, selectableMicroflow, editable, onChange | Several objects of a reference set the entity around it owns (Studio Pro's input reference set selector) |
-| `comboBox` | attribute or association, captionAttribute, label, editable, onChange | Combo box (pluggable) for an enumeration/Boolean attribute or a reference, copied from a Studio Pro-saved combo box of this project whose widget equals `widgets/*.mpk`, every setting back to its default. Otherwise refused with the classic alternative (`referenceSelector`, `dropDown`, `checkBox`) |
-| `templateGrid` | entity, source, association, microflow, nanoflow, xpath, widgets (per tile), columns (tiles per row, default 2), rows (default 3), selection, selectFirst, buttons | Classic template grid (as the Studio Pro 10.24 / 11.12 samples store it): tiles with their own widgets (inputs too), control bar `buttons` as `dataGrid`; a data view can listen to it; addWidgets `into` it |
-| `gallery` | entity, source, association, microflow, nanoflow, xpath, widgets (per item), selection (default Single), pageSize, columns (desktop 1-12), onClick | Gallery (pluggable), data source as `listView`, copied like `comboBox`; a data view can listen to it (`listenTo`). Without one to copy it is refused: use `listView` |
+| `comboBox` | attribute or association, captionAttribute, label, editable, onChange | Combo box (pluggable) for an enumeration/Boolean attribute or a reference, built from `widgets/*.mpk` with Studio Pro's defaults (other modes: `pluggable` with `properties`). Without the .mpk refused with the classic alternative (`referenceSelector`, `dropDown`, `checkBox`) |
+| `templateGrid` | entity, source, association, microflow, nanoflow, xpath, widgets (per tile), columns (tiles per row, default 2), rows (default 3), selection, selectFirst, buttons, search (true or `["Attr"]`), sort | Classic template grid (as the Studio Pro 10.24 / 11.12 samples store it): tiles with their own widgets (inputs too), control bar `buttons` as `dataGrid`; a data view can listen to it; addWidgets `into` it |
+| `gallery` | entity, source, association, microflow, nanoflow, xpath, widgets (per item), selection (default Single), pageSize, columns (desktop 1-12), onClick, sort | Gallery (pluggable), data source as `listView`, built from `widgets/*.mpk` like `comboBox`; a data view can listen to it (`listenTo`). Without the .mpk it is refused: use `listView` |
+| `pluggable` | **type** (widget id or short name: `Datagrid`, `"Data grid 2"`, `Badge`), properties, label, editable | Any pluggable widget of `widgets/*.mpk`, built from its definition exactly as Studio Pro drops it (every property at its default, texts in the project's languages). `python mx.py widgettype` lists the installed widgets, `python mx.py widgettype <name>` their property keys, types, defaults and values. `properties` by type: boolean, number, string, enumeration key (or caption), expression, text with `{Attribute}`, attribute name (of the widget's data source, else of the data view around it), `Module.Assoc`, `Module.Entity`, an image, an action as on `actionButton`, selection `Single`/`Multi`/`None`, data source `"Module.Entity"` or `{entity, xpath}` (the first one also `association` / `microflow` / `nanoflow` + `params`), `widgets` lists (inside the data source's item when linked to it), object lists `[{key: value}]`. Wrong keys and values: error with `Did you mean`. Required properties left empty: a warning. A data view can `listenTo` it when it has a selection set to `Single`. Icons and linked data sources (filters outside a grid): Studio Pro |
+| `fileManager` | type (`upload`/`download`/`both`), label, maxFileSize (MB, default 5), allowedExtensions, showInBrowser, editable | In a data view of an entity that inherits `System.FileDocument` (an image entity too) |
+| `imageUploader` | label (default "Upload image"), maxFileSize (MB, default 5), allowedExtensions, thumbnail (`"100x75"`), editable | In a data view of an entity that inherits `System.Image` |
 
 Data sources (`"source"`; `association` / `microflow` / `nanoflow` alone also pick it). The object around a widget is
 the one of the nearest data view or list view / gallery item it sits in (through containers, group boxes, tabs and
@@ -374,7 +400,7 @@ layout grids); every level keeps its own object, so lists and data views nest as
 | source | on | gives | Notes |
 |---|---|---|---|
 | `database` (default of lists) | dataGrid, listView, gallery | every object of `entity`, filtered by `xpath` | Inside a data view without `xpath` the dry run suggests `association` when one links the two; `[%CurrentObject%]` in `xpath` shows only committed objects (the dry run says so) |
-| `association` | all | over `"association": "Module.Assoc"` from the object around it | Lists: a reference set the object owns, or the reference another entity has to it (`Sales.OrderLine_Order` in a data view of Order gives its lines, new ones too). Data views: a reference the object owns (a path `A/B` of references), or the other side of a one-to-one. The wrong direction is an error that says which widget fits |
+| `association` | all | over `"association": "Module.Assoc"` from the object around it | Lists: a reference set the object owns, or the reference another entity has to it (`Sales.OrderLine_Order` in a data view of Order gives its lines, new ones too); a path `"Sales.Order_Customer/Sales.Address_Customer"` whose steps go to one object and the last to many (the addresses of the order's customer); the reverse of a reference set the other side owns (with a "check it in Studio Pro" warning). Data views: a reference the object owns (a path `A/B` of references), or the other side of a one-to-one. The wrong direction is an error that says which widget fits |
 | `microflow` / `nanoflow` | all | what `"microflow": "Module.DS_X"` returns | A data view needs one object, a list a list (else an error). Parameters: the objects around it are passed as Studio Pro does (each object parameter must match one of them) |
 | `context` (default of a data view inside a list item) | dataView | the object around it | E.g. a data view per list view item; `entity` may be left out |
 | `parameter` (default of a data view elsewhere) | dataView | a page parameter of `entity` | Never inside a list item; an existing page gets no new parameter |
@@ -553,36 +579,55 @@ Layout grid, heading, list view with an editable detail and buttons, a Data grid
 ] }
 ```
 
+A Data grid 2 with filters, default sort and load-more paging, a pluggable widget by its definition, a design
+property, a section only managers see, and page settings (`python mx.py widgettype Badge` lists the badge's keys):
+
+```json
+{ "ops": [
+  { "op": "createPage", "module": "Sales", "name": "Order_Board", "entity": "Sales.Order", "url": "orders", "roles": ["Sales.User"],
+    "widgets": [
+      { "widget": "dataGrid", "kind": "datagrid2", "columns": ["Number", "Date", "Total", "Status"], "filters": true,
+        "sort": [ { "attribute": "Date", "direction": "desc" } ], "paging": "loadMore", "rowClass": "if $currentObject/Paid then 'paid' else ''" },
+      { "widget": "pluggable", "type": "Badge", "properties": { "type": "label", "value": "New" }, "design": { "Spacing top": "Large" } },
+      { "widget": "container", "visible": { "roles": ["Sales.Manager"] }, "widgets": [ { "widget": "text", "text": "Manager tools", "style": "H3" } ] } ] },
+  { "op": "addWidgets", "page": "Sales.Order_Board", "into": "dataGrid2_1", "slot": "emptyPlaceholder", "widgets": [ { "widget": "text", "text": "No orders" } ] },
+  { "op": "changePage", "page": "Sales.Order_Edit", "popupWidth": 600, "popupHeight": 400, "renameParameter": { "from": "Order", "to": "SalesOrder" } }
+] }
+```
+
 What pages cannot do yet (use Studio Pro, and `python mx.py gap "<what>"`):
-- Layouts (only pages and snippets are edited), page parameters, page titles, and widgets inside an existing pluggable
-  widget (Data grid 2 columns only through `changeWidget` `columns`; a new gallery gets its item widgets when it is
-  made) or a template grid.
-- `changeWidget`: no change of a data source (other than `xpath`), an input's attribute, design properties, on-enter /
-  on-leave events or the visibility by module role. `moveWidget`: within one page; a widget that shows
-  attributes stays in its data view or list view. Renaming a widget does not change `$widgetName` in expressions
-  (the dry run lists them).
-- Template grid: no search fields (the database source gets no search bar). Grid buttons: no export, no inline new rows.
-- Widgets other than the ones above: file manager, image uploader, navigation
-  list, scroll container, and every other pluggable widget (only Data grid 2, combo box and gallery, each copied from
-  a Studio Pro-saved one of this project whose widget equals `widgets/*.mpk`).
-- Primitive page parameters (no Studio Pro sample stores one; a mapping to one on an existing page is written with a
-  "first use" warning); tab pages with visibility, badges or a default tab; images with an on-click
-  action or a default image; design properties (the Atlas toggles); visibility by module role.
-- Combo box: only the context source with an enumeration, Boolean or reference (no database / static source, reference
-  set, custom content or footer). Gallery: no filters, sorting, empty message or personalization (left empty).
-- Data grid 2: no filters, default sorting, export or personalization (left empty); `buttons` are classic only. It needs a Data grid 2 on a page or snippet of this project whose widget equals
-  `widgets/*.mpk` (otherwise `kind: datagrid2` is refused; use `classic`).
+- Layouts: `createLayout` copies one; changing a layout's own widgets and placeholders is Studio Pro. Building blocks /
+  page templates are only read (`from`); data widgets copied from them stay unconfigured.
+- `changeWidget`: no change of a data source (other than `xpath`), an input's attribute, on-enter / on-leave events,
+  or a pluggable widget's other properties (add it again with `pluggable`). `moveWidget`: within one page, not into or
+  out of a pluggable widget. Renaming a widget does not change `$widgetName` in expressions (the dry run lists them).
+- Page parameters: `changePage` refuses a new required parameter while anything opens the page (optional ones need
+  Mendix 11.5+), a removed parameter that a widget or the URL uses; primitive page parameters are not made.
+- Pluggable widgets (`pluggable`): no icon properties, no linked data sources (a filter outside its grid), only the
+  first data source takes association / microflow / nanoflow (others: database); Studio Pro's editor hides properties
+  by other values, ops does not (a required-but-hidden property only gives a warning). Native widgets of
+  `widgets/*.mpk` (on native pages) are refused.
+- Data grid 2: no export to Excel / CSV button (do it in Studio Pro with the Data Widgets `Export_To_Excel` JavaScript
+  action in a nanoflow); `buttons` are classic only. Gallery: no filters or personalization fields (use `pluggable`
+  properties).
 - Classic data grid: no export buttons and no inline (in-grid) new rows; search only with the database source.
-- Data sources: a list over an association takes one association (a longer path: a microflow source or XPath); no
-  reverse of a reference set that the other side owns; data views with source context or association have no Studio
-  Pro 10/11 sample in the test projects (the dry run says "first use": check them in Studio Pro).
-- Buttons: no create-object action, no design properties.
+- Native pages: only text, container, action button, data view, list view and inputs; no native navigation (menu,
+  home page) and no native pluggable widgets.
+- Tab pages with visibility, badges or a default tab; images with an on-click action or a default image; design
+  properties that take several options (`Hide on`) or a custom colour.
+- Combo box: only the context source with an enumeration, Boolean or reference (other modes: `pluggable` with
+  `properties`).
+- Data views with source context or association, list view search attributes, visibility by module role, file
+  managers and native pages have no Studio Pro sample in the test projects: the dry run says "first use"; check them
+  in Studio Pro.
+- Buttons: no create-object action.
 - Menus: web profiles only (native profiles are refused); no reordering, and no op removes a menu item or home page
   (deleting a page that one opens says so).
 - Texts (labels, titles, captions, headers, menu captions) given as plain text are written in the default language
   only, as Studio Pro does; the dry run counts the ones other project languages lack. Give them per language
   (`"caption": {"en_US": "Save", "tr_TR": "Kaydet"}`) or translate them later (Languages and translations). Studio
-  Pro's own button captions (Save, Cancel, Search, Delete, Close page) also get their Dutch text when the project has nl_NL.
+  Pro's own button captions (Save, Cancel, Search, Delete, Close page, Upload image) also get their Dutch text when the
+  project has nl_NL.
 - Attributes inherited from System entities (e.g. `Name` of `Administration.Account`) cannot be shown.
 
 ### Languages and translations
@@ -590,7 +635,7 @@ What pages cannot do yet (use Studio Pro, and `python mx.py gap "<what>"`):
 | Op | Fields | Notes |
 |---|---|---|
 | `addLanguage` | **code** (e.g. `tr_TR`), default (true = make it the default language) | Adds the language as Studio Pro does (Settings > Languages). Existing texts keep their languages: list the untranslated ones with `texts --missing tr_TR`. A wrong code gets a did-you-mean (`Turkish`, `tr` -> `tr_TR`) |
-| `setTranslations` | **translations** `[{"where", "language", "text"}]`, language (for items without one) | `where` as `texts` lists it: `Module.Page [title]`, `Module.Page.widget [caption\|text\|label\|placeholder\|...]`, `Module.Enumeration.Value`, `Module.Flow.<step id>` (show message / validation feedback), `Module.Entity.Attribute [required\|unique\|maxLength\|range\|regex\|equals]` (validation message), `menu:Responsive/Caption/Sub`. The `[part]` may be left out when the place has one text. `{Attribute}` shows the same value as in the default text. `"text": {"tr_TR": ..., "de_DE": ...}` sets several languages at once |
+| `setTranslations` | **translations** `[{"where", "language", "text"}]`, language (for items without one) | `where` as `texts` lists it: `Module.Page [title]`, `Module.Page.widget [caption\|text\|label\|placeholder\|...]`, `Module.Enumeration.Value`, `Module.Flow.<step id>` (show message / validation feedback), `Module.Entity.Attribute [required\|unique\|maxLength\|range\|regex\|equals]` (validation message), `menu:Responsive/Caption/Sub`, `system:mendix.signin.username` (system texts: `texts system` lists the keys; `mendix.` may be left out). The `[part]` may be left out when the place has one text. `{Attribute}` shows the same value as in the default text. `"text": {"tr_TR": ..., "de_DE": ...}` sets several languages at once |
 
 Per-language texts in every op: wherever an op takes a text (captions, titles, texts, labels, placeholders,
 enumeration captions, messages, validation messages, menu captions), it also takes
@@ -612,8 +657,23 @@ Studio Pro stores a translation per language in the text; the order is the order
 ```
 
 Pluggable widget texts are listed and translated by path, e.g. `Module.Page.dataGrid1 [columns[2].header]`. Not
-supported: removing a language, menu captions of native navigation profiles, system texts (Studio Pro's App >
-Language > System texts) and the date/time formats of a language.
+supported: removing a language, menu captions of native navigation profiles, pluggable widget system texts and the
+date/time formats of a language. System texts (App > Language > System texts) are translated by key:
+
+```json
+{ "ops": [ { "op": "setTranslations", "language": "tr_TR", "translations": [
+  { "where": "system:mendix.signin.username", "text": "Kullanıcı adı" },
+  { "where": "system:mendix.signin.password", "text": "Parola" } ] } ] }
+```
+
+### App settings, configurations, images
+
+| Op | Fields | Notes |
+|---|---|---|
+| `setProjectSettings` | afterStartup, beforeShutdown, healthCheck (`Module.Microflow`, `""` = none), hashAlgorithm (`BCrypt`/`SSHA256`), bcryptCost (10..15), roundingMode (`HalfUp`/`HalfEven`), firstDayOfWeek (`Default`/`Sunday`..`Saturday`), defaultTimeZone (e.g. `Europe/Istanbul`, `""` = none) | App > Settings. The microflows have no parameters; after startup returns Boolean, health check returns String. A wrong time zone gets a did-you-mean (`istanbul` -> `Europe/Istanbul`) |
+| `setConfiguration` | **name**, applicationRootUrl, constants `{"Module.Constant": "value"}` (`null` = use the default), customSettings `{"Name": "value"}` (`null` = remove) | App > Settings > Configurations. A new name creates a configuration like the first one (without its database password). Database settings: Studio Pro |
+| `createImageCollection` | **module**, **name**, folder | |
+| `addImage` | **collection**, **file**, name (default the file name), replace | A PNG, JPG or SVG file inside the export folder (e.g. copy it to `edits/logo.png`), at most 2 MB; the kind is read from the content. Use it in a static image widget or button by `Module.Collection.Image` |
 
 ### Constants, scheduled events, REST
 
@@ -621,7 +681,108 @@ Language > System texts) and the date/time formats of a language.
 |---|---|---|
 | `createConstant` | **module**, **name**, **type**, **default**, exposedToClient, folder | Type String/Integer/Long/Decimal/Boolean/DateTime |
 | `createScheduledEvent` | **module**, **name**, **microflow**, **every** (`Minute`/`Hour`/`Day`/`Week`), interval, at (`HH:MM`), days, enabled (default false), timeZone, onOverlap, folder | The microflow must have no parameters |
-| `publishRest` | **module**, **service**, **resource**, **method**, **microflow**, path (e.g. `{Id}`), servicePath, authentication (default Basic), roles, folder | Microflow parameters become path (`{Name}` in path) or query parameters. Object/list parameters or results need mappings: refused, do those in Studio Pro. Experimental |
+| `publishRest` | see REST services below | |
+
+### REST services (consumed and published)
+
+No Studio Pro-saved consumed REST service, published REST service with mappings, user task page or workflow exists in
+the test projects. These documents are built from the Model SDK metamodel of the project's Mendix version; the dry run
+says `first use ... check it in Studio Pro`. Tell the user to open them in Studio Pro once and look at the
+error list.
+
+| Op | Fields | Notes |
+|---|---|---|
+| `createConsumedRestService` | **module**, **name**, **baseUrl**, **operations**, authentication (`"none"` or `{username, password}`; a value `"@Module.Constant"` uses a constant), folder | Mendix 10.1+ REST client document. Each operation: **name**, **path** (`/orders/{id}`, after the base URL), method (default Get), parameters `{"id": "Integer"}` (types of the `{name}` placeholders in path, headers and body; default String), query `["status"]` or `{"page": {"required": false}}` (Mendix 11; on Mendix 10 they go into the path as `?status={status}`, optional ones are refused), headers `{"Name": "value {param}"}`, body (Post/Put/Patch: a text template with `{param}`, or `{snippet, entity, entities, attributes, skip, create}` = an export mapping of one object), response (`"none"`, or `{snippet, entity, entities, attributes, skip, keys, create}` = an import mapping like `createImportMapping`), timeout (s, 300). Added for Studio Pro's rules: `Accept: application/json` on every operation, `Content-Type: application/json` and a `{}` body for Post/Put/Patch without one |
+| `addRestOperation` | **service** (`Module.Service`) + the operation fields above | Adds one operation to an existing consumed REST service |
+| `publishRest` | **module**, **service**, **resource**, **method**, **microflow**, path (`{Id}`), headers `["Param"]`, importMapping, exportMapping, commit, summary, description, deprecated, create, query, servicePath, version, authentication, roles, folder | Creates the service (version default 1.0.0, shown in its OpenAPI document; authentication default `["Basic"]`) and resource when missing. Microflow parameters: `{Name}` in the path -> path, listed in `headers` -> header, an object/list -> the body (needs `importMapping` of that entity; commit `yes`/`no`/`withoutEvents`, default yes), `System.HttpRequest`/`HttpResponse` -> none, others -> query. An object/list result needs `exportMapping`. `create: true` makes the microflow when it is missing (String parameters from path, headers and `query`, the import mapping's entity, returns String or the export mapping's entity). `roles` may call the service |
+
+Action `sendRestRequest` calls an operation: `{ "action": "sendRestRequest", "operation": "Module.Service.Operation",
+"args": { "id": "$Id" }, "query": { "status": "'open'" }, "body": "Order", "variable": "Result" }`. Every `{param}`
+needs an arg; required query parameters need a value. `body` only for an operation with a mapping body, `variable`
+only for one with a response mapping (an object, or a list for an array). Otherwise the response is in
+`$latestHttpResponse` (`$latestHttpResponse/Content`, `$latestHttpResponse/StatusCode`). No `onError` (Studio Pro
+does not allow a custom error handler here); use `callRest` when the call needs one.
+
+```json
+{ "ops": [
+  { "op": "createConsumedRestService", "module": "Sales", "name": "OrderApi", "baseUrl": "https://api.example.com/v1",
+    "authentication": { "username": "api", "password": "@Sales.ApiPassword" },
+    "operations": [
+      { "name": "GetOrder", "path": "/orders/{id}", "parameters": { "id": "Integer" },
+        "response": { "snippet": "{ \"number\": \"A1\", \"total\": 10.5 }", "entity": "Sales.RemoteOrder", "create": true } },
+      { "name": "CreateOrder", "method": "Post", "path": "/orders", "body": "{ \"number\": \"{number}\" }" } ] },
+  { "op": "createMicroflow", "module": "Sales", "name": "ACT_Order_Fetch", "parameters": [ { "name": "Id", "type": "Integer" } ],
+    "returns": "Sales.RemoteOrder", "returnValue": "$Order",
+    "actions": [ { "action": "sendRestRequest", "operation": "Sales.OrderApi.GetOrder", "args": { "id": "$Id" }, "variable": "Order" } ] }
+] }
+```
+
+Publish an operation with a body and a result (the mappings first, see JSON structures below):
+
+```json
+{ "ops": [
+  { "op": "publishRest", "module": "Sales", "service": "OrderService", "resource": "orders", "method": "Post", "path": "{Shop}",
+    "microflow": "Sales.PRS_Order_Create", "create": true, "headers": ["Token"], "importMapping": "Sales.IMM_Order",
+    "exportMapping": "Sales.EXM_Order", "roles": ["Sales.ApiUser"], "version": "2.0.0" } ] }
+```
+
+### Workflows
+
+| Op | Fields | Notes |
+|---|---|---|
+| `createWorkflow` | **module**, **name**, **context** (a stored `Module.Entity`), **steps**, title, description, dueDate, adminPage, roles, folder | The context is `$WorkflowContext` in every expression (`$WorkflowContext/Amount > 1000`); `$Workflow` is the `System.Workflow`. `roles` may open the task pages and the admin page (workflow security: who sees a task is the step's `assignee`). Steps run top to bottom; the end of the main flow is added (`end1`, and on Mendix 11 a `start1`). Activities get Studio Pro's names (`userTask1`, `decision1`, `parallelSplit1`, `callMicroflow1`, ...) unless the step has `name`. The fields of one step kind: `ops userTask` |
+| `createPage` with `"kind": "userTaskPage"` | **module**, **name**, **outcomes** `["Approve","Reject"]`, entity + **workflow** + fields + editable, title, folder, layout, roles | The page a user task opens: parameter `WorkflowUserTask` (`System.WorkflowUserTask`), a data view of it with one Complete-user-task button per outcome and a Close button. With `entity`: the context object read-only (`editable: true` to edit) in a data view inside it, from a new microflow `<Page>_Context` that retrieves the workflow context; `workflow` may be created later in the same plan |
+
+Steps (`{ "step": "<kind>", "name": "optional", ... }`):
+
+| Step | Fields | Notes |
+|---|---|---|
+| `userTask` | **page** (a user task page), **outcomes** `["Approve","Reject"]` or `{"Approve": [steps], "Reject": [steps]}`, assignee, caption, taskName, description, dueDate, onCreated, autoAssign | assignee: `{"userRoles": ["HRManager"]}` (user roles of the project), `{"xpath": "[...]"}` on the user entity, or `{"microflow": "Module.Flow"}` (parameters: the context or `System.Workflow`; returns a list of users). Without: every user may pick it up. One outcome: no steps of its own (the workflow continues after the task) |
+| `decision` | **condition**, **outcomes** `{"true": [...], "false": [...]}` or `{"Module.Enum.Value": [...], "": [...]}` | Boolean: both outcomes are made. Enumeration: one outcome per value and one for no value (`""`), as Studio Pro requires; leave values out to give them no steps |
+| `parallelSplit` | **paths** `[[steps], [steps]]` | Two or more paths; the workflow continues when all are done. A path cannot `end` the workflow |
+| `callMicroflow` | **microflow**, args `{"Param": "expression"}`, outcomes | The parameter of the context entity gets `$WorkflowContext` (System.Workflow: `$Workflow`). A microflow returning a Boolean or enumeration gets its outcomes (give steps in `outcomes`) |
+| `callWorkflow` | **workflow**, context (default `$WorkflowContext`), async | |
+| `jumpTo` | **target** (an activity name) | Last step of a branch. Not to an end, jump or start |
+| `waitForTimer` | **delay** (DateTime expression) | Mendix 10.6+ |
+| `waitForNotification` | | A microflow continues it with `notifyWorkflow` (give the step a `name`) |
+| `end` | | Ends the workflow; last step of a user task outcome or decision branch, not in a parallel path |
+
+Workflow actions (in microflows; System variables are written by name, e.g. a parameter of type
+`System.WorkflowUserTask` or `System.Workflow`):
+
+| Action | Fields | Notes |
+|---|---|---|
+| `callWorkflow` | **workflow**, **context** (object variable), variable | Starts the workflow; variable gets the `System.Workflow` |
+| `completeUserTask` | **task** (`System.WorkflowUserTask` variable), **outcome** | Studio Pro: Complete user task. The task must be assigned to the current user (open it with `openUserTask`, or a task page) |
+| `changeWorkflowState` | **workflow**, **operation** (`abort`/`pause`/`unpause`/`continue`/`restart`/`retry`), reason (abort) | |
+| `retrieveWorkflowContext` | **workflow** (`System.Workflow` variable), **definition** (`Module.Workflow`), **variable** | The context object |
+| `retrieveWorkflows` | **context**, **variable** | Mendix 10.4+: the workflows of an object (a list) |
+| `retrieveActivityRecords` | **workflow**, **variable** | Mendix 10.4+: list of `System.WorkflowActivityRecord` |
+| `generateJumpToOptions` | **workflow**, **variable** | A `System.WorkflowJumpToDetails` to pick the jump target in |
+| `applyJumpTo` | **details**, variable | Moves the workflow to the chosen option |
+| `lockWorkflow` | **workflow** (`Module.Workflow`), unlock, pauseAll | Lock: no new instances (pauseAll pauses running ones); unlock: true (pauseAll resumes them) |
+| `notifyWorkflow` | **workflow**, **definition**, **activity** (name of a `waitForNotification` step), variable | variable: Boolean, true when it continued |
+| `openUserTask` | **task**, assign (default true) | Opens the task page |
+| `openWorkflow` | **workflow** | Opens the workflow admin page |
+
+`retrieve` also follows System associations: `{ "action": "retrieve", "variable": "Wf", "from": "Task", "association":
+"System.WorkflowUserTask_Workflow" }`.
+
+```json
+{ "ops": [
+  { "op": "createPage", "kind": "userTaskPage", "module": "Sales", "name": "Order_Approve_Task", "entity": "Sales.Order",
+    "workflow": "Sales.WF_OrderApproval", "fields": ["Number", "Total"], "outcomes": ["Approve", "Reject"], "roles": ["Sales.Manager"] },
+  { "op": "createWorkflow", "module": "Sales", "name": "WF_OrderApproval", "context": "Sales.Order", "title": "Order approval",
+    "steps": [
+      { "step": "userTask", "caption": "Approve order", "page": "Sales.Order_Approve_Task", "assignee": { "userRoles": ["Manager"] },
+        "outcomes": { "Approve": [], "Reject": [ { "step": "callMicroflow", "microflow": "Sales.ACT_Order_Reject" }, { "step": "end" } ] } },
+      { "step": "decision", "condition": "$WorkflowContext/Total > 1000",
+        "outcomes": { "true": [ { "step": "userTask", "page": "Sales.Order_Approve_Task", "outcomes": ["Approve", "Reject"], "assignee": { "userRoles": ["Director"] } } ], "false": [] } },
+      { "step": "callMicroflow", "microflow": "Sales.ACT_Order_Confirm" } ] },
+  { "op": "createMicroflow", "module": "Sales", "name": "ACT_Order_StartApproval", "parameters": [ { "name": "Order", "type": "Sales.Order" } ],
+    "actions": [ { "action": "callWorkflow", "workflow": "Sales.WF_OrderApproval", "context": "Order" } ] }
+] }
+```
 
 ### JSON structures and mappings
 
@@ -643,7 +804,33 @@ Typical plan: structure, import mapping that creates the entities, export mappin
                  { "action": "exportWithMapping", "mapping": "Sales.EXM_Order", "object": "Order", "variable": "Out" } ] } ] }
 ```
 
-The export shows a structure as `json/path: Name type` lines and a mapping as `json/path -> Entity via Association [Create/Find/Parameter]`; use those paths in `entities`, `attributes`, `skip`, `keys`. Custom handlers, converters, XML schemas and message definitions: Studio Pro.
+The export shows a structure as `json/path: Name type` lines and a mapping as `json/path -> Entity via Association [Create/Find/Parameter]`; use those paths in `entities`, `attributes`, `skip`, `keys`. Custom handlers and converters: Studio Pro. XML schemas and message definitions: see below.
+
+### OData, XML schemas, message definitions
+
+| Op | Fields | Notes |
+|---|---|---|
+| `publishOData` | **module**, **name**, **entities**, path (default `odata/<name>/v1/`), version (1.0.0), namespace (DefaultNamespace), authentication (`["Basic"]`), roles, associations (default true), summary, description, folder | Mendix 10.4+. Each entity: `"Module.Entity"` or `{entity, exposedName, attributes, key, insert, update, delete, count, topSkip, pageSize}`. key: `"ID"` (default for stored entities) or `["Attr"]` (required for non-stored entities). insert/update/delete: `true` (write to the database) or `"Module.Microflow"`; default read-only. Enumeration attributes publish their enumeration; associations between published entities become navigation properties. Binary and hashed string attributes are left out. Layout as the one Studio Pro sample (TestApp 11.14); check associations, enumerations and write modes in Studio Pro |
+| `createXmlSchema` | **module**, **name**, **file** (`.xsd` path, relative to the current or the project folder), folder | Stores the XSD as Studio Pro does. One file only: `xs:import`/`xs:include` are refused |
+| `createMessageDefinition` | **module**, **name** (collection), **entity**, definition (default the entity name), attributes, associations `["Module.Assoc"]`, folder | A list of the entity (`<Entity>s` with items `<Entity>`), its attributes (all but binary) and per association the other entity with its attributes. Layout of the Mendix 8.18 sample |
+| `createXmlImportMapping` | **module**, **name**, xmlSchema + rootElement, or messageDefinition (`Module.Collection.Definition`), entity, entities, attributes, skip, keys, create, persistable, folder | Like `createImportMapping`, over an XML schema element or a message definition. Paths are the element names joined with `/` from the root: `Order/Line/Sku`. A message definition says its entities (no entity/entities/create). XSD support: sequences/all-groups of elements with built-in types, named and anonymous complex types, repeated complex elements; attributes, choices, extensions and repeated simple elements are refused |
+| `createXmlExportMapping` | same fields, no keys | Like `createExportMapping` |
+| `consumeODataService`, `consumeWebService`, `createBusinessEvent` | | Not supported: refused with the Studio Pro steps (consumed OData from `$metadata`, consumed SOAP web services from a WSDL, business events). They are contracts Studio Pro reads and keeps in sync |
+
+Mappings over XML schemas have no Studio Pro sample in the test projects: the dry run says to check them in Studio
+Pro (if a path does not match, Studio Pro shows an error on the mapping; right-click it and choose to update it).
+
+```json
+{ "ops": [
+  { "op": "publishOData", "module": "Sales", "name": "SalesOData", "roles": ["Sales.ApiUser"],
+    "entities": [ "Sales.Customer", { "entity": "Sales.Order", "insert": true, "update": "Sales.ACT_Order_Update", "pageSize": 500 } ] },
+  { "op": "createXmlSchema", "module": "Sales", "name": "XSD_Order", "file": "order.xsd" },
+  { "op": "createXmlImportMapping", "module": "Sales", "name": "IMM_OrderXml", "xmlSchema": "Sales.XSD_Order", "rootElement": "Order",
+    "entity": "Sales.OrderIn", "entities": { "Order/Line": "Sales.OrderLineIn" }, "create": true },
+  { "op": "createMessageDefinition", "module": "Sales", "name": "MD_Orders", "entity": "Sales.Order", "associations": ["Sales.Order_Customer"] },
+  { "op": "createXmlExportMapping", "module": "Sales", "name": "EXM_OrdersXml", "messageDefinition": "Sales.MD_Orders.Order" }
+] }
+```
 
 ### Theme files (SCSS)
 
@@ -668,6 +855,34 @@ The export shows a structure as `json/path: Name type` lines and a mapping as `j
 | `delete` | **target** | Deletes a document, entity, attribute, association, enumeration value or module role. Lists documents that still use it (`STILL USED BY`) |
 
 ### Examples
+
+Domain model details: a calculated attribute, an association that deletes its lines and refuses to delete a
+customer with orders, a view entity, and access rules (with a System.Image specialization):
+
+```json
+{ "ops": [
+  { "op": "createMicroflow", "module": "Sales", "name": "CAL_Order_Total", "parameters": [ { "name": "Order", "type": "Sales.Order" } ], "returns": "Decimal", "returnValue": "$Order/Amount * 1.2" },
+  { "op": "addAttribute", "entity": "Sales.Order", "name": "TotalVat", "type": "Decimal", "calculated": "Sales.CAL_Order_Total" },
+  { "op": "changeAssociation", "association": "Sales.OrderLine_Order", "onDeleteTo": "delete" },
+  { "op": "changeAssociation", "association": "Sales.Order_Customer", "onDeleteTo": "prevent", "messageTo": { "en_US": "This customer still has orders", "tr_TR": "Bu müşterinin siparişleri var" } },
+  { "op": "createViewEntity", "module": "Sales", "name": "CustomerTotals", "oql": "from Sales.Order as o\nselect o/Sales.Order_Customer/Sales.Customer/Name as Customer, sum(o.Amount) as Total\ngroup by o/Sales.Order_Customer/Sales.Customer/Name", "attributes": [ { "name": "Customer", "type": "String(200)" }, { "name": "Total", "type": "Decimal" } ] },
+  { "op": "createEntity", "module": "Sales", "name": "ProductPhoto", "generalization": "System.Image" },
+  { "op": "addAccessRule", "entity": "Sales.ProductPhoto", "roles": ["Sales.User"], "access": "ReadWrite", "create": true, "members": { "Name": "ReadOnly" } },
+  { "op": "changeAccessRule", "entity": "Sales.Order", "roles": ["Sales.User"], "xpath": "[Sales.Order_Owner = '[%CurrentUser%]']", "members": { "Amount": "ReadOnly" }, "delete": false, "newMembers": "None" },
+  { "op": "deleteAccessRule", "entity": "Sales.Order", "roles": ["Sales.Guest"] }
+] }
+```
+
+App settings, a test configuration, an image:
+
+```json
+{ "ops": [
+  { "op": "setProjectSettings", "afterStartup": "Sales.ASU_Startup", "healthCheck": "Sales.HC_Database", "firstDayOfWeek": "Monday", "defaultTimeZone": "Europe/Istanbul", "roundingMode": "HalfEven" },
+  { "op": "setConfiguration", "name": "Test", "applicationRootUrl": "https://test.example.com/", "constants": { "Sales.ApiUrl": "https://api-test.example.com" }, "customSettings": { "ClientRequestTimeout": "60000" } },
+  { "op": "createImageCollection", "module": "Sales", "name": "Images" },
+  { "op": "addImage", "collection": "Sales.Images", "file": "edits/logo.png" }
+] }
+```
 
 Add an attribute:
 
@@ -697,6 +912,35 @@ Microflow with steps:
     { "action": "change", "variable": "Order", "set": { "Status": "Sales.OrderStatus.Paid" }, "commit": true },
     { "action": "call", "microflow": "Sales.SUB_Order_Notify", "args": { "Order": "$Order" } },
     { "action": "message", "text": "Order closed", "type": "Information" } ] } ] }
+```
+
+Rule, enumeration switch and reduce:
+
+```json
+{ "ops": [
+  { "op": "createRule", "module": "Sales", "name": "RUL_Order_IsLarge", "parameters": [ { "name": "Order", "type": "Sales.Order" } ],
+    "returns": "Boolean", "returnValue": "$Order/Total > 1000" },
+  { "op": "createMicroflow", "module": "Sales", "name": "ACT_Order_Route", "parameters": [ { "name": "Order", "type": "Sales.Order" } ],
+    "actions": [
+      { "action": "if", "rule": "Sales.RUL_Order_IsLarge", "args": { "Order": "$Order" }, "then": [ { "action": "log", "message": "large order" } ] },
+      { "action": "switch", "value": "$Order/Status", "cases": { "Open": [ { "action": "log", "message": "open", "note": "still to pay" } ], "Paid, Cancelled": [ { "action": "log", "message": "done" } ] },
+        "empty": [ { "action": "log", "message": "no status" } ] },
+      { "action": "retrieve", "variable": "Lines", "entity": "Sales.OrderLine", "xpath": "[Sales.OrderLine_Order = $Order]" },
+      { "action": "aggregateList", "variable": "Codes", "list": "Lines", "function": "reduce", "initial": "''", "expression": "$currentResult + $currentObject/Code + ';'" } ] } ] }
+```
+
+Java action with its file, a REST call with authentication and form data, then restructuring (ids from `steps`):
+
+```json
+{ "ops": [
+  { "op": "createJavaAction", "module": "Sales", "name": "JA_Order_Sign", "parameters": [ { "name": "Order", "type": "Sales.Order" }, { "name": "Key", "type": "String" } ],
+    "returns": "String", "exposed": { "caption": "Sign order", "category": "Sales" } },
+  { "op": "addActions", "microflow": "Sales.ACT_Order_Close", "actions": [
+      { "action": "callRest", "method": "Post", "url": "{1}/sign", "urlArgs": ["@Sales.ApiUrl"], "auth": { "user": "@Sales.ApiUser", "password": "@Sales.ApiPassword" },
+        "formData": { "order": "toString($Order/Number)" }, "timeout": 30, "response": "string", "variable": "Signed" } ] },
+  { "op": "moveAction", "microflow": "Sales.ACT_Order_Close", "id": "3f2a9c1b", "after": "7c0d11e2", "branch": "true" },
+  { "op": "extractMicroflow", "microflow": "Sales.ACT_Order_Close", "from": "5b6e0a7d", "to": "9e8f1c2a", "name": "SUB_Order_Totals" }
+] }
 ```
 
 Decision, loop and error handler:
@@ -843,12 +1087,19 @@ Then give the user exact Studio Pro steps. SDK scripts (`edits/<name>.js`) run o
 `--allow-scripts`, because a script runs with full rights before the user approves anything; otherwise `dryrun`
 refuses them.
 
-Operations cannot do these things: changing layouts, page parameters, button actions or data sources of existing
-widgets (pages and snippets take `addWidgets`, `changeWidget`, `deleteWidget`, `moveWidget`), widgets outside the
-`createPage` list (template grids, reference set selectors, file managers and pluggable widgets other than a Data
-grid 2, combo box or gallery copied from the project), snippet calls with parameters, design properties, import/export mappings,
-JSON structures, consumed REST services, workflows, REST operations with object bodies or results, inheritance
-splits, and setting attributes inherited from System entities (for example `System.User.Name`). For these, write
+Operations cannot do these things: changing a layout's widgets (`createLayout` copies one), Data grid 2 export
+buttons, icon properties and linked data sources of pluggable widgets, native navigation and native pluggable widgets,
+design properties with several options, consumed OData services, consumed SOAP web services and business events
+(refused with the Studio Pro steps), XML schemas of several files or with attributes/choices/extensions, OpenAPI
+imports of consumed REST services, multi-user tasks, boundary events and event sub-processes of workflows, changing
+an existing workflow (only `createWorkflow`), custom mapping handlers and converters, and setting attributes inherited
+from System entities (for example `System.User.Name`). In flows: calling an ML model (refused with the Studio Pro
+steps), generate document in a project that has no Generate document action yet, moving or extracting steps that have
+a custom error handler or a decision in between, extracting steps that make more than one variable used later,
+changing a Java/JavaScript action after it was created (ops keep the user code when a file exists), and renaming or
+deleting a Java action's file (`rename`/`delete` change the model only). In the domain model: view entities in
+Mendix 10 (Mendix 11 has `createViewEntity`), creating or changing external entities (the export only shows them),
+database settings of a configuration, and access rules of System module entities. For these, write
 `edits/<name>.js` with the Mendix Model SDK, or give the user Studio Pro steps. Prefer Studio Pro steps when the
 change is large or risky.
 

@@ -556,7 +556,10 @@ class LocalClient {
 
     encode() {
         if (this.detached.size) throw new Error(`${this.detached.size} element(s) were detached and never re-attached`);
-        return this.project.encode(this.changes, hinter(this.catalog, this.schema, this.warn));
+        const enc = this.project.encode(this.changes, hinter(this.catalog, this.schema, this.warn));
+        // files outside the model that belong to the change (Java/JavaScript action sources): { rel, bytes, before }
+        if (this.extraFiles && this.extraFiles.size) enc.extra = [...this.extraFiles].map(([rel, f]) => ({ rel, bytes: f.content, before: f.before }));
+        return enc;
     }
 
     save() {

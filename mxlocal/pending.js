@@ -28,6 +28,12 @@ function save(projectDir, enc, info) {
         h.update(f.rel).update(f.bytes === null ? "(delete)" : f.bytes).update(String(f.before));
         return { rel: f.rel, hash: f.hash, before: f.before, data: f.bytes === null ? null : `file${i}.bin` };
     });
+    const extra = (enc.extra || []).map((x, i) => {
+        fs.mkdirSync(path.join(d, "files"), { recursive: true });
+        fs.writeFileSync(path.join(d, "files", String(i)), x.bytes);
+        h.update(x.rel).update(x.bytes).update(String(x.before));
+        return { rel: x.rel, before: x.before || null };
+    });
     h.update(JSON.stringify([enc.created, enc.deleted, enc.moved || [], info.plan || null]));
     const code = h.digest("hex").slice(0, 4).toUpperCase();
     const manifest = {
@@ -40,6 +46,7 @@ function save(projectDir, enc, info) {
         deleted: enc.deleted,
         moved: enc.moved || [],
         plainFiles,
+        extra,
         summary: info.summary,
         plan: info.plan || null,
         content: info.content
@@ -55,6 +62,7 @@ function load(projectDir) {
     const m = JSON.parse(fs.readFileSync(file, "utf8"));
     m.files = m.files.map(f => ({ ...f, bytes: fs.readFileSync(path.join(d, "units", f.id + ".mxunit")) }));
     m.plainFiles = (m.plainFiles || []).map(f => ({ ...f, bytes: f.data === null ? null : fs.readFileSync(path.join(d, "units", f.data)) }));
+    m.extra = (m.extra || []).map((x, i) => ({ ...x, bytes: fs.readFileSync(path.join(d, "files", String(i))) }));
     return m;
 }
 

@@ -179,13 +179,6 @@
       }
     },
     {
-      "id": "gap",
-      "text": "Sipariş onayı için iki adımlı bir onay workflow'u (Workflow dokümanı) oluştur.",
-      "checks": {
-        "gap": true
-      }
-    },
-    {
       "id": "pageedit",
       "setup": [
         {
@@ -360,6 +353,134 @@
         ],
         "files": {
           "Customer_Summary\\.txt$": "(?s)^(?=.*data: microflow MyFirstModule\\.DS_Customer_LastOrder)(?=.*attr Total)"
+        }
+      }
+    },
+    {
+      "id": "enumswitch",
+      "setup": [
+        {
+          "op": "createEnumeration",
+          "module": "MyFirstModule",
+          "name": "OrderStatus",
+          "values": [
+            "Open",
+            "Paid",
+            "Cancelled"
+          ]
+        },
+        {
+          "op": "addAttribute",
+          "entity": "MyFirstModule.Order",
+          "name": "Status",
+          "type": "Enum(MyFirstModule.OrderStatus)"
+        }
+      ],
+      "text": "Siparişin Total değeri 1000'den büyük mü diye bakan RUL_Order_IsLarge rule'unu yaz. Sonra ACT_Order_Route microflow'unu yaz: Order parametresi alsın; önce bu rule ile karar versin, büyükse 'büyük sipariş' log'lasın. Sonra Order'ın Status değerine göre: Open ise 'açık', Paid ya da Cancelled ise 'kapalı', Status boşsa 'durum yok' log'lasın.",
+      "checks": {
+        "find": [
+          "MyFirstModule.ACT_Order_Route",
+          "MyFirstModule.RUL_Order_IsLarge"
+        ],
+        "files": {
+          "ACT_Order_Route\\.txt$": "(?s)^(?=.*RUL_Order_IsLarge)(?=.*açık)(?=.*kapalı)(?=.*durum yok)"
+        }
+      }
+    },
+    {
+      "id": "javaaction",
+      "text": "MyFirstModule'e JA_Order_Hash adında bir Java action ekle: Order (Order entity'si) ve Salt (metin) parametreleri alsın, metin döndürsün ve toolbox'ta Orders kategorisinde 'Hash order' adıyla görünsün.",
+      "checks": {
+        "find": [
+          "MyFirstModule.JA_Order_Hash"
+        ]
+      }
+    },
+    {
+      "id": "calcdelete",
+      "text": "Order'a TotalVat adında hesaplanan (calculated) ondalıklı bir alan ekle: Total * 1.2 olsun. Ayrıca siparişi olan bir müşteri silinmek istenirse 'Bu müşterinin siparişleri var' mesajıyla engellensin.",
+      "checks": {
+        "find": [
+          "MyFirstModule.Order.TotalVat"
+        ],
+        "files": {
+          "domain-model\\.txt$": "(?s)^(?=.*TotalVat: Decimal \\(calculated by MyFirstModule\\.)(?=.*deleting a Customer is refused while it has a Order \\(\"Bu müşterinin siparişleri var\"\\))"
+        }
+      }
+    },
+    {
+      "id": "accesssettings",
+      "text": "User rolü siparişleri (Order) sadece okuyabilsin, yalnızca Note alanını düzenleyebilsin ve sipariş silemesin. Uygulama açılırken çalışan, true döndüren ASU_Startup microflow'unu after startup olarak ayarla; haftanın ilk günü Pazartesi olsun.",
+      "checks": {
+        "find": [
+          "MyFirstModule.ASU_Startup"
+        ],
+        "files": {
+          "domain-model\\.txt$": "ACCESS \\[MyFirstModule\\.User\\] (create )?default=ReadOnly\\n    ReadWrite: Note\\n",
+          "overview\\.txt$": "(?s)^(?=.*AFTER STARTUP MICROFLOW: MyFirstModule\\.ASU_Startup)(?=.*first day of week=Monday)"
+        }
+      }
+    },
+    {
+      "id": "workflow",
+      "text": "Sipariş onayı için iki adımlı bir onay workflow'u (Workflow dokümanı) oluştur: önce Administrator rolündeki biri siparişi onaylasın ya da reddetsin; Total 1000'den büyükse ikinci bir onay adımı gelsin. Görev sayfalarını da yap.",
+      "checks": {
+        "files": {
+          "workflows\\.txt$": "(?s)WORKFLOW MyFirstModule\\.\\w+.*context: MyFirstModule\\.Order.*user task.*user task"
+        }
+      }
+    },
+    {
+      "id": "restclient",
+      "text": "https://api.example.com/v1 adresindeki sipariş API'si için bir REST istemcisi (consumed REST service) oluştur: GET /orders/{id} operasyonu olsun. Bu operasyonu verilen id ile çağırıp cevabın içeriğini loglayan ACT_Order_FetchRemote microflow'unu yaz.",
+      "checks": {
+        "find": [
+          "MyFirstModule.ACT_Order_FetchRemote"
+        ],
+        "files": {
+          "integrations/.*\\.txt$": "CONSUMED REST SERVICE",
+          "ACT_Order_FetchRemote\\.txt$": "SEND REST REQUEST"
+        }
+      }
+    },
+    {
+      "id": "restpublish",
+      "text": "Order'ları dışarıya açan bir published REST servisi (OrderService) yap: orders kaynağında GET {Number} ile tek siparişi JSON olarak döndürsün. Gereken microflow, JSON structure ve export mapping'i de oluştur; User rolü çağırabilsin.",
+      "checks": {
+        "files": {
+          "integrations/.*\\.txt$": "PUBLISHED REST SERVICE",
+          "entry-points\\.txt$": "GET /rest/\\S+/orders/\\{Number\\}"
+        }
+      }
+    },
+    {
+      "id": "dg2filters",
+      "text": "Order_Grid sayfası yap: siparişleri (Number, Total, Paid) Data grid 2 ile listele; her kolonun başında filtre olsun, en büyük Number en üstte olacak şekilde sıralansın ve sayfalama 'daha fazla yükle' olsun.",
+      "checks": {
+        "find": [
+          "MyFirstModule.Order_Grid"
+        ],
+        "files": {
+          "Order_Grid\\.txt$": "(?s)^(?=.*Data grid 2)(?=.*SORT BY Number desc)(?=.*Number filter)(?=.*loadMore)"
+        }
+      }
+    },
+    {
+      "id": "designroles",
+      "setup": [
+        {
+          "op": "createModuleRole",
+          "module": "MyFirstModule",
+          "name": "Manager"
+        }
+      ],
+      "text": "Order_Admin sayfası yap: en üstte 'Yönetim' başlığı olsun ve üstünde büyük boşluk bıraksın (Atlas tasarım özelliği Spacing top: Large); altında yalnızca MyFirstModule.Manager rolündeki kullanıcıların gördüğü, içinde 'Sadece yöneticiler' yazan bir container olsun.",
+      "checks": {
+        "find": [
+          "MyFirstModule.Order_Admin"
+        ],
+        "files": {
+          "Order_Admin\\.txt$": "(?s)^(?=.*Yönetim[^\\n]*design Spacing: margin-top L)(?=.*visible if user has role MyFirstModule\\.Manager)"
         }
       }
     },

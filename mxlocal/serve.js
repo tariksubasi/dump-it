@@ -33,6 +33,8 @@ function tools(allowApply) {
             inputSchema: { type: "object", properties: { flow: str("qualified name, e.g. Sales.ACT_Order_Save") }, required: ["flow"] } },
         { name: "widgets", description: "Widget tree of a page or snippet: names, kinds, entity of each data view / list view, and where new widgets can go ([into]). Use before addWidgets, changeWidget, deleteWidget, moveWidget.",
             inputSchema: { type: "object", properties: { page: str("qualified name, e.g. Sales.Customer_Edit") }, required: ["page"] } },
+        { name: "widgettype", description: "Pluggable widgets installed in widgets/*.mpk; with a name (e.g. Datagrid, \"Data grid 2\", Badge): its properties with types, defaults and values, for { \"widget\": \"pluggable\", \"type\": ..., \"properties\": { ... } } in createPage / addWidgets.",
+            inputSchema: { type: "object", properties: { name: str("optional widget id or short name, e.g. Datagrid") } } },
         { name: "texts", description: "Translatable texts (page titles, widget captions/labels, messages, enumeration and menu captions) with their text in every project language. Use before setTranslations; missing lists only texts without that language.",
             inputSchema: { type: "object", properties: { scope: str("optional Module, Module.Document or menu (default: the project's own modules and menus)"), missing: str("optional language code, e.g. tr_TR: only texts without it") } } },
         { name: "ops", description: "Without a name: one line per operation. With a name (e.g. createPage, addAttribute, retrieve): its fields. Use only these operations and fields.",
@@ -141,6 +143,17 @@ class Server {
                     const model = await client.open();
                     try {
                         lines.push(await require("./ops").bind(model, client).widgets(String(a.page || "")));
+                    } finally {
+                        this.settle(client);
+                    }
+                    break;
+                }
+                case "widgettype": {
+                    const ctx = await this.project();
+                    const client = new LocalClient(ctx);
+                    const model = await client.open();
+                    try {
+                        lines.push(await require("./ops").bind(model, client).widgetType(String(a.name || "")));
                     } finally {
                         this.settle(client);
                     }
