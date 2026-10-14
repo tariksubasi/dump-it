@@ -280,7 +280,7 @@ class PageRenderer:
             facts = self._facts(w)
             caption = self._caption(w)
             kids = self._children(w)
-            if not facts and not caption and (kind in TRANSPARENT or not kids):
+            if not facts and not caption and w["$Type"] != CUSTOM and (kind in TRANSPARENT or not kids):
                 self._widgets(kids, indent)
                 continue
             line = "%s- %s %s" % ("  " * indent, kind, w.get("Name"))
@@ -321,7 +321,7 @@ class PageRenderer:
             keys, self._defaults = {}, {}
             self._property_keys(w.get("Type"), keys)
             self._widget_object(w.get("Object"), keys, "", out)
-            for k in ("ConditionalVisibilitySettings", "ConditionalEditabilitySettings"):
+            for k in ("ConditionalVisibilitySettings", "ConditionalEditabilitySettings", "Appearance"):
                 self._scan(w.get(k), k, out)
             return out
         if w.get("Image"):
@@ -358,6 +358,10 @@ class PageRenderer:
             cond = self._condition(value)
             if cond:
                 out.append(("visible if " if "Visibility" in name else "editable if ") + cond)
+        elif name == "Appearance":
+            design = [_design(d) for d in value.get("DesignProperties") or []]
+            if design:
+                out.append("design " + "; ".join(design))
         elif name == "NoAction":
             return
         elif t.startswith("Forms$") and name.endswith("Action"):
@@ -407,6 +411,8 @@ class PageRenderer:
             for k in ("Microflow", "Nanoflow", "Form"):
                 if v.get(k):
                     out.append("%s: %s %s" % (key, k.lower(), v[k]))
+            if v.get("PrimitiveValue") not in (None, "") and v["PrimitiveValue"] not in default:
+                out.append("%s: %s" % (key, v["PrimitiveValue"]))
             if v.get("Selection") not in (None, "None"):
                 out.append("%s: selection %s" % (key, v["Selection"]))
             if clean(v.get("XPathConstraint")):
@@ -442,6 +448,13 @@ class PageRenderer:
         xpath = clean(ds.get("XPathConstraint"))
         if xpath:
             parts.append("WHERE " + xpath)
+        sort = [(short((i.get("AttributeRef") or {}).get("Attribute") or "?"), "desc" if i.get("SortOrder") == "Descending" else "asc")
+                for i in ((ds.get("SortBar") or {}).get("SortItems") or [])]
+        if sort:
+            parts.append("SORT BY " + ", ".join("%s %s" % x for x in sort))
+        search = [short((r or {}).get("Attribute") or "?") for r in ((ds.get("Search") or {}).get("SearchRefs") or [])]
+        if search:
+            parts.append("SEARCH " + ", ".join(search))
         return " ".join(p for p in parts if p)
 
     def _condition(self, c):
@@ -454,6 +467,19 @@ class PageRenderer:
         if c.get("ModuleRoles"):
             parts.append("user has role " + " or ".join(c["ModuleRoles"]))
         return " and ".join(parts)
+
+
+def _design(d):
+    """Atlas design property value: Key: Option, a toggle (its key), or Spacing: margin-top M, ..."""
+    v = d.get("Value") or {}
+    t = v.get("$Type", "")
+    if t.endswith("OptionDesignPropertyValue"):
+        return "%s: %s" % (d.get("Key"), v.get("Option"))
+    if t.endswith("CompoundDesignPropertyValue"):
+        return "%s: %s" % (d.get("Key"), ", ".join(_design(x).replace(": ", " ") for x in v.get("Properties") or []))
+    if t.endswith("CustomDesignPropertyValue"):
+        return "%s: %s" % (d.get("Key"), v.get("Value"))
+    return str(d.get("Key"))
 
 
 def params_text(mappings):

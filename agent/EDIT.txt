@@ -13,6 +13,8 @@ STEP 1 - FIND THE NAMES
     @PY@ mx.py steps <Module.Flow>             (or the steps tool)
   To change an existing page or snippet, get its widget names first (names, [into] places, {Entity} of data views):
     @PY@ mx.py widgets <Module.Page>           (or the widgets tool)
+  For a pluggable widget of the project (widgets/*.mpk: Data grid 2, filters, charts, ...), its property keys and values:
+    @PY@ mx.py widgettype <name>               (or the widgettype tool; without a name: the installed widgets)
   To translate texts (titles, captions, labels, messages, enumeration and menu captions), list them with where [part]:
     @PY@ mx.py texts <Module or Module.Page> --missing tr_TR   (or the texts tool)
 

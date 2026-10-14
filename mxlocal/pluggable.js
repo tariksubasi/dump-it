@@ -68,7 +68,7 @@ function xmlLines(props, prefix = "", group = []) {
             const rt = kid(c, "returnType");
             const tr = kid(c, "translations") ? kids(kid(c, "translations"), "translation").map(x => `${x.attrs.lang}=${txt(x)}`) : [];
             out.push(`${prefix}${a.key} ${String(a.type).toLowerCase()} list=${a.isList === "true"} required=${a.required !== "false"} default=${a.defaultValue || ""}` +
-                ` [${group.join("::")}] "${txt(kid(c, "caption"))}" enum=${list("enumerationValues", "enumerationValue", "key")} sel=${list("selectionTypes", "selectionType", "name")}` +
+                ` [${kid(c, "category") ? txt(kid(c, "category")) : group.join("::")}] "${txt(kid(c, "caption"))}" enum=${list("enumerationValues", "enumerationValue", "key")} sel=${list("selectionTypes", "selectionType", "name")}` +
                 ` attr=${list("attributeTypes", "attributeType", "name")} ret=${rt ? (rt.attrs.type || "None") + (rt.attrs.isList === "true" ? "[]" : "") : ""} ds=${a.dataSource || ""} tr=${tr}`);
             if (a.type === "object" && kid(c, "properties")) out.push(...xmlLines(kid(c, "properties"), `${prefix}${a.key}/`));
         }
@@ -156,3 +156,196 @@ function exemplars(project, widgetId) {
 }
 
 module.exports = { unzip, parseXml, installed, typeDiff, exemplars, typeLines };
+
+// ------------------------------------------------------------------------------------------------ generic builder
+// What Studio Pro stores when a pluggable widget is dropped on a page, built from its widgets/*.mpk definition:
+// the CustomWidgets$CustomWidgetType (every property type of the XML, with its group path as Category) and a
+// CustomWidgets$WidgetObject with every (non-system) property at its default. Storage JSON (as in the .mpr).
+const { randomUUID } = require("crypto");
+const VALUE_TYPES = { action: "Action", association: "Association", attribute: "Attribute", boolean: "Boolean", datasource: "DataSource", decimal: "Decimal", entity: "Entity",
+    entityconstraint: "EntityConstraint", enumeration: "Enumeration", expression: "Expression", file: "File", form: "Form", icon: "Icon", image: "Image", integer: "Integer",
+    microflow: "Microflow", nanoflow: "Nanoflow", object: "Object", selection: "Selection", string: "String", texttemplate: "TextTemplate", translatablestring: "TranslatableString", widgets: "Widgets" };
+const cap1 = s => (s ? s[0].toUpperCase() + s.slice(1) : s);
+
+function valueTypeJson(p, xmlType) {
+    const a = p ? p.attrs : {};
+    const names = (t, item) => (p && kid(p, t) ? kids(kid(p, t), item).map(x => x.attrs.name) : []);
+    const rt = p && kid(p, "returnType");
+    const props = p && kid(p, "properties");
+    return {
+        $ID: randomUUID(), $Type: "CustomWidgets$WidgetValueType",
+        ActionVariables: p && kid(p, "actionVariables") ? kids(kid(p, "actionVariables"), "actionVariable").map(v => ({ $ID: randomUUID(), $Type: "CustomWidgets$WidgetActionVariable", Caption: v.attrs.caption || "", Key: v.attrs.key, Type: v.attrs.type })) : [],
+        AllowedTypes: names("attributeTypes", "attributeType"),
+        AllowNonPersistableEntities: a.allowNonPersistableEntities === "true",
+        AllowUpload: a.allowUpload === "true",
+        AssociationTypes: names("associationTypes", "associationType"),
+        DataSourceProperty: a.dataSource || "",
+        DefaultType: a.defaultType || "None",
+        DefaultValue: a.defaultValue !== undefined ? a.defaultValue : "",
+        EntityProperty: a.entityProperty || "",
+        EnumerationValues: p && kid(p, "enumerationValues") ? kids(kid(p, "enumerationValues"), "enumerationValue").map(v => ({ $ID: randomUUID(), $Type: "CustomWidgets$WidgetEnumerationValue", _Key: v.attrs.key, Caption: txt(v) })) : [],
+        IsLinked: a.isLinked === "true",
+        IsList: a.isList === "true",
+        IsMetaData: a.isMetaData === "true",
+        IsPath: cap1(a.isPath || "no"),
+        Multiline: a.multiline === "true",
+        ObjectType: props ? { $ID: randomUUID(), $Type: "CustomWidgets$WidgetObjectType", PropertyTypes: propertyTypesJson(props, []) } : null,
+        OnChangeProperty: a.onChange || "",
+        ParameterIsList: a.parameterIsList === "true",
+        PathType: cap1(a.pathType || "none"),
+        Required: p ? a.required !== "false" : false,
+        ReturnType: rt ? { $ID: randomUUID(), $Type: "CustomWidgets$WidgetReturnType", AssignableTo: rt.attrs.assignableTo || "", EntityProperty: rt.attrs.entityProperty || "", IsList: rt.attrs.isList === "true", Type: rt.attrs.type || "None" } : null,
+        SelectableObjectsProperty: a.selectableObjects || "",
+        SelectionTypes: names("selectionTypes", "selectionType"),
+        SetLabel: a.setLabel === "true",
+        Translations: p && kid(p, "translations") ? kids(kid(p, "translations"), "translation").map(t => ({ $ID: randomUUID(), $Type: "CustomWidgets$WidgetTranslation", LanguageCode: t.attrs.lang, Text: txt(t) })) : [],
+        Type: xmlType
+    };
+}
+
+function propertyTypesJson(props, group) {
+    const out = [];
+    for (const c of props.children) {
+        if (c.tag === "propertyGroup") out.push(...propertyTypesJson(c, [...group, c.attrs.caption || ""]));
+        else if (c.tag === "systemProperty" || c.tag === "property") {
+            const sys = c.tag === "systemProperty";
+            const t = sys ? "System" : VALUE_TYPES[String(c.attrs.type).toLowerCase()];
+            if (!t) throw new Error(`property ${c.attrs.key}: unknown type '${c.attrs.type}'`);
+            out.push({
+                $ID: randomUUID(), $Type: "CustomWidgets$WidgetPropertyType",
+                Caption: sys ? `<system:${c.attrs.key}>` : txt(kid(c, "caption")),
+                Category: kid(c, "category") ? txt(kid(c, "category")) : group.join("::"),
+                Description: sys || !kid(c, "description") ? "" : kid(c, "description").text, // not trimmed, as Studio Pro
+                IsDefault: false,
+                PropertyKey: c.attrs.key,
+                ValueType: valueTypeJson(sys ? null : c, t)
+            });
+        }
+    }
+    return out;
+}
+
+// Keeps only the keys keys(storageType) lists (what this Mendix version stores; null = all).
+function onlyKeys(o, keys) {
+    if (Array.isArray(o)) return o.forEach(x => onlyKeys(x, keys));
+    if (!o || typeof o !== "object") return;
+    const ks = o.$Type && keys(o.$Type);
+    if (ks && ks.length) for (const k of Object.keys(o)) if (k[0] !== "$" && !ks.includes(k)) delete o[k];
+    for (const v of Object.values(o)) if (v && typeof v === "object") onlyKeys(v, keys);
+}
+
+// <widget> element -> CustomWidgets$CustomWidgetType (storage JSON, fresh ids); keys: see onlyKeys.
+function typeJson(w, keys) {
+    const t = typeJsonAll(w);
+    if (keys) onlyKeys(t, keys);
+    return t;
+}
+function typeJsonAll(w) {
+    const a = w.attrs;
+    return {
+        $ID: randomUUID(), $Type: "CustomWidgets$CustomWidgetType",
+        HelpUrl: txt(kid(w, "helpUrl")),
+        ObjectType: { $ID: randomUUID(), $Type: "CustomWidgets$WidgetObjectType", PropertyTypes: propertyTypesJson(kid(w, "properties") || { children: [] }, []) },
+        OfflineCapable: a.offlineCapable === "true",
+        StudioCategory: txt(kid(w, "studioCategory")),
+        StudioProCategory: txt(kid(w, "studioProCategory")),
+        SupportedPlatform: a.supportedPlatform || "Web",
+        WidgetDescription: txt(kid(w, "description")),
+        WidgetId: a.id,
+        WidgetName: txt(kid(w, "name")),
+        WidgetNeedsEntityContext: a.needsEntityContext === "true",
+        WidgetPluginWidget: a.pluginWidget === "true"
+    };
+}
+
+// widgetId -> <widget> element of the installed .mpk (or null).
+function widgetXml(dir, widgetId) {
+    const def = installed(dir).get(widgetId);
+    if (!def) return null;
+    const z = unzip(path.join(dir, "widgets", def.file));
+    const pkg = parseXml(z.get("package.xml")().toString("utf8"));
+    const cm = kid(pkg.children[0], "clientModule");
+    for (const wf of kids(kid(cm, "widgetFiles"), "widgetFile")) {
+        const read = z.get(wf.attrs.path);
+        const w = read && parseXml(read().toString("utf8")).children.find(c => c.tag === "widget");
+        if (w && w.attrs.id === widgetId) return w;
+    }
+    return null;
+}
+
+const PRIMITIVES = ["Boolean", "Integer", "Decimal", "String", "Enumeration"];
+const text = items => ({ $ID: randomUUID(), $Type: "Texts$Text", Items: items.map(([c, t]) => ({ $ID: randomUUID(), $Type: "Texts$Translation", LanguageCode: c, Text: t })) });
+const clientTemplate = items => ({ $ID: randomUUID(), $Type: "Forms$ClientTemplate", Fallback: text([]), Parameters: [], Template: text(items) });
+
+// The value of one property as Studio Pro writes it when the widget is dropped: the type's default (texts: the
+// widget's own translations in the project's languages), no references, a No action; a non-list object gets one
+// object with its defaults.
+function valueJson(vt, langs) {
+    const t = vt.Type;
+    const sels = vt.SelectionTypes || [];
+    return {
+        $ID: randomUUID(), $Type: "CustomWidgets$WidgetValue",
+        Action: { $ID: randomUUID(), $Type: "Forms$NoAction", DisabledDuringExecution: true },
+        AttributeRef: null, DataSource: null, EntityRef: null,
+        Expression: t === "Expression" ? vt.DefaultValue : "",
+        Form: "", Icon: null, Image: "", Microflow: "", Nanoflow: "",
+        Objects: t === "Object" && !vt.IsList && vt.ObjectType ? [objectJson(vt.ObjectType, langs)] : [],
+        PrimitiveValue: PRIMITIVES.includes(t) ? vt.DefaultValue : "",
+        Selection: sels.length && !sels.includes("None") ? sels[0] : "None",
+        SourceVariable: null,
+        TextTemplate: t === "TextTemplate" ? clientTemplate((vt.Translations || []).filter(x => langs.includes(x.LanguageCode)).map(x => [x.LanguageCode, x.Text])) : null,
+        TranslatableValue: t === "TranslatableString" ? text((vt.Translations || []).filter(x => langs.includes(x.LanguageCode)).map(x => [x.LanguageCode, x.Text])) : null,
+        TypePointer: vt.$ID,
+        Widgets: [],
+        XPathConstraint: ""
+    };
+}
+
+// A CustomWidgets$WidgetObject of objectType (storage JSON) with every non-system property at its default.
+function objectJson(objectType, langs) {
+    return {
+        $ID: randomUUID(), $Type: "CustomWidgets$WidgetObject",
+        Properties: objectType.PropertyTypes.filter(pt => pt.ValueType.Type !== "System").map(pt => ({ $ID: randomUUID(), $Type: "CustomWidgets$WidgetProperty", TypePointer: pt.$ID, Value: valueJson(pt.ValueType, langs) })),
+        TypePointer: objectType.$ID
+    };
+}
+
+// A whole CustomWidgets$CustomWidget as dropped from the toolbox (storage JSON): langs = project languages, default
+// first; keys: see onlyKeys. The label (system property Label) is the widget's name, as in Studio Pro.
+function widgetJson(w, name, langs, keys) {
+    const type = typeJson(w, keys);
+    const sys = type.ObjectType.PropertyTypes.filter(pt => pt.ValueType.Type === "System").map(pt => pt.PropertyKey);
+    const out = {
+        $ID: randomUUID(), $Type: "CustomWidgets$CustomWidget",
+        Appearance: { $ID: randomUUID(), $Type: "Forms$Appearance", Class: "", DesignProperties: [], DynamicClasses: "", Style: "" },
+        ConditionalEditabilitySettings: null, ConditionalVisibilitySettings: null,
+        Editable: "Always",
+        LabelTemplate: sys.includes("Label") ? clientTemplate([[langs[0], type.WidgetName]]) : null,
+        Name: name,
+        Object: objectJson(type.ObjectType, langs),
+        TabIndex: 0,
+        Type: type
+    };
+    if (keys) onlyKeys(out, keys);
+    return out;
+}
+
+// Short name -> widget ids of the installed .mpk files: "Datagrid", "Data grid 2", "datagrid", the full id.
+function findWidget(dir, name) {
+    const all = [...installed(dir).keys()];
+    const low = String(name).toLowerCase().replace(/[\s_-]/g, "");
+    const hit = all.filter(id => id.toLowerCase() === String(name).toLowerCase() || id.split(".").pop().toLowerCase() === low);
+    if (hit.length) return { id: hit[0], all };
+    for (const id of all) {
+        const w = widgetXml(dir, id);
+        if (w && txt(kid(w, "name")).toLowerCase().replace(/[\s_-]/g, "") === low) return { id, all };
+    }
+    return { id: null, all };
+}
+
+module.exports.typeJson = typeJson;
+module.exports.objectJson = objectJson;
+module.exports.widgetJson = widgetJson;
+module.exports.findWidget = findWidget;
+module.exports.onlyKeys = onlyKeys;
+module.exports.widgetXml = widgetXml;

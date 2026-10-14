@@ -452,6 +452,37 @@
           "entry-points\\.txt$": "GET /rest/\\S+/orders/\\{Number\\}"
         }
       }
+    },
+    {
+      "id": "dg2filters",
+      "text": "Order_Grid sayfası yap: siparişleri (Number, Total, Paid) Data grid 2 ile listele; her kolonun başında filtre olsun, en büyük Number en üstte olacak şekilde sıralansın ve sayfalama 'daha fazla yükle' olsun.",
+      "checks": {
+        "find": [
+          "MyFirstModule.Order_Grid"
+        ],
+        "files": {
+          "Order_Grid\\.txt$": "(?s)^(?=.*Data grid 2)(?=.*SORT BY Number desc)(?=.*Number filter)(?=.*loadMore)"
+        }
+      }
+    },
+    {
+      "id": "designroles",
+      "setup": [
+        {
+          "op": "createModuleRole",
+          "module": "MyFirstModule",
+          "name": "Manager"
+        }
+      ],
+      "text": "Order_Admin sayfası yap: en üstte 'Yönetim' başlığı olsun ve üstünde büyük boşluk bıraksın (Atlas tasarım özelliği Spacing top: Large); altında yalnızca MyFirstModule.Manager rolündeki kullanıcıların gördüğü, içinde 'Sadece yöneticiler' yazan bir container olsun.",
+      "checks": {
+        "find": [
+          "MyFirstModule.Order_Admin"
+        ],
+        "files": {
+          "Order_Admin\\.txt$": "(?s)^(?=.*Yönetim[^\\n]*design Spacing: margin-top L)(?=.*visible if user has role MyFirstModule\\.Manager)"
+        }
+      }
     }
   ]
 }
