@@ -984,21 +984,26 @@ function sameOutside(before, after, ids = new Set()) {
 function pluggableSamples(project) {
     const pl = require("./pluggable");
     const strip = o => (Array.isArray(o) ? o.map(strip) : o && typeof o === "object" && !Buffer.isBuffer(o) ? Object.fromEntries(Object.entries(o).filter(([k]) => k !== "$ID").map(([k, v]) => [k, strip(v)])) : o);
-    const done = new Set(), problems = [];
+    // a widget counts as equal when one of its instances equals the built type (instances saved by older Studio Pro
+    // sessions may differ in description whitespace while the .mpk is the same)
+    const seen = new Map();
     for (const id of project.units.keys()) {
         const u = project.read(id);
         if (u.$Type !== "Forms$Page" && u.$Type !== "Forms$Snippet") continue;
         walkPlain(u, o => {
-            if (o.$Type !== "CustomWidgets$CustomWidget" || done.has(o.Type.WidgetId)) return;
-            const def = pl.installed(project.dir).get(o.Type.WidgetId);
+            if (o.$Type !== "CustomWidgets$CustomWidget") return;
+            const wid = o.Type.WidgetId;
+            if (seen.has(wid) && seen.get(wid).ok) return;
+            const def = pl.installed(project.dir).get(wid);
             if (!def || pl.typeDiff(o.Type, def).length) return;
-            done.add(o.Type.WidgetId);
             const keys = {};
             walkPlain(o.Type, z => (keys[z.$Type] = Object.keys(z)));
-            const want = JSON.stringify(strip(o.Type)), got = JSON.stringify(strip(pl.typeJson(pl.widgetXml(project.dir, o.Type.WidgetId), t => keys[t])));
-            if (want !== got) problems.push(`${o.Type.WidgetId} ${def.version}: type built from the .mpk differs from ${u.Name}.${o.Name}`);
+            const ok = JSON.stringify(strip(o.Type)) === JSON.stringify(strip(pl.typeJson(pl.widgetXml(project.dir, wid), t => keys[t])));
+            if (!seen.has(wid)) seen.set(wid, { ok, at: `${wid} ${def.version}: type built from the .mpk differs from ${u.Name}.${o.Name}` });
+            else if (ok) seen.get(wid).ok = true;
         });
     }
+    const done = new Set(seen.keys()), problems = [...seen.values()].filter(x => !x.ok).map(x => x.at);
     return { compared: done.size, problems };
 }
 

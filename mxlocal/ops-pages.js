@@ -3,7 +3,7 @@
 // page from a widget list (layout grids, containers, texts, data views, data grids, list views, buttons, inputs), plus
 // menu items and home pages. The layout and its placeholder are learned from the project's own pages; widget names,
 // defaults and storage follow what Studio Pro writes (checked against Studio Pro-saved pages of Mendix 10.22-11.13).
-// A Data grid 2 is copied from one on the project's own pages whose type matches widgets/*.mpk (see pluggable.js).
+// Pluggable widgets (Data grid 2, gallery, combo box, any other) are built from widgets/*.mpk with Studio Pro's defaults (see pluggable.js).
 const sdk = require("mendixmodelsdk");
 const { fail, suggest, bool, setIfAvailable, enumValue, validName } = require("./ops-util");
 const { toSdk } = require("./convert");
@@ -52,7 +52,7 @@ const WIDGETS = {
         }
     },
     dataGrid: {
-        doc: "data grid (objects from the database, over an association or from a microflow/nanoflow) with single selection: a classic Data grid with a search bar, or with kind datagrid2 a Data grid 2 copied from the project's own pages",
+        doc: "data grid (objects from the database, over an association or from a microflow/nanoflow) with single selection: a classic Data grid with a search bar, or with kind datagrid2 a Data grid 2 built from widgets/*.mpk",
         fields: {
             entity: "optional Module.Entity (default: the page entity; with association / microflow: what it gives)",
             ...LIST_SOURCE,
@@ -70,7 +70,7 @@ const WIDGETS = {
             selection: "optional Single | SingleAndMaintain | Multi | SimpleMulti | None (default Single; Data grid 2: Single | Multi | None)",
             selectFirst: "optional true/false (default false)",
             rows: "optional rows per page (default 20)",
-            kind: "optional classic | datagrid2 | auto (default classic). datagrid2 copies a Data grid 2 from a page of this project whose widget matches widgets/*.mpk (columns, data source and selection set; filters, actions and personalization left empty); auto = datagrid2 when that is possible, else classic. \"widget\": \"dataGrid2\" = kind datagrid2"
+            kind: "optional classic | datagrid2 | auto (default classic). datagrid2 builds a Data grid 2 from widgets/*.mpk with Studio Pro's defaults (a copy of one on the project's pages when the .mpk cannot be read); auto = datagrid2 when that is possible, else classic. \"widget\": \"dataGrid2\" = kind datagrid2"
         }
     },
     listView: {
@@ -106,7 +106,7 @@ const WIDGETS = {
         fields: { association: "R Module.Assoc (a reference set)", attribute: "optional attribute of the other entity to show (default: its first String attribute)", label: "optional label (default: the other entity's name)", xpath: "optional XPath constraint on the selectable objects", selectableMicroflow: "optional Module.Microflow that returns the selectable objects, instead of xpath", editable: EDITABLE, onChange: ON_CHANGE }
     },
     comboBox: {
-        doc: "Combo box (pluggable, copied from the project's own pages like Data grid 2) for an enumeration or Boolean attribute, or a reference (association + caption attribute), inside a data view. Without a Studio Pro-saved combo box matching widgets/*.mpk it is refused: use referenceSelector (association) or dropDown / radioButtons (enumeration)",
+        doc: "Combo box (pluggable, built from widgets/*.mpk like Data grid 2) for an enumeration or Boolean attribute, or a reference (association + caption attribute), inside a data view. Without the .mpk it is refused: use referenceSelector (association) or dropDown / radioButtons (enumeration)",
         fields: { attribute: "enumeration or Boolean attribute (or use association)", association: "Module.Assoc reference from the data view's entity", captionAttribute: "optional with association: String attribute of the other entity (default: its first)", label: "optional label", editable: EDITABLE, onChange: ON_CHANGE }
     },
     templateGrid: {
@@ -134,7 +134,7 @@ const WIDGETS = {
         }
     },
     gallery: {
-        doc: "Gallery (pluggable, copied from the project's own pages like Data grid 2): objects (database, association or microflow/nanoflow, as listView) as tiles, each item with its own widgets; a data view can listen to it. Without a Studio Pro-saved gallery matching widgets/*.mpk it is refused: use listView",
+        doc: "Gallery (pluggable, built from widgets/*.mpk like Data grid 2): objects (database, association or microflow/nanoflow, as listView) as tiles, each item with its own widgets; a data view can listen to it. Without the .mpk it is refused: use listView",
         fields: { entity: "optional Module.Entity (default: the page entity)", ...LIST_SOURCE, xpath: "optional XPath constraint", widgets: "optional [ widgets ] per item (default: one text per attribute)", selection: "optional Single | Multi | None (default Single)", pageSize: "optional (default 20)", columns: "optional desktop columns 1-12 (default 1)", onClick: "optional: on an item click " + ACTION + "; the item is passed", sort: "optional default sort order (source database): [ \"Attribute\" | { \"attribute\": \"Name\", \"direction\": \"desc\" } ] (default direction asc)" }
     }
 };
@@ -1189,7 +1189,7 @@ function makePages(h) {
         return b;
     }
 
-    // ------------------------------------------------ Data grid 2 (copied from the project's own pages)
+    // ------------------------------------------------ Data grid 2 (built from widgets/*.mpk, else copied from the project's own pages)
 
     const ATTR_TYPES = { String: "String", HashedString: "HashString", AutoNumber: "AutoNumber", Boolean: "Boolean", DateTime: "DateTime",
         Decimal: "Decimal", Enumeration: "Enum", Integer: "Integer", Long: "Long", Binary: "Binary" };
