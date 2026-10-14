@@ -81,7 +81,8 @@ for mpr in "${PROJECTS[@]}"; do
     out="$(node "$MXLOCAL" selftest --project "$mpr" 2>&1)"
     oks=$(printf '%s\n' "$out" | grep -c '^  OK')
     fails=$(printf '%s\n' "$out" | grep -c '^  FAIL')
-    if [ "$fails" -gt 0 ] || [ "$oks" -eq 0 ]; then
+    # a selftest that stops with an exception prints "Self test FAILED" and no FAIL line
+    if [ "$fails" -gt 0 ] || [ "$oks" -eq 0 ] || printf '%s\n' "$out" | grep -q 'Self test FAILED'; then
         say "FAIL $(basename "$mpr")"
         printf '%s\n' "$out" | grep -E '^  (FAIL|SKIP)|ERROR|Self test' | head -20
         fail=1
