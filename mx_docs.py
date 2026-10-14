@@ -154,7 +154,7 @@ def _inline_template(value):
         ref = p.get("AttributeRef")
         if clean(p.get("Expression")) or not isinstance(ref, dict) or not ref.get("Attribute"):
             return ""
-        names.append(short(ref["Attribute"]))
+        names.append(attr_path(ref))
     if not names or not body:
         return ""
     return re.sub(r"\{(\d+)\}", lambda m: "{%s}" % names[int(m.group(1)) - 1] if 0 < int(m.group(1)) <= len(names) else m.group(0), body)
@@ -334,9 +334,35 @@ class PageRenderer:
             out.append("selection " + w["SelectionMode"])
         if w["$Type"] == "Forms$GroupBox" and w.get("Collapsible") not in (None, "No"):
             out.append("collapsible" + (" (collapsed)" if w["Collapsible"] == "YesInitiallyCollapsed" else ""))
+        if w["$Type"] == "Forms$DataView":
+            if w.get("LabelWidth") == 0:
+                out.append("vertical form")
+            elif w.get("LabelWidth") not in (None, 3):
+                out.append("label width %s" % w["LabelWidth"])
+            if w.get("ReadOnlyStyle") == "Text":
+                out.append("read-only as text")
+            if w.get("ShowFooter") is False:
+                out.append("no footer")
+        elif w.get("ReadOnlyStyle") in ("Control", "Text"):
+            out.append("read-only as " + w["ReadOnlyStyle"].lower())
+        if isinstance(w.get("MaxLengthCode"), int) and w["MaxLengthCode"] > 0:
+            out.append("max length %d" % w["MaxLengthCode"])
+        if clean(w.get("InputMask")):
+            out.append("mask " + clean(w["InputMask"]))
+        if w.get("RenderMode") == "Form" and (w.get("PopupFormSettings") or {}).get("Form"):
+            out.append("select page " + w["PopupFormSettings"]["Form"])
+        if w.get("MaintainSelectionAfterMicroflow"):
+            out.append("keeps selection")
+        if isinstance(w.get("PlaceholderTemplate"), dict):
+            ph = _inline_template(w["PlaceholderTemplate"]) or template(w["PlaceholderTemplate"])
+            if ph and ph != "''":
+                out.append("placeholder " + ph)
         for k, v in w.items():
             if k not in ("CaptionTemplate", "LabelTemplate", "Caption", "Content"):
                 self._scan(v, k, out)
+        for k in ("Content", "CaptionTemplate"):
+            for prm in (w.get(k) or {}).get("Parameters") or [] if isinstance(w.get(k), dict) else []:
+                self._scan(prm, "Parameters", out)
         return out
 
     def _scan(self, value, key, out):
@@ -372,9 +398,23 @@ class PageRenderer:
         elif name == "SnippetCall":
             out.append("snippet " + (value.get("Form") or ""))
         elif name == "WidgetValidation":
-            if clean(value.get("Expression")):
-                out.append("validation " + clean(value["Expression"]))
-        elif name not in ("Text", "ClientTemplate", "FormattingInfo"):
+            expr = clean(value.get("Expression"))
+            if expr:
+                msg = text(value.get("Message"))
+                out.append(("required" if expr == "$value != empty" else "validation " + expr) + (" (\"%s\")" % msg if msg else ""))
+        elif name == "FormattingInfo":
+            fmt = format_text(value)
+            if fmt:
+                out.append("format " + fmt)
+        elif name == "PageVariable" and key == "SourceVariable":
+            if value.get("LocalVariable"):
+                out.append("variable $" + value["LocalVariable"])
+        elif name == "ClientTemplateParameter":
+            fmt = format_text(value.get("FormattingInfo") or {})
+            ref = value.get("AttributeRef") or {}
+            if fmt and ref.get("Attribute"):
+                out.append("{%s} format %s" % (attr_path(ref), fmt))
+        elif name not in ("Text", "ClientTemplate"):
             for k, v in value.items():
                 if not k.startswith("$"):
                     self._scan(v, k, out)
@@ -448,11 +488,11 @@ class PageRenderer:
         xpath = clean(ds.get("XPathConstraint"))
         if xpath:
             parts.append("WHERE " + xpath)
-        sort = [(short((i.get("AttributeRef") or {}).get("Attribute") or "?"), "desc" if i.get("SortOrder") == "Descending" else "asc")
+        sort = [(attr_path(i.get("AttributeRef") or {}) or "?", "desc" if i.get("SortOrder") == "Descending" else "asc")
                 for i in ((ds.get("SortBar") or {}).get("SortItems") or [])]
         if sort:
             parts.append("SORT BY " + ", ".join("%s %s" % x for x in sort))
-        search = [short((r or {}).get("Attribute") or "?") for r in ((ds.get("Search") or {}).get("SearchRefs") or [])]
+        search = [attr_path(r or {}) or "?" for r in ((ds.get("Search") or {}).get("SearchRefs") or [])]
         if search:
             parts.append("SEARCH " + ", ".join(search))
         return " ".join(p for p in parts if p)
@@ -490,33 +530,74 @@ def params_text(mappings):
     return ", ".join(out)
 
 
+def format_text(f):
+    """Non-default number / date format of a FormattingInfo: '2 decimals, group digits', 'date dd-MM-yyyy'."""
+    out = []
+    if isinstance(f.get("DecimalPrecision"), int) and f["DecimalPrecision"] != 2:
+        out.append("%d decimals" % f["DecimalPrecision"])
+    if f.get("GroupDigits"):
+        out.append("group digits")
+    if f.get("DateFormat") == "Custom":
+        out.append("date " + clean(f.get("CustomDateFormat")))
+    elif f.get("DateFormat") in ("Time", "DateTime"):
+        out.append(f["DateFormat"].lower())
+    return ", ".join(out)
+
+
+def _flow_options(s):
+    """confirm / progress / validation options of a flow call: ' (asks "Sure?"; blocking progress; ...)'."""
+    opts = []
+    ci = s.get("ConfirmationInfo")
+    if isinstance(ci, dict):
+        opts.append("asks \"%s\"" % text(ci.get("Question")) if text(ci.get("Question")) else "asks confirmation")
+    if s.get("ProgressBar") not in (None, "None"):
+        opts.append("%s progress%s" % ("blocking" if s["ProgressBar"] == "Blocking" else "non-blocking", " \"%s\"" % text(s.get("ProgressMessage")) if text(s.get("ProgressMessage")) else ""))
+    if s.get("FormValidations") in ("None", "Widget"):
+        opts.append("ignores validation errors" if s["FormValidations"] == "None" else "checks this widget's validation only")
+    return " (%s)" % "; ".join(opts) if opts else ""
+
+
+def _page_options(a, fs):
+    opts = []
+    title = fs.get("TitleOverride")
+    if isinstance(title, dict) and text(title.get("Text")):
+        opts.append("title \"%s\"" % text(title["Text"]))
+    if clean(a.get("NumberOfPagesToClose2")):
+        opts.append("closes %s page(s) first" % clean(a["NumberOfPagesToClose2"]))
+    return " (%s)" % "; ".join(opts) if opts else ""
+
+
 def action_text(a):
     name = a.get("$Type", "").split("$", 1)[-1]
     if name == "MicroflowAction":
         s = a.get("MicroflowSettings") or {}
         line = "microflow %s(%s)" % (s.get("Microflow"), params_text(s.get("ParameterMappings")))
-        return line + (" (asks confirmation)" if s.get("ConfirmationInfo") else "")
+        return line + _flow_options(s)
     if name == "CallNanoflowClientAction":
-        return "nanoflow %s(%s)" % (a.get("Nanoflow"), params_text(a.get("ParameterMappings")))
+        return "nanoflow %s(%s)" % (a.get("Nanoflow"), params_text(a.get("ParameterMappings"))) + _flow_options(a)
     if name == "FormAction":
         fs = a.get("FormSettings") or {}
-        return "open page %s(%s)" % (fs.get("Form"), params_text(fs.get("ParameterMappings")))
+        return "open page %s(%s)" % (fs.get("Form"), params_text(fs.get("ParameterMappings"))) + _page_options(a, fs)
     if name == "CreateObjectClientAction":
-        page = (a.get("PageSettings") or a.get("FormSettings") or {}).get("Form")
-        return "create %s, open page %s" % (entity_ref(a.get("EntityRef")) or a.get("Entity"), page)
+        fs = a.get("PageSettings") or a.get("FormSettings") or {}
+        ref = a.get("EntityRef") or {}
+        steps = ref.get("Steps") or []
+        what = ("%s linked to the object around it over %s" % (steps[-1].get("DestinationEntity"), steps[-1].get("Association"))) if steps else (entity_ref(ref) or a.get("Entity"))
+        return "create %s, open page %s" % (what, fs.get("Form")) + _page_options(a, fs)
     simple = {"SaveChangesClientAction": "save changes", "CancelChangesClientAction": "cancel changes",
               "DeleteClientAction": "delete object", "ClosePageClientAction": "close page",
-              "SignOutClientAction": "sign out"}
+              "SignOutClientAction": "sign out", "SyncClientAction": "synchronize"}
     if name in simple:
         return simple[name] + (" and close page" if a.get("ClosePage") else "")
     if name == "OpenLinkClientAction":
         addr = a.get("Address") or {}
-        return "open link " + (addr.get("Value") or attr_path(addr.get("AttributeRef") or {}))
+        kind = {"Email": "e-mail ", "Call": "call ", "Text": "text message to "}.get(a.get("LinkType"), "link ")
+        return "open " + kind + (addr.get("Value") or attr_path(addr.get("AttributeRef") or {}))
     close = " and close page" if field(a, "ClosePage") else ""
     if name == "SetTaskOutcomeClientAction":
         return "complete user task with outcome '%s'%s" % (field(a, "OutcomeValue") or short(str(field(a, "Outcome") or "?")), close)
     if name == "CallWorkflowClientAction":
-        return "start workflow %s%s" % (field(a, "Workflow"), close)
+        return "start workflow %s%s" % (field(a, "Workflow"), close) + _flow_options(a)
     if name == "OpenUserTaskClientAction":
         return "open user task" + (" (assign on open)" if field(a, "AssignOnOpen") else "")
     if name == "OpenWorkflowClientAction":
@@ -851,6 +932,17 @@ def navigation_lines(doc, index):
             target = item.get("Page") or item.get("Microflow")
             out.append("    home for role %s: %s" % (item.get("UserRole"), target))
             index.entry("HOME PAGES", "%s role %s -> %s" % (profile.get("Name"), item.get("UserRole"), target))
+        native = profile.get("NativeHomePage") or {}
+        target = native.get("HomePagePage") or native.get("HomePageNanoflow")
+        if target:
+            out.append("    default home: " + target)
+            index.entry("HOME PAGES", "%s default -> %s" % (profile.get("Name"), target))
+        for item in profile.get("RoleBasedNativeHomePages") or []:
+            target = item.get("HomePagePage") or item.get("HomePageNanoflow")
+            out.append("    home for role %s: %s" % (item.get("UserRole"), target))
+            index.entry("HOME PAGES", "%s role %s -> %s" % (profile.get("Name"), item.get("UserRole"), target))
+        for item in profile.get("BottomBarItems") or []:
+            out.append("    bottom bar \"%s\" -> open page %s" % (text(item.get("Caption")), item.get("Page")))
         login = (profile.get("LoginPageSettings") or {}).get("Form")
         if login:
             out.append("    login page: " + login)
