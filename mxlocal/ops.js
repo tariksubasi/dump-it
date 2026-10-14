@@ -17,6 +17,8 @@ const { makeSecurity, SECURITY_OPS } = require("./ops-security");
 const { makeMappings, MAPPING_OPS } = require("./ops-mappings");
 const { makeTexts, TEXT_OPS } = require("./ops-texts");
 const { makeRest, REST_OPS } = require("./ops-rest");
+const { makeOData, ODATA_OPS } = require("./ops-odata");
+const { makeXml, XML_OPS } = require("./ops-xml");
 const { makeWorkflows, WORKFLOW_OPS, USER_TASK_PAGE_FIELDS, SYSTEM_ENTITIES, STEP_FIELDS, STEP_COMMON } = require("./ops-workflows");
 
 const OPS = {
@@ -92,6 +94,8 @@ const OPS = {
     setHomePage: { doc: "Set the home page (or home microflow) of a navigation profile, for everyone or for some user roles.", fields: HOME_FIELDS },
     ...MAPPING_OPS,
     ...REST_OPS,
+    ...ODATA_OPS,
+    ...XML_OPS,
     ...WORKFLOW_OPS,
     moveDocument: { doc: "Move a document to another folder of the same module.", fields: { document: "R Module.Document", folder: "optional folder path, e.g. Orders/Actions (missing or \"\" = the module root)" } },
     rename: { doc: "Rename a module, document, entity, attribute, association or enumeration value. Updates references, reports names left in expressions/XPath/Java.", fields: { target: "R qualified name, e.g. Module.Entity.Attribute", newName: "R new short name" } },
@@ -418,6 +422,8 @@ function bind(model, client) {
     const mappingOps = makeMappings({ model, get, exists, entity, folder, attributeChain, loadParents, impl: () => impl });
     const version = client.project.version;
     const restOps = makeRest({ model, client, get, exists, folder, version, mappingInternals: mappingOps.internals, impl: () => impl });
+    const odataOps = makeOData({ model, client, get, exists, entity, folder, version, persistable, attributeChain, loadParents });
+    const xmlOps = makeXml({ model, client, get, exists, entity, folder, version, attributeChain, loadParents, mappingInternals: mappingOps.internals });
     const workflowOps = makeWorkflows({ model, client, get, exists, entity, folder, version, persistable, attributeChain, loadParents, grantAccess: o => impl.grantAccess(o), impl: () => impl,
         textAll: (owner, prop, value) => pageOps.internals.templateAll(owner, prop, value, null, "", true) });
 
@@ -819,6 +825,8 @@ function bind(model, client) {
         ...mappingOps.impl,
         ...textOps.impl,
         ...restOps.impl,
+        ...odataOps.impl,
+        ...xmlOps.impl,
         ...workflowOps.impl
     };
 
@@ -963,6 +971,8 @@ function bind(model, client) {
         ...mappingOps.checks,
         ...textOps.checks,
         ...restOps.checks,
+        ...odataOps.checks,
+        ...xmlOps.checks,
         createWorkflow: o => workflowOps.checks.createWorkflow(o),
         createPage: o => (o.kind === "userTaskPage" ? workflowOps.checks.userTaskPage(o) : pageOps.checks.createPage(o))
     };

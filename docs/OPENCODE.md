@@ -737,7 +737,33 @@ Typical plan: structure, import mapping that creates the entities, export mappin
                  { "action": "exportWithMapping", "mapping": "Sales.EXM_Order", "object": "Order", "variable": "Out" } ] } ] }
 ```
 
-The export shows a structure as `json/path: Name type` lines and a mapping as `json/path -> Entity via Association [Create/Find/Parameter]`; use those paths in `entities`, `attributes`, `skip`, `keys`. Custom handlers, converters, XML schemas and message definitions: Studio Pro.
+The export shows a structure as `json/path: Name type` lines and a mapping as `json/path -> Entity via Association [Create/Find/Parameter]`; use those paths in `entities`, `attributes`, `skip`, `keys`. Custom handlers and converters: Studio Pro. XML schemas and message definitions: see below.
+
+### OData, XML schemas, message definitions
+
+| Op | Fields | Notes |
+|---|---|---|
+| `publishOData` | **module**, **name**, **entities**, path (default `odata/<name>/v1/`), version (1.0.0), namespace (DefaultNamespace), authentication (`["Basic"]`), roles, associations (default true), summary, description, folder | Mendix 10.4+. Each entity: `"Module.Entity"` or `{entity, exposedName, attributes, key, insert, update, delete, count, topSkip, pageSize}`. key: `"ID"` (default for stored entities) or `["Attr"]` (required for non-stored entities). insert/update/delete: `true` (write to the database) or `"Module.Microflow"`; default read-only. Enumeration attributes publish their enumeration; associations between published entities become navigation properties. Binary and hashed string attributes are left out. Layout as the one Studio Pro sample (TestApp 11.14); check associations, enumerations and write modes in Studio Pro |
+| `createXmlSchema` | **module**, **name**, **file** (`.xsd` path, relative to the current or the project folder), folder | Stores the XSD as Studio Pro does. One file only: `xs:import`/`xs:include` are refused |
+| `createMessageDefinition` | **module**, **name** (collection), **entity**, definition (default the entity name), attributes, associations `["Module.Assoc"]`, folder | A list of the entity (`<Entity>s` with items `<Entity>`), its attributes (all but binary) and per association the other entity with its attributes. Layout of the Mendix 8.18 sample |
+| `createXmlImportMapping` | **module**, **name**, xmlSchema + rootElement, or messageDefinition (`Module.Collection.Definition`), entity, entities, attributes, skip, keys, create, persistable, folder | Like `createImportMapping`, over an XML schema element or a message definition. Paths are the element names joined with `/` from the root: `Order/Line/Sku`. A message definition says its entities (no entity/entities/create). XSD support: sequences/all-groups of elements with built-in types, named and anonymous complex types, repeated complex elements; attributes, choices, extensions and repeated simple elements are refused |
+| `createXmlExportMapping` | same fields, no keys | Like `createExportMapping` |
+| `consumeODataService`, `consumeWebService`, `createBusinessEvent` | | Not supported: refused with the Studio Pro steps (consumed OData from `$metadata`, consumed SOAP web services from a WSDL, business events). They are contracts Studio Pro reads and keeps in sync |
+
+Mappings over XML schemas have no Studio Pro sample in the test projects: the dry run says to check them in Studio
+Pro (if a path does not match, Studio Pro shows an error on the mapping; right-click it and choose to update it).
+
+```json
+{ "ops": [
+  { "op": "publishOData", "module": "Sales", "name": "SalesOData", "roles": ["Sales.ApiUser"],
+    "entities": [ "Sales.Customer", { "entity": "Sales.Order", "insert": true, "update": "Sales.ACT_Order_Update", "pageSize": 500 } ] },
+  { "op": "createXmlSchema", "module": "Sales", "name": "XSD_Order", "file": "order.xsd" },
+  { "op": "createXmlImportMapping", "module": "Sales", "name": "IMM_OrderXml", "xmlSchema": "Sales.XSD_Order", "rootElement": "Order",
+    "entity": "Sales.OrderIn", "entities": { "Order/Line": "Sales.OrderLineIn" }, "create": true },
+  { "op": "createMessageDefinition", "module": "Sales", "name": "MD_Orders", "entity": "Sales.Order", "associations": ["Sales.Order_Customer"] },
+  { "op": "createXmlExportMapping", "module": "Sales", "name": "EXM_OrdersXml", "messageDefinition": "Sales.MD_Orders.Order" }
+] }
+```
 
 ### Documents, rename and delete
 
@@ -890,10 +916,12 @@ refuses them.
 
 Operations cannot do these things: changing layouts, page parameters, button actions or data sources of existing
 widgets (pages and snippets take `addWidgets`, `changeWidget`, `deleteWidget`, `moveWidget`), widgets outside the
-`createPage` list (template grids, reference set selectors, file managers and pluggable widgets other than a Data
-grid 2, combo box or gallery copied from the project), snippet calls with parameters, design properties, import/export mappings,
-JSON structures, consumed REST services, workflows, REST operations with object bodies or results, inheritance
-splits, and setting attributes inherited from System entities (for example `System.User.Name`). For these, write
+`createPage` list (file managers and pluggable widgets other than a Data grid 2, combo box or gallery copied from the
+project), design properties, consumed OData services, consumed SOAP web services and business events (refused with
+the Studio Pro steps), XML schemas of several files or with attributes/choices/extensions, OpenAPI imports of
+consumed REST services, binary REST bodies, multi-user tasks, boundary events and event sub-processes of workflows,
+changing an existing workflow (only `createWorkflow`), custom mapping handlers and converters, and setting attributes
+inherited from System entities (for example `System.User.Name`). For these, write
 `edits/<name>.js` with the Mendix Model SDK, or give the user Studio Pro steps. Prefer Studio Pro steps when the
 change is large or risky.
 

@@ -1147,7 +1147,9 @@ async function selftest(mpr, keep, { out, relevant }) {
                 ["REST", "consumed REST service (Basic auth with a constant, path/header/query parameters, template and mapping bodies, response mapping), sendRestRequest x4, published REST with path/header/query/body parameters, import/export mappings, a created microflow, roles, version",
                     () => integ.restPlan(mod, T, src.version), p => integ.restProblems(p, T)],
                 ["workflows", `two workflows (${pageable ? "user tasks with task pages, targeting by user role and microflow, outcomes with steps, " : ""}decisions on a Boolean and an enumeration, call microflow with outcomes, jump, timer, parallel split, call workflow, notification wait, end in a branch)${pageable ? ", user task pages (WorkflowUserTask parameter, context from a data source microflow, outcome buttons)" : ""}, workflow actions (call, context, notify, jump-to options, state, lock/unlock, open, complete task)`,
-                    () => integ.workflowPlan(mod, T, src.version, pageable, userRole), p => integ.workflowProblems(p, T, src.version, pageable)]
+                    () => integ.workflowPlan(mod, T, src.version, pageable, userRole), p => integ.workflowProblems(p, T, src.version, pageable)],
+                ["OData/XML", `${require("./versions").cmp(src.version, "10.4.0") >= 0 ? "published OData (2 entities: ID and attribute key, enumeration, association, insert/update by microflow/delete, paging), " : ""}XML schema from an .xsd, XML import/export mappings over it, message definition with associations and mappings over it, import/export steps; consumed OData, SOAP and business events refused with Studio Pro steps`,
+                    () => integ.odataPlan(mod, T, src.version, tmp), p => integ.odataProblems(p, T, src.version)]
             ];
             if (!pageable) results.push("SKIP workflow user tasks and user task pages: this project has no page with a layout to copy (a user task needs a task page)");
             for (const [name, what, plan, verify] of phases) {

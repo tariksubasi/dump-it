@@ -379,8 +379,8 @@ function makeMappings(h) {
         const VAL = imp ? im.ImportValueMappingElement : em.ExportValueMappingElement;
         const common = (el, s) => {
             el.exposedName = s.name;
-            el.jsonPath = s.path;
-            el.xmlPath = "";
+            el.jsonPath = s.jsonPath !== undefined ? s.jsonPath : s.path; // XML schemas and message definitions: own paths
+            el.xmlPath = s.xmlPath || "";
             el.minOccurs = s.min;
             el.maxOccurs = s.max;
             el.nillable = s.nillable;

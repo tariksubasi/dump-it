@@ -30,6 +30,16 @@ async function runPhase(env, s, plan, verify) {
     const { reopen, copy, layout, layoutProblems } = env;
     const problems = [];
     const before = new Set(s.ctx.project.units.keys());
+    // ops that must be refused (with the Studio Pro steps) and change nothing
+    for (const o of plan.refuse || []) {
+        let msg = "";
+        try {
+            await s.ops.runPlan({ ops: [o] }, () => {});
+        } catch (e) {
+            msg = e.message;
+        }
+        if (!/is not supported\. .*In Studio Pro/.test(msg)) problems.push(`${o.op} was not refused with the Studio Pro steps${msg ? `: ${msg}` : ""}`);
+    }
     const lint = await s.ops.runPlan(plan, () => {});
     problems.push(...lint);
     await s.model.flushChanges();
@@ -209,4 +219,92 @@ function workflowProblems(project, T, version, pageable) {
     return r;
 }
 
-module.exports = { runPhase, restPlan, restProblems, workflowPlan, workflowProblems, unitsNamed, walk };
+// ---------------------------------------------------------------- OData, XML schema, message definitions
+
+const XSD = `<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="http://example.com/zzorder" elementFormDefault="qualified">
+  <xs:element name="Order">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="Number" type="xs:string"/>
+        <xs:element name="Total" type="xs:decimal" minOccurs="0"/>
+        <xs:element name="Placed" type="xs:dateTime"/>
+        <xs:element name="Line" type="LineType" minOccurs="0" maxOccurs="unbounded"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+  <xs:complexType name="LineType">
+    <xs:sequence>
+      <xs:element name="Sku" type="xs:string"/>
+      <xs:element name="Qty" type="xs:int"/>
+    </xs:sequence>
+  </xs:complexType>
+</xs:schema>
+`;
+
+function odataPlan(mod, T, version, dir) {
+    const E = `${mod}.${T}`;
+    const xsd = require("path").join(dir, "zz-order.xsd");
+    require("fs").writeFileSync(xsd, XSD);
+    const odata = cmp(version, "10.4.0") >= 0;
+    return { refuse: [{ op: "consumeODataService", module: mod, metadata: "metadata.xml" }, { op: "consumeWebService", module: mod }, { op: "createBusinessEvent", module: mod }],
+        ops: [
+            { op: "createEnumeration", module: mod, name: `${T}OdKind`, values: ["A", "B"], folder: "ZzXml" },
+            { op: "createEntity", module: mod, name: `${T}OdCust`, attributes: [{ name: "Name", type: "String(100)" }, { name: "Kind", type: `Enum(${E}OdKind)` }] },
+            { op: "createEntity", module: mod, name: `${T}OdOrder`, attributes: [{ name: "Number", type: "String(20)" }, { name: "Total", type: "Decimal" }, { name: "Placed", type: "DateTime" }] },
+            { op: "addAssociation", from: `${E}OdOrder`, to: `${E}OdCust` },
+            { op: "createModuleRole", module: mod, name: "ZzODataUser" },
+            { op: "createMicroflow", module: mod, name: `${T}_OdUpdate`, folder: "ZzXml", parameters: [{ name: "Order", type: `${E}OdOrder` }], actions: [{ action: "commit", variable: "Order" }] },
+            ...(odata ? [{ op: "publishOData", module: mod, name: `${T}_OData`, folder: "ZzXml", roles: [`${mod}.ZzODataUser`],
+                entities: [`${E}OdCust`, { entity: `${E}OdOrder`, insert: true, update: `${E}_OdUpdate`, delete: true, pageSize: 500, key: ["Number"] }] }] : []),
+            { op: "createXmlSchema", module: mod, name: `${T}_Xsd`, folder: "ZzXml", file: xsd },
+            { op: "createXmlImportMapping", module: mod, name: `${T}_XmlImm`, folder: "ZzXml", xmlSchema: `${E}_Xsd`, rootElement: "Order", entity: `${E}OdOrder`, entities: { "Order/Line": `${E}OdLine` }, create: true },
+            { op: "createXmlExportMapping", module: mod, name: `${T}_XmlExm`, folder: "ZzXml", xmlSchema: `${E}_Xsd`, entity: `${E}OdOrder`, entities: { "Order/Line": `${E}OdLine` }, skip: ["Order/Total"] },
+            { op: "createMessageDefinition", module: mod, name: `${T}_MD`, folder: "ZzXml", entity: `${E}OdOrder`, associations: [`${E}OdOrder_${T}OdCust`, `${E}OdLine_${T}OdOrder`] },
+            { op: "createXmlImportMapping", module: mod, name: `${T}_MdImm`, folder: "ZzXml", messageDefinition: `${E}_MD.${T}OdOrder` },
+            { op: "createXmlExportMapping", module: mod, name: `${T}_MdExm`, folder: "ZzXml", messageDefinition: `${E}_MD.${T}OdOrder` },
+            { op: "createMicroflow", module: mod, name: `${T}_XmlFlow`, folder: "ZzXml", parameters: [{ name: "Xml", type: "String" }], returns: "String", returnValue: "$Out", actions: [
+                { action: "importWithMapping", mapping: `${E}_XmlImm`, source: "Xml", variable: "Order", commit: "no" },
+                { action: "exportWithMapping", mapping: `${E}_XmlExm`, object: "Order", variable: "Out" }] }
+        ] };
+}
+
+function odataProblems(project, T, version) {
+    const r = [];
+    const u = unitsNamed(project, `${T}_`);
+    if (cmp(version, "10.4.0") >= 0) {
+        const s = u[`${T}_OData`];
+        if (!s || s.$Type !== "ODataPublish$PublishedODataService2") r.push("published OData service missing");
+        else {
+            if (s.EntityTypes.length !== 2 || s.EntitySets.length !== 2) r.push(`${s.EntityTypes.length} entity types, ${s.EntitySets.length} sets`);
+            if (!s.Enumerations.length) r.push("the enumeration of Kind is not published");
+            const ord = s.EntityTypes.find(t => /OdOrder$/.test(t.Entity));
+            if (!ord || !ord.ChildMembers.some(m => m.IsPartOfKey && /Number$/.test(m.Attribute || ""))) r.push("Number is not the key of the order");
+            if (!ord || !ord.ChildMembers.some(m => m.$Type === "ODataPublish$PublishedAssociationEnd")) r.push("the association to the customer is not published");
+            const cust = s.EntityTypes.find(t => /OdCust$/.test(t.Entity));
+            if (!cust || !cust.ChildMembers.some(m => m.$Type === "ODataPublish$PublishedId" && m.IsPartOfKey)) r.push("the customer has no ID key");
+            const set = s.EntitySets.find(x => x.EntityTypePointer === (ord && ord.$ID));
+            if (!set || set.InsertMode.$Type !== "ODataPublish$ChangeSource" || set.UpdateMode.$Type !== "ODataPublish$CallMicroflowToChange" || set.PageSize !== 500) r.push("order set capabilities");
+        }
+    }
+    const x = u[`${T}_Xsd`];
+    if (!x || x.Entries.length !== 1 || !/zzorder/.test(x.Entries[0].TargetNamespace) || !x.Entries[0].Contents.includes("LineType")) r.push("XML schema missing or without its contents");
+    for (const [n, root, paths] of [["XmlImm", "Order", ["Order|Number", "Order|Line|Sku"]], ["XmlExm", "Order", ["Order|Number", "Order|Line|Qty"]], ["MdImm", null, [`${T}OdOrders|${T}OdOrder|Number`]], ["MdExm", null, [`${T}OdOrders|${T}OdOrder|${T}OdCust|Name`]]]) {
+        const m = u[`${T}_${n}`];
+        if (!m) {
+            r.push(`${n} missing`);
+            continue;
+        }
+        if (root && (m.XsdRootElementName !== root || !m.XmlSchema)) r.push(`${n}: root element ${m.XsdRootElementName}`);
+        if (!root && !m.MessageDefinition) r.push(`${n} has no message definition`);
+        const have = [];
+        walk(m.Elements, e => have.push(e.XmlPath));
+        for (const p of paths) if (!have.includes(p)) r.push(`${n} lacks element ${p}`);
+        walk(m.Elements, e => /ExportMappings\$ObjectMappingElement/.test(e.$Type) && e.ObjectHandling === "Create" && r.push(`${n}: export element with Create`));
+    }
+    const md = u[`${T}_MD`];
+    if (!md || md.MessageDefinitions[0].ExposedEntity.ExposedName !== `${T}OdOrders`) r.push("message definition root is not the list <Entity>s");
+    return r;
+}
+
+module.exports = { runPhase, restPlan, restProblems, workflowPlan, workflowProblems, odataPlan, odataProblems, unitsNamed, walk };
