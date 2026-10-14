@@ -429,7 +429,7 @@ function bind(model, client) {
     const flows = makeFlows({ model, client, get, entity, text, dataType, attributeChain, loadParents });
     const codeOps = makeCode({ model, client, get, exists, entity, folder, createFlow: (...a) => flows.createFlow(...a) });
     const flowEdit = makeFlowEdit({ model, exists, createFlow: (o, nano) => flows.createFlow(o, nano, folder(o.module, o.folder)) }, flows);
-    const pageOps = makePages({ model, client, get, exists, entity, text, translationsOf, folder, attributeChain, loadParents, persistable, grantAccess: o => impl.grantAccess(o) });
+    const pageOps = makePages({ model, client, get, exists, entity, text, translationsOf, folder, attributeChain, loadParents, persistable, dataType, grantAccess: o => impl.grantAccess(o), createNanoflow: o => createFlowOp(o, true) });
     const pageEdit = makePageEdit({ model, client, get, text, translationsOf, attributeChain, persistable }, pageOps.internals);
     const securityOps = makeSecurity({ model, get });
     const mappingOps = makeMappings({ model, get, exists, entity, folder, attributeChain, loadParents, impl: () => impl });

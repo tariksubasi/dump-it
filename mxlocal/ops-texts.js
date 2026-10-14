@@ -50,7 +50,7 @@ function isPerLanguage(v) {
 }
 
 // {Attribute} -> {n} in the order of the default text (as the page builders do).
-const NAMED = /\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
+const NAMED = /\{([A-Za-z_][\w.]*(?:\/[A-Za-z_][\w.]*)*)\}/g; // {Attribute} or {Assoc/Attribute}
 function namesIn(s) {
     const used = [];
     String(s).replace(NAMED, (m, a) => (used.includes(a) || used.push(a), m));
