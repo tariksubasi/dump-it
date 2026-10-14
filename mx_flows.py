@@ -314,6 +314,9 @@ class FlowRenderer:
             value = m.get("Argument")
             if value is None:
                 v = m.get("Value") or m.get("ParameterValue") or {}
+                if isinstance(v, str):  # Send REST request: the expression itself
+                    out.append("%s=%s" % (short(m.get("Parameter") or m.get("QueryParameter")), clean(v)))
+                    continue
                 value = v.get("Argument") or v.get("Entity") or v.get("Microflow") or v.get("Nanoflow") or compact(v)
             out.append("%s=%s" % (short(m.get("Parameter")), clean(value)))
         return ", ".join(out)
@@ -525,11 +528,13 @@ class FlowRenderer:
         body = a.get("BodyVariable") or {}
         body_var = body.get("VariableName") if isinstance(body, dict) else None
         self.index.effect("REST REQUESTS (Send REST request action)", "%s -> %s" % (self.qn, operation or compact(a, 150)))
-        line = "%sSEND REST REQUEST %s(%s)" % ("$%s = " % var if var else "", operation, self._args(a.get("ParameterMappings")))
+        args = self._args(a.get("ParameterMappings"))
+        query = self._args([m for m in a.get("QueryParameterMappings") or [] if m.get("Included") != "No"])
+        line = "%sSEND REST REQUEST %s(%s)" % ("$%s = " % var if var else "", operation, ", ".join(x for x in (args, query) if x))
         if body_var:
             line += " body=$" + body_var
         known = {"$ID", "$Type", "Operation", "RestOperation", "OutputVariable", "OutputVariableName", "BodyVariable",
-                 "ParameterMappings", "ErrorHandlingType"}
+                 "ParameterMappings", "QueryParameterMappings", "BaseUrlParameterMapping", "ErrorHandlingType"}
         rest = compact({k: v for k, v in a.items() if k not in known}, 300)
         return line, ["details: " + rest] if rest else []
 
