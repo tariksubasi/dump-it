@@ -189,7 +189,9 @@ const SYNONYMS = {
     groupBox: { title: "use \"caption\"", header: "use \"caption\"" },
     image: { entity: "a dynamic image shows the object of the data view / list view / gallery around it (or over \"association\")", attribute: "a dynamic image shows the whole System.Image object around it; leave out attribute" },
     referenceSelector: { entity: "the entity is the data view's; give \"association\"", captionAttribute: "use \"attribute\"" },
-    comboBox: { caption: "use \"captionAttribute\" (the attribute of the other entity) or \"label\"" },
+    comboBox: { caption: "use \"captionAttribute\" (the attribute of the other entity) or \"label\"",
+        required: "a combo box (pluggable) has no validation in Studio Pro; use a referenceSelector or dropDown with \"required\", or check it in the save microflow",
+        validation: "a combo box (pluggable) has no validation in Studio Pro; use a referenceSelector or dropDown with \"validation\"", format: "a combo box shows its caption attribute as it is" },
     gallery: { fields: "use \"widgets\" (per item)", rows: "use \"pageSize\"", listenTo: `a gallery cannot listen; ${MASTER_DETAIL}` }
 };
 const KINDS = [...Object.keys(WIDGETS), ...Object.keys(INPUTS)];
