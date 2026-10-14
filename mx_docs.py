@@ -254,7 +254,7 @@ class PageRenderer:
             facts = self._facts(w)
             caption = self._caption(w)
             kids = self._children(w)
-            if not facts and not caption and (kind in TRANSPARENT or not kids):
+            if not facts and not caption and w["$Type"] != CUSTOM and (kind in TRANSPARENT or not kids):
                 self._widgets(kids, indent)
                 continue
             line = "%s- %s %s" % ("  " * indent, kind, w.get("Name"))
@@ -385,6 +385,8 @@ class PageRenderer:
             for k in ("Microflow", "Nanoflow", "Form"):
                 if v.get(k):
                     out.append("%s: %s %s" % (key, k.lower(), v[k]))
+            if v.get("PrimitiveValue") not in (None, "") and v["PrimitiveValue"] not in default:
+                out.append("%s: %s" % (key, v["PrimitiveValue"]))
             if v.get("Selection") not in (None, "None"):
                 out.append("%s: selection %s" % (key, v["Selection"]))
             if clean(v.get("XPathConstraint")):
