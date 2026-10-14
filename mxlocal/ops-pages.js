@@ -257,7 +257,8 @@ const PAGE_FIELDS = {
     native: "optional true: a native mobile page (a NativePhone layout of the project; widgets: text, container, actionButton, dataView, listView, input / textBox / checkBox / datePicker); refused when the project has no native layout"
 };
 const MENU_FIELDS = {
-    page: "R Module.Page (without page parameters); a native page becomes a bottom bar item of the native profile",
+    page: "Module.Page (without page parameters); a native page becomes a bottom bar item of the native profile",
+    action: "optional instead of page: the menu item's action, as on actionButton: \"signOut\", { \"action\": \"openLink\", \"url\": \"https://...\" }, { \"action\": \"callMicroflow\", \"microflow\": ... } (no object around it), create, sync; needs caption",
     profile: "optional navigation profile: Responsive, Tablet, Phone, Native or its name (default Responsive; a native page: the native profile)",
     caption: "optional (default: the page title)",
     parent: "optional caption of an existing menu item to put it under"
@@ -3446,6 +3447,8 @@ function makePages(h) {
     const opens = (it, qn) => it.action instanceof pages.PageClientAction && it.action.pageSettings && it.action.pageSettings.pageQualifiedName === qn;
 
     async function menuItem(o, where, ctx) {
+        if (o.action !== undefined) return actionMenuItem(o, where, ctx);
+        if (o.page === undefined && !o.pageObj) throw new Error(`${where}: give "page" (the page it opens) or "action" (e.g. "signOut", { "action": "openLink", "url": "https://..." })`);
         const page = o.pageObj || (await h.get(o.page));
         if (!(page instanceof pages.Page)) throw new Error(`${where}: '${o.page}' is not a page`);
         if (page.parameters.length) throw new Error(`${where}: ${page.qualifiedName} has a page parameter (${page.parameters.map(p => p.name).join(", ")}); a menu item can only open a page without parameters`);
@@ -3474,6 +3477,30 @@ function makePages(h) {
         a.pageSettings.page = page;
         const seen = await menuRoleLint(where, page, caption);
         return `${profile.name} menu${under}: "${caption}" -> ${page.qualifiedName} (${seen})`;
+    }
+
+    // A menu item with another action than opening a page: sign out, open a link, call a flow without object
+    // parameters, create an object, sync (the action model of buttons; nothing is around a menu item)
+    async function actionMenuItem(o, where, ctx) {
+        if (o.page !== undefined) throw new Error(`${where}: give page or action, not both (an action "showPage" takes its own "page")`);
+        if (o.caption === undefined) throw new Error(`${where}: a menu item with an action needs "caption"`);
+        const profile = await navProfile(o.profile, where);
+        const all = menuItems(profile.menuItemCollection.items);
+        let items = profile.menuItemCollection.items, under = "";
+        if (o.parent) {
+            const p = all.find(x => x.item.caption.translations.some(t => t.text.toLowerCase() === String(o.parent).toLowerCase()));
+            if (!p) fail(`${where}: no menu item '${o.parent}' in the ${profile.name} menu`, o.parent, all.map(x => captionOf(x.item.caption)).filter(Boolean));
+            if (p.depth >= 2) throw new Error(`${where}: '${o.parent}' is already 3 levels deep; pick a higher menu item`);
+            items = p.item.items;
+            under = ` > ${captionOf(p.item.caption)}`;
+        }
+        const c = ctx || { qn: `${profile.name} menu`, untranslated: 0, after: [], names: names(), params: new Map(), vars: new Map(), scope: [], count: { inputs: 0 } };
+        const item = menus.MenuItem.create(model);
+        items.push(item);
+        await textAll(item.caption, String(o.caption), c);
+        const text = await makeAction(o.action, { container: null, name: String(o.caption) }, c, where, a => (item.action = a), { button: true });
+        for (const f of c.after) f();
+        return `${profile.name} menu${under}: "${o.caption}" -> ${text}`;
     }
 
     // A bottom bar item of a native profile (G13): caption + a native page (Studio Pro: Navigation > Native > Bottom bar)
@@ -3925,6 +3952,10 @@ function makePages(h) {
             return r;
         },
         async addMenuItem(o) {
+            if (o.action !== undefined) {
+                const profile = await navProfile(o.profile, "check");
+                return menuItems(profile.menuItemCollection.items).some(x => captionOf(x.item.caption) === String(o.caption) && !(x.item.action instanceof pages.NoClientAction)) ? [] : [`the ${profile.name} menu has no item "${o.caption}" with an action`];
+            }
             return (await menuHas(o.profile, o.page)) ? [] : [`${o.page} is not in the ${o.profile || "Responsive"} menu`];
         },
         async setHomePage(o) {

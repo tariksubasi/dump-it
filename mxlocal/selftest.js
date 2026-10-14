@@ -1360,6 +1360,10 @@ async function selftest(mpr, keep, { out, relevant }) {
             s2 = await reopen(copy);
         }
 
+        // phase pages2 (selftest-pages2.js): attribute paths, the action model, validation, formats, form settings, page
+        // variables, select page, Data grid 2 export, native navigation, and the refusals
+        s2 = await require("./selftest-pages2").pages2Phase({ s2, reopen, copy, mod, T, layout, layoutProblems, check, results, userRole });
+
         // phase 4 + 5: change a page Studio Pro saved (add into a column, change a caption and a class), then move the
         // text into the new container, delete that and put the class back: the page must be byte for byte what it was
         const pe = editablePage(s2.ctx.project, mod, T, M);
