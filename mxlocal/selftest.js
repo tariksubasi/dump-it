@@ -975,6 +975,147 @@ function sameOutside(before, after, ids = new Set()) {
     return { same: bson.encode(ca).equals(bson.encode(cb)), compared: idsIn(ca).size, added: added.length, removed: removed.length };
 }
 
+
+// ------------------------------------------------ pages phase P: generic pluggable widgets, design, files, filters,
+// sort, URL, role visibility, native page
+
+// Every installed pluggable widget with a Studio Pro-saved instance of the same .mpk: the type built from the .mpk must
+// equal the instance's type (ids aside). { compared, problems }
+function pluggableSamples(project) {
+    const pl = require("./pluggable");
+    const strip = o => (Array.isArray(o) ? o.map(strip) : o && typeof o === "object" && !Buffer.isBuffer(o) ? Object.fromEntries(Object.entries(o).filter(([k]) => k !== "$ID").map(([k, v]) => [k, strip(v)])) : o);
+    const done = new Set(), problems = [];
+    for (const id of project.units.keys()) {
+        const u = project.read(id);
+        if (u.$Type !== "Forms$Page" && u.$Type !== "Forms$Snippet") continue;
+        walkPlain(u, o => {
+            if (o.$Type !== "CustomWidgets$CustomWidget" || done.has(o.Type.WidgetId)) return;
+            const def = pl.installed(project.dir).get(o.Type.WidgetId);
+            if (!def || pl.typeDiff(o.Type, def).length) return;
+            done.add(o.Type.WidgetId);
+            const keys = {};
+            walkPlain(o.Type, z => (keys[z.$Type] = Object.keys(z)));
+            const want = JSON.stringify(strip(o.Type)), got = JSON.stringify(strip(pl.typeJson(pl.widgetXml(project.dir, o.Type.WidgetId), t => keys[t])));
+            if (want !== got) problems.push(`${o.Type.WidgetId} ${def.version}: type built from the .mpk differs from ${u.Name}.${o.Name}`);
+        });
+    }
+    return { compared: done.size, problems };
+}
+
+// What the project offers for phase P: web pluggable widgets of widgets/*.mpk, design properties, native layouts.
+function pagesTargets(project, model) {
+    const pl = require("./pluggable");
+    const design = require("./design");
+    const out = { widgets: [], design: design.definitions(project.dir).size > 0, native: null, grid2: null, filters: false };
+    for (const [id] of pl.installed(project.dir)) {
+        let t;
+        try {
+            t = pl.typeJson(pl.widgetXml(project.dir, id));
+        } catch (e) {
+            continue;
+        }
+        if (!t.WidgetPluginWidget || t.SupportedPlatform === "Native") continue;
+        out.widgets.push({ id, context: t.WidgetNeedsEntityContext });
+    }
+    out.grid2 = out.widgets.some(w => w.id === "com.mendix.widget.web.datagrid.Datagrid");
+    out.filters = out.grid2 && ["datagridtextfilter.DatagridTextFilter", "datagridnumberfilter.DatagridNumberFilter"].every(f => out.widgets.some(w => w.id.endsWith(f)));
+    for (const id of project.units.keys()) {
+        const u = project.read(id);
+        if (u.$Type === "Forms$Layout" && u.Content && u.Content.$Type === "Forms$NativeLayoutContent") out.native = true;
+    }
+    return out;
+}
+
+function pagesPlan(mod, T, x, wt) {
+    const E = `${mod}.${T}`, role = `${mod}.ZzRole`;
+    const plain = x.widgets.filter(w => !w.context).map((w, i) => ({ widget: "pluggable", type: w.id, name: `zzPl${i}` }));
+    const inDv = x.widgets.filter(w => w.context).map((w, i) => ({ widget: "pluggable", type: w.id, name: `zzPlc${i}` }));
+    const design = x.design ? { design: { "Spacing": { "margin-top": "M" } } } : {};
+    const ops = [
+        { op: "createPage", module: mod, name: `${T}_Plug`, entity: E, folder: "ZzTest", url: `zz-plug-${T.toLowerCase()}`,
+            widgets: [
+                { widget: "container", name: "zzPlBox", visible: { roles: [role] }, ...design, widgets: plain },
+                { widget: "dataView", name: "zzPlDv", source: "parameter", editable: false, fields: [], widgets: inDv },
+                { widget: "listView", name: "zzPlList", search: ["Title"], sort: [{ attribute: "Count", direction: "desc" }], fields: ["Title"] },
+                { widget: "templateGrid", name: "zzPlTiles", search: true, sort: ["Title"], widgets: [{ widget: "text", text: "{Title}" }] },
+                { widget: "dataGrid", name: "zzPlClassic", columns: ["Title", "Count"], search: ["Title"], sort: ["Title"] },
+                ...(x.grid2 ? [{ widget: "dataGrid", kind: "datagrid2", name: "zzPlGrid", columns: ["Title", "Count", "When"], filters: x.filters, sort: [{ attribute: "When", direction: "desc" }],
+                    paging: "loadMore", selection: "Multi", rowClass: "if $currentObject/Flag then 'zz-flag' else ''" },
+                { widget: "pluggable", type: "Datagrid", name: "zzPlGeneric", properties: { datasource: { entity: E, xpath: "[Count > 1]" }, itemSelection: "Single",
+                    columns: [{ attribute: "Title", header: "Title" }, { showContentAs: "dynamicText", dynamicText: "{Title} ({Count})", header: "Both" }] } },
+                { widget: "dataView", name: "zzPlDetail", listenTo: "zzPlGeneric", editable: false, fields: ["Title"] }] : []),
+                { widget: "actionButton", name: "zzPlBtn", action: "close", ...(x.design ? { design: { "Size": "Large" } } : {}) }] },
+        { op: "changePage", page: `${E}_Plug`, popupWidth: 640, popupHeight: 480, popupResizable: false, title: "Plug" },
+        { op: "changePage", page: `${E}_Plug`, renameParameter: { from: T, to: `${T}Item` } },
+        ...(x.design ? [{ op: "changeWidget", page: `${E}_Plug`, widget: "zzPlBtn", design: { "Size": null, "Full width": true } }] : []),
+        ...(x.grid2 ? [{ op: "addWidgets", page: `${E}_Plug`, into: "zzPlGeneric", slot: "columns 1/content", widgets: [{ widget: "text", name: "zzPlCell", text: "{Title}" }] }] : []),
+        ...(wt.imageEntity ? [{ op: "createPage", module: mod, name: `${T}_Upload`, entity: wt.imageEntity, folder: "ZzTest", widgets: [{ widget: "dataView", source: "parameter", fields: [],
+            widgets: [{ widget: "imageUploader", maxFileSize: 2 }, { widget: "fileManager", type: "download" }] }] }] : []),
+        ...(x.native ? [{ op: "createPage", module: mod, name: `${T}_Native`, native: true, entity: E, folder: "ZzTest",
+            widgets: [{ widget: "text", text: "Items" }, { widget: "listView", fields: ["Title"] }, { widget: "dataView", source: "parameter", fields: ["Title", "Flag"], footer: [{ widget: "actionButton", action: "save" }] }] }] : [])
+    ];
+    return { ops };
+}
+
+// The stored phase-P pages: every pluggable widget's type equals the one built from its .mpk, its object has one
+// property per non-system property type, design / roles / URL / sort / search / filters as asked.
+function pagesProblems(project, mod, T, x, wt) {
+    const pl = require("./pluggable");
+    const strip = o => (Array.isArray(o) ? o.map(strip) : o && typeof o === "object" && !Buffer.isBuffer(o) ? Object.fromEntries(Object.entries(o).filter(([k]) => k !== "$ID").map(([k, v]) => [k, strip(v)])) : o);
+    const r = [];
+    const byName = n => [...project.units.keys()].map(id => project.read(id)).find(u => u.$Type === "Forms$Page" && u.Name === n);
+    const page = byName(`${T}_Plug`);
+    if (!page) return ["page missing"];
+    if (page.Url !== `zz-plug-${T.toLowerCase()}`) r.push(`url is '${page.Url}'`);
+    if (page.PopupWidth !== 640 || page.PopupResizable !== false) r.push("pop-up size not stored");
+    if (!page.Parameters.some(p => p.Name === `${T}Item`)) r.push("parameter not renamed");
+    let plugs = 0;
+    const named = {};
+    walkPlain(page, o => {
+        if (o.Name) named[o.Name] = o;
+        if (o.$Type !== "CustomWidgets$CustomWidget") return;
+        plugs++;
+        const keys = {};
+        walkPlain(o.Type, z => (keys[z.$Type] = Object.keys(z)));
+        const built = pl.typeJson(pl.widgetXml(project.dir, o.Type.WidgetId), t => keys[t]);
+        if (JSON.stringify(strip(o.Type)) !== JSON.stringify(strip(built))) r.push(`${o.Name}: type differs from widgets/*.mpk`);
+        const n = o.Type.ObjectType.PropertyTypes.filter(p => p.ValueType.Type !== "System").length;
+        if (o.Object.Properties.length !== n) r.push(`${o.Name}: ${o.Object.Properties.length} properties, the type has ${n}`);
+    });
+    const want = x.widgets.length + (x.grid2 ? 2 + (x.filters ? 3 : 0) : 0);
+    if (plugs < want) r.push(`${plugs} pluggable widgets stored, expected ${want}`);
+    const box = named.zzPlBox;
+    if (!box || !box.ConditionalVisibilitySettings || !(box.ConditionalVisibilitySettings.ModuleRoles || []).includes(`${mod}.ZzRole`)) r.push("zzPlBox is not visible by module role");
+    if (x.design) {
+        if (!box || !box.Appearance.DesignProperties.some(d => d.Key === "Spacing")) r.push("zzPlBox has no Spacing design property");
+        const b = named.zzPlBtn;
+        if (!b || !b.Appearance.DesignProperties.some(d => d.Key === "Full width") || b.Appearance.DesignProperties.some(d => d.Key === "Size")) r.push("zzPlBtn design not changed");
+    }
+    const lv = named.zzPlList;
+    if (!lv || !lv.DataSource.Search.SearchRefs.length || !lv.DataSource.SortBar.SortItems.length) r.push("list view search / sort missing");
+    const tg = named.zzPlTiles;
+    if (!tg || !(tg.DataSource.SearchBar.NewButtons || tg.DataSource.SearchBar.Items || []).length || !tg.DataSource.SortBar.SortItems.length) r.push("template grid search / sort missing");
+    if (x.grid2) {
+        if (!named.zzPlCell) r.push("addWidgets into the Data grid 2 column content missing");
+        let srt = false;
+        walkPlain(named.zzPlGrid || {}, o => o.$Type === "CustomWidgets$CustomWidgetXPathSource" && o.SortBar && o.SortBar.SortItems.length && (srt = true));
+        if (!srt) r.push("Data grid 2 default sort missing");
+        const dv = named.zzPlDetail;
+        if (!dv || dv.DataSource.ListenTarget !== "zzPlGeneric") r.push("the data view does not listen to the generic Data grid 2");
+    }
+    if (wt.imageEntity) {
+        const up = byName(`${T}_Upload`);
+        let iu = 0, fm = 0;
+        walkPlain(up || {}, o => (o.$Type === "Forms$ImageUploader" && iu++, o.$Type === "Forms$FileManager" && fm++));
+        if (iu !== 1 || fm !== 1) r.push("image uploader / file manager missing");
+    }
+    if (x.native) {
+        const np = byName(`${T}_Native`);
+        if (!np || !/NativePhone/.test(np.FormCall.Form)) r.push("native page missing or not on a native layout");
+    }
+    return r;
+}
+
 async function reopen(copy) {
     const ctx = await loadProject(copy);
     const client = new LocalClient(ctx);
@@ -1156,6 +1297,36 @@ async function selftest(mpr, keep, { out, relevant }) {
             s2 = await reopen(copy);
         }
 
+        // phase P: generic pluggable widgets (every installed web widget, defaults as Studio Pro drops it, compared with
+        // the Studio Pro-saved ones), Data grid 2 filters / sort / paging, search and sort of classic lists, design
+        // properties, visibility by module role, URL, pop-up size, parameter rename, file widgets, native page
+        if (pageable) {
+            const samples = pluggableSamples(s2.ctx.project);
+            check(`generic pluggable builder: the type built from widgets/*.mpk equals Studio Pro's for ${samples.compared} widget(s) with a sample`, !samples.problems.length, samples.problems.slice(0, 4).join("; "));
+            const px = pagesTargets(s2.ctx.project, s2.model);
+            if (!px.design) results.push("SKIP design properties: no themesource/*/web/design-properties.json");
+            if (!px.native) results.push("SKIP native page: no native layout");
+            if (!wt.imageEntity) results.push("SKIP image uploader / file manager: no entity inheriting System.Image");
+            if (!px.grid2) results.push("SKIP Data grid 2 filters / sort / generic Data grid 2: widgets/ has no Data grid 2");
+            const phaseP = pagesPlan(mod, T, px, wt);
+            await s2.ops.runPlan(phaseP, () => {});
+            await s2.model.flushChanges();
+            enc = s2.client.encode();
+            const layP = layoutProblems(layout, enc);
+            const lostP = lostProperties(s2.client, s2.model, enc);
+            s2.client.project.writeEncoded(enc);
+            s2 = await reopen(copy);
+            const failedP = await s2.ops.checkPlan(phaseP);
+            const pp = pagesProblems(s2.ctx.project, mod, T, px, wt);
+            const errs = [];
+            for (const u of s2.model.allUnits().filter(u => u.isLoadable && !u.isLoaded)) await s2.model.loadUnitById(u.id, false).catch(e => errs.push(e.message));
+            await s2.model.flushChanges();
+            if (s2.client.log.length) errs.push(`${s2.client.log.length} deltas on open`);
+            const allP = [...layP.problems.slice(0, 3), ...lostP, ...failedP, ...pp, ...errs];
+            check(`pages P: ${px.widgets.length} pluggable widget(s) built from widgets/*.mpk with Studio Pro's defaults${px.grid2 ? ", Data grid 2 filters/sort/paging/row class + generic one listened to + addWidgets into a column" : ""}, list view / template grid / classic grid search + sort, ${px.design ? "design properties (+ changeWidget), " : ""}visibility by module role, URL, pop-up size, parameter rename${wt.imageEntity ? ", image uploader + file manager" : ""}${px.native ? ", native page" : ""}`, !allP.length, allP.slice(0, 6).join("; "));
+            s2 = await reopen(copy);
+        }
+
         // phase 4 + 5: change a page Studio Pro saved (add into a column, change a caption and a class), then move the
         // text into the new container, delete that and put the class back: the page must be byte for byte what it was
         const pe = editablePage(s2.ctx.project, mod, T, M);
@@ -1243,7 +1414,7 @@ async function selftest(mpr, keep, { out, relevant }) {
         return ok;
     } catch (e) {
         if (results.length) out(results.map(r => "  " + r).join("\n"));
-        out(`Self test FAILED: ${e.message}\nCopy kept for inspection: ${tmp}`);
+        out(`Self test FAILED: ${e.stack}\nCopy kept for inspection: ${tmp}`);
         return false;
     }
 }
