@@ -1145,6 +1145,9 @@ async function selftest(mpr, keep, { out, relevant }) {
             s2 = await reopen(copy);
         }
 
+        // phase D: domain model details and app settings (selftest-domain.js)
+        s2 = await require("./selftest-domain").domainPhase({ s2, reopen, copy, tmp, mod, T, E, role, layout, check, results, layoutProblems, lostProperties, src });
+
         // phase 4 + 5: change a page Studio Pro saved (add into a column, change a caption and a class), then move the
         // text into the new container, delete that and put the class back: the page must be byte for byte what it was
         const pe = editablePage(s2.ctx.project, mod, T, M);

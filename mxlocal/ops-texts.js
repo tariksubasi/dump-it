@@ -34,9 +34,9 @@ const TEXT_OPS = {
         fields: { code: "R language code, e.g. tr_TR, de_DE, nl_NL", default: "optional true: make it the default language (the language plain-string texts are written in)" }
     },
     setTranslations: {
-        doc: "Translate existing texts: page titles, widget captions/texts/labels/placeholders, enumeration captions, show-message and validation-feedback texts, validation rule messages, menu captions. Find them with: texts Module[.Document] [--missing <code>].",
+        doc: "Translate existing texts: page titles, widget captions/texts/labels/placeholders, enumeration captions, show-message and validation-feedback texts, validation rule messages, menu captions, system texts. Find them with: texts Module[.Document] | system [--missing <code>].",
         fields: {
-            translations: "R [ { \"where\": \"<as texts lists it, e.g. Sales.Order_Edit.saveButton [caption]>\", \"language\": \"tr_TR\", \"text\": \"Kaydet\" } ]; where: Module.Page (title), Module.Page.widget [part], Module.Enumeration.Value, Module.Flow.<step id from steps>, Module.Entity.Attribute [rule], menu:Responsive/Caption; {Attribute} shows a value as in the default text; \"text\" may also be { \"tr_TR\": ..., \"de_DE\": ... } without language",
+            translations: "R [ { \"where\": \"<as texts lists it, e.g. Sales.Order_Edit.saveButton [caption]>\", \"language\": \"tr_TR\", \"text\": \"Kaydet\" } ]; where: Module.Page (title), Module.Page.widget [part], Module.Enumeration.Value, Module.Flow.<step id from steps>, Module.Entity.Attribute [rule], menu:Responsive/Caption, system:<key> (system texts, e.g. system:mendix.signin.username; list: texts system); {Attribute} shows a value as in the default text; \"text\" may also be { \"tr_TR\": ..., \"de_DE\": ... } without language",
             language: "optional language for items without one"
         }
     }
@@ -289,10 +289,21 @@ function makeTexts(h) {
     };
     const TEXT_UNITS = u => isA(u, pages.Page, pages.Snippet, pages.Layout, enumerations.Enumeration, mf.MicroflowBase, dm.DomainModel, menus && menus.MenuDocument);
 
+    // System texts (App > Languages > System texts) by key: where "system:mendix.signin.username".
+    async function systemTexts() {
+        const out = [];
+        for (const c of model.allSystemTextCollections ? model.allSystemTextCollections() : []) {
+            const col = await c.load();
+            for (const st of col.systemTexts) if (st.text) out.push({ where: `system:${st.key}`, part: "text", t: st.text, ct: null });
+        }
+        return out;
+    }
+
     // The texts of a scope: nothing = the project's own modules and the menus, "Module", "Module.Document",
-    // "Module.Entity", "menu" (navigation).
+    // "Module.Entity", "menu" (navigation), "system" (system texts).
     async function textsIn(scope, ls) {
         const s = String(scope || "").trim();
+        if (/^system(:.*)?$/i.test(s)) return systemTexts();
         if (/^(menu|navigation)(:.*)?$/i.test(s)) return navigationTexts(ls);
         if (s.includes(".")) {
             const doc = await get(s.split("/")[0]);
@@ -343,6 +354,15 @@ function makeTexts(h) {
         const part = partIn || (m && m[2]);
         if (!at) throw new Error(`${where}: needs "where" (as the texts command lists it)`);
         let scope;
+        if (/^system:/i.test(at)) {
+            const all = await textsIn("system", ls);
+            const key = at.replace(/^system:\s*/i, "");
+            const hit = all.find(e => e.where.toLowerCase() === `system:${key}`.toLowerCase()) || all.find(e => e.where.toLowerCase() === `system:mendix.${key}`.toLowerCase());
+            if (hit) return hit;
+            const keys = all.map(e => e.where.slice(7));
+            const s = suggest(key, keys, 5).length ? suggest(key, keys, 5) : keys.filter(k => k.toLowerCase().includes(key.toLowerCase().split(".").pop())).slice(0, 5);
+            throw new Error(`${where}: no system text '${key}'` + (s.length ? `. Did you mean: ${s.map(k => "system:" + k).join(", ")}?` : ` (texts system lists the ${keys.length} keys)`));
+        }
         if (/^menu:/i.test(at)) scope = "menu";
         else {
             const parts = at.split("/")[0].split(".");

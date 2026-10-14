@@ -201,10 +201,13 @@ The live list is `python mx.py ops`. If it differs from this table, trust the li
 
 | Op | Fields | Notes |
 |---|---|---|
-| `createEntity` | **module**, **name**, persistable (default true), generalization (`Module.Parent`), attributes `[{name, type, default}]` | Placed to the right of existing entities |
-| `addAttribute` | **entity**, **name**, **type**, default | Default when not given: Integer/Long/Decimal `0`, Boolean `false`, AutoNumber `1`, others empty |
-| `changeAttribute` | **attribute** (`Module.Entity.Attr`), type, default | At least one of type/default |
-| `addAssociation` | **from**, **to**, name (default `From_To`), type (`Reference`/`ReferenceSet`), owner (`Default`/`Both`) | `from` stores the reference: many `from` → one `to` for Reference. Other module in `to` → cross-module association |
+| `createEntity` | **module**, **name**, persistable (default true), generalization (`Module.Parent`, or `System.FileDocument` / `System.Image` / `System.User`), attributes `[{name, type, default, calculated}]` | Placed to the right of existing entities |
+| `addAttribute` | **entity**, **name**, **type**, default, calculated (`Module.Microflow`) | Default when not given: Integer/Long/Decimal `0`, Boolean `false`, AutoNumber `1`, others empty. `calculated`: the value comes from the microflow (not stored, no default); it has no parameter or one of the entity and returns the attribute's type (Long/Integer: Integer). Existing access rules get the new member with their "new members" rights |
+| `changeAttribute` | **attribute** (`Module.Entity.Attr`), type, default, calculated, stored (`true`) | At least one field. `calculated` makes a stored attribute calculated (`DATA LOSS`: its column is dropped); `"stored": true` stores a calculated one again (existing objects get the default). ReadWrite rights on a now calculated attribute become ReadOnly |
+| `addAssociation` | **from**, **to**, name (default `From_To`), type (`Reference`/`ReferenceSet`), owner (`Default`/`Both`), storage (`Table`/`Column`), onDeleteFrom, onDeleteTo (`keep`/`delete`/`prevent`), messageFrom, messageTo | `from` stores the reference: many `from` → one `to` for Reference. Other module in `to` → cross-module association. Storage default: the app's setting (Mendix 11 apps: Column) for a Reference with owner Default, else Table |
+| `changeAssociation` | **association**, type, owner, storage, onDeleteFrom, onDeleteTo, messageFrom, messageTo | `onDeleteFrom`: what happens when a `from` (owner) object is deleted: `keep` its `to` objects (default), `delete` them too, or `prevent` the delete while linked (needs `messageFrom`, the text shown). `onDeleteTo` the same for a `to` object. Changing the type prints `DATA LOSS` (ReferenceSet → Reference keeps one link per object). Column storage: Reference with owner Default only (a reference set moves to Table). Owner Both adds the association to the `to` entity's access rules. Rename with `rename`; the two ends cannot change |
+| `createViewEntity` | **module**, **name**, **oql**, attributes `[{name, type}]`, folder | Mendix 11+ (Mendix 10 refuses: create it in Studio Pro). A read-only entity whose objects come from the OQL query, with an OQL document of the same name. Every column needs a name (`x.Total * 2 as Twice`); columns that select an attribute (`o.Total as Total`) take its type (AutoNumber → Long), the others need `attributes`. Studio Pro checks the OQL itself when it opens the app |
+| `changeViewEntity` | **entity**, **oql**, attributes | New OQL; attributes follow the columns (new ones added, missing ones removed with `STILL USED BY`) |
 | `setGeneralization` | **entity**, **generalization** (`Module.Parent` or `"none"`), persistable | Refuses loops. Check access rules and pages of the entity afterwards |
 | `addValidationRule` | **entity**, **attribute**, **rule** (`required`/`unique`/`maxLength`/`range`/`regex`/`equals`), **message**, maxLength, min, max, regex, value | |
 | `addEventHandler` | **entity**, **moment** (`Before`/`After`), **event** (`Create`/`Commit`/`Delete`/`RollBack`), **microflow**, passObject (default true), raiseErrorOnFalse | The microflow needs one parameter of the entity (when passObject) and must return Boolean for `Before` |
@@ -223,7 +226,9 @@ The default of an `Enum` attribute is the value name, e.g. `"default": "Open"`.
 | `createModule` | **name**, roles `["RoleName"]` | New module with its domain model, module security and settings (as Studio Pro makes them). Then `addModuleRoles` to give its roles to user roles. A plan that needs a module that does not exist yet starts with this op |
 | `createModuleRole` | **module**, **name**, description | |
 | `grantAccess` | **document** (microflow, nanoflow or page), **roles** `["Module.Role"]` | Adds to the allowed roles; existing roles stay |
-| `addAccessRule` | **entity**, **roles**, access (`ReadWrite`/`ReadOnly`/`None`, default `ReadOnly`), members `{"Attr":"ReadWrite"}`, create, delete, xpath | Every attribute and owned association gets a member right. AutoNumber and calculated attributes are never more than ReadOnly |
+| `addAccessRule` | **entity**, **roles**, access (`ReadWrite`/`ReadOnly`/`None`, default `ReadOnly`), members `{"Attr":"ReadWrite"}`, create, delete, xpath, newMembers | Every member gets a right, in Studio Pro's order: own attributes, parents' attributes, owned associations (also the `to` side of an owner-Both association). Members of `System.FileDocument`/`System.Image` parents are listed too (`"Name"` or `"System.FileDocument.Name"`; FileID, HasContents, Size, PublicThumbnailPath read-only). `System.User` members (Name, Password, ...) are not part of a specialization's rule (Studio Pro does not list them either): refused with that reason. AutoNumber, calculated and view entity attributes are never more than ReadOnly. `newMembers`: rights of attributes/associations added later (default: access). A view entity rule cannot create/delete |
+| `changeAccessRule` | **entity**, **roles** (of the rule), rule (number, when several rules have these roles), setRoles, access, members, newMembers, create, delete, xpath | Changes only the given fields; `access` sets every member not in `members` (and the rights of members added later, unless `newMembers`). `xpath: ""` removes the constraint. XPath must be in brackets. Errors list the rules (`rule 2 [Module.User]`) |
+| `deleteAccessRule` | **entity**, **roles**, rule | Says when the roles lose all access to the entity |
 | `revokeAccess` | **document**, **roles** | The opposite of `grantAccess` |
 | `createUserRole` | **name**, **moduleRoles** `["Module.Role"]`, description, manageAllRoles | Project-level role that users get. Gets its own GUID, checks security. `System.User` / `System.Administrator` are accepted (written by name, as Studio Pro stores them) |
 | `addModuleRoles` | **userRole** (e.g. `Administrator`), **moduleRoles** | Typical after a new module role: give it to the user roles that need it |
@@ -594,7 +599,7 @@ What pages cannot do yet (use Studio Pro, and `python mx.py gap "<what>"`):
 | Op | Fields | Notes |
 |---|---|---|
 | `addLanguage` | **code** (e.g. `tr_TR`), default (true = make it the default language) | Adds the language as Studio Pro does (Settings > Languages). Existing texts keep their languages: list the untranslated ones with `texts --missing tr_TR`. A wrong code gets a did-you-mean (`Turkish`, `tr` -> `tr_TR`) |
-| `setTranslations` | **translations** `[{"where", "language", "text"}]`, language (for items without one) | `where` as `texts` lists it: `Module.Page [title]`, `Module.Page.widget [caption\|text\|label\|placeholder\|...]`, `Module.Enumeration.Value`, `Module.Flow.<step id>` (show message / validation feedback), `Module.Entity.Attribute [required\|unique\|maxLength\|range\|regex\|equals]` (validation message), `menu:Responsive/Caption/Sub`. The `[part]` may be left out when the place has one text. `{Attribute}` shows the same value as in the default text. `"text": {"tr_TR": ..., "de_DE": ...}` sets several languages at once |
+| `setTranslations` | **translations** `[{"where", "language", "text"}]`, language (for items without one) | `where` as `texts` lists it: `Module.Page [title]`, `Module.Page.widget [caption\|text\|label\|placeholder\|...]`, `Module.Enumeration.Value`, `Module.Flow.<step id>` (show message / validation feedback), `Module.Entity.Attribute [required\|unique\|maxLength\|range\|regex\|equals]` (validation message), `menu:Responsive/Caption/Sub`, `system:mendix.signin.username` (system texts: `texts system` lists the keys; `mendix.` may be left out). The `[part]` may be left out when the place has one text. `{Attribute}` shows the same value as in the default text. `"text": {"tr_TR": ..., "de_DE": ...}` sets several languages at once |
 
 Per-language texts in every op: wherever an op takes a text (captions, titles, texts, labels, placeholders,
 enumeration captions, messages, validation messages, menu captions), it also takes
@@ -616,8 +621,23 @@ Studio Pro stores a translation per language in the text; the order is the order
 ```
 
 Pluggable widget texts are listed and translated by path, e.g. `Module.Page.dataGrid1 [columns[2].header]`. Not
-supported: removing a language, menu captions of native navigation profiles, system texts (Studio Pro's App >
-Language > System texts) and the date/time formats of a language.
+supported: removing a language, menu captions of native navigation profiles, pluggable widget system texts and the
+date/time formats of a language. System texts (App > Language > System texts) are translated by key:
+
+```json
+{ "ops": [ { "op": "setTranslations", "language": "tr_TR", "translations": [
+  { "where": "system:mendix.signin.username", "text": "Kullanıcı adı" },
+  { "where": "system:mendix.signin.password", "text": "Parola" } ] } ] }
+```
+
+### App settings, configurations, images
+
+| Op | Fields | Notes |
+|---|---|---|
+| `setProjectSettings` | afterStartup, beforeShutdown, healthCheck (`Module.Microflow`, `""` = none), hashAlgorithm (`BCrypt`/`SSHA256`), bcryptCost (10..15), roundingMode (`HalfUp`/`HalfEven`), firstDayOfWeek (`Default`/`Sunday`..`Saturday`), defaultTimeZone (e.g. `Europe/Istanbul`, `""` = none) | App > Settings. The microflows have no parameters; after startup returns Boolean, health check returns String. A wrong time zone gets a did-you-mean (`istanbul` -> `Europe/Istanbul`) |
+| `setConfiguration` | **name**, applicationRootUrl, constants `{"Module.Constant": "value"}` (`null` = use the default), customSettings `{"Name": "value"}` (`null` = remove) | App > Settings > Configurations. A new name creates a configuration like the first one (without its database password). Database settings: Studio Pro |
+| `createImageCollection` | **module**, **name**, folder | |
+| `addImage` | **collection**, **file**, name (default the file name), replace | A PNG, JPG or SVG file inside the export folder (e.g. copy it to `edits/logo.png`), at most 2 MB; the kind is read from the content. Use it in a static image widget or button by `Module.Collection.Image` |
 
 ### Constants, scheduled events, REST
 
@@ -658,6 +678,34 @@ The export shows a structure as `json/path: Name type` lines and a mapping as `j
 | `delete` | **target** | Deletes a document, entity, attribute, association, enumeration value or module role. Lists documents that still use it (`STILL USED BY`) |
 
 ### Examples
+
+Domain model details: a calculated attribute, an association that deletes its lines and refuses to delete a
+customer with orders, a view entity, and access rules (with a System.Image specialization):
+
+```json
+{ "ops": [
+  { "op": "createMicroflow", "module": "Sales", "name": "CAL_Order_Total", "parameters": [ { "name": "Order", "type": "Sales.Order" } ], "returns": "Decimal", "returnValue": "$Order/Amount * 1.2" },
+  { "op": "addAttribute", "entity": "Sales.Order", "name": "TotalVat", "type": "Decimal", "calculated": "Sales.CAL_Order_Total" },
+  { "op": "changeAssociation", "association": "Sales.OrderLine_Order", "onDeleteTo": "delete" },
+  { "op": "changeAssociation", "association": "Sales.Order_Customer", "onDeleteTo": "prevent", "messageTo": { "en_US": "This customer still has orders", "tr_TR": "Bu müşterinin siparişleri var" } },
+  { "op": "createViewEntity", "module": "Sales", "name": "CustomerTotals", "oql": "from Sales.Order as o\nselect o/Sales.Order_Customer/Sales.Customer/Name as Customer, sum(o.Amount) as Total\ngroup by o/Sales.Order_Customer/Sales.Customer/Name", "attributes": [ { "name": "Customer", "type": "String(200)" }, { "name": "Total", "type": "Decimal" } ] },
+  { "op": "createEntity", "module": "Sales", "name": "ProductPhoto", "generalization": "System.Image" },
+  { "op": "addAccessRule", "entity": "Sales.ProductPhoto", "roles": ["Sales.User"], "access": "ReadWrite", "create": true, "members": { "Name": "ReadOnly" } },
+  { "op": "changeAccessRule", "entity": "Sales.Order", "roles": ["Sales.User"], "xpath": "[Sales.Order_Owner = '[%CurrentUser%]']", "members": { "Amount": "ReadOnly" }, "delete": false, "newMembers": "None" },
+  { "op": "deleteAccessRule", "entity": "Sales.Order", "roles": ["Sales.Guest"] }
+] }
+```
+
+App settings, a test configuration, an image:
+
+```json
+{ "ops": [
+  { "op": "setProjectSettings", "afterStartup": "Sales.ASU_Startup", "healthCheck": "Sales.HC_Database", "firstDayOfWeek": "Monday", "defaultTimeZone": "Europe/Istanbul", "roundingMode": "HalfEven" },
+  { "op": "setConfiguration", "name": "Test", "applicationRootUrl": "https://test.example.com/", "constants": { "Sales.ApiUrl": "https://api-test.example.com" }, "customSettings": { "ClientRequestTimeout": "60000" } },
+  { "op": "createImageCollection", "module": "Sales", "name": "Images" },
+  { "op": "addImage", "collection": "Sales.Images", "file": "edits/logo.png" }
+] }
+```
 
 Add an attribute:
 
@@ -837,7 +885,10 @@ business event and calling an ML model (refused with the Studio Pro steps), gene
 Generate document action yet, moving or extracting steps that have a custom error handler or a decision in between,
 extracting steps that make more than one variable used later, changing a Java/JavaScript action after it was created
 (add parameters in Studio Pro; ops keep the user code when a file exists), and renaming or deleting a Java action's
-file (`rename`/`delete` change the model only). For these, write
+file (`rename`/`delete` change the model only). Also: rights on `System.User` members in a specialization's access rule (Studio Pro does not offer them), view
+entities in Mendix 10 (beta; Mendix 11 has `createViewEntity`), creating or changing external entities (consumed
+OData: the export only shows them), database settings of a configuration, and access rules of System module
+entities. For these, write
 `edits/<name>.js` with the Mendix Model SDK, or give the user Studio Pro steps. Prefer Studio Pro steps when the
 change is large or risky.
 

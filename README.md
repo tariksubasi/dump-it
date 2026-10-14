@@ -117,7 +117,7 @@ istemiyorsan export'u `--no-mcp` ile al.
 
 | Alan | Yapabildikleri |
 |---|---|
-| Domain model | Entity, attribute (tüm tipler), association, kalıtım (generalization), validation rule, event handler, index, enumeration |
+| Domain model | Entity, attribute (tüm tipler), association, kalıtım (generalization; `System.Image` / `System.FileDocument` / `System.User` dahil), validation rule, event handler, index, enumeration; **hesaplanan (calculated) attribute** (microflow ile; stored <-> calculated geçişi, kolon düşerse DATA LOSS satırı); **association ayarları** (Reference <-> ReferenceSet, owner Default/Both, Table/Column saklama, silmede: bağlıları da sil / tut / mesajla engelle; tip değişince DATA LOSS satırı); **view entity** (Mendix 11+, OQL'den; kolon tipleri seçilen attribute'lardan; Mendix 10'da açık mesajla reddedilir); external entity'ler (consumed OData) export'ta görünür, değiştirilmez |
 | Microflow / nanoflow | Oluşturma; retrieve, create, change, commit, delete, rollback, call, log, mesaj, değişken, sayfa aç/kapat, ana sayfa; **karar (if), nesne tipi kararı + cast, döngü (liste / while), break, continue, hata yakalama (error handler)** |
 | Enumeration kararı ve rule | **switch**: enumeration değerine göre her değer (ya da "A, B") için ayrı yol, kalanlar için `other`, boş değer için `empty`, sonra birleşme; **rule** dokümanı (Boolean ya da enumeration döner, sadece okur/hesaplar) ve rule çağıran karar (`if`/`switch` + `rule` + `args`) |
 | Java / JavaScript action | `createJavaAction` / `createJavaScriptAction`: parametreler (metin, sayı, tarih, entity, liste, enumeration, tip parametresi `EntityType(T)` / `Object(T)` / `List(T)`, microflow / nanoflow), dönüş tipi, toolbox'ta aksiyon olarak gösterme; **Java/JS dosyası Studio Pro'nun ürettiği gibi** (`javasource/<modül>/actions/<Ad>.java`, `javascriptsource/.../<Ad>.js`) değişikliğin parçası: dry run'da görünür, yedeklenir, `/geri-al` ile geri alınır; var olan dosyanın import'ları, USER CODE ve EXTRA CODE kısmı korunur; uygulamadan sonra elle değiştirilmiş dosyayı geri alma silmez (önce sorar) |
@@ -130,19 +130,22 @@ istemiyorsan export'u `--no-mcp` ile al.
 | Grid ve gallery aksiyonları | Klasik grid kontrol çubuğu: Yeni / Düzenle / Sil / microflow-nanoflow (seçili satır ya da Multi seçimde satırlar listesi); Data grid 2 ve gallery `onClick`; Data grid 2'de dinamik metin ve özel içerik (satır başına widget) kolonları; **template grid**; **reference set selector**; seçilebilir nesneler microflow'dan; input, selector ve combo box'ta **on change** aksiyonu; `changeWidget` ile butonun aksiyonunu, onClick ve onChange'i değiştirme |
 | Var olan sayfa | Var olan sayfa/snippet'e aynı widget'ları ekleme (container, data view, list view, group box, tab page, layout grid kolonu), widget değiştirme (yazı, etiket, görünürlük, düzenlenebilirlik, class, grid kolonları, XPath, isim), silme, taşıma; `widgets` komutu sayfanın widget ağacını gösterir |
 | Modül | Yeni modül (domain model, modül güvenliği ve ayarlarıyla, Studio Pro'nun oluşturduğu gibi) ve modül rolleri |
-| Güvenlik | Modül rolü, erişim kuralı, microflow/nanoflow/sayfa erişimi verme ve geri alma |
+| Güvenlik | Modül rolü, erişim kuralı ekleme / **değiştirme / silme** (attribute ve association başına ReadWrite/ReadOnly/None, XPath, create/delete, sonradan eklenen üyelerin hakkı; `System.Image`/`System.FileDocument`'ten gelen üyeler dahil, `System.User` üyeleri Studio Pro gibi listelenmez), microflow/nanoflow/sayfa erişimi verme ve geri alma |
 | Kullanıcı rolü | Yeni kullanıcı rolü (modül rolleriyle, `System.User` dahil), var olan kullanıcı rolüne modül rolü ekleme (ör. Administrator'a yeni modülün rolü) |
 | Demo kullanıcı | Bir ya da birkaç kullanıcı rolüyle demo kullanıcı; entity'si diğer demo kullanıcılarınki gibi |
 | Güvenlik seviyesi | Off / Prototype / Production, demo kullanıcıları açma/kapama, misafir (anonymous) erişimi |
 | JSON entegrasyonu | Örnek JSON'dan JSON structure (Studio Pro'nun ürettiği isim, yol ve tiplerle), import ve export mapping (iç içe nesneler ve diziler association ile; eksik entity/attribute/association'ları aynı planda oluşturma ya da var olanlara isimle eşleme, "bunu mu demek istediniz" önerisiyle), import/export with mapping adımları |
-| Diller ve çeviriler | Projeye dil ekleme (ör. `tr_TR`, istenirse varsayılan dil), var olan metinleri çevirme (`setTranslations`: sayfa başlığı, widget caption/metin/etiket/placeholder, enumeration caption'ı, mesaj ve validation feedback metni, validation rule mesajı, menü caption'ı), her op'ta dile göre metin (`"caption": {"en_US": "Save", "tr_TR": "Kaydet"}`; düz metin varsayılan dildir), çevrilecek metinleri listeleme (`python mx.py texts Modül --missing tr_TR`) |
+| Diller ve çeviriler | Projeye dil ekleme (ör. `tr_TR`, istenirse varsayılan dil), var olan metinleri çevirme (`setTranslations`: sayfa başlığı, widget caption/metin/etiket/placeholder, enumeration caption'ı, mesaj ve validation feedback metni, validation rule mesajı, menü caption'ı, **sistem metinleri** `system:mendix.signin.username`), her op'ta dile göre metin (`"caption": {"en_US": "Save", "tr_TR": "Kaydet"}`; düz metin varsayılan dildir), çevrilecek metinleri listeleme (`python mx.py texts Modül --missing tr_TR`) |
+| Uygulama ayarları | After startup / before shutdown / health check microflow'u, hash algoritması (BCrypt/SSHA256), yuvarlama, haftanın ilk günü, varsayılan saat dilimi (`istanbul` -> `Europe/Istanbul` önerisi); **configuration** oluşturma/değiştirme (constant değerleri, custom runtime ayarları, root URL) |
+| Resimler | Image collection oluşturma, export klasöründeki PNG/JPG/SVG dosyasını ekleme (en fazla 2 MB, tip içerikten okunur) |
 | Diğer | Constant, scheduled event, basit published REST operasyonu, doküman taşıma, yeniden adlandırma (modül dahil), silme |
 
 Yapamadıkları (Studio Pro'da ya da SDK script'iyle): layout düzenleme, listede olmayan widget'lar (template grid,
 reference set selector, file manager; Data grid 2, combo box ve gallery dışındaki pluggable widget'lar), parametreli
 snippet çağrısı, design property'ler (Atlas toggle'ları), rol bazlı görünürlük, import/export mapping
 dokümanının kendisi, JSON structure, consumed REST servisi, workflow, nesne gövdeli REST operasyonları; business event
-yayınlama, ML model çağrısı, generate document (projede örneği yoksa), hata yakalayıcısı olan adımları taşıma/ayırma.
+yayınlama, ML model çağrısı, generate document (projede örneği yoksa), hata yakalayıcısı olan adımları taşıma/ayırma; Mendix 10'da view
+entity, external entity oluşturma/değiştirme, configuration'ın veritabanı ayarları.
 
 **Bir kere yapılır:**
 

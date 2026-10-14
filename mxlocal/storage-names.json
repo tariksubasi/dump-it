@@ -284,6 +284,7 @@
 "Rest$PublishedODataMicroflowParameter":{"p":{"propType":"Type"}},
 "Security$DemoUser":{"$":"Security$DemoUserImpl"},
 "Security$ProjectSecurity":{"p":{"adminUserRoleName":"AdminUserRole","guestUserRoleName":"GuestUserRole"}},
+"Settings$Configuration":{"$":"Settings$ServerConfiguration","p":{"runtimePortNumber":"HttpPortNumber","adminPortNumber":"ServerPortNumber","runtimePortOnlyLocal":"OpenHttpPort","adminPortOnlyLocal":"OpenAdminPort"}},
 "Settings$Language":{"$":"Texts$Language"},
 "Settings$ProjectSettings":{"p":{"settingsParts":"Settings"}},
 "Settings$WebUIProjectSettingsPart":{"$":"Forms$WebUIProjectSettingsPart"},

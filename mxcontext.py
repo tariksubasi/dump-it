@@ -17,7 +17,7 @@ import time
 from mx_docs import (PageRenderer, code_action_signature, code_refs, constant_line, enumeration_line, navigation_lines,
                      queue_line, read_source, render_code_action, render_consumed_rest, render_dataset,
                      render_domain_model, render_generic, render_json_structure, render_mapping, render_published_rest,
-                     scheduled_event_line, security_lines, settings_lines)
+                     scheduled_event_line, security_lines, settings_lines, view_entity_lines, image_collection_line)
 from mx_flows import FlowRenderer, flow_signature
 from mx_model import FLOW_TYPES, STRUCTURAL, Context, Index, Project, clean, collect_texts, harvest, kind_of
 from mx_workflows import WorkflowRenderer
@@ -44,7 +44,7 @@ CODE_ACTIONS = {"JavaActions$JavaAction", "JavaScriptActions$JavaScriptAction"}
 UNUSED_CANDIDATES = FLOW_TYPES | CODE_ACTIONS | {"Forms$Page", "Forms$Snippet", "Forms$Layout", "ImportMappings$ImportMapping",
                                                  "ExportMappings$ExportMapping", "JsonStructures$JsonStructure", "DataSets$DataSet",
                                                  "Workflows$Workflow"}
-SKIPPED = {"Forms$PageTemplate", "Forms$BuildingBlock", "Images$ImageCollection", "Projects$ModuleSettings",
+SKIPPED = {"Forms$PageTemplate", "Forms$BuildingBlock", "Projects$ModuleSettings",
            "Texts$SystemTextCollection", "Projects$ProjectConversion"}
 USED_BY = {"Forms$Page", "Forms$Snippet", "Forms$Layout", "ImportMappings$ImportMapping", "ExportMappings$ExportMapping",
            "JsonStructures$JsonStructure", "DataSets$DataSet"}
@@ -408,6 +408,10 @@ class Exporter:
             self._inline(u, "SCHEDULED EVENTS", scheduled_event_line(doc, qn, self.index))
         elif t == "Queues$Queue":
             self._inline(u, "TASK QUEUES", queue_line(doc, qn))
+        elif t == "DomainModels$ViewEntitySourceDocument":
+            self._inline(u, "VIEW ENTITY OQL", "\n".join(view_entity_lines(doc, qn)))
+        elif t == "Images$ImageCollection":
+            self._inline(u, "IMAGE COLLECTIONS", image_collection_line(doc, qn))
         elif qn:
             self._store(u, "other", render_generic(doc, qn))
 
@@ -521,7 +525,7 @@ class Exporter:
         for name, sections in sorted(self.modules.items()):
             module = next(m for m in self.ctx.modules.values() if m.name == name)
             out = ["MODULE %s (%s)" % (name, "marketplace %s" % module.version if module.marketplace else "custom")]
-            for section in ("MODULE ROLES", "ENUMERATIONS", "CONSTANTS", "SCHEDULED EVENTS", "TASK QUEUES"):
+            for section in ("MODULE ROLES", "ENUMERATIONS", "CONSTANTS", "SCHEDULED EVENTS", "TASK QUEUES", "VIEW ENTITY OQL", "IMAGE COLLECTIONS"):
                 if sections.get(section):
                     out += ["", section + ":"] + ["  " + line for line in sorted(sections[section])]
             out += ["", "DOCUMENTS BY FOLDER:"]
