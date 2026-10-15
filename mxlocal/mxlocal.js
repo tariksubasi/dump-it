@@ -42,6 +42,12 @@ const USAGE = `mxlocal - Mendix Model SDK offline on a local .mpr (v2)
                                         createIn functions, what replaced removed types/properties
   node mxlocal.js find <text> --project <app.mpr|folder>
                                         model elements whose qualified name contains <text>
+  node mxlocal.js usages <Module.Name> [--depth n] --project <app.mpr|folder>
+                                        who uses a document, entity, attribute, association, enumeration value,
+                                        ... (by name and in expressions/XPath), grouped by document with the place
+  node mxlocal.js unused [Module] --project <app.mpr|folder>
+                                        documents, entities, attributes, enumeration values nobody references
+                                        (entry points excluded): "probably unused", never deleted automatically
   node mxlocal.js steps <Module.Flow> --project <app.mpr|folder>
                                         the steps of a microflow/nanoflow with ids (for changeAction/deleteAction)
   node mxlocal.js widgets <Module.Page> --project <app.mpr|folder>
@@ -454,6 +460,11 @@ async function main() {
         const client = new LocalClient(ctx);
         const model = await client.open();
         out(await require("./ops").bind(model, client).texts(a._[1], a.missing));
+    } else if (cmd === "usages" || cmd === "unused") {
+        if (cmd === "usages" && !a._[1]) throw new Error("usages needs a qualified name, e.g. usages Sales.Order");
+        const client = new LocalClient(await loadProject(mpr));
+        const refs = require("./refs");
+        out(cmd === "usages" ? refs.usages(client, a._[1], a.depth) : refs.unused(client, a._[1]));
     } else if (cmd === "find") {
         if (!a._[1]) throw new Error("find needs a text, e.g. find Customer");
         const ctx = await loadProject(mpr);
@@ -505,7 +516,7 @@ function report(e, file) {
     const stack = (e && e.stack ? e.stack : "").split("\n").slice(1);
     const own = file && stack.find(l => l.includes(path.resolve(file)));
     if (own) lines.push("  at " + own.trim().replace(/^at /, ""));
-    else if (!/^(No |Nothing |Code |The model|apply needs|run needs|Studio Pro|Expected|--project|Only|This project|Unknown command|Unknown tool|Op \d|ops must be|name: |widgets: )|is a script\. Scripts are off|is not a tool here|true conflict\(s\) need a side|--pick|--all is|different Mendix versions|changed since the dry run|changed after the apply/.test(msg)) lines.push(...stack.slice(0, 4).map(l => "  " + l.trim()));
+    else if (!/^(No |Nothing |Code |The model|apply needs|run needs|Studio Pro|Expected|--project|Only|This project|Unknown command|Unknown tool|Op \d|ops must be|name: |widgets: )|is a script\. Scripts are off|is not a tool here|true conflict\(s\) need a side|--pick|--all is|different Mendix versions|changed since the dry run|changed after the apply|^'[^']*' not found|^usages needs/.test(msg)) lines.push(...stack.slice(0, 4).map(l => "  " + l.trim()));
     const hint = HINTS.find(([re]) => re.test(full)); // the full text: the type names may be past the cut
     if (hint) lines.push("HINT: " + (typeof hint[1] === "function" ? hint[1](full) : hint[1]));
     return lines.join("\n") + "\n";

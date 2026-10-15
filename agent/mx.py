@@ -4,6 +4,10 @@ Copied into the export folder by mxcontext.py with CONFIG filled in, so the agen
 
     python mx.py refresh              re-export the model and show what changed since the last checked state
     python mx.py find <text>          model elements whose name contains <text>
+    python mx.py usages <Module.Name> [--depth n]
+                                      who uses it (by name, expressions, XPath), grouped by document with the place;
+                                      run it before rename, delete, moveEntity or changeMicroflow
+    python mx.py unused [Module]      documents/entities/attributes/enumeration values nobody references (probably)
     python mx.py steps <Module.Flow>  steps of a microflow/nanoflow with ids (for changeAction / deleteAction)
     python mx.py widgets <Module.Page> widgets of a page or snippet: names, kinds, entity, where new ones go
                                       (for addWidgets / changeWidget / deleteWidget / moveWidget)
@@ -48,7 +52,7 @@ for stream in (sys.stdout, sys.stderr):
     except (AttributeError, ValueError):
         pass
 EDITS = os.path.join(HERE, "edits")
-COMMANDS = ("refresh", "find", "steps", "widgets", "widgettype", "texts", "ops", "api", "dryrun", "rerun", "gap", "apply", "undo", "check", "ok",
+COMMANDS = ("refresh", "find", "usages", "unused", "steps", "widgets", "widgettype", "texts", "ops", "api", "dryrun", "rerun", "gap", "apply", "undo", "check", "ok",
             "selftest", "mergecheck", "mergefix")
 last_output = ""
 
@@ -208,6 +212,15 @@ def main(argv):
             say("Usage: python mx.py find <part of a name>")
             return 1
         return mxlocal("find", " ".join(rest))
+    if cmd == "usages":
+        names = [a for i, a in enumerate(rest) if not a.startswith("--") and (i == 0 or rest[i - 1] != "--depth")]
+        if not names:
+            say("Usage: python mx.py usages <Module.Name> [--depth n]")
+            return 1
+        depth = rest[rest.index("--depth") + 1:rest.index("--depth") + 2] if "--depth" in rest else []
+        return mxlocal("usages", names[0], *(["--depth"] + depth if depth else []))
+    if cmd == "unused":
+        return mxlocal("unused", *rest[:1])
     if cmd == "steps":
         if not rest:
             say("Usage: python mx.py steps <Module.Microflow>")

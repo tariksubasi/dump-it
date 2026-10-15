@@ -17,7 +17,7 @@ const inspect = require("./inspect");
 const PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 
 const INSTRUCTIONS = `Mendix model tools for one local project (Studio Pro app).
-Change protocol: 1) find the exact names (find; widget names of a page: widgets; texts to translate: texts); 2) pick operations (ops, then ops with a name for its fields);
+Change protocol: 1) find the exact names (find; who uses something: usages, before every rename/delete/move; widget names of a page: widgets; texts to translate: texts); 2) pick operations (ops, then ops with a name for its fields);
 3) plan = write the change and dry-run it (nothing is written; it returns an approval code);
 4) show the user the dry run (every DATA LOSS / EXPRESSION CHECK / Warnings line) and ask them to close Studio Pro and
 answer "yes <CODE>"; 5) only then apply with that code. Never invent operations or fields. No operation fits: gap,
@@ -29,6 +29,10 @@ function tools(allowApply) {
     const list = [
         { name: "find", description: "Model elements (documents, entities, attributes, associations, roles, ...) whose qualified name contains the text, with their types. Use before writing a change: names are case-sensitive.",
             inputSchema: { type: "object", properties: { text: str("part of a name, e.g. Order or Sales.Customer") }, required: ["text"] } },
+        { name: "usages", description: "Who uses a document, entity, attribute, association, enumeration value, constant, ... (by name and in expressions/XPath), grouped by document with the place (widget, step id, column). Run it before rename, delete, moveEntity or changeMicroflow.",
+            inputSchema: { type: "object", properties: { name: str("qualified name, e.g. Sales.Order or Sales.ACT_Order_Save"), depth: str("optional 1-5: also who uses those users (default 1)") }, required: ["name"] } },
+        { name: "unused", description: "Documents, entities, attributes and enumeration values nobody references (entry points excluded), with reasons. Probably unused: never delete without usages and the user's yes.",
+            inputSchema: { type: "object", properties: { module: str("optional module name (default: the app's own modules)") } } },
         { name: "steps", description: "Steps of a microflow or nanoflow with stable ids (for changeAction, deleteAction, addActions 'after').",
             inputSchema: { type: "object", properties: { flow: str("qualified name, e.g. Sales.ACT_Order_Save") }, required: ["flow"] } },
         { name: "widgets", description: "Widget tree of a page or snippet: names, kinds, entity of each data view / list view, and where new widgets can go ([into]). Use before addWidgets, changeWidget, deleteWidget, moveWidget.",
@@ -124,6 +128,14 @@ class Server {
                 case "find": {
                     const ctx = await this.project();
                     lines.push(inspect.find(new LocalClient(ctx), String(a.text || "")));
+                    break;
+                }
+                case "usages":
+                case "unused": {
+                    const ctx = await this.project();
+                    const client = new LocalClient(ctx);
+                    const refs = require("./refs");
+                    lines.push(name === "usages" ? refs.usages(client, String(a.name || ""), a.depth) : refs.unused(client, a.module ? String(a.module) : undefined));
                     break;
                 }
                 case "steps": {

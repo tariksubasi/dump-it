@@ -1417,6 +1417,9 @@ async function selftest(mpr, keep, { out, relevant }) {
         await require("./selftest-tools").phase({ src, copy, reopen, check, results, layout, mod, T, layoutProblems, sameOutside, out });
         s2 = await reopen(copy);
 
+        // phase R: reference graph (usages, unused) and the ops built on it (selftest-refs.js)
+        s2 = await require("./selftest-refs").refsPhase({ reopen, copy, mod, T, check, results, layout, layoutProblems, lostProperties, relevant, userRole });
+
         // phase 3: attribute rename + module rename
         const phase3 = { ops: [{ op: "rename", target: `${E}.Flag`, newName: "Active" }, { op: "rename", target: mod, newName: `${mod}Zz` }] };
         await s2.ops.runPlan(phase3, () => {});
@@ -1460,4 +1463,4 @@ async function selftest(mpr, keep, { out, relevant }) {
     }
 }
 
-module.exports = { selftest, sameOutside, layoutProblems, ownLayout };
+module.exports = { selftest, sameOutside, layoutProblems, ownLayout, plans, reopen };
