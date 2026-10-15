@@ -110,9 +110,109 @@ async function unusedPhase(x) {
     return s;
 }
 
+// write a plan on the copy; returns { s (reopened), failed (checkPlan), lay, lost, lines }
+async function runApply(x, s, plan) {
+    const lines = [];
+    await s.ops.runPlan(plan, l => lines.push(l));
+    await s.model.flushChanges();
+    const enc = s.client.encode();
+    const lay = x.layoutProblems(x.layout, enc);
+    const lost = x.lostProperties(s.client, s.model, enc);
+    const warnings = s.client.summary().warnings;
+    s.client.project.writeEncoded(enc);
+    const s2 = await x.reopen(x.copy);
+    const failed = await s2.ops.checkPlan(plan);
+    return { s: s2, failed, lay: lay.problems, lost, lines, warnings };
+}
+
+// every unit loads with the Model SDK, opening changes nothing
+async function reopenErrors(s) {
+    const errs = [];
+    for (const u of s.model.allUnits().filter(u => u.isLoadable && !u.isLoaded)) await s.model.loadUnitById(u.id, false).catch(e => errs.push(e.message));
+    await s.model.flushChanges();
+    if (s.client.log.length) errs.push(`${s.client.log.length} deltas on open`);
+    return errs;
+}
+
+async function refused(s, plan, re) {
+    try {
+        await s.ops.runPlan(plan, () => {});
+        return `not refused: ${JSON.stringify(plan.ops[0]).slice(0, 120)}`;
+    } catch (e) {
+        return re.test(e.message) ? null : `wrong refusal for ${plan.ops[0].op}: ${e.message.slice(0, 200)}`;
+    }
+}
+
+// changeMicroflow: a parameter added (value given to a call step and a page button), one renamed ($Item in the flow
+// follows), return type and value changed; then removed again; refusals for callers that cannot follow
+async function changeMicroflowPhase(x) {
+    const { reopen, copy, mod, T, check, results } = x;
+    const E = `${mod}.${T}`;
+    let s = await reopen(copy);
+    const pageable = await s.ops.get(`${E}_Edit`).then(() => true, () => false);
+    const setup = { ops: [
+        { op: "createMicroflow", module: mod, name: `${T}_Callee`, folder: "ZzTest", parameters: [{ name: "Item", type: E }], returns: "Boolean", returnValue: "$Item/Count > 0",
+            actions: [{ action: "log", message: "callee {1}", args: ["$Item/Title"] }, { action: "change", variable: "Item", set: { Count: "$Item/Count + 1" } }] },
+        { op: "createMicroflow", module: mod, name: `${T}_Caller`, folder: "ZzTest", parameters: [{ name: "Thing", type: E }], actions: [{ action: "call", microflow: `${E}_Callee`, args: { Item: "$Thing" }, variable: "Ok" }] },
+        ...(pageable ? [{ op: "createPage", module: mod, name: `${T}_Calls`, entity: E, folder: "ZzTest", widgets: [{ widget: "dataView", widgets: [{ widget: "actionButton", name: "zzCallBtn", action: "callMicroflow", microflow: `${E}_Callee`, caption: "Call" }] }] }] : [])
+    ] };
+    let r = await runApply(x, s, setup);
+    const problems = [...r.failed];
+    s = r.s;
+    const change = { ops: [{ op: "changeMicroflow", microflow: `${E}_Callee`, addParameters: [{ name: "Note", type: "String", value: "'from caller'" }], renameParameters: { Item: "Obj" }, returns: "String", returnValue: "$Obj/Title + $Note" }] };
+    r = await runApply(x, s, change);
+    s = r.s;
+    problems.push(...r.failed, ...r.lay.slice(0, 3), ...r.lost);
+    const out = r.lines.join("\n");
+    if (!/CALLERS UPDATED \(\d+\)/.test(out) || !out.includes(`${E}_Caller`) || (pageable && !out.includes("zzCallBtn"))) problems.push(`dry run lacks the callers: ${out.slice(0, 300)}`);
+    const plain = name => {
+        for (const [id] of s.ctx.project.units) {
+            const p = s.ctx.project.read(id);
+            if (p.Name === name && /Microflows\$Microflow|Forms\$Page/.test(p.$Type)) return p;
+        }
+        return null;
+    };
+    const json = o => JSON.stringify(o || {});
+    const callee = json(plain(`${T}_Callee`));
+    if (!callee.includes("$Obj/Title") || callee.includes("$Item") || !/"Name":"Note"/.test(callee) || !callee.includes("DataTypes$StringType")) problems.push("callee: parameters, $Item -> $Obj or return type not stored");
+    const caller = json(plain(`${T}_Caller`));
+    if (!caller.includes(`"Parameter":"${E}_Callee.Obj"`) || !caller.includes(`"Argument":"'from caller'"`) || !caller.includes(`"Parameter":"${E}_Callee.Note"`)) problems.push("caller call step lacks the Obj / Note mappings");
+    if (pageable) {
+        const page = json(plain(`${T}_Calls`));
+        // the object of the data view is passed implicitly (Studio Pro stores no mapping for it)
+        if (!page.includes(`"Parameter":"${E}_Callee.Note"`) || !page.includes(`"Expression":"'from caller'"`)) problems.push("page button lacks the Note mapping");
+    }
+    // remove it again; refusals
+    const back = { ops: [{ op: "changeMicroflow", microflow: `${E}_Callee`, removeParameters: ["Note"], returns: "String", returnValue: "$Obj/Title" }] };
+    r = await runApply(x, s, back);
+    s = r.s;
+    problems.push(...r.failed);
+    if (json(plain(`${T}_Caller`)).includes(`${E}_Callee.Note`)) problems.push("removed parameter still mapped by the caller");
+    const refusals = [
+        [{ op: "changeMicroflow", microflow: `${E}_Job`, addParameters: [{ name: "X", type: "String", value: "''" }] }, /scheduled event passes no parameters/],
+        [{ op: "changeMicroflow", microflow: `${E}_Sub`, addParameters: [{ name: "X", type: "String", value: "''" }] }, /event handler/],
+        [{ op: "changeMicroflow", microflow: `${E}_Callee`, addParameters: [{ name: "X", type: "String" }] }, /give "value"/],
+        [{ op: "changeMicroflow", microflow: `${E}_Callee`, removeParameters: ["Obj"] }, /still uses \$Obj/],
+        [{ op: "changeMicroflow", microflow: `${E}_Callee`, renameParameters: { Objj: "Y" } }, /no parameter 'Objj'.*Did you mean: Obj/],
+        [{ op: "changeMicroflow", microflow: `${E}_Callee`, returns: "Nothing" }, /uses the result as \$Ok/]
+    ];
+    for (const [op, re] of refusals) {
+        const p = await refused(await reopen(copy), { ops: [op] }, re);
+        if (p) problems.push(p);
+    }
+    problems.push(...(await reopenErrors(await reopen(copy))));
+    check(`changeMicroflow: parameter added (value passed by a call step${pageable ? " and a page button" : ""}), renamed ($Item in the flow follows), return type + value changed, then removed again from every caller; ${refusals.length} refusals (scheduled event, event handler, no value, still used, did-you-mean, result used); stored with Studio Pro's keys, reopen 0 errors`, !problems.length, problems.slice(0, 6).join("; "));
+    if (!pageable) results.push("SKIP changeMicroflow page button caller: this project has no page with a layout to copy");
+    return s;
+}
+
 async function refsPhase(x) {
-    await usagesPhase(x);
-    return unusedPhase(x);
+    const only = x.only ? x.only.split(",") : null;
+    const run = n => !only || only.includes(n);
+    if (run("usages")) await usagesPhase(x);
+    if (run("unused")) await unusedPhase(x);
+    if (run("changeMicroflow")) await changeMicroflowPhase(x);
+    return x.reopen(x.copy);
 }
 
 module.exports = { refsPhase, sdkPairs };

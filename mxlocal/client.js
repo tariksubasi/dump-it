@@ -10,6 +10,8 @@ const { Catalog, toSdk, fromSdk, valueToPlain, complete, hinter } = require("./c
 const { Cache } = require("./cache");
 
 const WC = "local";
+// A flow's parameter object is what call mappings name as Microflows$MicroflowParameter / NanoflowParameter / RuleParameter.
+const PARAMETER_ALIAS = (type, target) => type === "Microflows$MicroflowParameterObject" && /^Microflows\$\w*Parameter$/.test(target);
 
 async function loadProject(mprPath) {
     const project = new Project(mprPath);
@@ -343,7 +345,7 @@ class LocalClient {
         let changed = 0;
         const fix = (v, p) => {
             if (typeof v !== "string" || !v) return v;
-            if (v === oldQn && (!p.target || this.schema.isSubtype(targetType, p.target))) return newQn;
+            if (v === oldQn && (!p.target || this.schema.isSubtype(targetType, p.target) || PARAMETER_ALIAS(targetType, p.target))) return newQn;
             if (v.startsWith(oldQn + ".")) return newQn + v.slice(oldQn.length);
             return v;
         };
