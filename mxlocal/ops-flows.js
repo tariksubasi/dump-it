@@ -3,6 +3,7 @@
 // laid out like Studio Pro does, list their steps with stable ids, and change or delete single steps.
 const sdk = require("mendixmodelsdk");
 const { DATA_TYPES, suggest, fail, validate, bool, noDollar, enumValue } = require("./ops-util");
+const { makeFlowExtras, RETRIEVE_FIELDS, MEMBER_FIELDS } = require("./ops-flow-extras");
 
 const { microflows: mf, domainmodels: dm, datatypes, pages, codeactions, javaactions, javascriptactions, importmappings, exportmappings, services } = sdk;
 
@@ -15,10 +16,10 @@ const ON_ERROR = "optional \"continue\", or { \"rollback\": true/false, \"action
 const ACTIONS = {
     retrieve: {
         doc: "Retrieve from the database, or over an association when 'from' is set.",
-        fields: { variable: "R result variable name", entity: "database retrieve: Module.Entity", xpath: "optional XPath, e.g. [Active = true()]", first: "optional true = single object", from: "association retrieve: variable name, e.g. Order", association: "association retrieve: Module.Association" }
+        fields: { variable: "R result variable name", entity: "database retrieve: Module.Entity", xpath: "optional XPath, e.g. [Active = true()]", first: "optional true = single object", from: "association retrieve: variable name, e.g. Order", association: "association retrieve: Module.Association", ...RETRIEVE_FIELDS }
     },
-    create: { doc: "Create an object.", fields: { variable: "R new variable name", entity: "R Module.Entity", set: "optional { \"Attribute\": \"expression\", \"Module.Assoc\": \"$Var\" }", commit: "optional true/false (default false)" } },
-    change: { doc: "Change members of an object.", fields: { variable: "R variable to change (no $)", set: "R { \"Attribute\": \"expression\" }", commit: "optional true/false", refresh: "optional true/false" } },
+    create: { doc: "Create an object.", fields: { variable: "R new variable name", entity: "R Module.Entity", set: "optional { \"Attribute\": \"expression\", \"Module.Assoc\": \"$Var\" }", ...MEMBER_FIELDS, commit: "optional true/false (default false)" } },
+    change: { doc: "Change members of an object.", fields: { variable: "R variable to change (no $)", set: "{ \"Attribute\": \"expression\", \"Module.Assoc\": \"$Var\" } (set, add or remove is required)", ...MEMBER_FIELDS, commit: "optional true/false", refresh: "optional true/false" } },
     commit: { doc: "Commit an object or list.", fields: { variable: "R variable (no $)", events: "optional false = without events" } },
     delete: { doc: "Delete an object or list.", fields: { variable: "R variable (no $)" } },
     call: { doc: "Call a microflow. In a nanoflow: a nanoflow or a microflow.", fields: { microflow: "R Module.Microflow or Module.Nanoflow", args: "optional { \"ParamName\": \"expression\" }", variable: "optional result variable name" } },
@@ -139,6 +140,7 @@ const CONTROL = {
 function makeFlows(h) {
     const { model } = h;
     const toLint = [];
+    const extras = makeFlowExtras(h, { expr: (...a) => expr(...a), variableInfo: (...a) => variableInfo(...a), entityOfVariable: (...a) => entityOfVariable(...a) });
 
     // current: the entity $currentObject stands for (list operations and aggregates)
     function expr(m, value, where, current = null) {
@@ -906,6 +908,7 @@ function makeFlows(h) {
                     const range = mf.ConstantRange.createInDatabaseRetrieveSourceUnderRange(src);
                     range.singleObject = bool(spec.first, false);
                 }
+                await extras.retrieveExtras(f, a, spec, where);
                 break;
             }
             case "create":
@@ -914,13 +917,16 @@ function makeFlows(h) {
                 a.outputVariableName = noDollar(spec.variable);
                 a.commit = bool(spec.commit, false) ? mf.CommitEnum.Yes : mf.CommitEnum.No;
                 await memberChanges(f, a, spec.entity, spec.set, where);
+                await extras.addRemove(f, a, spec.entity, spec, where);
                 break;
             case "change":
                 a = mf.ChangeObjectAction.createIn(act);
                 a.changeVariableName = noDollar(spec.variable);
                 a.commit = bool(spec.commit, false) ? mf.CommitEnum.Yes : mf.CommitEnum.No;
                 a.refreshInClient = bool(spec.refresh, false);
+                if (spec.set === undefined && spec.add === undefined && spec.remove === undefined) throw new Error(`${where}: change needs "set", "add" or "remove"`);
                 await memberChanges(f, a, await entityOfVariable(f.m, spec.variable, where), spec.set, where);
+                await extras.addRemove(f, a, await entityOfVariable(f.m, spec.variable, where), spec, where);
                 break;
             case "commit":
                 a = mf.CommitAction.createIn(act);
@@ -1609,7 +1615,7 @@ function makeFlows(h) {
         if (a instanceof mf.RetrieveAction) {
             const src = a.retrieveSource;
             s = src instanceof mf.DatabaseRetrieveSource
-                ? `RETRIEVE $${a.outputVariableName} = ${src.range instanceof mf.ConstantRange && src.range.singleObject ? "FIRST " : ""}${src.entityQualifiedName}${src.xPathConstraint ? " " + src.xPathConstraint : ""}`
+                ? `RETRIEVE $${a.outputVariableName} = ${src.range instanceof mf.ConstantRange && src.range.singleObject ? "FIRST " : ""}${src.entityQualifiedName}${src.xPathConstraint ? " " + src.xPathConstraint : ""}${extras.describeRetrieve(src)}`
                 : `RETRIEVE $${a.outputVariableName} = $${src.startVariableName}/${src.associationQualifiedName}`;
         } else if (a instanceof mf.CreateObjectAction) s = `CREATE $${a.outputVariableName} = ${a.entityQualifiedName}`;
         else if (a instanceof mf.ChangeObjectAction) s = `CHANGE $${a.changeVariableName}`;
@@ -1734,7 +1740,8 @@ function makeFlows(h) {
             entity: async (f, a, v) => {
                 if (!(a.retrieveSource instanceof mf.DatabaseRetrieveSource)) throw new Error("entity only applies to a database retrieve");
                 a.retrieveSource.entity = await h.entity(v);
-            }
+            },
+            ...extras.retrieveChanges
         },
         members: {
             set: async (f, a, v, where) => {
@@ -1742,7 +1749,7 @@ function makeFlows(h) {
                 const ent = await h.entity(entityQn);
                 await h.loadParents(ent);
                 for (const [member, value] of Object.entries(v || {})) {
-                    const existing = [...a.items].find(mc => (member.includes(".") ? mc.associationQualifiedName : mc.attribute && mc.attribute.name) === member);
+                    const existing = [...a.items].find(mc => mc.type === mf.ChangeActionItemType.Set && (member.includes(".") ? mc.associationQualifiedName : mc.attribute && mc.attribute.name) === member);
                     if (existing) existing.value = expr(f.m, value, where);
                     else await memberChange(f, a, ent, entityQn, member, value, where);
                 }
@@ -1755,7 +1762,8 @@ function makeFlows(h) {
                 }
             },
             commit: (f, a, v) => (a.commit = bool(v, false) ? mf.CommitEnum.Yes : mf.CommitEnum.No),
-            refresh: (f, a, v) => (a.refreshInClient = bool(v, false))
+            refresh: (f, a, v) => (a.refreshInClient = bool(v, false)),
+            ...extras.memberChanges
         },
         CommitAction: { events: (f, a, v) => (a.withEvents = bool(v, true)), refresh: (f, a, v) => (a.refreshInClient = bool(v, false)) },
         call: {

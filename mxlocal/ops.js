@@ -69,7 +69,9 @@ const OPS = {
         fields: {
             microflow: "R Module.Microflow or Module.Nanoflow", id: "R step id from 'steps', e.g. 3f2a9c1b",
             xpath: "retrieve: new XPath", first: "retrieve: true/false", entity: "retrieve: Module.Entity",
+            sort: "retrieve (database): [ \"Attr\" | { \"attribute\": \"Attr\", \"descending\": true } ] replaces the sorting ([] = none)", range: "retrieve (database): { \"offset\": \"0\", \"limit\": \"10\" } or \"all\"",
             set: "create/change: { \"Attr\": \"expression\" } (adds or replaces)", unset: "create/change: [ \"Attr\" ] to remove",
+            add: "create/change: { \"Module.Assoc\": \"$Obj or $List\" } add to a reference set (replaces the add of that association)", remove: "create/change: { \"Module.Assoc\": \"$Obj or $List\" } remove from a reference set",
             commit: "create/change: true/false; callRest/importWithMapping (import mapping): yes | no | withoutEvents", refresh: "change/commit/rollback: true/false", events: "commit: true/false",
             args: "call/callJava/callJavaScript/rule decision: { \"Param\": \"expression\" }; validationFeedback: [\"expression\"]", message: "log/validationFeedback: text", level: "log: level", text: "message: text",
             type: "message: Information | Warning | Error; changeList: add | remove | replace | clear", blocking: "message: true/false",
@@ -432,7 +434,7 @@ function bind(model, client) {
 
     const textOps = makeTexts({ model, client, get, resetLanguage });
     const translationsOf = textOps.translationsOf;
-    const flows = makeFlows({ model, client, get, entity, text, dataType, attributeChain, loadParents });
+    const flows = makeFlows({ model, client, get, entity, text, dataType, attributeChain, loadParents, pages: () => pageOps.internals });
     const codeOps = makeCode({ model, client, get, exists, entity, folder, createFlow: (...a) => flows.createFlow(...a) });
     const flowEdit = makeFlowEdit({ model, exists, createFlow: (o, nano) => flows.createFlow(o, nano, folder(o.module, o.folder)) }, flows);
     const pageOps = makePages({ model, client, get, exists, entity, text, translationsOf, folder, attributeChain, loadParents, persistable, dataType, grantAccess: o => impl.grantAccess(o), createNanoflow: o => createFlowOp(o, true) });

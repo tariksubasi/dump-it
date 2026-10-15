@@ -46,6 +46,16 @@ def flow_signature(doc):
     return "(%s)%s" % (", ".join(params), " -> " + ret if ret and ret != "Void" else "")
 
 
+
+def _sort_text(s):
+    """A retrieve sort item: Attr, Assoc/Attr over references, DESC when descending."""
+    ref = s.get("AttributeRef") or {}
+    attr = ref.get("Attribute")
+    if not attr:
+        return None
+    steps = [short(st.get("Association")) for st in ((ref.get("EntityRef") or {}).get("Steps") or [])]
+    return "/".join(steps + [short(attr)]) + (" DESC" if s.get("SortOrder") == "Descending" else "")
+
 class FlowRenderer:
     def __init__(self, doc, qn, unit, ctx, index):
         self.doc, self.qn, self.unit, self.ctx, self.index = doc, qn, unit, ctx, index
@@ -395,9 +405,9 @@ class FlowRenderer:
         xpath = clean(src.get("XpathConstraint"))
         if xpath:
             line += " WHERE " + xpath
-        sorts = [(s.get("AttributeRef") or {}).get("Attribute") for s in (src.get("NewSortings") or {}).get("Sortings") or []]
+        sorts = [_sort_text(s) for s in (src.get("NewSortings") or {}).get("Sortings") or []]
         if sorts:
-            line += " SORT BY " + ", ".join(short(s) for s in sorts if s)
+            line += " SORT BY " + ", ".join(s for s in sorts if s)
         return line, []
 
     def _a_CreateChangeAction(self, a):
