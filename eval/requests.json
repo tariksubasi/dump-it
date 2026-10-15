@@ -733,6 +733,30 @@
           "Invoice_NewEdit\\.txt$": "MyFirstModule\\.Invoice"
         }
       }
+    },
+    {
+      "id": "xpathtypo",
+      "text": "ACT_Order_Unpaid microflow'u yap: müşterisinin adı 'ACME' olan ve Totl'u 100'den büyük siparişleri (Order) getirsin, sayısını log'a yazsın.",
+      "checks": {
+        "find": [
+          "MyFirstModule.ACT_Order_Unpaid"
+        ],
+        "files": {
+          "ACT_Order_Unpaid\\.txt$": "MyFirstModule\\.Order_Customer/MyFirstModule\\.Customer/Name = 'ACME'[^\\n]*Total > 100|Total > 100[^\\n]*MyFirstModule\\.Order_Customer/MyFirstModule\\.Customer/Name = 'ACME'"
+        }
+      }
+    },
+    {
+      "id": "exprtype",
+      "text": "ACT_Order_Note microflow'u yap: Order parametresi alsın, Note alanına 'Toplam: ' ve siparişin Total değerini yazsın, Paid ise Note'un sonuna ' (ödendi)' eklesin ve commit etsin.",
+      "checks": {
+        "find": [
+          "MyFirstModule.ACT_Order_Note"
+        ],
+        "files": {
+          "ACT_Order_Note\\.txt$": "Note[^\\n]*Toplam"
+        }
+      }
     }
   ]
 }

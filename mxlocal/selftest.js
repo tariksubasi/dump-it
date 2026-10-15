@@ -1416,6 +1416,9 @@ async function selftest(mpr, keep, { out, relevant }) {
             s2 = await reopen(copy);
         }
 
+        // XPath and expression checks (selftest-parsers.js): the project's own, then wrong inputs (dry run only)
+        await require("./selftest-parsers").phase({ src, copy, reopen, check, mod, pageable });
+
         // navigation, theme files, packages (selftest-tools.js)
         await require("./selftest-tools").phase({ src, copy, reopen, check, results, layout, mod, T, layoutProblems, sameOutside, out });
         s2 = await reopen(copy);

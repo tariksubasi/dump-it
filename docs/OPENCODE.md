@@ -151,14 +151,15 @@ python mx.py dryrun <short-name>
 ```
 
 - `ERROR:` → read the `HINT:` line, fix the file, run again. After 5 failed tries, stop and show the user the error.
-- `EXPRESSION CHECK` lines → fix the names in the file and run again.
+- `XPATH CHECK` / `EXPRESSION CHECK` lines → the dry run refused (no approval code): fix the file and run again
+  (section 9 says how). Lines marked `(warning)` alone do not stop it: show them to the user.
 
 **Step 4: Show the result and ask.** Use this format, then stop and wait:
 
 ```
 PLAN: <1-5 bullets: what changes and why>
 DRY RUN: <the numbered op lines and the "Changes:" lines>
-ATTENTION: <every DATA LOSS line first, then every EXPRESSION CHECK / NOT STORED / OLD NAME STILL USED / STILL USED BY / Warnings line, or "none">
+ATTENTION: <every DATA LOSS line first, then every XPATH CHECK / EXPRESSION CHECK / NOT STORED / OLD NAME STILL USED / STILL USED BY / Warnings line, or "none">
 To apply: close Studio Pro and answer "yes <CODE>".
 ```
 
@@ -1316,6 +1317,11 @@ module.exports = async ({ model, sdk, ops, log }) => {
 - Microflow objects go in `mf.objectCollection`. Flows go in `mf.flows` (`SequenceFlow` with `origin`,
   `destination`).
 - The same dry run, approval and apply steps apply. Fix the script until the dry run shows no `NOT STORED` lines.
+  The XPath and expression check (section 9) also runs on everything a script wrote.
+- The XPath/expression check is sure it is right only for names and types it can see. When Studio Pro accepts
+  something it refuses (a function or System member of a newer Mendix version that it calls an error), add
+  `"expressionCheck": "warn"` at the top of the change file (next to `"ops"`): the lines stay, the dry run gives a
+  code. Tell the user, and record it with `python mx.py gap "expression check: <the line>"`.
 
 ---
 
@@ -1327,7 +1333,8 @@ module.exports = async ({ model, sdk, ops, log }) => {
   1. addAttribute Sales.Order.Note: String(500)          <- one line per operation that ran
 Changes: 0 created, 1 updated, 0 deleted unit(s)           <- documents that will change
   ~ DomainModels$DomainModel  (...)
-EXPRESSION CHECK ...                                       <- wrong $Var/Attribute in an expression: fix the file
+XPATH CHECK ...                                            <- wrong name/value in an XPath constraint: fix the file
+EXPRESSION CHECK ...                                       <- wrong name/type in an expression: fix the file
 NOT STORED ...                                             <- a value this Mendix version does not keep: fix the script
 OLD NAME STILL USED ...                                    <- rename left old names in expressions/XPath/Java
       DATA LOSS: the column A and its values are dropped ...  <- deleting/retyping stored data: tell the user first
@@ -1339,6 +1346,37 @@ Dry run: nothing written. Approval code: 7F3A              <- the code the user 
 ```
 
 Show the user every line between `Changes:` and `Dry run:`. Do not hide warnings.
+
+### XPATH CHECK and EXPRESSION CHECK
+
+Every XPath constraint and expression the change wrote or changed is parsed and checked against the model, in its
+place: retrieves, data sources of grids, list views, galleries and Data grid 2, selectable objects, search fields,
+access rules; conditions, change/create values, variables, return values, log and message texts, list operations,
+aggregates, call / show page / button arguments, visibility, editability, validation and widget expressions. Each
+line is `<document> [<step id>] <step>` (or `<page> <widget> (<property>)`), the problem, and `in: <the text>`.
+
+```
+XPATH CHECK (...):
+  ! Sales.ACT_X [9d1d21c0] retrieve L: Sales.Order_Customr: Sales.Order has no association 'Sales.Order_Customr'. Did you mean: Sales.Order_Customer?   in: [...]
+EXPRESSION CHECK (...):
+  ! Sales.ACT_X [403fd4d8] change Order (Total): the expression gives String, but Decimal is expected (use parseDecimal(...))   in: 'abc'
+  ! (warning) Sales.ACT_X [d332e42c] change Order (Note): unknown function newFn(...) (fine if your Mendix version has it)
+Refused: 2 XPATH CHECK / EXPRESSION CHECK error(s) above ... no approval code.
+```
+
+- A line without `(warning)` is an error Studio Pro would show: the dry run gives **no code**. Fix the change file.
+- `Did you mean: X` → use X (attribute, association, entity, variable, function, enumeration value, constant, token).
+- `the expression gives A, but B is expected` → the value has the wrong type for the attribute, variable, parameter,
+  return value or condition. Use the hint: `toString(...)` / `formatDecimal(...)` for text, `round(...)` for a
+  whole number, `parseInteger(...)` / `parseDecimal(...)` from text, `Module.Enum.Value` for an enumeration,
+  `true()`/`false()` in XPath. `(cast it first)`: a generalization goes where its specialization is needed: use
+  `ifType` + `cast`.
+- XPath paths name the entity after each association: `[Module.Order_Customer/Module.Customer/Name = 'x']`.
+  Expressions use `$Order/Module.Order_Customer/Name` (or `.../Module.Customer/Name`).
+- `syntax: ...` → a missing `)`, `]` or quote; the position is in the message.
+- `(warning)` lines (newer functions, members of System entities this check does not know, an association followed
+  against its owner) do not stop the dry run: show them under ATTENTION.
+- Only what the change wrote is checked; mistakes already in the project are not reported.
 
 ### Apply
 
@@ -1364,6 +1402,11 @@ mx check: NOT RUN (mx.exe not found) ...                          <- say this to
 | `already exists` | It is already done. Remove that operation or use another name |
 | `no variable 'V' before this action` | V must be a parameter or be created by an earlier action |
 | `has no attribute 'A' (in $V/A). Did you mean: B` | Use B in that expression |
+| `XPATH CHECK` / `EXPRESSION CHECK` ... `Did you mean: B` | Use B in that XPath or expression (section 9) |
+| `the expression gives A, but B is expected` | Convert the value as the hint says, or pass the right variable |
+| `after the association X comes the entity` | XPath: write `X/Module.Entity/Attribute` |
+| `is not a parameter or variable here` | Use a parameter, a variable made by an earlier step, or a page parameter / `$currentObject` |
+| `Refused: N XPATH CHECK / EXPRESSION CHECK error(s)` | Fix those lines; `"expressionCheck": "warn"` only when you are sure Studio Pro accepts it (section 8) |
 | `has N end events` / `has N outgoing flows` | Add `"after": "<variable name>"`, a step id, or `"after": "start"` |
 | `has no step with id` | Run `python mx.py steps <Module.Flow>` and copy the id in brackets |
 | `'x' cannot be changed on ...` | The message lists the fields that kind of step accepts |
