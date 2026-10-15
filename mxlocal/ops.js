@@ -26,6 +26,7 @@ const { makeRest, REST_OPS } = require("./ops-rest");
 const { makeOData, ODATA_OPS } = require("./ops-odata");
 const { makeXml, XML_OPS } = require("./ops-xml");
 const { makeRefOps, REF_OPS } = require("./ops-refs");
+const { makeCopy, COPY_OPS } = require("./ops-copy");
 const { makeWorkflows, WORKFLOW_OPS, USER_TASK_PAGE_FIELDS, SYSTEM_ENTITIES, STEP_FIELDS, STEP_COMMON } = require("./ops-workflows");
 
 const OPS = {
@@ -87,6 +88,7 @@ const OPS = {
     deleteAction: { doc: "Delete one action or loop from a flow and reconnect the line. Get its id with: steps Module.Flow.", fields: { microflow: "R Module.Microflow or Module.Nanoflow", id: "R step id from 'steps'" } },
     ...FLOW_EDIT_OPS,
     ...REF_OPS,
+    ...COPY_OPS,
     ...CODE_OPS,
     setGeneralization: { doc: "Make an entity inherit from another entity, or from none.", fields: { entity: "R Module.Entity", generalization: "R Module.Parent, or \"\" / \"none\" for no parent", persistable: "optional true/false when there is no parent (default true)" } },
     addValidationRule: {
@@ -441,6 +443,7 @@ function bind(model, client) {
     const pageEdit = makePageEdit({ model, client, get, text, translationsOf, attributeChain, persistable }, pageOps.internals);
     const securityOps = makeSecurity({ model, get });
     const refOps = makeRefOps({ model, client, get, exists, dataType, folder, entity }, flows);
+    const copyOps = makeCopy({ model, client, get, folder });
     const themeOps = makeTheme({ client });
     const marketOps = makeMarket({ client, model });
     const navOps = makeNav({ model, client, get, exists, text, translationsOf, folder, grantAccess: o => impl.grantAccess(o) }, pageOps.internals);
@@ -878,6 +881,7 @@ function bind(model, client) {
         ...codeOps.impl,
         ...flowEdit.impl,
         ...refOps.impl,
+        ...copyOps.impl,
         ...domainOps.impl,
         ...textOps.impl,
         ...restOps.impl,
@@ -1038,6 +1042,7 @@ function bind(model, client) {
         ...codeOps.checks,
         ...flowEdit.checks,
         ...refOps.checks,
+        ...copyOps.checks,
         ...domainOps.checks,
         ...textOps.checks,
         ...restOps.checks,

@@ -206,12 +206,72 @@ async function changeMicroflowPhase(x) {
     return s;
 }
 
+// copyDocument: an entity (same module, and with associations + roles into another module), a page for that entity
+// (attributes by name), a page for an entity that lacks them (refused, then skipUnmatched), a microflow into another
+// module (roles refused, then mapped), an enumeration
+async function copyPhase(x) {
+    const { reopen, copy, mod, T, check, results } = x;
+    const E = `${mod}.${T}`;
+    const M = `${T}Mod`;
+    let s = await reopen(copy);
+    const pageable = await s.ops.get(`${E}_Edit`).then(() => true, () => false);
+    const problems = [];
+    const plan = { ops: [
+        { op: "copyDocument", document: E, name: `${T}Twin` },
+        { op: "copyDocument", document: `${E}Line`, module: M, name: "ZzLine", associations: true },
+        { op: "copyDocument", document: E, module: M, name: "ZzCopied", roles: { [`${mod}.ZzRole`]: `${M}.HR` } },
+        { op: "copyDocument", document: `${E}_Main`, module: M, roles: { [`${mod}.ZzRole`]: `${M}.User` } },
+        { op: "copyDocument", document: `${E}Status`, name: `${T}Status2` }
+    ] };
+    let r = await runApply(x, s, plan);
+    s = r.s;
+    problems.push(...r.failed, ...r.lay.slice(0, 3), ...r.lost);
+    if (pageable) {
+        r = await runApply(x, s, { ops: [{ op: "copyDocument", document: `${E}_Edit`, name: `${T}Twin_Edit`, entity: { [E]: `${E}Twin` } }] });
+        s = r.s;
+        problems.push(...r.failed, ...r.lay.slice(0, 3), ...r.lost);
+        const g = refs.graph(s.client);
+        const twin = g.units.find(u => u.label === `${E}Twin_Edit`);
+        const own = twin ? g.edges.filter(e => e.unit === twin.id) : [];
+        if (!own.some(e => e.to === `${E}Twin.Title`) || own.some(e => e.to === E || e.to.startsWith(E + "."))) problems.push(`page copy for ${E}Twin: ${own.map(e => e.to).filter(t => t.startsWith(E)).slice(0, 5).join(", ")}`);
+    } else results.push("SKIP copyDocument of a page: this project has no page with a layout to copy");
+    const g = refs.graph(s.client);
+    for (const n of [`${E}Twin.Title`, `${M}.ZzCopied.Count`, `${M}.ZzLine.Text`, `${E}Status2.Done`, `${M}.${T}_Main`]) if (!g.names.has(n) && !g.units.some(u => u.label === n)) problems.push(`${n} missing`);
+    const dm = s.ctx.project.read(g.units.find(u => u.type === "DomainModels$DomainModel" && u.module === M).id);
+    const copied = dm.Entities.find(e => e.Name === "ZzCopied");
+    const rules = JSON.stringify(copied || {});
+    if (!copied || !rules.includes(`"${M}.ZzCopied.Title"`) || rules.includes(`${E}.`) || !rules.includes(`"${M}.HR"`)) problems.push("ZzCopied: validation/access rules not re-bound to the copy and the role");
+    const orig = s.ctx.project.read(g.units.find(u => u.type === "DomainModels$DomainModel" && u.module === mod).id).Entities.find(e => e.Name === T);
+    if (copied && orig && (copied.$ID === orig.$ID || copied.GUID === orig.GUID || copied.Attributes[0].$ID === orig.Attributes[0].$ID)) problems.push("ZzCopied kept the ids of the original");
+    const refusals = [
+        [{ op: "copyDocument", document: `${E}_Main`, module: M, name: "ZzMain2" }, /module roles .* no match in .*ZzRole.*"roles"/],
+        [{ op: "copyDocument", document: E, name: `${T}Twin` }, /already exists/],
+        [{ op: "copyDocument", document: `${E}_Nightly`, name: "ZzNightly" }, /copies pages, snippets/],
+        [{ op: "copyDocument", document: `${E}_Mian`, name: "X" }, /Did you mean: .*_Main/],
+        ...(pageable ? [[{ op: "copyDocument", document: `${E}_Edit`, name: `${T}On_Edit`, module: M, entity: { [E]: `${M}.Onboarding` }, roles: { [`${mod}.ZzRole`]: `${M}.User` } }, /lacks: .*Title.*skipUnmatched/]] : [])
+    ];
+    for (const [op, re] of refusals) {
+        const p = await refused(await reopen(copy), { ops: [op] }, re);
+        if (p) problems.push(p);
+    }
+    if (pageable) {
+        r = await runApply(x, await reopen(copy), { ops: [{ op: "copyDocument", document: `${E}_Edit`, name: `${T}On_Edit`, module: M, entity: { [E]: `${M}.Onboarding` }, roles: { [`${mod}.ZzRole`]: `${M}.User` }, skipUnmatched: true }] });
+        s = r.s;
+        problems.push(...r.failed, ...r.lay.slice(0, 3), ...r.lost);
+        if (!/left out \d+ widget/.test(r.lines.join("\n"))) problems.push("skipUnmatched did not list what it left out");
+    }
+    problems.push(...(await reopenErrors(await reopen(copy))));
+    check(`copyDocument: entity (attributes, validation + access rules re-bound, fresh ids; into another module with roles mapped and its association as a cross-module one), ${pageable ? "page for another entity (attributes by name, nothing left on the original), page for an entity lacking attributes (refused, then skipUnmatched), " : ""}microflow into another module (roles mapped), enumeration; ${refusals.length} refusals; reopen 0 errors`, !problems.length, problems.slice(0, 6).join("; "));
+    return s;
+}
+
 async function refsPhase(x) {
     const only = x.only ? x.only.split(",") : null;
     const run = n => !only || only.includes(n);
     if (run("usages")) await usagesPhase(x);
     if (run("unused")) await unusedPhase(x);
     if (run("changeMicroflow")) await changeMicroflowPhase(x);
+    if (run("copy")) await copyPhase(x);
     return x.reopen(x.copy);
 }
 
