@@ -1006,9 +1006,9 @@ function bind(model, client) {
             return (await exists(`${o.module}.${o.name}`)) ? [] : [`${o.module}.${o.name} missing`];
         },
         ...pageEdit.checks,
-        addMenuItem: o => (extendedMenuItem(o) ? navOps.checks.addMenuItem(o) : pageOps.checks.addMenuItem(o)),
         setHomePage: o => pageOps.checks.setHomePage(o),
         ...navOps.checks,
+        addMenuItem: o => (extendedMenuItem(o) ? navOps.checks.addMenuItem(o) : pageOps.checks.addMenuItem(o)),
         ...themeOps.checks,
         ...marketOps.checks,
         async moveDocument(o) {
