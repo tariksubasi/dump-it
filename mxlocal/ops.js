@@ -1065,7 +1065,14 @@ function bind(model, client) {
                 throw e;
             }
         }
-        return flows.lintExpressions();
+        return lintChanged();
+    }
+
+    // EXPRESSION CHECK / XPATH CHECK over what the change created or changed: the error lines (with .findings: all
+    // findings, warnings too, for the dry run)
+    async function lintChanged() {
+        await model.flushChanges();
+        return require("./exprlint").planLint(client);
     }
 
     async function checkPlan(plan) {
@@ -1093,7 +1100,7 @@ function bind(model, client) {
         return failed;
     }
 
-    const api = { get, runPlan, checkPlan, dataType, folder, lintExpressions: () => flows.lintExpressions(), steps: qn => flows.steps(qn), widgets: qn => pageEdit.widgets(qn), widgetType: name => (name ? pageOps.internals.widgetType(name) : pageOps.internals.widgetTypes()), texts: (scope, missing) => textOps.list(scope, missing) };
+    const api = { get, runPlan, checkPlan, dataType, folder, lintExpressions: () => lintChanged(), steps: qn => flows.steps(qn), widgets: qn => pageEdit.widgets(qn), widgetType: name => (name ? pageOps.internals.widgetType(name) : pageOps.internals.widgetTypes()), texts: (scope, missing) => textOps.list(scope, missing) };
     for (const name of Object.keys(OPS)) {
         api[name] = o => {
             validate("op", name, OPS[name], o || {}, `ops.${name}`);

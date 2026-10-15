@@ -248,12 +248,13 @@ async function run(file, mpr, allowJs, ctx) {
         lines.push(s);
         out(s);
     };
-    let exprWarnings = [];
-    if (change.plan) exprWarnings = await ops.runPlan(change.plan, s => say("  " + s));
+    let lint = [];
+    if (change.plan) lint = await ops.runPlan(change.plan, s => say("  " + s));
     else {
         await change.fn({ model, sdk: require("mendixmodelsdk"), ops, log: s => say("  " + s) });
-        exprWarnings = await ops.lintExpressions();
+        lint = await ops.lintExpressions();
     }
+    const checked = require("./exprlint").format(lint.findings || []);
     await model.flushChanges();
     const s = client.summary();
     const plainFiles = require("./files").encode(client);
@@ -274,10 +275,18 @@ async function run(file, mpr, allowJs, ctx) {
     enc.plainFiles = plainFiles;
     const lost = lostProperties(client, model, enc);
     const warnings = relevant(client.summary().warnings, enc);
-    if (exprWarnings.length) say("EXPRESSION CHECK (Studio Pro will show these as errors; fix the change file):\n" + exprWarnings.map(w => "  ! " + w).join("\n"));
+    if (checked.xpath.length) say("XPATH CHECK (wrong attribute/association/entity/value in an XPath constraint; fix the change file):\n" + checked.xpath.map(w => "  ! " + w).join("\n"));
+    if (checked.expression.length) say("EXPRESSION CHECK (Studio Pro will show these as errors; fix the change file):\n" + checked.expression.map(w => "  ! " + w).join("\n"));
     if (lost.length) say("NOT STORED (the script set these, but this Mendix version does not keep them; use api <Type>):\n" + lost.map(w => "  ! " + w).join("\n"));
     if (s.leftovers.length) say("OLD NAME STILL USED (rename does not update expressions, XPath, Java; fix these too):\n" + s.leftovers.map(w => "  ! " + w).join("\n"));
     if (warnings.length) say("Warnings:\n" + warnings.map(w => "  ! " + w).join("\n"));
+    // an XPath or expression Studio Pro rejects: no approval code ("expressionCheck": "warn" in the change file to
+    // apply anyway, when the check is wrong)
+    if (lint.length && !(change.plan && change.plan.expressionCheck === "warn")) {
+        out(`Refused: ${lint.length} XPATH CHECK / EXPRESSION CHECK error(s) above (lines without "(warning)"). Fix them in the change file and run again. Nothing written, no approval code.`);
+        process.exitCode = 1;
+        return { client, refused: lint.length };
+    }
     const code = pending.save(client.project.dir, enc, { fingerprint, source: path.resolve(file), summary: lines, plan: change.plan,
         content: fs.readFileSync(path.resolve(file), "utf8") });
     out(`Dry run: nothing written. Approval code: ${code}`);

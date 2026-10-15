@@ -138,11 +138,8 @@ const CONTROL = {
 
 function makeFlows(h) {
     const { model } = h;
-    const toLint = [];
-
-    // current: the entity $currentObject stands for (list operations and aggregates)
-    function expr(m, value, where, current = null) {
-        toLint.push({ m, expr: String(value), where, current });
+    // an expression as stored; exprlint.js checks every stored expression after the plan (EXPRESSION CHECK)
+    function expr(m, value) {
         return String(value);
     }
 
@@ -1996,55 +1993,9 @@ function makeFlows(h) {
         return where;
     }
 
-    // ------------------------------------------------ expression check ($Var/Member paths)
-
-    async function lintExpressions() {
-        const lint = [];
-        for (const { m, expr: e, where, current } of toLint) {
-            const re = /\$(\w+)\/([\w.]+)/g;
-            let hit;
-            while ((hit = re.exec(e))) {
-                const [, variable, member] = hit;
-                let entityQn;
-                if (variable === "currentObject") {
-                    if (!current) {
-                        lint.push(`${where}: $currentObject only exists in an aggregate or list operation expression`);
-                        continue;
-                    }
-                    entityQn = current;
-                } else if (["currentUser", "latestHttpResponse", "latestSoapFault", "latestError"].includes(variable)) continue; // built-in variables
-                else {
-                    const v = variablesOf(m).get(variable);
-                    if (!v) {
-                        lint.push(`${where}: $${variable} is not a parameter or a variable created in ${m.qualifiedName}`);
-                        continue;
-                    }
-                    try {
-                        entityQn = await entityOfVariable(m, variable, where);
-                    } catch (err) {
-                        continue; // primitive variable or unknown: nothing to check
-                    }
-                }
-                if (!entityQn || entityQn.startsWith("System.")) continue; // System entities are not in the project
-                const ent = await h.entity(entityQn);
-                await h.loadParents(ent);
-                const first = member.split("/")[0];
-                if (first.includes(".")) continue; // association path: Module.Assoc
-                const chain = h.attributeChain(ent);
-                if (!chain.complete) continue; // inherits from an entity outside the project (System.User, ...)
-                const names = chain.attributes.map(a => a.name);
-                if (!names.includes(first)) {
-                    const s = suggest(first, names, 3);
-                    lint.push(`${where}: ${entityQn} has no attribute '${first}' (in $${variable}/${member})` + (s.length ? `. Did you mean: ${s.join(", ")}?` : ""));
-                }
-            }
-        }
-        return lint;
-    }
-
     // for ops-flow-edit.js (moveAction, extractMicroflow, addAnnotation)
     const internals = { flowDoc, findStep, flowsOf, walkObjects, variablesOf, typeOfVariable, variableInfo, anchorOf, openAnchor, makeRoom, connect, flow, caseOf, caseLabel, activity, annotate, describe, point, size, returnsValue, errorDefault, X_STEP, LANE };
-    return { createFlow, addActions, changeAction, deleteAction, steps, describe, variablesOf, walkObjects, flowDoc, lintExpressions, findStep, internals };
+    return { createFlow, addActions, changeAction, deleteAction, steps, describe, variablesOf, walkObjects, flowDoc, findStep, internals };
 }
 
 module.exports = { makeFlows, ACTIONS, CONTROL, COMMON, CREATES };
