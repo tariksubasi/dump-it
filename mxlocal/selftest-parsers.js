@@ -7,10 +7,11 @@
 const { lintProject } = require("./exprlint");
 
 // [flow, what is wrong, expected level, message pattern]; the flows are made by plan() below
-function cases(mod, P) {
-    const O = `${mod}.${P}Order`, C = `${mod}.${P}Customer`, A = `${mod}.${P}Order_${P}Customer`, EN = `${mod}.${P}Status`;
+function cases(mod, P, pageable) {
+    const O = `${mod}.${P}Order`, C = `${mod}.${P}Customer`, A = `${mod}.${P}Order_${P}Customer`, EN = `${mod}.${P}Status`, SP = `${mod}.${P}Special`;
+    const page = `${mod}.${P}Cust_Edit`;
     return {
-        O, C, A, EN,
+        O, C, A, EN, SP, page, pageable,
         bad: [
             // XPath
             [{ action: "retrieve", variable: "L", entity: O, xpath: `[${A}x/${C}/Name = 'x']` }, "error", /has no association '.*Customerx'\. Did you mean: .*Order_.*Customer\?/],
@@ -38,7 +39,12 @@ function cases(mod, P) {
             [{ action: "if", condition: "$Order/Paid and $Order/Note", then: [{ action: "log", message: "x" }] }, "error", /'and' needs Boolean operands, got String/],
             [{ action: "call", microflow: `${mod}.${P}Sub`, args: { Customer: "$Order" } }, "error", /gives .*Order, but .*Customer is expected/],
             [{ action: "variable", name: "N", type: "Integer", value: "'1'" }, "error", /gives String, but Integer is expected \(use parseInteger/],
-            [{ action: "change", variable: "Order", set: { Note: "someNewFunction($Order/Note)" } }, "warning", /unknown function someNewFunction.*fine if your Mendix version has it/]
+            [{ action: "change", variable: "Order", set: { Note: "someNewFunction($Order/Note)" } }, "warning", /unknown function someNewFunction.*fine if your Mendix version has it/],
+            // arguments: parameter entity types with generalization, lists, pages
+            [{ action: "call", microflow: `${mod}.${P}SubSpecial`, args: { Special: "$Cust" } }, "error", /gives .*Customer, but .*Special is expected \(cast it first\)/],
+            [{ action: "call", microflow: `${mod}.${P}SubList`, args: { Customers: "$Cust" } }, "error", /gives .*Customer, but List of .*Customer is expected/],
+            [{ action: "call", microflow: `${mod}.${P}SubList`, args: { Customers: "$Order/Total" } }, "error", /gives Decimal, but List of .*Customer is expected/],
+            ...(pageable ? [[{ action: "showPage", page, args: { [`${P}Customer`]: "$Order" } }, "error", /gives .*Order, but .*Customer is expected/]] : [])
         ],
         good: [
             { action: "retrieve", variable: "G1", entity: O, xpath: `[${A}/${C}/Name = $Order/Note and Total > 5 and not(contains(Note, 'x'))]` },
@@ -49,7 +55,13 @@ function cases(mod, P) {
             { action: "variable", name: "When", type: "DateTime", value: "addDays([%BeginOfCurrentDay%], 1)" },
             { action: "change", variable: "Order", set: { Note: `getCaption($Order/Status) + ' ' + $Order/${A}/${C}/Name + formatDecimal($Order/Total, '#.00')`, Status: `${EN}.Done`, Total: "$Order/Count * 1.5", [A]: "$Cust" } },
             { action: "if", condition: `$Order/Paid and $Order/Status != ${EN}.Open and $Order/${A} != empty`, then: [{ action: "log", message: "ok {1}", args: ["$Order/Note"] }] },
-            { action: "call", microflow: `${mod}.${P}Sub`, args: { Customer: "$Cust" } }
+            { action: "call", microflow: `${mod}.${P}Sub`, args: { Customer: "$Cust" } },
+            { action: "retrieve", variable: "Sp", entity: SP, first: true },
+            { action: "call", microflow: `${mod}.${P}Sub`, args: { Customer: "$Sp" } },
+            { action: "retrieve", variable: "Cs", entity: C },
+            { action: "call", microflow: `${mod}.${P}SubList`, args: { Customers: "$Cs" } },
+            { action: "variable", name: "Lvl", type: "String", value: `$Sp/Level + ' ' + $Sp/Name` },
+            ...(pageable ? [{ action: "showPage", page, args: { [`${P}Customer`]: "$Sp" } }] : [])
         ]
     };
 }
@@ -61,15 +73,20 @@ function plan(mod, P, c) {
         { op: "createEntity", module: mod, name: `${P}Order`, attributes: [{ name: "Total", type: "Decimal" }, { name: "Note", type: "String(200)" }, { name: "Count", type: "Integer" },
             { name: "Paid", type: "Boolean" }, { name: "Created", type: "DateTime" }, { name: "Status", type: `Enum(${c.EN})` }] },
         { op: "addAssociation", from: c.O, to: c.C },
-        { op: "createMicroflow", module: mod, name: `${P}Sub`, parameters: [{ name: "Customer", type: c.C }], actions: [{ action: "log", message: "sub" }] }
+        { op: "createEntity", module: mod, name: `${P}Special`, attributes: [{ name: "Level", type: "String(20)" }] },
+        { op: "setGeneralization", entity: c.SP, generalization: c.C },
+        { op: "createMicroflow", module: mod, name: `${P}Sub`, parameters: [{ name: "Customer", type: c.C }], actions: [{ action: "log", message: "sub" }] },
+        { op: "createMicroflow", module: mod, name: `${P}SubSpecial`, parameters: [{ name: "Special", type: c.SP }], actions: [{ action: "log", message: "sub" }] },
+        { op: "createMicroflow", module: mod, name: `${P}SubList`, parameters: [{ name: "Customers", type: `List(${c.C})` }], actions: [{ action: "log", message: "sub" }] },
     ];
+    if (c.pageable) ops.push({ op: "createPage", module: mod, name: `${P}Cust_Edit`, entity: c.C });
     const params = [{ name: "Order", type: c.O }, { name: "Cust", type: c.C }];
     c.bad.forEach(([action], i) => ops.push({ op: "createMicroflow", module: mod, name: `${P}Bad${i + 1}`, parameters: params, actions: [action] }));
     ops.push({ op: "createMicroflow", module: mod, name: `${P}Good`, parameters: params, actions: c.good });
     return { ops };
 }
 
-async function phase({ src, copy, reopen, check, mod }) {
+async function phase({ src, copy, reopen, check, mod, pageable }) {
     // (a) the project as Studio Pro saved it
     const t0 = Date.now();
     const all = lintProject(src);
@@ -82,7 +99,7 @@ async function phase({ src, copy, reopen, check, mod }) {
 
     // (b) wrong inputs in a change file
     const P = "ZzP";
-    const c = cases(mod, P);
+    const c = cases(mod, P, pageable);
     const s = await reopen(copy);
     const lint = await s.ops.runPlan(plan(mod, P, c), () => {});
     const found = lint.findings || [];
@@ -92,7 +109,7 @@ async function phase({ src, copy, reopen, check, mod }) {
         if (!mine.some(f => f.level === level && re.test(f.msg))) missed.push(`${P}Bad${i + 1} expected ${level} ${re} got ${mine.map(f => `${f.level}: ${f.msg}`).join(" | ") || "nothing"}`);
         else if (mine.some(f => f.level === "error" && level !== "error")) missed.push(`${P}Bad${i + 1} also gave an error: ${mine.map(f => f.msg).join(" | ")}`);
     });
-    const goodFindings = found.filter(f => f.where.startsWith(`${mod}.${P}Good `) || f.where.startsWith(`${mod}.${P}Sub `));
+    const goodFindings = found.filter(f => [`${P}Good `, `${P}Sub `, `${P}SubList `, `${P}SubSpecial `, `${P}Cust_Edit `].some(n => f.where.startsWith(`${mod}.${n}`)));
     const refusedCount = lint.length; // error lines: the dry run refuses with these
     const expectedErrors = c.bad.filter(x => x[1] === "error").length;
     check(`XPath + expression check catches ${c.bad.length} wrong inputs (did-you-mean, types, syntax) and passes ${c.good.length} correct steps (lint ${lint.ms} ms)`,
