@@ -71,7 +71,7 @@ const MENU_EXTRA = {
     icon: ICON,
     after: "optional caption of a sibling to put it after (default: at the end)", before: "optional caption of a sibling to put it before"
 };
-const extendedMenuItem = o => o.page === undefined || ["menu", "microflow", "icon", "after", "before"].some(k => o[k] !== undefined);
+const extendedMenuItem = o => (o.page === undefined && o.action === undefined) || ["menu", "microflow", "icon", "after", "before"].some(k => o[k] !== undefined);
 
 function makeNav(h, pi) {
     const { model, client } = h;
