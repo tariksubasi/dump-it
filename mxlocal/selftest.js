@@ -1363,6 +1363,9 @@ async function selftest(mpr, keep, { out, relevant }) {
         // phase pages2 (selftest-pages2.js): attribute paths, the action model, validation, formats, form settings, page
         // variables, select page, Data grid 2 export, native navigation, and the refusals
         s2 = await require("./selftest-pages2").pages2Phase({ s2, reopen, copy, mod, T, layout, layoutProblems, check, results, userRole });
+        // phase S (selftest-smallops.js): retrieve sort/range, reference set add/remove, snippets, CRUD pages, changing
+        // and deleting constants, scheduled events, rules, handlers, indexes, enumeration values
+        s2 = await require("./selftest-smallops").smallPhase({ s2, reopen, copy, mod, T, role, layout, layoutProblems, check, results, src });
 
         // phase 4 + 5: change a page Studio Pro saved (add into a column, change a caption and a class), then move the
         // text into the new container, delete that and put the class back: the page must be byte for byte what it was
