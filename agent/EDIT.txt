@@ -133,7 +133,7 @@ Change and delete existing steps (ids from: @PY@ mx.py steps Sales.ACT_Orders_Pr
 Dashboard page (grid + read-only detail of the selected row, in the menu), an edit form, a nanoflow that opens it:
 { "ops": [
   { "op": "createPage", "module": "Sales", "name": "Order_Dashboard", "entity": "Sales.Order", "roles": ["Sales.User"], "menu": "Responsive",
-    "widgets": [ { "widget": "dataGrid", "columns": ["Number", "Total", "Status"] },
+    "widgets": [ { "widget": "dataGrid", "columns": ["Number", "Total", "Status", "Order_Customer/Name"] },
                  { "widget": "dataView", "listenTo": "dataGrid", "editable": false } ] },
   { "op": "createPage", "module": "Sales", "name": "Order_Edit", "entity": "Sales.Order", "fields": ["Number", "Total", "Status"], "roles": ["Sales.User"] },
   { "op": "createNanoflow", "module": "Sales", "name": "NF_Order_Open", "parameters": [ { "name": "Order", "type": "Sales.Order" } ],
@@ -141,7 +141,21 @@ Dashboard page (grid + read-only detail of the selected row, in the menu), an ed
 ] }
   Page widgets: layoutGrid, container, text, dataGrid, dataView (listenTo a grid), listView, actionButton, input
   (fields of one: @PY@ mx.py ops dataGrid; all: @PY@ mx.py ops createPage). A data grid is classic; "kind": "datagrid2"
-  copies a Data grid 2 from this project's pages. The first Warnings line says which grid was made: show it to the user.
+  builds a Data grid 2 from widgets/*.mpk. The first Warnings line says which grid was made: show it to the user.
+  An attribute over a reference is a path: "Order_Customer/Name" (columns, fields, inputs, sort, search, {Assoc/Attr}
+  in texts); a path to MANY objects is refused: use a listView / dataGrid with "source": "association".
+
+Buttons and inputs: a new order linked to the customer around it, a delete with a question and a progress bar, a
+required field with a message, a number format (a question only on callMicroflow / callNanoflow / callWorkflow):
+{ "ops": [ { "op": "createPage", "module": "Sales", "name": "Customer_Detail", "entity": "Sales.Customer", "roles": ["Sales.User"],
+  "widgets": [ { "widget": "dataView", "source": "parameter", "fields": [], "widgets": [
+    { "widget": "textBox", "attribute": "Name", "required": true, "requiredMessage": "Give a name" },
+    { "widget": "textBox", "attribute": "Discount", "format": { "decimals": 2 } },
+    { "widget": "actionButton", "action": "create", "page": "Sales.Order_Edit", "association": "Sales.Order_Customer", "caption": "New order" },
+    { "widget": "actionButton", "action": "callMicroflow", "microflow": "Sales.ACT_Customer_Delete", "caption": "Delete",
+      "confirm": { "question": "Delete this customer?", "proceed": "Delete", "cancel": "Keep" }, "progress": "blocking" } ] } ] } ] }
+  Other actions: openLink (url / email / phone: text or { "attribute": ... }), signOut, sync, callWorkflow; showPage and
+  create take "pageTitle". Inputs also take validation { expression, message }, readOnlyStyle, onEnter / onLeave.
 
 Existing page (names from: @PY@ mx.py widgets Sales.Order_Edit): add an input into the data view, a button in its
 footer, make a field read-only, move a button, delete a widget:
@@ -165,11 +179,11 @@ The module does not exist yet: create it first, in the same file (then its roles
     "widgets": [ { "widget": "dataGrid", "columns": ["FullName", "FirstDay"] }, { "widget": "dataView", "listenTo": "dataGrid", "editable": false } ] }
 ] }
 
-Master-detail (selected customer + its orders): a list view INSIDE the listening data view, xpath over the association:
+Master-detail (selected customer + its orders): a list view INSIDE the listening data view, over the association:
 { "ops": [ { "op": "createPage", "module": "Sales", "name": "Customer_Orders", "entity": "Sales.Customer", "roles": ["Sales.User"],
   "widgets": [ { "widget": "dataGrid", "columns": ["Name", "City"] },
                { "widget": "dataView", "listenTo": "dataGrid", "editable": false, "fields": ["Name"],
-                 "widgets": [ { "widget": "listView", "entity": "Sales.Order", "fields": ["Number", "Total"], "xpath": "[Sales.Order_Customer = '[%CurrentObject%]']" } ] } ] } ] }
+                 "widgets": [ { "widget": "listView", "association": "Sales.Order_Customer", "fields": ["Number", "Total"] } ] } ] } ] }
 
 Relational page: the selected order, its customer over the reference, an editable list of its lines (association,
 an input per line), and a button that passes the selected lines (Multi) to a microflow ("params"; variables:
@@ -236,6 +250,10 @@ ERRORS AND FIXES
 - "is not a language of this project ... add it first" -> put { "op": "addLanguage", "code": "<code>" } before it.
 - "no translatable text at 'x'. Did you mean" -> copy the where [part] from @PY@ mx.py texts <Module.Document>.
 - "datagrid2 ... is not possible here" -> use "kind": "classic" (or leave kind out).
+- "leads to many X ... an attribute path follows references to one object" -> show X in a listView / dataGrid with
+  "source": "association" (inside a data view or list item of the entity), not as a column or field.
+- "confirm goes with callMicroflow, callNanoflow or callWorkflow" -> ask the question in a flow call (a microflow that deletes).
+- "decimals goes with a Decimal attribute" / "date goes with a Date and time attribute" -> use the format of the attribute's type.
 - "needs an import mapping" / "export mapping" -> publishRest supports only simple parameters/results; do it in Studio Pro.
 - "has no attribute 'A' (in $V/A). Did you mean: B" -> use B in that expression.
 - "Studio Pro has this project open" -> ask the user to close Studio Pro, then run the same command again.

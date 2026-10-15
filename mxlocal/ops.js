@@ -104,8 +104,8 @@ const OPS = {
     createLayout: { doc: "Create a layout as a copy of an existing one (its placeholders, header, sidebar and menu widgets), to change in Studio Pro or use in createPage \"layout\".", fields: { module: "R module name", name: "R layout name", from: "R Module.Layout to copy (e.g. Atlas_Core.Atlas_Default)", folder: "optional folder path" } },
     createPage: { doc: "Create a page (or with kind userTaskPage a workflow user task page): an edit form for an entity (inputs by attribute type, Save/Cancel), an empty page, or a page from widgets (layout grids, containers, texts, data grids (classic, or a Data grid 2 built from widgets/*.mpk), data views that listen to a grid, list views, buttons, inputs), optionally with a menu item. Uses the layout the project's other pages use.", fields: { ...PAGE_FIELDS, ...USER_TASK_PAGE_FIELDS } },
     ...PAGE_EDIT_OPS,
-    addMenuItem: { doc: "Add a menu item that opens a page (or runs a microflow) to a navigation profile's menu or a menu document.", fields: { ...MENU_FIELDS, ...MENU_EXTRA } },
-    setHomePage: { doc: "Set the home page (or home microflow) of a navigation profile, for everyone or for some user roles.", fields: HOME_FIELDS },
+    addMenuItem: { doc: "Add a menu item that opens a page, runs a microflow or another action (sign out, open a link, call a flow) to a navigation profile's menu or a menu document; a native page becomes a bottom bar item of the native profile.", fields: { ...MENU_FIELDS, ...MENU_EXTRA } },
+    setHomePage: { doc: "Set the home page (or home microflow) of a navigation profile, for everyone or for some user roles (native profile: a native page or nanoflow).", fields: HOME_FIELDS },
     ...NAV_OPS,
     ...THEME_OPS,
     ...MARKET_OPS,
@@ -435,7 +435,7 @@ function bind(model, client) {
     const flows = makeFlows({ model, client, get, entity, text, dataType, attributeChain, loadParents });
     const codeOps = makeCode({ model, client, get, exists, entity, folder, createFlow: (...a) => flows.createFlow(...a) });
     const flowEdit = makeFlowEdit({ model, exists, createFlow: (o, nano) => flows.createFlow(o, nano, folder(o.module, o.folder)) }, flows);
-    const pageOps = makePages({ model, client, get, exists, entity, text, translationsOf, folder, attributeChain, loadParents, persistable, grantAccess: o => impl.grantAccess(o) });
+    const pageOps = makePages({ model, client, get, exists, entity, text, translationsOf, folder, attributeChain, loadParents, persistable, dataType, grantAccess: o => impl.grantAccess(o), createNanoflow: o => createFlowOp(o, true) });
     const pageEdit = makePageEdit({ model, client, get, text, translationsOf, attributeChain, persistable }, pageOps.internals);
     const securityOps = makeSecurity({ model, get });
     const themeOps = makeTheme({ client });

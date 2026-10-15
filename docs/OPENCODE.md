@@ -344,15 +344,15 @@ Mendix expressions as text: `"'Hello'"`, `"$Order/Total * 2"`, `"empty"`, `"[%Cu
 
 | Op | Fields | Notes |
 |---|---|---|
-| `createPage` | **module**, **name**, title, entity, fields `["Attr"]`, buttons (default true), widgets, arrange, menu, layout, folder, roles, url, popupWidth, popupHeight, popupResizable, from, native | `from`: a page template or building block of the project (`"Dashboard_Action_Center"`, its display name or `Module.Name`): its widgets are copied first, data widgets in it stay unconfigured (the dry run lists them), then `widgets`. `native: true`: a native mobile page on the project's NativePhone layout (text, container, actionButton, dataView, listView, inputs; refused without a native layout). `layout` may also be a layout no page uses yet (its placeholder `Main`). Without `widgets`: with `entity` an edit form (page parameter, data view, an input per attribute, Save/Cancel), without `entity` an empty page. With `widgets`: the page content from the widget list below; `entity` is then the default entity of grids and data views. `menu` (`"Responsive"` or `{profile, caption, parent}`) adds a menu item, `roles` lets module roles open the page. The layout is the one the project's own pages use most |
+| `createPage` | **module**, **name**, title, entity, fields `["Attr"]`, buttons (default true), widgets, arrange, menu, layout, folder, roles, url, popupWidth, popupHeight, popupResizable, from, native, variables, design | `variables` (Mendix 10+): page variables `[{"name": "Search", "type": "String", "default": "''"}]` (types Boolean, Integer, Long, Decimal, String, DateTime, `Enum(Module.E)`; `default` is an expression): an input takes `"variable": "Search"` instead of an attribute (anywhere on the page), expressions, XPath and flow `params` use `$Search`. `design`: design properties of the page itself (Atlas `Form orientation`, `Label width` where the theme has them). `from`: a page template or building block of the project (`"Dashboard_Action_Center"`, its display name or `Module.Name`): its widgets are copied first, data widgets in it stay unconfigured (the dry run lists them), then `widgets`. `native: true`: a native mobile page on the project's NativePhone layout (text, container, actionButton, dataView, listView, inputs; refused without a native layout). `layout` may also be a layout no page uses yet (its placeholder `Main`). Without `widgets`: with `entity` an edit form (page parameter, data view, an input per attribute, Save/Cancel), without `entity` an empty page. With `widgets`: the page content from the widget list below; `entity` is then the default entity of grids and data views. `menu` (`"Responsive"` or `{profile, caption, parent}`) adds a menu item, `roles` lets module roles open the page. The layout is the one the project's own pages use most |
 | `createLayout` | **module**, **name**, **from** (a layout), folder | A copy of an existing layout (placeholders, header, sidebar, menu widgets) to change in Studio Pro; `createPage` takes it in `layout` (the content goes in its placeholder `Main`, or its only one). Layout widgets are not edited by ops |
-| `addMenuItem` | **page** or **microflow**, profile (default Responsive) or menu (a menu document `Module.Menu`), caption (default: the page title), parent (caption or path of an existing item), after / before (a sibling caption), icon | Only pages without parameters. A page is in a menu once. New items go at the end unless after/before. A menu item has no roles of its own: it shows for the user roles that may open the page (change that with `grantAccess` / `revokeAccess` on the page, or `changeMenuItem` roles). The dry-run line ends with `seen by: <user roles>`. `icon`: an icon collection icon `"Atlas_Core.Atlas_Filled.home"`, an image `"Module.Images.Logo"`, a glyph code number (`57377`) |
+| `addMenuItem` | **page** or **microflow**, profile (default Responsive) or menu (a menu document `Module.Menu`), caption (default: the page title), parent (caption or path of an existing item), after / before (a sibling caption), icon | Only pages without parameters. A page is in a menu once. New items go at the end unless after/before. A menu item has no roles of its own: it shows for the user roles that may open the page (change that with `grantAccess` / `revokeAccess` on the page, or `changeMenuItem` roles). The dry-run line ends with `seen by: <user roles>`. `icon`: an icon collection icon `"Atlas_Core.Atlas_Filled.home"`, an image `"Module.Images.Logo"`, a glyph code number (`57377`). With `action` instead of `page`/`microflow`: what the item does, as on `actionButton` (`"signOut"`, `{"action": "openLink", "url": ...}`, `{"action": "callMicroflow", ...}` without object parameters, `create`, `sync` in an offline profile); needs `caption`. A native page (or `"profile": "Native"`) becomes a bottom bar item of the native profile (refused when the project has none: add one in Studio Pro). |
 | `addWidgets` | **page**, **widgets**, into, slot, after, before, entity | Adds `createPage` widgets (list below) to an existing page or snippet. `into`: a container, data view, list view, group box, tab page, the placeholder (`Main`), a layout grid column `"layoutGrid1/row 1/column 2"`, or a pluggable widget (gallery, Data grid 2, ...) with `slot` = its widget list (`"content"`, `"emptyPlaceholder"`, `"columns 2/content"`; `widgets` lists them); `"slot": "footer"` = a data view's footer. `after`/`before`: a widget name in that list (default: at the end). Inputs and `{Attribute}` texts use the entity of the data view or list view around them. New names as Studio Pro gives them (`text3`, `actionButton2`). A new data view listens to a grid or list view (`listenTo`, also one already on the page) or shows the page's own parameter; no op adds a page parameter |
-| `changeWidget` | **page**, **widget**, caption, text, label, placeholder, editable, visible, class, design, style, textStyle, buttonStyle, columns, xpath, name, action, onClick, onChange | Only the given fields change. `design`: Atlas design properties (below); given keys change, `null` removes one. `visible` also `{"roles": ["Module.Role"]}`. `editable`: true/false, or (inputs) an expression or `{"attribute": "Status", "values": ["Open"]}`; `visible`: true, false, an expression `"$currentObject/Active"` or `{"attribute": ...}`. `columns`: `{"add": [...], "remove": [...]}` of a classic grid or Data grid 2. `name` renames; data views listening to it follow. `action` (a button, also a classic grid button), `onClick` (Data grid 2, gallery) and `onChange` (inputs, selectors, combo box) replace the old action: `{"action": "showPage", "page": ..., "params": ...}`. Texts change in the default language only (the dry run warns about other languages) |
-| `changePage` | **page**, title, url, popupWidth, popupHeight, popupResizable, addParameter `{name, type, required}`, removeParameter, renameParameter `{from, to}` | Page settings and parameters of an existing page. `url`: `"orders"` or `"order/{Order/Id}"` (a parameter's attribute; unique in the app). Parameters only when no caller breaks: a new required parameter is refused while a button, menu item, grid or microflow opens the page (the error lists them; Mendix 11.5+: `"required": false`); `removeParameter` is refused while a widget or the URL uses it, and removes the callers' mappings of it; `renameParameter` keeps callers, widgets and the URL in step. `createPage` takes `url` and the pop-up fields too |
+| `changeWidget` | **page**, **widget**, caption, text, label, placeholder, editable, visible, class, design, style, textStyle, buttonStyle, columns, xpath, name, action, onClick, onChange, onEnter, onLeave, onEnterKeyPress, required, requiredMessage, validation, format, readOnlyStyle, inputMask, maxLength, orientation, labelWidth, showFooter, selectPage | Inputs: `required` true/false (false removes the validation), `validation`, `format`, `readOnlyStyle`, `inputMask`, `maxLength`, events `onEnter` / `onLeave` / `onEnterKeyPress` (text box) as in createPage; a classic grid column takes `format`; a data view `orientation`, `labelWidth`, `readOnlyStyle`, `showFooter`; a reference (set) selector `selectPage`. `action` takes the whole action model (create, openLink, confirm, progress, pageTitle, ...). Only the given fields change. `design`: Atlas design properties (below); given keys change, `null` removes one. `visible` also `{"roles": ["Module.Role"]}`. `editable`: true/false, or (inputs) an expression or `{"attribute": "Status", "values": ["Open"]}`; `visible`: true, false, an expression `"$currentObject/Active"` or `{"attribute": ...}`. `columns`: `{"add": [...], "remove": [...]}` of a classic grid or Data grid 2. `name` renames; data views listening to it follow. `action` (a button, also a classic grid button), `onClick` (Data grid 2, gallery) and `onChange` (inputs, selectors, combo box) replace the old action: `{"action": "showPage", "page": ..., "params": ...}`. Texts change in the default language only (the dry run warns about other languages) |
+| `changePage` | **page**, title, url, popupWidth, popupHeight, popupResizable, addParameter `{name, type, required}`, removeParameter, renameParameter `{from, to}`, variables, design | `variables`: page variables to add, or to change (same name: new type / default). Page settings and parameters of an existing page. `url`: `"orders"` or `"order/{Order/Id}"` (a parameter's attribute; unique in the app). Parameters only when no caller breaks: a new required parameter is refused while a button, menu item, grid or microflow opens the page (the error lists them; Mendix 11.5+: `"required": false`); `removeParameter` is refused while a widget or the URL uses it, and removes the callers' mappings of it; `renameParameter` keeps callers, widgets and the URL in step. `createPage` takes `url` and the pop-up fields too |
 | `deleteWidget` | **page**, **widget** | Deletes the widget with everything in it (also a classic grid column, grid button or tab page). Refused while a data view listens to it or a widget elsewhere refers to it by name |
 | `moveWidget` | **page**, **widget**, into, slot, after, before | Same page only. A widget that shows attributes or acts on the object stays in the same data view or list view |
-| `setHomePage` | **page** or **microflow**, profile (default Responsive), roles (user roles, e.g. `["Administrator"]`) | Without roles: the default home page. Only pages/microflows without parameters |
+| `setHomePage` | **page**, **microflow** or (native) **nanoflow**, profile (default Responsive; `Native`), roles (user roles, e.g. `["Administrator"]`) | Without roles: the default home page. Only pages/flows without parameters. A native page or a nanoflow sets the native profile's home page (refused when the project has no native profile) |
 | `changeMenuItem` | **item**, profile or menu, caption, page, microflow, action (`"none"`), icon (`"none"` removes it), roles | `item` = the caption (any language), a path `"Parent/Child"`, or the page/microflow the item opens. Only the given fields change. `caption` as text changes the default language only (per language: `{"en_US": ..., "nl_NL": ...}`). `roles` (module roles) are given to the item's page or microflow, since menu items have no roles of their own |
 | `moveMenuItem` | **item**, profile or menu, parent (`""` = top level), after / before (a sibling caption), position (`first` / `last`) | Moves the item with its sub-items: re-order within its parent, or under another item. At most 3 levels; an item cannot go under itself |
 | `deleteMenuItem` | **item**, profile or menu | Deletes the item and its sub-items (the dry run lists them) |
@@ -374,19 +374,19 @@ also take `editable` (true, false or a condition like `visible`). Full field lis
 |---|---|---|
 | `layoutGrid` | columns `[8, 4]` or `[{"weight": 8, "widgets": [...]}]`, or rows `[{"columns": [...]}]`, width | Weights 1-12 or `"auto"`; `tablet`/`phone` weights per column |
 | `container` | widgets, class | |
-| `text` | **text**, style (`Text`, `Paragraph`, `H1`-`H6`) | Inside a data view or list view, `{Attribute}` shows the value. `{1}` is refused (a Mendix placeholder). `"widget": "heading"` = a text with style H2 |
-| `dataGrid` | entity, source, association, microflow, nanoflow, columns (`"Attr"` or `{attribute, caption, width}`; Data grid 2 also `{attribute, filter}`, `{dynamicText, caption}` and `{widgets, caption}`), xpath, search, sort, selection (default Single), selectFirst, rows, kind, buttons (classic), onClick, filters, paging, selectionMethod, rowClass, configAttribute (Data grid 2) | Data source: see the source table below; the database source needs a persistable entity, search and `sort` (`[{"attribute": "Date", "direction": "desc"}, "Name"]`, the default order) only with it. Classic `search`: true or `["Attr"]`. `kind`: `classic` (default; search bar), `datagrid2` (a Data grid 2 built from `widgets/*.mpk` with Studio Pro's defaults; a copy of one on the project's pages when the .mpk cannot be read; refused without the .mpk), `auto` (datagrid2 when possible, else classic; also classic when a column type does not fit a Data grid 2). Data grid 2: `filters: true` puts a text / number / date / drop-down filter (by attribute type, from `widgets/*.mpk`) in every attribute column header (`filter` per column), `paging` `buttons` / `virtualScrolling` / `loadMore`, `selectionMethod` `rowClick` / `checkbox`, `rowClass` an expression, `configAttribute` a String attribute of the data view around it (personalization). `width`: whole numbers (weights, 100 in total). Classic `buttons`: `[{"action": "new" \| "edit", "page": ...}, {"action": "delete"}, {"action": "callMicroflow", "microflow": ..., "params": ...}]` (+ caption, style, name); a flow gets the selected row, a List parameter the selected rows (`"selection": "Multi"`); edit is the default (double-click) button; export buttons are refused. Data grid 2: `onClick` (an action, the row is passed), dynamic text columns (`{Attribute}`) and custom content columns (widgets per row; a button that opens a page gets the row mapped, as Studio Pro stores it) |
-| `dataView` | entity, source, listenTo, association, microflow, nanoflow, editable (default true), fields, buttons, widgets, footer | Data source: see the source table below. `listenTo`: the name of a grid or list view, or `dataGrid` / `listView` when the page has exactly one (a Data grid 2 needs selection Single). A page parameter (Save/Cancel when editable) only outside list items. An editable data view without a save button (also none in a data view around it) gets a warning |
-| `listView` | entity, source, association, microflow, nanoflow, xpath, fields, widgets, pageSize (whole number), search `["Attr"]`, sort | Data source: see the source table below; `search` (a search box over those attributes) and `sort` with the database source. Each item is an object: inputs, reference selectors and data views (source context) go inside (an editable list). A data view can listen to it |
-| `actionButton` | **action** (`save`, `cancel`, `close`, `delete`, `showPage`, `callMicroflow`, `callNanoflow`), caption, page, microflow, nanoflow, params, style, closePage | Without `params` it passes the objects around it (a target whose parameters are all such objects, or none); `params` maps each parameter (table below). save/cancel `closePage` default: true in a parameter data view, false in a listening one (the dashboard stays open; Studio Pro's own default is true). `close` = `closePageButton1` "Close page" |
-| `input`, `textBox`, `textArea`, `checkBox`, `datePicker`, `radioButtons`, `dropDown` | **attribute**, label, editable, onChange | Inside a data view or a list view / gallery item; `input` picks the widget by attribute type (an enumeration gets radio buttons, as on Studio Pro's pages) |
+| `text` | **text**, style (`Text`, `Paragraph`, `H1`-`H6`), format | Inside a data view or list view, `{Attribute}` shows the value, `{Order_Customer/Name}` one over references. `format` per `{Attribute}`: `{"Total": {"decimals": 2, "groupDigits": true}, "Date": {"date": "dd-MM-yyyy"}}`. `{1}` is refused (a Mendix placeholder). `"widget": "heading"` = a text with style H2 |
+| `dataGrid` | entity, source, association, microflow, nanoflow, columns (`"Attr"`, `"Order_Customer/Name"` or `{attribute, caption, width, format}`; Data grid 2 also `{attribute, filter}`, `{dynamicText, caption, format}` and `{widgets, caption}`), xpath, search, sort, selection (default Single), selectFirst, rows, kind, buttons (classic), onClick, filters, paging, selectionMethod, rowClass, configAttribute, export (Data grid 2) | Columns, `sort` and `search` take attribute paths over references (below). `format` (classic columns; a Data grid 2 shows an attribute column in its own format: use a `dynamicText` column with `format`). Data grid 2 `export`: `true` or `{"caption", "fileName", "sheetName", "headers"}` adds an Export to Excel button in the grid's header and a nanoflow `<Page>_<grid>_Export` that calls `DataWidgets.Export_To_Excel` (as the Data Widgets sample; refused when the project lacks the Data Widgets module). Data source: see the source table below; the database source needs a persistable entity, search and `sort` (`[{"attribute": "Date", "direction": "desc"}, "Name"]`, the default order) only with it. Classic `search`: true or `["Attr"]`. `kind`: `classic` (default; search bar), `datagrid2` (a Data grid 2 built from `widgets/*.mpk` with Studio Pro's defaults; a copy of one on the project's pages when the .mpk cannot be read; refused without the .mpk), `auto` (datagrid2 when possible, else classic; also classic when a column type does not fit a Data grid 2). Data grid 2: `filters: true` puts a text / number / date / drop-down filter (by attribute type, from `widgets/*.mpk`) in every attribute column header (`filter` per column), `paging` `buttons` / `virtualScrolling` / `loadMore`, `selectionMethod` `rowClick` / `checkbox`, `rowClass` an expression, `configAttribute` a String attribute of the data view around it (personalization). `width`: whole numbers (weights, 100 in total). Classic `buttons`: `[{"action": "new" \| "edit", "page": ...}, {"action": "delete"}, {"action": "callMicroflow", "microflow": ..., "params": ...}]` or any action below (+ caption, style, name and the action options; `"maintainSelection": true` keeps the selection after a flow); a flow gets the selected row, a List parameter the selected rows (`"selection": "Multi"`); edit is the default (double-click) button. Data grid 2: `onClick` (an action, the row is passed), dynamic text columns (`{Attribute}`) and custom content columns (widgets per row; a button that opens a page gets the row mapped, as Studio Pro stores it) |
+| `dataView` | entity, source, listenTo, association, microflow, nanoflow, editable (default true), fields, buttons, widgets, footer, orientation, labelWidth, readOnlyStyle, showFooter | `orientation` `horizontal` / `vertical` (stored as label width 0, as Studio Pro does), `labelWidth` 1-11, `readOnlyStyle` `control` / `text`, `showFooter`. `fields` take paths (`"Order_Customer/Name"`: a read-only input). Data source: see the source table below. `listenTo`: the name of a grid or list view, or `dataGrid` / `listView` when the page has exactly one (a Data grid 2 needs selection Single). A page parameter (Save/Cancel when editable) only outside list items. An editable data view without a save button (also none in a data view around it) gets a warning |
+| `listView` | entity, source, association, microflow, nanoflow, xpath, fields, widgets, pageSize (whole number), search `["Attr"]`, sort | `fields`, `search` and `sort` take paths (`"Order_Customer/Name"`). Data source: see the source table below; `search` (a search box over those attributes) and `sort` with the database source. Each item is an object: inputs, reference selectors and data views (source context) go inside (an editable list). A data view can listen to it |
+| `actionButton` | **action** (table below), caption, page, microflow, nanoflow, workflow, params, entity, association, url, email, phone, sms, confirm, progress, progressMessage, abortOnValidationErrors, pageTitle, style, closePage | Without `params` it passes the objects around it (a target whose parameters are all such objects, or none); `params` maps each parameter (table below). save/cancel `closePage` default: true in a parameter data view, false in a listening one (the dashboard stays open; Studio Pro's own default is true). `close` = `closePageButton1` "Close page" |
+| `input`, `textBox`, `textArea`, `checkBox`, `datePicker`, `radioButtons`, `dropDown` | **attribute** (or variable), label, editable, onChange, onEnter, onLeave, onEnterKeyPress, required, requiredMessage, validation, format, readOnlyStyle, placeholder, inputMask, maxLength | Inside a data view or a list view / gallery item (an input of a page `variable` anywhere); `input` picks the widget by attribute type (an enumeration gets radio buttons, as on Studio Pro's pages). `attribute` may be a path (`"Order_Customer/Name"`): read-only, as Studio Pro shows it, unless `editable` is given. `required: true` (+ `requiredMessage`) = Studio Pro's validation Required (`$value != empty`); `validation: {"expression": "$value > 0", "message": "..."}` a custom one (one of the two). `format`: numbers `{"decimals": 2, "groupDigits": true}` (decimals: Decimal only), dates `{"date": "date" \| "time" \| "dateTime" \| "dd-MM-yyyy HH:mm"}`. `readOnlyStyle` `inherit` / `control` / `text`. Text box / text area: `maxLength` (`"attribute"`, `"unlimited"`, a number), `inputMask` (text box). `onEnter` / `onLeave` (focus), `onEnterKeyPress` (text box): actions as on `actionButton` |
 | `tabContainer` | **tabs** `[{"caption": "General", "widgets": [...], "name": ...}]` | Tab pages `tabPage1`, ...; addWidgets `into` a tab page by its name |
 | `groupBox` | caption, collapsible (`no`/`expanded`/`collapsed`), headerMode (`Div`, `H1`-`H6`), widgets | `{Attribute}` in the caption inside a data view or list view |
 | `snippetCall` | **snippet**, params | An existing snippet (`Did you mean`); its object parameters get the objects around it, or `params` |
 | `image` | image, association, width, height | `image`: a static image `Module.Collection.Image` (`Did you mean`). Without it: the image of the object around it (data view, list view or gallery of an entity that inherits `System.Image`, or over `association`). Size: pixels `200`, `"50%"` or `"auto"` |
-| `referenceSelector` | **association**, attribute, label, xpath, selectableMicroflow, editable, onChange | Inside a data view whose entity owns the reference (`Module.Order_Customer` in a data view of Order); `attribute` of the other entity (default: its first String attribute). `selectableMicroflow`: a microflow that returns the selectable objects (instead of `xpath`) |
-| `referenceSetSelector` | **association**, attribute, label, xpath, selectableMicroflow, editable, onChange | Several objects of a reference set the entity around it owns (Studio Pro's input reference set selector) |
-| `comboBox` | attribute or association, captionAttribute, label, editable, onChange | Combo box (pluggable) for an enumeration/Boolean attribute or a reference, built from `widgets/*.mpk` with Studio Pro's defaults (other modes: `pluggable` with `properties`). Without the .mpk refused with the classic alternative (`referenceSelector`, `dropDown`, `checkBox`) |
+| `referenceSelector` | **association**, attribute, label, xpath, selectableMicroflow, selectPage, required, requiredMessage, validation, readOnlyStyle, editable, onChange | Inside a data view whose entity owns the reference (`Module.Order_Customer` in a data view of Order); `attribute` of the other entity (default: its first String attribute; `"Order_Customer/Name"` is the same; a longer path is refused: Studio Pro follows one association). `selectableMicroflow`: a microflow that returns the selectable objects (instead of `xpath`). `selectPage`: a page without parameters that lists the objects to pick (Studio Pro: Select using Page; the dry run warns when it shows no grid of them) |
+| `referenceSetSelector` | **association**, attribute, label, xpath, selectableMicroflow, selectPage, readOnlyStyle, editable, onChange | Several objects of a reference set the entity around it owns (Studio Pro's input reference set selector) |
+| `comboBox` | attribute or association, captionAttribute, label, editable, onChange | `captionAttribute` may be a path from the other entity (`"City_Country/Name"`). Combo box (pluggable) for an enumeration/Boolean attribute or a reference, built from `widgets/*.mpk` with Studio Pro's defaults (other modes: `pluggable` with `properties`). Without the .mpk refused with the classic alternative (`referenceSelector`, `dropDown`, `checkBox`) |
 | `templateGrid` | entity, source, association, microflow, nanoflow, xpath, widgets (per tile), columns (tiles per row, default 2), rows (default 3), selection, selectFirst, buttons, search (true or `["Attr"]`), sort | Classic template grid (as the Studio Pro 10.24 / 11.12 samples store it): tiles with their own widgets (inputs too), control bar `buttons` as `dataGrid`; a data view can listen to it; addWidgets `into` it |
 | `gallery` | entity, source, association, microflow, nanoflow, xpath, widgets (per item), selection (default Single), pageSize, columns (desktop 1-12), onClick, sort | Gallery (pluggable), data source as `listView`, built from `widgets/*.mpk` like `comboBox`; a data view can listen to it (`listenTo`). Without the .mpk it is refused: use `listView` |
 | `pluggable` | **type** (widget id or short name: `Datagrid`, `"Data grid 2"`, `Badge`), properties, label, editable | Any pluggable widget of `widgets/*.mpk`, built from its definition exactly as Studio Pro drops it (every property at its default, texts in the project's languages). `python mx.py widgettype` lists the installed widgets, `python mx.py widgettype <name>` their property keys, types, defaults and values. `properties` by type: boolean, number, string, enumeration key (or caption), expression, text with `{Attribute}`, attribute name (of the widget's data source, else of the data view around it), `Module.Assoc`, `Module.Entity`, an image, an action as on `actionButton`, selection `Single`/`Multi`/`None`, data source `"Module.Entity"` or `{entity, xpath}` (the first one also `association` / `microflow` / `nanoflow` + `params`), `widgets` lists (inside the data source's item when linked to it), object lists `[{key: value}]`. Wrong keys and values: error with `Did you mean`. Required properties left empty: a warning. A data view can `listenTo` it when it has a selection set to `Single`. Icons and linked data sources (filters outside a grid): Studio Pro |
@@ -419,9 +419,34 @@ checked (entity, also a specialization; object or list); a wrong name is an erro
 | `"$<Parameter>"` | a page (or snippet) parameter | A new page's parameters are named after their entity |
 | any other text | an expression (`"'Open'"`, `"$currentObject/Total * 2"`) | Flow parameters only (a page or snippet parameter of an object takes a variable) |
 
-Actions in `onClick` / `onChange` / changeWidget `action`: `{"action": "showPage" | "callMicroflow" | "callNanoflow" |
-"save" | "cancel" | "close" | "delete", "page" / "microflow" / "nanoflow", "params", "closePage"}`; the object around
-the widget (the row for onClick) is passed, `params` as above.
+Actions: one model for `actionButton`, classic grid `buttons`, `onClick` (Data grid 2, gallery), `onChange` /
+`onEnter` / `onLeave` / `onEnterKeyPress` (inputs), `addMenuItem` `action` and changeWidget `action`:
+`{"action": ..., ...}` (or just `"save"`); the object around the widget (the row for onClick) is passed, `params` as above.
+
+| action | takes | Notes |
+|---|---|---|
+| `showPage` | **page**, params, pageTitle, closePage | `pageTitle`: a title instead of the page's own (texts per language allowed); `closePage`: true or a number of pages to close first |
+| `callMicroflow` / `callNanoflow` | **microflow** / **nanoflow**, params, confirm, progress, progressMessage, abortOnValidationErrors (microflow), maintainSelection (grid buttons) | `confirm`: true, a question, or `{"question", "proceed", "cancel"}`; `progress`: `none` / `nonBlocking` / `blocking` (+ `progressMessage`); `abortOnValidationErrors`: true (default) / `"widget"` / false |
+| `create` | **page**, entity, association, pageTitle, closePage | A new object (default entity: the page's parameter entity) shown on `page`; `association` links it to the object of the data view or list item around the button (Studio Pro: Entity (path) over an association, e.g. a new Order in a Customer data view over `Sales.Order_Customer`) |
+| `openLink` | one of url, email, phone, sms | A text, or `{"attribute": "Website"}` (also a path) of the object around it |
+| `save` / `cancel` / `delete` | closePage | |
+| `close`, `signOut` | | |
+| `sync` | | Offline apps only: refused without an offline or native navigation profile |
+| `callWorkflow` | **workflow**, confirm, closePage | Starts the workflow for the object around the button (its context entity) |
+
+`confirm` and `progress` go with flow calls only (Studio Pro asks only before those; a delete with a question is a
+microflow that deletes). `openTask` / `openWorkflow` are refused (they need a data view of a System workflow entity):
+call a microflow with `openUserTask` / `openWorkflow`.
+
+Attribute paths: everywhere an attribute is taken (grid and Data grid 2 columns, `fields`, inputs, `sort`, `search`,
+Data grid 2 filters, `{...}` in texts, `visible` / `editable` by attribute, selector captions, pluggable attribute
+properties linked to a data source, `openLink` attributes) a path over references to one object works:
+`"Order_Customer/Name"`, `"Sales.Order_Customer/Name"`, the entity's name `"Customer/Name"` (when one reference
+leads there) or several steps `"Order_Customer/Customer_Country/Name"`. They are stored as Studio Pro stores them (an
+`AttributeRef` with the association steps). A step to many objects is refused with the list widget that shows them
+(`listView` / `dataGrid` with `"source": "association"`); a wrong step or attribute says `Did you mean`. `visible` /
+`editable` `{"attribute": "Customer/Active"}` becomes the expression `$currentObject/Sales.Order_Customer/Active` (a
+condition by attribute takes the object's own attributes in Studio Pro).
 
 Pages may have several parameters (one per data view with source parameter and entity); a button that opens such a
 page maps each one.
@@ -595,24 +620,105 @@ property, a section only managers see, and page settings (`python mx.py widgetty
 ] }
 ```
 
+Attribute paths (G1): customer and country columns on an order grid, sorted and searched by customer name, and the
+customer's name in the selected order's detail (`Sales.Order_Customer` goes from Order to Customer,
+`Sales.Customer_Country` from Customer to Country):
+
+```json
+{ "ops": [ { "op": "createPage", "module": "Sales", "name": "Order_Overview2", "entity": "Sales.Order", "widgets": [
+    { "widget": "dataGrid", "name": "orders", "columns": ["Number", "Order_Customer/Name", { "attribute": "Customer/Customer_Country/Name", "caption": "Country" }],
+      "sort": ["Customer/Name"], "search": ["Customer/Name"] },
+    { "widget": "dataView", "listenTo": "orders", "editable": false, "fields": ["Number", "Customer/Name"],
+      "widgets": [ { "widget": "text", "text": "Ordered by {Customer/Name}", "visible": { "attribute": "Customer/Active" } } ] } ] } ] }
+```
+
+Actions (G2, G9): a new order for the customer on its page (linked over the association), its website from an
+attribute, a delete with a question and a progress bar, a page opened with another title, and a sign-out menu item:
+
+```json
+{ "ops": [
+  { "op": "createPage", "module": "Sales", "name": "Customer_Card", "entity": "Sales.Customer", "widgets": [
+    { "widget": "dataView", "source": "parameter", "fields": ["Name"], "widgets": [
+      { "widget": "actionButton", "action": "create", "page": "Sales.Order_Edit", "association": "Sales.Order_Customer", "caption": "New order", "pageTitle": "New order" },
+      { "widget": "actionButton", "action": "openLink", "url": { "attribute": "Website" }, "caption": "Website" },
+      { "widget": "listView", "association": "Sales.Order_Customer", "widgets": [ { "widget": "text", "text": "{Number}" },
+        { "widget": "actionButton", "action": "callMicroflow", "microflow": "Sales.ACT_Order_Delete", "caption": "Delete", "style": "Danger",
+          "confirm": { "question": "Delete this order?", "proceed": "Delete", "cancel": "Keep" }, "progress": "blocking", "progressMessage": "Deleting..." } ] } ] } ] },
+  { "op": "addMenuItem", "caption": "Sign out", "action": "signOut" }
+] }
+```
+
+Validation and formats (G3, G5): a required note with its message, a custom check on the total, number and date
+formats, a required reference with a select page; then a change on an existing page:
+
+```json
+{ "ops": [
+  { "op": "createPage", "module": "Sales", "name": "Order_Form", "entity": "Sales.Order", "widgets": [
+    { "widget": "dataView", "source": "parameter", "fields": [], "widgets": [
+      { "widget": "textBox", "attribute": "Note", "required": true, "requiredMessage": "Please give a note", "maxLength": 100 },
+      { "widget": "textBox", "attribute": "Total", "validation": { "expression": "$value >= 0", "message": "The total cannot be negative" }, "format": { "decimals": 2, "groupDigits": true } },
+      { "widget": "datePicker", "attribute": "Date", "required": true, "format": { "date": "dd-MM-yyyy" } },
+      { "widget": "referenceSelector", "association": "Sales.Order_Customer", "selectPage": "Sales.Customer_Select", "required": true } ] } ] },
+  { "op": "changeWidget", "page": "Sales.Order_Edit", "widget": "textBox2", "required": true, "format": { "decimals": 0 } }
+] }
+```
+
+Form settings (G6): a vertical, text-style read-only form; then a wider label column on an existing one:
+
+```json
+{ "ops": [
+  { "op": "createPage", "module": "Sales", "name": "Order_Summary", "entity": "Sales.Order", "widgets": [
+    { "widget": "dataView", "source": "parameter", "editable": false, "orientation": "vertical", "readOnlyStyle": "text", "showFooter": false, "fields": ["Number", "Total"] } ] },
+  { "op": "changeWidget", "page": "Sales.Order_Edit", "widget": "dataView1", "orientation": "horizontal", "labelWidth": 4 }
+] }
+```
+
+Page variables and input events (G8, G10): a search text box bound to a page variable that runs a nanoflow on Enter,
+and an input that saves when it loses the focus:
+
+```json
+{ "ops": [ { "op": "createPage", "module": "Sales", "name": "Order_Search", "entity": "Sales.Order", "variables": [ { "name": "Query", "type": "String", "default": "''" } ],
+  "widgets": [
+    { "widget": "textBox", "variable": "Query", "label": "Search", "onEnterKeyPress": { "action": "callNanoflow", "nanoflow": "Sales.NF_Search", "params": { "Text": "$Query" } } },
+    { "widget": "dataView", "source": "parameter", "fields": [], "widgets": [ { "widget": "input", "attribute": "Note", "onLeave": "save" } ] } ] } ] }
+```
+
+Data grid 2 export (G12) and native navigation (G13; only when the project has a native profile):
+
+```json
+{ "ops": [
+  { "op": "createPage", "module": "Sales", "name": "Order_Export", "widgets": [
+    { "widget": "dataGrid", "kind": "datagrid2", "entity": "Sales.Order", "columns": ["Number", "Customer/Name", "Total"], "export": { "fileName": "Orders" } } ] },
+  { "op": "createPage", "module": "Sales", "name": "Home_Native", "native": true, "widgets": [ { "widget": "text", "text": "Orders" } ], "menu": { "caption": "Home" } },
+  { "op": "setHomePage", "page": "Sales.Home_Native" }
+] }
+```
+
 What pages cannot do yet (use Studio Pro, and `python mx.py gap "<what>"`):
 - Layouts: `createLayout` copies one; changing a layout's own widgets and placeholders is Studio Pro. Building blocks /
   page templates are only read (`from`); data widgets copied from them stay unconfigured.
-- `changeWidget`: no change of a data source (other than `xpath`), an input's attribute, on-enter / on-leave events,
-  or a pluggable widget's other properties (add it again with `pluggable`). `moveWidget`: within one page, not into or
+- `changeWidget`: no change of a data source (other than `xpath`), an input's attribute, or a pluggable widget's other
+  properties (add it again with `pluggable`). `moveWidget`: within one page, not into or
   out of a pluggable widget. Renaming a widget does not change `$widgetName` in expressions (the dry run lists them).
 - Page parameters: `changePage` refuses a new required parameter while anything opens the page (optional ones need
-  Mendix 11.5+), a removed parameter that a widget or the URL uses; primitive page parameters are not made.
+  Mendix 11.5+), a removed parameter that a widget or the URL uses; primitive page parameters are not made (use page
+  `variables`). Page variables: no removal; a type change is not checked against the widgets that use them.
 - Pluggable widgets (`pluggable`): no icon properties, no linked data sources (a filter outside its grid), only the
   first data source takes association / microflow / nanoflow (others: database); Studio Pro's editor hides properties
   by other values, ops does not (a required-but-hidden property only gives a warning). Native widgets of
   `widgets/*.mpk` (on native pages) are refused.
-- Data grid 2: no export to Excel / CSV button (do it in Studio Pro with the Data Widgets `Export_To_Excel` JavaScript
-  action in a nanoflow); `buttons` are classic only. Gallery: no filters or personalization fields (use `pluggable`
-  properties).
-- Classic data grid: no export buttons and no inline (in-grid) new rows; search only with the database source.
-- Native pages: only text, container, action button, data view, list view and inputs; no native navigation (menu,
-  home page) and no native pluggable widgets.
+- Data grid 2: export is Excel through the Data Widgets module (`export`; no CSV, no column export settings, refused
+  without Data Widgets); `buttons` are classic only; an attribute column has no `format` (use a dynamic text column).
+  Gallery: no filters or personalization fields (use `pluggable` properties).
+- Classic data grid: no export buttons and no inline (in-grid) new rows; search only with the database source; a
+  column over a reference set (Studio Pro lists its values) is refused like every to-many path.
+- Native pages: only text, container, action button, data view, list view and inputs; no native pluggable widgets.
+  Native navigation (bottom bar items, home page) only when the project has a native profile (adding one is Studio
+  Pro); bottom bar icons are not set.
+- Actions: `openTask` / `openWorkflow` (use a microflow); confirmation, progress bars, select pages, create over an
+  association, page title overrides, closing pages first, page variables other than a text box, input masks and
+  custom maximum lengths have no Studio Pro sample in the test projects: the dry run says "first use"; check them in
+  Studio Pro.
 - Tab pages with visibility, badges or a default tab; images with an on-click action or a default image; design
   properties that take several options (`Hide on`) or a custom colour.
 - Combo box: only the context source with an enumeration, Boolean or reference (other modes: `pluggable` with
@@ -620,9 +726,8 @@ What pages cannot do yet (use Studio Pro, and `python mx.py gap "<what>"`):
 - Data views with source context or association, list view search attributes, visibility by module role, file
   managers and native pages have no Studio Pro sample in the test projects: the dry run says "first use"; check them
   in Studio Pro.
-- Buttons: no create-object action.
-- Menus: web profiles only (native profiles are refused); no reordering, and no op removes a menu item or home page
-  (deleting a page that one opens says so).
+- Menus: no reordering, and no op removes a menu item, bottom bar item or home page (deleting a page that one opens
+  says so).
 - Texts (labels, titles, captions, headers, menu captions) given as plain text are written in the default language
   only, as Studio Pro does; the dry run counts the ones other project languages lack. Give them per language
   (`"caption": {"en_US": "Save", "tr_TR": "Kaydet"}`) or translate them later (Languages and translations). Studio
@@ -1088,7 +1193,8 @@ Then give the user exact Studio Pro steps. SDK scripts (`edits/<name>.js`) run o
 refuses them.
 
 Operations cannot do these things: changing a layout's widgets (`createLayout` copies one), Data grid 2 export
-buttons, icon properties and linked data sources of pluggable widgets, native navigation and native pluggable widgets,
+without the Data Widgets module (or to CSV), icon properties and linked data sources of pluggable widgets, adding a
+native navigation profile and native pluggable widgets, open user task / open workflow buttons,
 design properties with several options, consumed OData services, consumed SOAP web services and business events
 (refused with the Studio Pro steps), XML schemas of several files or with attributes/choices/extensions, OpenAPI
 imports of consumed REST services, multi-user tasks, boundary events and event sub-processes of workflows, changing

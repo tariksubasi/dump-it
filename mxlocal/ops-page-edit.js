@@ -42,7 +42,14 @@ const PAGE_EDIT_OPS = {
             name: "new name; data views listening to it follow",
             action: "a button's action (also a classic grid button): { \"action\": \"showPage\" | \"callMicroflow\" | \"callNanoflow\" | \"save\" | \"cancel\" | \"close\" | \"delete\", \"page\" / \"microflow\" / \"nanoflow\", \"params\" } (replaces the old one)",
             onClick: "on click of a Data grid 2 or gallery: an action as in \"action\" (the row is passed)",
-            onChange: "on change of an input, reference (set) selector or combo box: an action as in \"action\" (the object around it is passed)"
+            onChange: "on change of an input, reference (set) selector or combo box: an action as in \"action\" (the object around it is passed)",
+            onEnter: "input: action when it gets the focus", onLeave: "input: action when it loses the focus", onEnterKeyPress: "text box: action on the Enter key",
+            required: "input / reference selector: true (validation Required, $value != empty) | false (no validation)", requiredMessage: "with required true: the message",
+            validation: "input: { \"expression\": \"$value > 0\", \"message\": \"...\" } (custom validation)",
+            format: "text box, date picker or classic grid column: { \"decimals\": 2, \"groupDigits\": true } | { \"date\": \"date\" | \"time\" | \"dateTime\" | \"dd-MM-yyyy\" }",
+            readOnlyStyle: "input: inherit | control | text; data view: control | text", inputMask: "text box: a mask, e.g. \"99-99-9999\"", maxLength: "text box / text area: \"attribute\" | \"unlimited\" | a number",
+            orientation: "data view: horizontal | vertical", labelWidth: "data view: label width 1-11 (horizontal form)", showFooter: "data view: true/false",
+            selectPage: "reference (set) selector: Module.Page that lists the objects to pick (Studio Pro: Select using Page)"
         }
     },
     changePage: {
@@ -54,7 +61,9 @@ const PAGE_EDIT_OPS = {
             popupWidth: "optional pop-up width in pixels (0 = auto)", popupHeight: "optional pop-up height in pixels (0 = auto)", popupResizable: "optional true/false",
             addParameter: "optional { \"name\": \"Order\", \"type\": \"Module.Entity\", \"required\": true } (refused while something opens the page, unless required false on Mendix 11.5+)",
             removeParameter: "optional parameter name (refused while a widget of the page uses it; callers' mappings of it are removed)",
-            renameParameter: "optional { \"from\": \"Order\", \"to\": \"SalesOrder\" } (widgets and callers follow)"
+            renameParameter: "optional { \"from\": \"Order\", \"to\": \"SalesOrder\" } (widgets and callers follow)",
+            variables: "optional page variables to add (or change: same name): [ { \"name\": \"Search\", \"type\": \"String\", \"default\": \"''\" } ] (Mendix 10+; see createPage)",
+            design: "optional design properties of the page, e.g. { \"Form orientation\": \"Horizontal\" } (where the theme has them for pages)"
         }
     },
     deleteWidget: {
@@ -66,7 +75,9 @@ const PAGE_EDIT_OPS = {
         fields: { page: "R Module.Page or Module.Snippet", widget: "R widget name", ...PLACE }
     }
 };
-const CHANGE_FIELDS = ["caption", "text", "label", "placeholder", "editable", "visible", "class", "design", "style", "textStyle", "buttonStyle", "columns", "xpath", "name", "action", "onClick", "onChange"];
+const INPUT_FIELDS = ["required", "requiredMessage", "validation", "format", "readOnlyStyle", "inputMask", "maxLength"];
+const CHANGE_FIELDS = ["caption", "text", "label", "placeholder", "editable", "visible", "class", "design", "style", "textStyle", "buttonStyle", "columns", "xpath", "name", "action", "onClick", "onChange",
+    "onEnter", "onLeave", "onEnterKeyPress", ...INPUT_FIELDS, "orientation", "labelWidth", "showFooter", "selectPage"];
 // fields a weak model takes from elsewhere -> what to write instead (checked before the generic "unknown field")
 const FIELD_SYNONYMS = {
     addWidgets: { in: "use \"into\"", inside: "use \"into\"", target: "use \"into\"", container: "use \"into\"", parent: "use \"into\"", widget: "use \"widgets\": [ { \"widget\": ... } ] (a list)", footer: "use \"into\": \"<data view>\", \"slot\": \"footer\"", position: "use \"after\" or \"before\" (a widget name)" },
@@ -100,6 +111,8 @@ const CONTEXT_FREE = ["ListenTargetSource", "GridXPathSource", "ListViewXPathSou
 // friendly names of pluggable widgets ops makes
 const PLUGGABLE_NAMES = { "com.mendix.widget.web.combobox.Combobox": "combo box", "com.mendix.widget.web.gallery.Gallery": "gallery" };
 const short = s => (s.length > 60 ? s.slice(0, 57) + "..." : s);
+// "Assoc/Attribute" of an AttributeRef (the association names of its steps, then the attribute)
+const pathText = ref => [...(ref.entityRef && ref.entityRef.steps ? ref.entityRef.steps.map(st => st.associationQualifiedName.split(".").pop()) : []), ref.attributeQualifiedName.split(".").pop()].join("/");
 // the data source of a pluggable widget (Data grid 2, gallery, ...), or null
 function cwSource(el) {
     for (const p of el.object ? el.object.properties : []) if (p.value && p.value.dataSource) return p.value.dataSource;
@@ -468,7 +481,7 @@ function makePageEdit(h, I) {
     // {Attribute} -> {1}, ... and the attributes in order
     function template(value) {
         const used = [];
-        const text = String(value).replace(/\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (m, a) => {
+        const text = String(value).replace(/\{([A-Za-z_][\w.]*(?:\/[A-Za-z_][\w.]*)*)\}/g, (m, a) => {
             if (!used.includes(a)) used.push(a);
             return `{${used.indexOf(a) + 1}}`;
         });
@@ -480,18 +493,17 @@ function makePageEdit(h, I) {
         I.noPlaceholder(value, where);
         const { text, used } = template(value);
         if (used.length && !dc) throw new Error(`${where}: {${used[0]}} needs a data view or list view around the widget`);
-        const attrs = used.map(n => I.attributeOf(dc.ent, n, where));
-        const cur = ct.parameters.map(p => (p.attributeRef && !prop(p, "expression") ? p.attributeRef.attributeQualifiedName : null));
-        if (cur.length !== attrs.length || attrs.some((a, i) => cur[i] !== a.qualifiedName)) {
+        const paths = used.map(n => I.pathOf(dc.ent, n, where));
+        const key = r => (r ? [r.attributeQualifiedName, ...(r.entityRef && r.entityRef.steps ? r.entityRef.steps.map(st => st.associationQualifiedName) : [])].join("|") : null);
+        const cur = ct.parameters.map(p => (p.attributeRef && !prop(p, "expression") ? key(p.attributeRef) : null));
+        if (cur.length !== paths.length || paths.some((p, i) => cur[i] !== [p.attr.qualifiedName, ...p.steps.map(st => st.assoc.qualifiedName)].join("|"))) {
             const others = ct.template.translations.filter(x => x.languageCode !== ctx.lang && /\{\d+\}/.test(x.text));
             if (others.length) client.warn(`${where}: the ${others.map(x => x.languageCode).join(", ")} text uses {1}-style values that now mean other attributes; check it in Studio Pro`);
             if (ct.parameters.length) ct.parameters.clear();
-            for (const a of attrs) {
+            for (const a of paths) {
                 const p = pages.ClientTemplateParameter.create(model);
                 ct.parameters.push(p);
-                const ref = dm.AttributeRef.create(model);
-                ref.attribute = a;
-                p.attributeRef = ref;
+                p.attributeRef = I.attrRefOf(a);
             }
         }
         await setText(ct.template, text, ctx, where);
@@ -672,6 +684,34 @@ function makePageEdit(h, I) {
             if (prop(w, "onChangeAction") === undefined) throw new Error(`${where}: a ${kindOf(w)} has no on change event (inputs, reference selectors and combo boxes have one)`);
             return I.makeAction(v, { container: dc, name: node.name }, ctx, where, a => (w.onChangeAction = a));
         },
+        async onEnter(P, node, v, dc, ctx, where) {
+            return eventChange(node, "onEnter", v, dc, ctx, where);
+        },
+        async onLeave(P, node, v, dc, ctx, where) {
+            return eventChange(node, "onLeave", v, dc, ctx, where);
+        },
+        async onEnterKeyPress(P, node, v, dc, ctx, where) {
+            return eventChange(node, "onEnterKeyPress", v, dc, ctx, where);
+        },
+        ...Object.fromEntries(INPUT_FIELDS.map(f => [f, (P, node, v, dc, ctx, where) => inputChange(node, f, v, dc, ctx, where)])),
+        async orientation(P, node, v, dc, ctx, where) {
+            return dvChange(node, "orientation", v, where);
+        },
+        async labelWidth(P, node, v, dc, ctx, where) {
+            return dvChange(node, "labelWidth", v, where);
+        },
+        async showFooter(P, node, v, dc, ctx, where) {
+            return dvChange(node, "showFooter", v, where);
+        },
+        async selectPage(P, node, v, dc, ctx, where) {
+            const w = node.el;
+            const ref = prop(w, "attributeRef");
+            const steps = ref && ref.entityRef && ref.entityRef.steps ? ref.entityRef.steps : [];
+            if (!has(w, "selectPageSettings") || !steps.length) throw new Error(`${where}: selectPage is for a reference selector or reference set selector`);
+            const other = await I.entityOf(steps[steps.length - 1].destinationEntityQualifiedName, where);
+            const text = await I.selectPage(w, { spec: { selectPage: v }, where, kind: kindOf(w), container: dc }, other, ctx);
+            return text.slice(2);
+        },
         async name(P, node, v, dc, ctx, where) {
             const n = validName(v, "widget name");
             const old = node.name;
@@ -685,6 +725,46 @@ function makePageEdit(h, I) {
             return `renamed to ${n}${listeners.length ? ` (${listeners.map(l => l.node.label).join(", ")} now ${listeners.length > 1 ? "listen" : "listens"} to ${n})` : ""}`;
         }
     };
+
+    const EVENT_PROPS = { onChange: "onChangeAction", onEnter: "onEnterAction", onLeave: "onLeaveAction", onEnterKeyPress: "onEnterKeyPressAction" };
+    async function eventChange(node, k, v, dc, ctx, where) {
+        const w = node.el;
+        if (prop(w, EVENT_PROPS[k]) === undefined) throw new Error(`${where}: a ${kindOf(w)} has no ${k} event${k === "onEnterKeyPress" ? " (a text box has one)" : " (text boxes, text areas, date pickers and drop-downs have one)"}`);
+        return `${k}: ` + (await I.makeAction(v, { container: dc, name: node.name }, ctx, where, a => (w[EVENT_PROPS[k]] = a)));
+    }
+    // required / validation / format / read-only style / mask / max length of an input (readOnlyStyle of a data view: dvChange)
+    async function inputChange(node, f, v, dc, ctx, where) {
+        const w = node.el, o = ctx.op;
+        if (f === "readOnlyStyle" && w instanceof pages.DataView) return dvChange(node, f, v, where);
+        if (f === "requiredMessage") {
+            if (o.required === undefined) throw new Error(`${where}: requiredMessage goes with "required": true`);
+            return "";
+        }
+        if (f === "format" && w instanceof pages.GridColumn) {
+            const attr = w.attributeRef ? model.findAttributeByQualifiedName(w.attributeRef.attributeQualifiedName) : null;
+            if (!attr) throw new Error(`${where}: the column's attribute is not known here`);
+            return `format ${I.formatInto(w, attr, v, where)}`;
+        }
+        if (!(w instanceof pages.InputWidget)) throw new Error(`${where}: ${f} is for an input (text box, text area, date picker, drop-down, reference selector, ...)${f === "format" ? " or a classic grid column" : ""}; a ${kindOf(w)} has none`);
+        if (f === "required" && !bool(v, false)) {
+            if (!prop(w, "validation")) throw new Error(`${where}: a ${kindOf(w)} has no validation`);
+            const was = w.validation.expression;
+            if (was) w.validation.expression = "";
+            if (w.validation.message.translations.length) w.validation.message.translations.clear();
+            await h.text(w.validation.message, ""); // as Studio Pro stores no validation: one empty text
+            return was ? `no validation (was ${was})` : "no validation";
+        }
+        const ref = prop(w, "attributeRef");
+        const attr = ref && !(w instanceof pages.AssociationWidget) ? model.findAttributeByQualifiedName(ref.attributeQualifiedName) : null;
+        const spec = { [f]: v, ...(f === "required" && o.requiredMessage !== undefined ? { requiredMessage: o.requiredMessage } : {}) };
+        const label = w.labelTemplate ? await textOf(w.labelTemplate.template) : "";
+        const out = await I.inputExtras({ spec, where, kind: kindOf(w), container: dc }, w, attr, ctx, label);
+        return out.join(", ");
+    }
+    function dvChange(node, f, v, where) {
+        if (!(node.el instanceof pages.DataView)) throw new Error(`${where}: ${f} is for a data view; a ${kindOf(node.el)} has none`);
+        return I.dvSettings(node.el, { [f]: v }, where).join(", ");
+    }
 
     // Listening data views of names: [{ node, src }]
     function listenersOf(P, names, except) {
@@ -755,9 +835,9 @@ function makePageEdit(h, I) {
             const s = typeof a === "string" ? { attribute: a } : a;
             const at = `${where}: columns.add ${i + 1}`;
             if (!s || typeof s !== "object" || !s.attribute) throw new Error(`${at}: use "Attr" or { "attribute": ..., "caption": ...${classic ? `, "width": ...` : ""} }`);
-            const keys = classic ? ["attribute", "caption", "width"] : ["attribute", "caption"];
+            const keys = classic ? ["attribute", "caption", "width", "format"] : ["attribute", "caption"];
             for (const k of Object.keys(s)) if (!keys.includes(k)) fail(`${at}: unknown field '${k}'${k === "width" ? " (a Data grid 2 column has no weight width here)" : ""}`, k, keys);
-            const attr = I.attributeOf(ent, String(s.attribute), at);
+            const path = I.pathOf(ent, String(s.attribute), at), attr = path.attr;
             if (cur().some(c => c.attr === attr.qualifiedName)) client.warn(`${where}: ${node.label} already has a column for ${attr.name}; added a second one`);
             const caption = s.caption !== undefined ? String(s.caption) : I.humanize(attr.name);
             if (classic) {
@@ -765,15 +845,16 @@ function makePageEdit(h, I) {
                 // width: a weight like the others (they need not add up to 100); default their average
                 const width = s.width !== undefined ? Number(s.width) : widths.length ? Math.max(1, Math.round(widths.reduce((x, y) => x + y, 0) / widths.length)) : 100;
                 if (!(Number.isInteger(width) && width > 0)) throw new Error(`${at}: width must be a whole number > 0 (a weight)`);
-                await I.classicColumn(w, attr, caption, width, ctx);
+                const col = await I.classicColumn(w, path, caption, width, ctx);
+                if (s.format !== undefined) I.formatInto(col, attr, s.format, `${at}: format`);
             } else {
                 if (allowed.length && !allowed.includes(I.typeOf(attr))) throw new Error(`${at}: a Data grid 2 column cannot show '${attr.name}' (${I.typeOf(attr)}); it shows ${allowed.join(", ")}`);
                 const objs = colsProp.value.objects;
                 const pattern = objs.find(o => (I.valueOf(o, "showContentAs") || {}).primitiveValue === "attribute") || objs[0] || null;
-                const col = await I.dg2Column(colsProp.type.valueType.objectType, pattern, attr, caption, ctx, at);
+                const col = await I.dg2Column(colsProp.type.valueType.objectType, pattern, path, caption, ctx, at);
                 objs.push(col);
             }
-            done.push(`+${attr.name}`);
+            done.push(`+${path.text}`);
         }
         if (classic && !w.columns.length) client.warn(`${where}: ${node.label} has no columns left`);
         return `columns ${done.join(", ")}`;
@@ -783,7 +864,8 @@ function makePageEdit(h, I) {
 
     // new widgets in the op's ctx, names given and Studio Pro style
     function newCtx(P) {
-        return { qn: P.qn, names: I.names(P.names), params: new Map(), count: { inputs: 0 }, untranslated: 0, ents: new Set(), page: P.doc, existing: true, scope: [], after: [] };
+        const vars = new Map((prop(P.doc, "variables") || []).map(v => [v.name, v]));
+        return { qn: P.qn, names: I.names(P.names), params: new Map(), vars, count: { inputs: 0 }, untranslated: 0, ents: new Set(), page: P.doc, existing: true, scope: [], after: [] };
     }
 
     async function untranslatedLint(ctx) {
@@ -830,6 +912,7 @@ function makePageEdit(h, I) {
     async function addWidgets(o) {
         const where = `addWidgets ${o.page}`;
         const P = await open(o.page, where);
+        await I.prepareAssocs(null);
         const slot = place(P, o, where);
         const dc = await builderContext(P, slot.dc, where).catch(e => {
             // an unknown entity matters only for widgets that show attributes; say so when one does
@@ -876,16 +959,20 @@ function makePageEdit(h, I) {
     async function changeWidget(o) {
         const where = `changeWidget ${o.page} ${o.widget}`;
         const P = await open(o.page, where);
+        await I.prepareAssocs(null);
         const node = find(P, o.widget, where);
         const fields = CHANGE_FIELDS.filter(k => o[k] !== undefined);
         if (!fields.length) throw new Error(`${where}: give what to change: ${CHANGE_FIELDS.join(", ")}`);
-        const ctx = { ...newCtx(P), lang: await defaultLanguage() };
+        const ctx = { ...newCtx(P), lang: await defaultLanguage(), op: o };
         // {Attribute} and conditions use the data view or list view around the widget (for a column: around its grid)
-        const needs = ["caption", "text", "label", "placeholder", "visible", "editable", "xpath", "action", "onClick", "onChange"].some(k => o[k] !== undefined);
-        if (["action", "onClick", "onChange"].some(k => o[k] !== undefined)) ctx.scope = await scopeOf(P, where);
+        const needs = ["caption", "text", "label", "placeholder", "visible", "editable", "xpath", "action", "onClick", "onChange", "onEnter", "onLeave", "onEnterKeyPress", "validation", "selectPage"].some(k => o[k] !== undefined);
+        if (["action", "onClick", "onChange", "onEnter", "onLeave", "onEnterKeyPress"].some(k => o[k] !== undefined)) ctx.scope = await scopeOf(P, where);
         const dc = needs && node.ctx ? await builderContext(P, node.ctx, where).catch(e => (/\{[A-Za-z_]|currentObject|"attribute"/.test(JSON.stringify(o)) ? Promise.reject(e) : null)) : null;
         const done = [];
-        for (const f of fields) done.push(await CHANGE[f](P, node, o[f], dc, ctx, `${where}: ${f}`));
+        for (const f of fields) {
+            const t = await CHANGE[f](P, node, o[f], dc, ctx, `${where}: ${f}`);
+            if (t) done.push(t);
+        }
         for (const f of ctx.after) f(); // parameter mappings
         await untranslatedLint(ctx);
         return `${P.qn}: ${o.widget}: ${done.join("; ")}`;
@@ -993,7 +1080,7 @@ function makePageEdit(h, I) {
         // {1} back to {Attribute} as addWidgets / changeWidget take it
         const tmpl = async ct => (ct ? short((await textOf(ct.template)).replace(/\{(\d+)\}/g, (m, i) => {
             const p = ct.parameters[i - 1], ref = p && p.attributeRef;
-            return ref && !prop(p, "expression") ? `{${ref.attributeQualifiedName.split(".").pop()}}` : m;
+            return ref && !prop(p, "expression") ? `{${pathText(ref)}}` : m;
         })) : "");
         if (el instanceof cw.CustomWidget && !I.isGrid2(el)) {
             // the attribute it edits (not linked to its own data source) and its label
@@ -1025,14 +1112,14 @@ function makePageEdit(h, I) {
             }
             if (el instanceof pages.DataGrid) {
                 const cols = [];
-                for (const c of el.columns) cols.push(`${c.attributeRef ? c.attributeRef.attributeQualifiedName.split(".").pop() : "?"} "${short(await textOf(c.caption))}"`);
+                for (const c of el.columns) cols.push(`${c.attributeRef ? pathText(c.attributeRef) : "?"} "${short(await textOf(c.caption))}"`);
                 bits.push(`columns: ${cols.join(", ") || "none"}`);
             } else if (I.isGrid2(el)) {
                 const colsProp = el.object.properties.find(p => p.type && p.type.key === "columns");
                 const cols = [];
                 for (const o of colsProp ? colsProp.value.objects : []) {
                     const a = I.valueOf(o, "attribute"), hd = I.valueOf(o, "header");
-                    cols.push(`${a && a.attributeRef ? a.attributeRef.attributeQualifiedName.split(".").pop() : "(custom)"} "${hd && hd.textTemplate ? short(await textOf(hd.textTemplate.template)) : ""}"`);
+                    cols.push(`${a && a.attributeRef ? pathText(a.attributeRef) : "(custom)"} "${hd && hd.textTemplate ? short(await textOf(hd.textTemplate.template)) : ""}"`);
                 }
                 bits.push(`columns: ${cols.join(", ") || "none"}`);
             }
@@ -1051,7 +1138,7 @@ function makePageEdit(h, I) {
         } else if (el instanceof pages.Label || el instanceof pages.GridColumn || el instanceof pages.TabPage) {
             const cap = prop(el, "caption");
             if (cap instanceof texts.Text) bits.push(`"${short(await textOf(cap))}"`);
-            if (el instanceof pages.GridColumn && el.attributeRef) bits.push(el.attributeRef.attributeQualifiedName.split(".").pop());
+            if (el instanceof pages.GridColumn && el.attributeRef) bits.push(pathText(el.attributeRef));
         } else if (el instanceof pages.GroupBox) {
             if (el.caption) bits.push(`"${await tmpl(el.caption)}"`);
             if (el.collapsible && el.collapsible.name !== "No") bits.push(el.collapsible.name === "YesInitiallyCollapsed" ? "collapsible (collapsed)" : "collapsible");
@@ -1183,7 +1270,7 @@ function makePageEdit(h, I) {
                 const cv = w.conditionalVisibilitySettings;
                 if (o.visible === true || o.visible === "true") say(!cv, "still has a visibility condition");
                 else if (typeof o.visible === "string" || o.visible === false || o.visible === "false") say(cv && cv.expression === String(o.visible), "visibility expression differs");
-                else say(cv && (o.visible.expression !== undefined ? cv.expression === String(o.visible.expression) : (cv.attributeQualifiedName || "").endsWith("." + o.visible.attribute)), "visibility condition differs");
+                else say(cv && (o.visible.expression !== undefined ? cv.expression === String(o.visible.expression) : String(o.visible.attribute).includes("/") ? !!cv.expression : (cv.attributeQualifiedName || "").endsWith("." + o.visible.attribute)), "visibility condition differs");
             }
             for (const k of ["class", "style"]) if (o[k] !== undefined) say(w.appearance[k] === String(o[k]), `${k} is "${w.appearance[k]}"`);
             if (o.design && typeof o.design === "object") for (const [k, v] of Object.entries(o.design)) if (v !== null && v !== false && typeof v !== "object") say(w.appearance.designProperties.some(d => d.key.toLowerCase() === k.toLowerCase() || (d.value instanceof pages.CompoundDesignPropertyValue)), `design ${k} missing`);
@@ -1201,13 +1288,21 @@ function makePageEdit(h, I) {
                 const named = a && (a.pageSettings ? a.pageSettings.pageQualifiedName : a.microflowSettings ? a.microflowSettings.microflowQualifiedName : prop(a, "nanoflowQualifiedName"));
                 say(a && !(a instanceof pages.NoClientAction) && (!target || named === target), `${k} is not ${spec.action}${target ? " " + target : ""}`);
             }
+            for (const k of ["onEnter", "onLeave", "onEnterKeyPress"]) if (o[k] !== undefined) say(prop(w, EVENT_PROPS[k]) && !(w[EVENT_PROPS[k]] instanceof pages.NoClientAction), `${k} is not set`);
+            if (o.required !== undefined) say(bool(o.required, false) ? w.validation.expression === "$value != empty" : !w.validation.expression, `required is not ${o.required}`);
+            if (o.validation && o.validation.expression !== undefined) say(w.validation.expression === String(o.validation.expression).trim(), "validation expression differs");
+            if (o.orientation !== undefined) say(/^vertical$/i.test(String(o.orientation)) ? w.labelWidth === 0 : w.labelWidth > 0, `orientation is not ${o.orientation}`);
+            if (o.labelWidth !== undefined) say(w.labelWidth === Number(o.labelWidth), `label width is ${w.labelWidth}`);
+            if (o.showFooter !== undefined) say(w.showFooter === bool(o.showFooter, true), `showFooter is ${w.showFooter}`);
+            if (o.readOnlyStyle !== undefined) say(String(w.readOnlyStyle.name).toLowerCase() === String(o.readOnlyStyle).toLowerCase(), `read-only style is ${w.readOnlyStyle.name}`);
+            if (o.selectPage !== undefined) say(w.selectPageSettings && w.selectPageSettings.pageQualifiedName === String(o.selectPage), "select page differs");
             if (o.columns && Array.isArray(o.columns.add)) {
                 const attrs = [];
                 if (w instanceof pages.DataGrid) for (const c of w.columns) attrs.push(c.attributeRef ? c.attributeRef.attributeQualifiedName.split(".").pop() : null);
                 else for (const c of (w.object.properties.find(p => p.type.key === "columns") || { value: { objects: [] } }).value.objects) attrs.push(((I.valueOf(c, "attribute") || {}).attributeRef || { attributeQualifiedName: "" }).attributeQualifiedName.split(".").pop());
                 for (const a of o.columns.add) {
                     const n = typeof a === "string" ? a : a && a.attribute;
-                    say(attrs.includes(String(n)), `has no column for ${n}`);
+                    say(attrs.includes(String(n).split("/").pop()), `has no column for ${n}`);
                 }
             }
             return r;
@@ -1275,6 +1370,8 @@ function makePageEdit(h, I) {
             out.push(`title "${o.title}"`);
         }
         if (o.url !== undefined) out.push(await pageUrl(page, o.url, where));
+        if (o.variables !== undefined) out.push(await I.pageVariables(page, o.variables, where, { qn: page.qualifiedName }));
+        if (o.design !== undefined) out.push(`design ${design.apply(sdk, model, page, design.resolve(client.project.dir, page, o.design, `${where}: design`)) || "unchanged"}`);
         for (const [k, prop] of [["popupWidth", "popupWidth"], ["popupHeight", "popupHeight"]]) {
             if (o[k] === undefined) continue;
             const n = Number(o[k]);
