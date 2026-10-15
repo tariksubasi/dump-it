@@ -214,8 +214,15 @@ The live list is `python mx.py ops`. If it differs from this table, trust the li
 | `addValidationRule` | **entity**, **attribute**, **rule** (`required`/`unique`/`maxLength`/`range`/`regex`/`equals`), **message**, maxLength, min, max, regex, value | |
 | `addEventHandler` | **entity**, **moment** (`Before`/`After`), **event** (`Create`/`Commit`/`Delete`/`RollBack`), **microflow**, passObject (default true), raiseErrorOnFalse | The microflow needs one parameter of the entity (when passObject) and must return Boolean for `Before` |
 | `addIndex` | **entity**, **attributes** `["A", {"name":"B","ascending":false}]` | |
+| `changeValidationRule` | **entity**, **attribute**, rule (which one, when the attribute has several), message, maxLength, min, max, regex, value | Only the values of the rule's own kind (a range rule takes min/max; `null` removes one). Another kind: `deleteValidationRule`, then `addValidationRule` |
+| `deleteValidationRule` | **entity**, **attribute**, rule | |
+| `deleteEventHandler` | **entity**, moment, event, microflow | Enough of them to name one handler; the microflow stays |
+| `changeIndex` | **entity**, **index** (its attributes in order `["A","B"]` or a number, 1 = first), **attributes** (new list as in addIndex) | |
+| `deleteIndex` | **entity**, **index** | |
 | `createEnumeration` | **module**, **name**, **values** (`["A", {"name":"B","caption":"Bee"}]`), folder | Captions are written in the project's default language |
-| `addEnumerationValue` | **enumeration**, **name**, caption | |
+| `addEnumerationValue` | **enumeration**, **name**, caption (text or `{"en_US": ..., "nl_NL": ...}`), image (`Module.Images.Name`) | |
+| `moveEnumerationValue` | **value** (`Module.Enum.Value`), before / after (a value name) or position (1 = first) | The order drop-downs and radio buttons show |
+| `changeEnumerationValue` | **value**, caption (text or per language), image (`""` = none) | Rename a value with `rename`. An image on a value: first use, check it in Studio Pro |
 
 Attribute types: `String(200)`, `String(unlimited)`, `String` (=200), `Integer`, `Long`, `Decimal`, `Boolean`,
 `DateTime`, `AutoNumber`, `HashedString`, `Binary`, `Enum(Module.Enumeration)`.
@@ -260,9 +267,9 @@ Actions (inside `"actions": [ { "action": "<name>", ... } ]`). Every action also
 
 | Action | Fields | Defaults |
 |---|---|---|
-| `retrieve` | **variable** + either entity, xpath, first (database) or from, association (over an association) | first = false (a list) |
-| `create` | **variable**, **entity**, set `{"Attr":"expr", "Module.Assoc":"$Var"}`, commit | commit = false |
-| `change` | **variable**, **set**, commit, refresh | commit = false |
+| `retrieve` | **variable** + either entity, xpath, first, sort, range (database) or from, association (over an association) | first = false (a list). sort `["Attr", {"attribute":"B","descending":true}]`, also over references to one object `"Order_Customer/Name"`; range `{"offset":"0","limit":"10"}` (expressions; not with first). An association retrieve has no sort or range (as in Studio Pro): retrieve from the database with `xpath` or sort with `listOperation` |
+| `create` | **variable**, **entity**, set `{"Attr":"expr", "Module.Assoc":"$Var"}`, add, remove, commit | commit = false |
+| `change` | **variable**, set, add `{"Module.Assoc":"$Obj or $List"}`, remove, commit, refresh | One of set/add/remove. add/remove change some objects of a reference set the entity owns (set replaces all); a reference (one object) only takes set |
 | `commit` | **variable**, events | events = true |
 | `delete` | **variable** | |
 | `call` | **microflow** (a nanoflow too, inside a nanoflow), args `{"Param":"expr"}`, variable | Every parameter needs an arg. A microflow cannot call a nanoflow |
@@ -314,8 +321,8 @@ Inside a loop a handler must end with `break`, `continue` or `error`.
 | Step | Fields |
 |---|---|
 | any action | caption, disabled |
-| retrieve | xpath, first, entity |
-| create / change | set (adds or replaces), unset `["Attr"]`, commit, refresh |
+| retrieve | xpath, first, entity, sort (replaces it; `[]` = none), range (or `"all"`) |
+| create / change | set (adds or replaces), unset `["Attr"]`, add, remove (replace the add/remove of that association), commit, refresh |
 | commit | events, refresh |
 | call | args |
 | log | message, level, args |
@@ -346,6 +353,8 @@ Mendix expressions as text: `"'Hello'"`, `"$Order/Total * 2"`, `"empty"`, `"[%Cu
 |---|---|---|
 | `createPage` | **module**, **name**, title, entity, fields `["Attr"]`, buttons (default true), widgets, arrange, menu, layout, folder, roles, url, popupWidth, popupHeight, popupResizable, from, native, variables, design | `variables` (Mendix 10+): page variables `[{"name": "Search", "type": "String", "default": "''"}]` (types Boolean, Integer, Long, Decimal, String, DateTime, `Enum(Module.E)`; `default` is an expression): an input takes `"variable": "Search"` instead of an attribute (anywhere on the page), expressions, XPath and flow `params` use `$Search`. `design`: design properties of the page itself (Atlas `Form orientation`, `Label width` where the theme has them). `from`: a page template or building block of the project (`"Dashboard_Action_Center"`, its display name or `Module.Name`): its widgets are copied first, data widgets in it stay unconfigured (the dry run lists them), then `widgets`. `native: true`: a native mobile page on the project's NativePhone layout (text, container, actionButton, dataView, listView, inputs; refused without a native layout). `layout` may also be a layout no page uses yet (its placeholder `Main`). Without `widgets`: with `entity` an edit form (page parameter, data view, an input per attribute, Save/Cancel), without `entity` an empty page. With `widgets`: the page content from the widget list below; `entity` is then the default entity of grids and data views. `menu` (`"Responsive"` or `{profile, caption, parent}`) adds a menu item, `roles` lets module roles open the page. The layout is the one the project's own pages use most |
 | `createLayout` | **module**, **name**, **from** (a layout), folder | A copy of an existing layout (placeholders, header, sidebar, menu widgets) to change in Studio Pro; `createPage` takes it in `layout` (the content goes in its placeholder `Main`, or its only one). Layout widgets are not edited by ops |
+| `createSnippet` | **module**, **name**, folder, parameters `[{"name":"Order","entity":"Sales.Order"}]`, entity (shorthand: one parameter of it; without widgets a form of it, fields), widgets | Widgets as in `createPage`; a data view with `"source": "parameter"` shows a snippet parameter (no Save/Cancel unless `"buttons": true`). Pages show it with `snippetCall` (parameters from `params` or the objects around it). `addWidgets`/`changeWidget` work on snippets too. A data view on a snippet parameter: first use, check it in Studio Pro |
+| `createCrud` | **entity**, module, folder, grid (`auto`/`datagrid2`/`classic`), columns, fields, overview, edit, menu, roles, access | Studio Pro's "Generate overview pages": `<Entity>_NewEdit` (form, Save/Cancel) and `<Entity>_Overview` (a New button + Data grid 2 with Edit/Delete per row when the project can build one, else a classic grid with New/Edit/Delete). `roles` may open both pages and get an access rule on the entity when they have none (`access`: `ReadWrite` default with create/delete, `ReadOnly`, `none`). `menu` adds a menu item to the overview |
 | `addMenuItem` | **page** or **microflow**, profile (default Responsive) or menu (a menu document `Module.Menu`), caption (default: the page title), parent (caption or path of an existing item), after / before (a sibling caption), icon | Only pages without parameters. A page is in a menu once. New items go at the end unless after/before. A menu item has no roles of its own: it shows for the user roles that may open the page (change that with `grantAccess` / `revokeAccess` on the page, or `changeMenuItem` roles). The dry-run line ends with `seen by: <user roles>`. `icon`: an icon collection icon `"Atlas_Core.Atlas_Filled.home"`, an image `"Module.Images.Logo"`, a glyph code number (`57377`). With `action` instead of `page`/`microflow`: what the item does, as on `actionButton` (`"signOut"`, `{"action": "openLink", "url": ...}`, `{"action": "callMicroflow", ...}` without object parameters, `create`, `sync` in an offline profile); needs `caption`. A native page (or `"profile": "Native"`) becomes a bottom bar item of the native profile (refused when the project has none: add one in Studio Pro). |
 | `addWidgets` | **page**, **widgets**, into, slot, after, before, entity | Adds `createPage` widgets (list below) to an existing page or snippet. `into`: a container, data view, list view, group box, tab page, the placeholder (`Main`), a layout grid column `"layoutGrid1/row 1/column 2"`, or a pluggable widget (gallery, Data grid 2, ...) with `slot` = its widget list (`"content"`, `"emptyPlaceholder"`, `"columns 2/content"`; `widgets` lists them); `"slot": "footer"` = a data view's footer. `after`/`before`: a widget name in that list (default: at the end). Inputs and `{Attribute}` texts use the entity of the data view or list view around them. New names as Studio Pro gives them (`text3`, `actionButton2`). A new data view listens to a grid or list view (`listenTo`, also one already on the page) or shows the page's own parameter; no op adds a page parameter |
 | `changeWidget` | **page**, **widget**, caption, text, label, placeholder, editable, visible, class, design, style, textStyle, buttonStyle, columns, xpath, name, action, onClick, onChange, onEnter, onLeave, onEnterKeyPress, required, requiredMessage, validation, format, readOnlyStyle, inputMask, maxLength, orientation, labelWidth, showFooter, selectPage | Inputs: `required` true/false (false removes the validation), `validation`, `format`, `readOnlyStyle`, `inputMask`, `maxLength`, events `onEnter` / `onLeave` / `onEnterKeyPress` (text box) as in createPage; a classic grid column takes `format`; a data view `orientation`, `labelWidth`, `readOnlyStyle`, `showFooter`; a reference (set) selector `selectPage`. `action` takes the whole action model (create, openLink, confirm, progress, pageTitle, ...). Only the given fields change. `design`: Atlas design properties (below); given keys change, `null` removes one. `visible` also `{"roles": ["Module.Role"]}`. `editable`: true/false, or (inputs) an expression or `{"attribute": "Status", "values": ["Open"]}`; `visible`: true, false, an expression `"$currentObject/Active"` or `{"attribute": ...}`. `columns`: `{"add": [...], "remove": [...]}` of a classic grid or Data grid 2. `name` renames; data views listening to it follow. `action` (a button, also a classic grid button), `onClick` (Data grid 2, gallery) and `onChange` (inputs, selectors, combo box) replace the old action: `{"action": "showPage", "page": ..., "params": ...}`. Texts change in the default language only (the dry run warns about other languages) |
@@ -786,6 +795,8 @@ date/time formats of a language. System texts (App > Language > System texts) ar
 |---|---|---|
 | `createConstant` | **module**, **name**, **type**, **default**, exposedToClient, folder | Type String/Integer/Long/Decimal/Boolean/DateTime |
 | `createScheduledEvent` | **module**, **name**, **microflow**, **every** (`Minute`/`Hour`/`Day`/`Week`), interval, at (`HH:MM`), days, enabled (default false), timeZone, onOverlap, folder | The microflow must have no parameters |
+| `changeConstant` | **constant**, default (or value), type, exposedToClient | The value must fit the type. A new type: check configuration values and `@Module.Constant` uses |
+| `changeScheduledEvent` | **event**, microflow, every, interval, at, days, enabled, timeZone, onOverlap | A schedule field gives a new schedule of `every` (default: the current kind; what is not given is kept). Start time = `at` |
 | `publishRest` | see REST services below | |
 
 ### REST services (consumed and published)
@@ -957,7 +968,7 @@ Pro (if a path does not match, Studio Pro shows an error on the mapping; right-c
 |---|---|---|
 | `moveDocument` | **document**, folder (missing or `""` = module root) | Within the same module |
 | `rename` | **target** (qualified name, or a module name), **newName** | Updates every reference. A module rename also updates `Module.` in expressions and XPath and lists code folders to move. Other renames report old names left in expressions, XPath and Java (`OLD NAME STILL USED`) |
-| `delete` | **target** | Deletes a document, entity, attribute, association, enumeration value or module role. Lists documents that still use it (`STILL USED BY`) |
+| `delete` | **target** | Deletes a document (also a constant, scheduled event, snippet), entity, attribute, association, enumeration value or module role. Lists documents that still use it (`STILL USED BY`). Not by name: validation rules `deleteValidationRule`, event handlers `deleteEventHandler`, indexes `deleteIndex`, access rules `deleteAccessRule`, widgets `deleteWidget`, flow steps `deleteAction` |
 
 ### Examples
 
@@ -986,6 +997,34 @@ App settings, a test configuration, an image:
   { "op": "setConfiguration", "name": "Test", "applicationRootUrl": "https://test.example.com/", "constants": { "Sales.ApiUrl": "https://api-test.example.com" }, "customSettings": { "ClientRequestTimeout": "60000" } },
   { "op": "createImageCollection", "module": "Sales", "name": "Images" },
   { "op": "addImage", "collection": "Sales.Images", "file": "edits/logo.png" }
+] }
+```
+
+Sorted top 10 and a reference set: the ten largest orders (by total, then customer name), the newest one, and tags
+added to an order:
+
+```json
+{ "ops": [
+  { "op": "createMicroflow", "module": "Sales", "name": "ACT_TopOrders", "parameters": [ { "name": "Tags", "type": "List(Sales.Tag)" } ], "returns": "List(Sales.Order)", "returnValue": "$Top", "actions": [
+    { "action": "retrieve", "variable": "Top", "entity": "Sales.Order", "xpath": "[Status = 'Open']", "sort": [ { "attribute": "Total", "descending": true }, "Order_Customer/Name" ], "range": { "offset": "0", "limit": "10" } },
+    { "action": "retrieve", "variable": "Newest", "entity": "Sales.Order", "first": true, "sort": [ { "attribute": "CreatedDate", "descending": true } ] },
+    { "action": "change", "variable": "Newest", "add": { "Sales.Order_Tag": "$Tags" }, "commit": true } ] }
+] }
+```
+
+Generated pages, a snippet, and changing what is there (a constant, a schedule, a rule, an index, an enumeration):
+
+```json
+{ "ops": [
+  { "op": "createCrud", "entity": "Sales.Customer", "roles": ["Sales.User"], "menu": "Responsive" },
+  { "op": "createSnippet", "module": "Sales", "name": "CustomerCard", "entity": "Sales.Customer", "fields": ["Name", "Email"] },
+  { "op": "changeConstant", "constant": "Sales.ApiUrl", "default": "https://api.example.com/v2", "exposedToClient": false },
+  { "op": "changeScheduledEvent", "event": "Sales.SE_Cleanup", "every": "Day", "at": "03:00", "enabled": true },
+  { "op": "changeValidationRule", "entity": "Sales.Order", "attribute": "Total", "rule": "range", "max": 100000, "message": "At most 100000" },
+  { "op": "deleteEventHandler", "entity": "Sales.Order", "moment": "Before", "event": "Commit" },
+  { "op": "changeIndex", "entity": "Sales.Order", "index": ["Number"], "attributes": ["Number", { "name": "CreatedDate", "ascending": false }] },
+  { "op": "moveEnumerationValue", "value": "Sales.OrderStatus.Cancelled", "position": 1 },
+  { "op": "changeEnumerationValue", "value": "Sales.OrderStatus.Open", "caption": { "en_US": "Open", "tr_TR": "Açık" } }
 ] }
 ```
 
@@ -1202,10 +1241,15 @@ an existing workflow (only `createWorkflow`), custom mapping handlers and conver
 from System entities (for example `System.User.Name`). In flows: calling an ML model (refused with the Studio Pro
 steps), generate document in a project that has no Generate document action yet, moving or extracting steps that have
 a custom error handler or a decision in between, extracting steps that make more than one variable used later,
+sorting or a range on an association retrieve (Studio Pro has none either: retrieve from the database or sort with
+`listOperation`), add/remove on a reference (one object: `set`),
 changing a Java/JavaScript action after it was created (ops keep the user code when a file exists), and renaming or
 deleting a Java action's file (`rename`/`delete` change the model only). In the domain model: view entities in
 Mendix 10 (Mendix 11 has `createViewEntity`), creating or changing external entities (the export only shows them),
-database settings of a configuration, and access rules of System module entities. For these, write
+database settings of a configuration, access rules of System module entities, changing the kind of a validation
+rule (delete it and add the new one), and changing what an event handler does (delete it and add a new one). Pages:
+widgets of a snippet that use a parameter without a data view around them (put them in a data view with
+`"source": "parameter"`), and Studio Pro's other page generators (only `createCrud`: overview + NewEdit). For these, write
 `edits/<name>.js` with the Mendix Model SDK, or give the user Studio Pro steps. Prefer Studio Pro steps when the
 change is large or risky.
 

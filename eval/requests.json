@@ -590,6 +590,31 @@
           "Order_Cleanup\\.txt$": "microflow MyFirstModule\\.\\w+\\([^)]*\\) \\(asks \"Bu sipariş silinsin mi\\?\"; (blocking|non-blocking) progress"
         }
       }
+    },
+    {
+      "id": "topten",
+      "text": "MyFirstModule'de ACT_TopOrders adında bir microflow yap: veritabanından Total'i en yüksek ilk 10 siparişi (Total'e göre azalan sırada) getirsin ve bu listeyi döndürsün.",
+      "checks": {
+        "find": [
+          "MyFirstModule.ACT_TopOrders"
+        ],
+        "files": {
+          "ACT_TopOrders\\.txt$": "RETRIEVE limit 10 offset 0 MyFirstModule\\.Order FROM DATABASE[^\\n]*SORT BY Total DESC"
+        }
+      }
+    },
+    {
+      "id": "crud",
+      "text": "Customer entity'si için Studio Pro'nun 'Generate overview pages' özelliğinin yaptığı gibi sayfalar oluştur: müşterileri listeleyen bir sayfa (Yeni, Düzenle, Sil ile) ve müşteri düzenleme formu. Liste sayfası menüde de görünsün.",
+      "checks": {
+        "find": [
+          "MyFirstModule.Customer_Overview",
+          "MyFirstModule.Customer_NewEdit"
+        ],
+        "files": {
+          "Customer_Overview\\.txt$": "MyFirstModule\\.Customer_NewEdit"
+        }
+      }
     }
   ]
 }
