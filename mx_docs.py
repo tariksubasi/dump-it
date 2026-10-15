@@ -97,8 +97,9 @@ def _entity(e, qn, attr_by_id, index, source):
             line += "  // " + clean(a["Documentation"])
         out.append(line)
     for r in e.get("ValidationRules") or []:
-        rule = (r.get("RuleInfo") or {}).get("$Type", "").split("$", 1)[-1].replace("RuleInfo", "")
-        out.append("  VALIDATION %s %s: %s" % (short(r.get("Attribute")), rule, text(r.get("Message"))))
+        info = r.get("RuleInfo") or {}
+        rule = info.get("$Type", "").split("$", 1)[-1].replace("RuleInfo", "")
+        out.append("  VALIDATION %s %s%s: %s" % (short(r.get("Attribute")), rule, _rule_detail(info), text(r.get("Message"))))
     for ev in e.get("Events") or []:
         line = "  EVENT %s %s -> %s" % (ev.get("Moment"), ev.get("Type"), ev.get("Microflow"))
         if ev.get("RaiseErrorOnFalse"):
@@ -106,7 +107,8 @@ def _entity(e, qn, attr_by_id, index, source):
         out.append(line)
         index.entry("ENTITY EVENT HANDLERS", "%s %s %s -> %s" % (qn, ev.get("Moment"), ev.get("Type"), ev.get("Microflow")))
     for ix in e.get("Indexes") or []:
-        cols = ", ".join(attr_by_id.get(c.get("AttributePointer"), "?") for c in ix.get("Attributes") or [])
+        cols = ", ".join(attr_by_id.get(c.get("AttributePointer"), "?") + ("" if c.get("Ascending", True) else " desc")
+                         for c in ix.get("Attributes") or [])
         out.append("  INDEX (%s)" % cols)
     for rule in e.get("AccessRules") or []:
         out.extend(_access_rule(rule, qn, index))
@@ -871,11 +873,28 @@ def render_generic(doc, qn):
 
 # --------------------------------------------------------------------------- module-level one-liners
 
+def _rule_detail(info):
+    """The values of a validation rule: max length, range, regular expression, equals value."""
+    t = info.get("$Type", "")
+    if t.endswith("MaxLengthRuleInfo"):
+        return " %s" % info.get("MaxLength")
+    if t.endswith("RangeRuleInfo"):
+        lo = info.get("MinValue") if info.get("UseMinValue") else ""
+        hi = info.get("MaxValue") if info.get("UseMaxValue") else ""
+        return " %s..%s" % (lo or "", hi or "")
+    if t.endswith("RegExRuleInfo"):
+        return " %s" % info.get("RegularExpression")
+    if t.endswith("EqualsToRuleInfo"):
+        return " %s" % info.get("EqualsToValue")
+    return ""
+
+
 def enumeration_line(doc, qn):
     values = []
     for v in doc.get("Values") or []:
         caption = text(v.get("Caption"))
-        values.append(v.get("Name") + (" \"%s\"" % caption if caption and caption != v.get("Name") else ""))
+        values.append(v.get("Name") + (" \"%s\"" % caption if caption and caption != v.get("Name") else "")
+                      + (" [image %s]" % v["Image"] if v.get("Image") else ""))
     return "%s: %s" % (qn, ", ".join(values))
 
 

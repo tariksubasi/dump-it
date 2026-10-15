@@ -27,6 +27,7 @@ const { makeOData, ODATA_OPS } = require("./ops-odata");
 const { makeXml, XML_OPS } = require("./ops-xml");
 const { makeWorkflows, WORKFLOW_OPS, USER_TASK_PAGE_FIELDS, SYSTEM_ENTITIES, STEP_FIELDS, STEP_COMMON } = require("./ops-workflows");
 const { makeScaffold, SCAFFOLD_OPS, SCAFFOLD_SYNONYMS } = require("./ops-scaffold");
+const { makeSmall, smallChangedLater, SMALL_OPS, SMALL_SYNONYMS } = require("./ops-small");
 
 const OPS = {
     createEntity: {
@@ -42,7 +43,7 @@ const OPS = {
             messageFrom: "prevent on onDeleteFrom: message", messageTo: "prevent on onDeleteTo: message" }
     },
     createEnumeration: { doc: "Create an enumeration.", fields: { module: "R module name", name: "R enumeration name", values: "R [ \"Value\" or { \"name\": ..., \"caption\": ... } ]", folder: "optional folder path, e.g. Enums/Order" } },
-    addEnumerationValue: { doc: "Add a value to an enumeration.", fields: { enumeration: "R Module.Enumeration", name: "R value name", caption: "optional caption (default the name)" } },
+    addEnumerationValue: { doc: "Add a value to an enumeration.", fields: { enumeration: "R Module.Enumeration", name: "R value name", caption: "optional caption (default the name; or { \"en_US\": ..., \"nl_NL\": ... })", image: "optional Module.ImageCollection.Image" } },
     createModule: { doc: "Create a module (with its domain model, module security and settings, as Studio Pro does).", fields: { name: "R module name, e.g. EmployeeOnboarding", roles: "optional [ \"RoleName\" ] module roles to create in it" } },
     createModuleRole: { doc: "Create a module role.", fields: { module: "R module name", name: "R role name", description: "optional" } },
     grantAccess: { doc: "Allow module roles to run a microflow/nanoflow or open a page.", fields: { document: "R Module.Microflow or Module.Page", roles: "R [ \"Module.Role\" ]" } },
@@ -118,9 +119,10 @@ const OPS = {
     ...XML_OPS,
     ...WORKFLOW_OPS,
     ...SCAFFOLD_OPS,
+    ...SMALL_OPS,
     moveDocument: { doc: "Move a document to another folder of the same module.", fields: { document: "R Module.Document", folder: "optional folder path, e.g. Orders/Actions (missing or \"\" = the module root)" } },
     rename: { doc: "Rename a module, document, entity, attribute, association or enumeration value. Updates references, reports names left in expressions/XPath/Java.", fields: { target: "R qualified name, e.g. Module.Entity.Attribute", newName: "R new short name" } },
-    delete: { doc: "Delete a document, entity, attribute, association, enumeration value or module role. Lists what still uses it.", fields: { target: "R qualified name" } }
+    delete: { doc: "Delete a document, entity, attribute, association, enumeration value or module role. Lists what still uses it. (Validation rules, event handlers, indexes: deleteValidationRule, deleteEventHandler, deleteIndex; access rules: deleteAccessRule; widgets: deleteWidget; flow steps: deleteAction.)", fields: { target: "R qualified name" } }
 };
 
 // Without a name: one line per operation (short, so a small model reads it every time). With a name: the fields of
@@ -459,6 +461,7 @@ function bind(model, client) {
     const xmlOps = makeXml({ model, client, get, exists, entity, folder, version, attributeChain, loadParents, mappingInternals: mappingOps.internals });
     const workflowOps = makeWorkflows({ model, client, get, exists, entity, folder, version, persistable, attributeChain, loadParents, grantAccess: o => impl.grantAccess(o), impl: () => impl,
         textAll: (owner, prop, value) => pageOps.internals.templateAll(owner, prop, value, null, "", true) });
+    const smallOps = makeSmall({ model, client, get, exists, entity, text, dataType });
     const scaffoldOps = makeScaffold({ model, client, get, exists, entity, folder, impl: () => impl, pageOps, pageEdit });
 
     // ------------------------------------------------ operations
@@ -604,7 +607,8 @@ function bind(model, client) {
             const val = enumerations.EnumerationValue.createIn(en);
             val.name = o.name;
             await text(val.caption, o.caption || o.name);
-            return `${o.enumeration}.${o.name}`;
+            const img = o.image !== undefined ? `, ${await smallOps.setImage(val, o.image, `addEnumerationValue ${o.enumeration}.${o.name}`)}` : "";
+            return `${o.enumeration}.${o.name}${img}`;
         },
         async createModule(o) {
             validName(o.name, "module name");
@@ -885,7 +889,8 @@ function bind(model, client) {
         ...odataOps.impl,
         ...xmlOps.impl,
         ...workflowOps.impl,
-        ...scaffoldOps.impl
+        ...scaffoldOps.impl,
+        ...smallOps.impl
     };
 
     // ------------------------------------------------ checks (run after apply on a freshly loaded model)
@@ -1045,6 +1050,7 @@ function bind(model, client) {
         ...odataOps.checks,
         ...xmlOps.checks,
         ...scaffoldOps.checks,
+        ...smallOps.checks,
         createWorkflow: o => workflowOps.checks.createWorkflow(o),
         createPage: o => (o.kind === "userTaskPage" ? workflowOps.checks.userTaskPage(o) : pageOps.checks.createPage(o))
     };
@@ -1055,7 +1061,7 @@ function bind(model, client) {
         const name = Object.keys(OPS).find(k => k.toLowerCase() === String(o.op).toLowerCase());
         if (!name) fail(`${where}: unknown op '${o.op}'`, o.op, Object.keys(OPS));
         if (name === "addMenuItem" && o.roles !== undefined) throw new Error(`${where} (addMenuItem): ${NO_MENU_ROLES(o.page)}`);
-        for (const [k, hint] of Object.entries({ ...(DOMAIN_SYNONYMS[name] || {}), ...(FIELD_SYNONYMS[name] || {}), ...(SCAFFOLD_SYNONYMS[name] || {}) })) if (o[k] !== undefined && !OPS[name].fields[k]) throw new Error(`${where} (${name}): unknown field '${k}': ${hint}`);
+        for (const [k, hint] of Object.entries({ ...(DOMAIN_SYNONYMS[name] || {}), ...(FIELD_SYNONYMS[name] || {}), ...(SCAFFOLD_SYNONYMS[name] || {}), ...(SMALL_SYNONYMS[name] || {}) })) if (o[k] !== undefined && !OPS[name].fields[k]) throw new Error(`${where} (${name}): unknown field '${k}': ${hint}`);
         validate("op", name, OPS[name], o, where);
         return { name, where };
     }
@@ -1090,7 +1096,7 @@ function bind(model, client) {
             const mine = PAGE_EDIT_NAMES.includes(name) ? pageEdit.touched(o) : [];
             const undoes = x => ["deleteWidget", "moveWidget"].includes(x.op) || (x.op === "changeWidget" && (x.name !== undefined || name === "changeWidget"));
             const reworked = mine.length && rest.some(x => x.page === o.page && undoes(x) && pageEdit.touched(x).some(n => mine.includes(n)));
-            if ((later && name !== "rename" && name !== "delete") || edited || undone || reworked || changedLater(name, o, rest)) continue;
+            if ((later && name !== "rename" && name !== "delete") || edited || undone || reworked || changedLater(name, o, rest) || smallChangedLater(name, o, rest)) continue;
             try {
                 failed.push(...(await checks[name](name === "setTranslations" ? o : await textOps.prepare(o, false))).map(f => `${i + 1}. ${name}: ${f}`));
             } catch (e) {
