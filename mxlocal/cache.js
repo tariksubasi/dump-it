@@ -106,7 +106,7 @@ function localNames(plain) {
         walk(plain, "", 0);
         return { base: "module", items };
     }
-    if (/Enumeration|Microflow|Nanoflow/.test(plain.$Type)) walk(plain, "", 0);
+    if (/Enumeration|Microflow|Nanoflow|ImageCollection/.test(plain.$Type)) walk(plain, "", 0);
     return { base: "unit", items };
 }
 

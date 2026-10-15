@@ -265,6 +265,64 @@ async function copyPhase(x) {
     return s;
 }
 
+// changeEntity (persistable off with DATA LOSS and back, documentation, image) and moveEntity of the selftest's
+// entity (used by pages, flows, rules, an event handler, an association owned by another entity) into another module
+// and back: no reference left on the old name, the same number of references on the new one, reopen 0 errors
+async function entityPhase(x) {
+    const { reopen, copy, mod, T, check } = x;
+    const E = `${mod}.${T}`;
+    const M = `${T}Mod`;
+    let s = await reopen(copy);
+    const problems = [];
+    const g0 = refs.graph(s.client);
+    const image = [...g0.names].find(([, t]) => t === "Images$Image");
+    const count = (g, qn) => g.edges.filter(e => e.to === qn || e.to.startsWith(qn + ".")).length;
+    const before = count(g0, E);
+    await s.ops.createEntity({ module: mod, name: `${T}Temp`, attributes: [{ name: "Note", type: "String(20)" }] });
+    await s.model.flushChanges();
+    s.client.project.writeEncoded(s.client.encode());
+    s = await reopen(copy);
+    let r = await runApply(x, s, { ops: [{ op: "changeEntity", entity: `${E}Temp`, persistable: false, documentation: "Zz temp", ...(image ? { image: image[0] } : {}) }] });
+    s = r.s;
+    problems.push(...r.failed, ...r.lay.slice(0, 3), ...r.lost);
+    if (!/DATA LOSS: the table of/.test(r.lines.join("\n"))) problems.push("persistable off without a DATA LOSS line");
+    r = await runApply(x, s, { ops: [{ op: "changeEntity", entity: `${E}Temp`, persistable: true }] });
+    s = r.s;
+    problems.push(...r.failed);
+    // move into the new module and back
+    r = await runApply(x, s, { ops: [{ op: "moveEntity", entity: E, module: M, roles: { [`${mod}.ZzRole`]: `${M}.User` } }] });
+    s = r.s;
+    problems.push(...r.failed, ...r.lay.slice(0, 3), ...r.lost);
+    const out = r.lines.join("\n");
+    if (!/reference\(s\) renamed in \d+ document/.test(out) || !/now cross-module/.test(out)) problems.push(`moveEntity dry run: ${out.slice(0, 200)}`);
+    let g = refs.graph(s.client);
+    const moved = `${M}.${T}`;
+    if (count(g, E) || count(g, moved) !== before) problems.push(`after the move: ${count(g, E)} reference(s) to ${E}, ${count(g, moved)} to ${moved} (was ${before})`);
+    if (!g.assocs.has(`${mod}.${T}Line_${T}`) || g.assocs.get(`${mod}.${T}Line_${T}`).child !== moved) problems.push(`${mod}.${T}Line_${T} does not point to ${moved}`);
+    problems.push(...(await reopenErrors(await reopen(copy))));
+    r = await runApply(x, await reopen(copy), { ops: [{ op: "moveEntity", entity: moved, module: mod, roles: { [`${M}.User`]: `${mod}.ZzRole` } }] });
+    s = r.s;
+    problems.push(...r.failed, ...r.lay.slice(0, 3), ...r.lost);
+    g = refs.graph(s.client);
+    if (count(g, moved) || count(g, E) !== before) problems.push(`after moving back: ${count(g, E)} reference(s) to ${E} (was ${before})`);
+    if (!/no longer cross-module/.test(r.lines.join("\n"))) problems.push("moving back did not make the association regular again");
+    const refusals = [
+        [{ op: "changeEntity", entity: `${E}Line`, persistable: false }, /inherits from/],
+        [{ op: "changeEntity", entity: E, persistable: false }, /REFUSED: persistable entities own associations/],
+        [{ op: "changeEntity", entity: E, color: "red" }, /does not store an entity color/],
+        [{ op: "moveEntity", entity: E, module: M }, /REFUSED: access rules .*ZzRole/],
+        [{ op: "moveEntity", entity: E, module: `${M}x` }, /Did you mean: .*Mod/],
+        [{ op: "moveEntity", entity: E, module: mod }, /already in/]
+    ];
+    for (const [op, re] of refusals) {
+        const p = await refused(await reopen(copy), { ops: [op] }, re);
+        if (p) problems.push(p);
+    }
+    problems.push(...(await reopenErrors(await reopen(copy))));
+    check(`changeEntity (persistable off with DATA LOSS and on again, documentation${image ? ", image" : ""}) and moveEntity of an entity with ${before} references (pages, flows, XPath, event handler, access rules with roles mapped, an association of another entity made cross-module) into another module and back: every reference follows, none left; ${refusals.length} refusals; reopen 0 errors`, !problems.length, problems.slice(0, 6).join("; "));
+    return s;
+}
+
 async function refsPhase(x) {
     const only = x.only ? x.only.split(",") : null;
     const run = n => !only || only.includes(n);
@@ -272,6 +330,7 @@ async function refsPhase(x) {
     if (run("unused")) await unusedPhase(x);
     if (run("changeMicroflow")) await changeMicroflowPhase(x);
     if (run("copy")) await copyPhase(x);
+    if (run("entity")) await entityPhase(x);
     return x.reopen(x.copy);
 }
 

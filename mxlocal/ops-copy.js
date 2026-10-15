@@ -337,8 +337,7 @@ function makeCopy(h) {
                 if (selfLink) c.ChildPointer = copy.$ID;
                 if (toModule !== srcModule && !selfLink) {
                     // the child stays in the old module: a cross-module association names it
-                    const cross = { $ID: c.$ID, $Type: "DomainModels$CrossAssociation", Child: childQn };
-                    for (const k of Object.keys(c)) if (!["$ID", "$Type", "ChildPointer", "ChildConnection"].includes(k)) cross[k] = c[k];
+                    const cross = require("./ops-entity").toCross(c, childQn);
                     client.warn(`DomainModels$CrossAssociation first use by ops (no Studio Pro sample in the test projects): check ${toModule}.${nameA} in Studio Pro`);
                     toDm.CrossAssociations = toDm.CrossAssociations || [];
                     toDm.CrossAssociations.push(cross);
@@ -359,6 +358,7 @@ function makeCopy(h) {
         copy.Location = `${(xs.length ? Math.max(...xs) : 0) + 200};${String(e.Location || "100;100").split(";")[1] || 100}`;
         toDm.Entities.push(copy);
         client.changes.updated.add(toUnit.id);
+        (client.rawUnits = client.rawUnits || new Set()).add(toUnit.id);
         client.indexed.delete(toUnit.id);
         client.indexUnit(toUnit.id);
         if (!o.associations && owned.length) lines.push(`not copied: association(s) ${owned.map(a => a.Name).join(", ")} (add "associations": true)`);

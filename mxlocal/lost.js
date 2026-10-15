@@ -51,7 +51,7 @@ function lostProperties(client, model, enc) {
     const cache = new Map();
     for (const f of enc.files) {
         const unit = model._units[f.id];
-        if (!unit || !unit.isLoaded) continue;
+        if (!unit || !unit.isLoaded || (client.rawUnits && client.rawUnits.has(f.id))) continue; // changed outside the SDK (copyDocument, moveEntity)
         const want = flatten(unit.toJSON());
         const got = flatten(toSdk(toPlain(bson.decode(f.bytes)), client.schema) || {});
         let before = new Map();

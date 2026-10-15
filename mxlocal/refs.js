@@ -605,4 +605,4 @@ function unused(client, moduleName) {
     return lines.join("\n");
 }
 
-module.exports = { unused, CHECKED, extract, Graph, graph, usages, known, xpathPaths, exprPaths, SELF };
+module.exports = { unused, CHECKED, codeText, extract, Graph, graph, usages, known, xpathPaths, exprPaths, SELF };

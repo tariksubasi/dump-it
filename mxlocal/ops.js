@@ -27,6 +27,7 @@ const { makeOData, ODATA_OPS } = require("./ops-odata");
 const { makeXml, XML_OPS } = require("./ops-xml");
 const { makeRefOps, REF_OPS } = require("./ops-refs");
 const { makeCopy, COPY_OPS } = require("./ops-copy");
+const { makeEntity, ENTITY_OPS } = require("./ops-entity");
 const { makeWorkflows, WORKFLOW_OPS, USER_TASK_PAGE_FIELDS, SYSTEM_ENTITIES, STEP_FIELDS, STEP_COMMON } = require("./ops-workflows");
 
 const OPS = {
@@ -89,6 +90,7 @@ const OPS = {
     ...FLOW_EDIT_OPS,
     ...REF_OPS,
     ...COPY_OPS,
+    ...ENTITY_OPS,
     ...CODE_OPS,
     setGeneralization: { doc: "Make an entity inherit from another entity, or from none.", fields: { entity: "R Module.Entity", generalization: "R Module.Parent, or \"\" / \"none\" for no parent", persistable: "optional true/false when there is no parent (default true)" } },
     addValidationRule: {
@@ -444,6 +446,7 @@ function bind(model, client) {
     const securityOps = makeSecurity({ model, get });
     const refOps = makeRefOps({ model, client, get, exists, dataType, folder, entity }, flows);
     const copyOps = makeCopy({ model, client, get, folder });
+    const entityOps = makeEntity({ model, client, get, entity, persistable, isFresh: qn => isFresh(qn) });
     const themeOps = makeTheme({ client });
     const marketOps = makeMarket({ client, model });
     const navOps = makeNav({ model, client, get, exists, text, translationsOf, folder, grantAccess: o => impl.grantAccess(o) }, pageOps.internals);
@@ -882,6 +885,7 @@ function bind(model, client) {
         ...flowEdit.impl,
         ...refOps.impl,
         ...copyOps.impl,
+        ...entityOps.impl,
         ...domainOps.impl,
         ...textOps.impl,
         ...restOps.impl,
@@ -1043,6 +1047,7 @@ function bind(model, client) {
         ...flowEdit.checks,
         ...refOps.checks,
         ...copyOps.checks,
+        ...entityOps.checks,
         ...domainOps.checks,
         ...textOps.checks,
         ...restOps.checks,
