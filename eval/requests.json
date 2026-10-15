@@ -590,6 +590,124 @@
           "Order_Cleanup\\.txt$": "microflow MyFirstModule\\.\\w+\\([^)]*\\) \\(asks \"Bu sipariş silinsin mi\\?\"; (blocking|non-blocking) progress"
         }
       }
+    },
+    {
+      "id": "addparam",
+      "setup": [
+        {
+          "op": "createMicroflow",
+          "module": "MyFirstModule",
+          "name": "ACT_Order_Process",
+          "parameters": [
+            {
+              "name": "Order",
+              "type": "MyFirstModule.Order"
+            }
+          ],
+          "actions": [
+            {
+              "action": "log",
+              "message": "process {1}",
+              "args": [
+                "$Order/Note"
+              ]
+            }
+          ]
+        },
+        {
+          "op": "createMicroflow",
+          "module": "MyFirstModule",
+          "name": "ACT_Order_Batch",
+          "parameters": [
+            {
+              "name": "Order",
+              "type": "MyFirstModule.Order"
+            }
+          ],
+          "actions": [
+            {
+              "action": "call",
+              "microflow": "MyFirstModule.ACT_Order_Process",
+              "args": {
+                "Order": "$Order"
+              }
+            }
+          ]
+        },
+        {
+          "op": "createPage",
+          "module": "MyFirstModule",
+          "name": "Order_Process",
+          "entity": "MyFirstModule.Order",
+          "widgets": [
+            {
+              "widget": "dataView",
+              "widgets": [
+                {
+                  "widget": "actionButton",
+                  "name": "processButton",
+                  "action": "callMicroflow",
+                  "microflow": "MyFirstModule.ACT_Order_Process",
+                  "caption": "Process"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "text": "ACT_Order_Process microflow'una 'Reason' adında bir String parametre ekle. Bu microflow'u Order_Process sayfasındaki buton ve ACT_Order_Batch microflow'u çağırıyor; ikisi de 'manual' metnini göndersin. Önce kimlerin kullandığına bak.",
+      "checks": {
+        "find": [
+          "MyFirstModule.ACT_Order_Process.Reason"
+        ],
+        "files": {
+          "ACT_Order_Batch\\.txt$": "Reason",
+          "Order_Process\\.txt$": "Reason"
+        }
+      }
+    },
+    {
+      "id": "copypage",
+      "setup": [
+        {
+          "op": "createEntity",
+          "module": "MyFirstModule",
+          "name": "Invoice",
+          "attributes": [
+            {
+              "name": "Number",
+              "type": "AutoNumber"
+            },
+            {
+              "name": "Total",
+              "type": "Decimal"
+            },
+            {
+              "name": "Paid",
+              "type": "Boolean"
+            },
+            {
+              "name": "Note",
+              "type": "String(200)"
+            }
+          ]
+        },
+        {
+          "op": "createPage",
+          "module": "MyFirstModule",
+          "name": "Order_NewEdit",
+          "entity": "MyFirstModule.Order"
+        }
+      ],
+      "text": "Order_NewEdit sayfasının aynısını Invoice entity'si için Invoice_NewEdit adıyla oluştur (aynı alanlar, Invoice üzerinde çalışsın).",
+      "checks": {
+        "find": [
+          "MyFirstModule.Invoice_NewEdit"
+        ],
+        "files": {
+          "Invoice_NewEdit\\.txt$": "MyFirstModule\\.Invoice"
+        }
+      }
     }
   ]
 }

@@ -8,6 +8,9 @@ R3. Write change files only in edits/. Never edit other files in this folder: th
 STEP 1 - FIND THE NAMES
   Find the exact names of everything you will touch (case matters):
     @PY@ mx.py find <part of a name>          (or the find tool)
+  Before rename, delete, moveEntity, changeMicroflow or copyDocument with "entity": see who uses it (pages, flows,
+  rules, with the widget / step) and name them in your PLAN:
+    @PY@ mx.py usages <Module.Name>            (or the usages tool; unused [Module] lists what nobody uses)
   Read the related files in modules/ when you need the current logic.
   To change or delete ONE existing step of a microflow/nanoflow, get the step ids first:
     @PY@ mx.py steps <Module.Flow>             (or the steps tool)
@@ -230,6 +233,11 @@ text is the default language); existing texts get translated with setTranslation
 More domain and app operations (see @PY@ mx.py ops for fields): createModule, setSecurity, setGeneralization,
 addValidationRule, addEventHandler, addIndex, createConstant, createScheduledEvent, publishRest, moveDocument, rename
 of a module, addMenuItem (menu item for a page), setHomePage (home page, also per user role).
+Changing what others use (callers / references follow; the dry run lists them or refuses):
+  { "ops": [ { "op": "changeMicroflow", "microflow": "Sales.ACT_Submit", "addParameters": [ { "name": "Channel", "type": "String", "value": "'web'" } ] } ] }
+  { "ops": [ { "op": "copyDocument", "document": "Sales.Order_Edit", "name": "Invoice_Edit", "entity": { "Sales.Order": "Sales.Invoice" } } ] }
+  moveEntity (entity, module, roles), changeEntity (persistable, documentation, image). Never delete what unused lists
+  without usages and the user's yes.
 
 ERRORS AND FIXES
 - "not found in the model. Did you mean: X" -> use X (check with find).

@@ -59,6 +59,8 @@ Run all of these from the export folder.
 | `python mx.py help` | Lists the commands | no |
 | `python mx.py refresh` | Re-exports the model and lists files changed since the last checked state | no |
 | `python mx.py find <text>` | Lists elements whose qualified name contains `<text>`, with their SDK type | no |
+| `python mx.py usages <Module.Name> [--depth n]` | Who uses a document, entity, attribute, association, enumeration value, constant, role, ...: by name and in expressions/XPath, grouped by document with the place (`widget saveButton`, `step 3f2a9c1b (MicroflowCallAction)`, `widget grid1 column 2`, `Order access rule`). `--depth 2`: also who uses those. **Run it before every `rename`, `delete`, `moveEntity`, `changeMicroflow`** and show the user what will change. Java/JavaScript code is not searched | no |
+| `python mx.py unused [Module]` | Documents, entities, attributes and enumeration values nobody references, with the reason (default: the app's own modules). Entry points are not listed (menus, home pages, scheduled events, published services, after-startup, event handlers, flows named in Java/JavaScript code, pages with a URL, toolbox actions, "mark as used"). Only "probably unused": never delete without `usages` and the user's yes | no |
 | `python mx.py steps <Module.Flow>` | Lists the steps of a microflow/nanoflow with stable ids (for `changeAction`, `deleteAction`, `addActions` `after`) | no |
 | `python mx.py widgets <Module.Page>` | Lists the widget tree of a page or snippet: names, kinds, entity of each data view / list view, and where new widgets can go (`[into]`, layout grid column paths). For `addWidgets`, `changeWidget`, `deleteWidget`, `moveWidget` | no |
 | `python mx.py texts [Module\|Module.Doc\|menu] [--missing <lang>]` | Lists translatable texts (page titles, widget captions/texts/labels/placeholders, enumeration captions, show-message and validation feedback texts, validation messages, menu captions) as `where [part]` with their text in every project language; `--missing tr_TR`: only those without Turkish. For `setTranslations` | no |
@@ -76,7 +78,7 @@ Run all of these from the export folder.
 | `python mx.py mergefix [--pick "<id or Module.Doc>=ours\|theirs,..."] [--all ours\|theirs]` | Dry run of the merge fix: writes nothing, prints the merged documents and an approval code. Every true conflict needs a side (the other side's change to that document is lost; tell the user to redo it in Studio Pro). Then `python mx.py apply <CODE>` writes the merged unit files and rebuilds the unit table; the user finishes with `git add <app>.mpr mprcontents` and `git commit` | no (apply: **yes**) |
 
 The same lookups also exist as tools of the `mendix` MCP server (in OpenCode: `mendix_find`, in Claude Code:
-`mcp__mendix__find`): `find`, `steps`, `widgets`, `texts`, `ops`, `api`, `dryrun`, `gap`, `mergecheck` and **`plan`**. `plan` takes a short name and the
+`mcp__mendix__find`): `find`, `usages`, `unused`, `steps`, `widgets`, `texts`, `ops`, `api`, `dryrun`, `gap`, `mergecheck` and **`plan`**. `plan` takes a short name and the
 ops list, saves `edits/<name>.json` and dry-runs it in one call; the server keeps the model loaded, so this takes a
 fraction of a second. Use the tool or the command; the result is the same. `apply` and `undo` exist only as commands,
 so OpenCode (and Claude Code) asks the user before they run. Commands are lowercase. (Folders exported with
@@ -104,14 +106,14 @@ The user can type these slash commands:
 | Question | File |
 |---|---|
 | Where is document X? | `index/documents.txt` |
-| Who calls microflow X? | `index/called-by.txt`, `index/call-graph.txt` |
+| Who calls microflow X? Who uses entity / attribute / page X (exact places)? | `python mx.py usages <Module.X>` (live model), `index/called-by.txt`, `index/call-graph.txt` |
 | Who creates, changes or deletes entity X? | `index/entity-usage.txt` |
 | Who sets attribute X, which page shows it? | `index/attributes.txt` |
 | REST endpoints, scheduled events, event handlers | `index/entry-points.txt` |
 | Outgoing REST, e-mail, marketplace modules | `index/external-effects.txt` |
 | What can role X do? | `index/security.txt` |
 | Where does the text "..." appear? | `index/texts.txt` |
-| Dead code | `index/unused.txt` |
+| Dead code | `python mx.py unused [Module]` (with reasons), `index/unused.txt` |
 | Workflows, user tasks, timers | `index/workflows.txt` |
 | One document in detail | `modules/<Module>/<kind>/<Name>.txt` |
 | Entities, attributes, associations, access rules | `modules/<Module>/domain-model.txt` |
@@ -134,6 +136,9 @@ Follow these steps in order. Do not skip one.
 ```
 python mx.py find Order
 ```
+
+Before a `rename`, `delete`, `moveEntity`, `changeMicroflow` or `copyDocument` with `entity`: run
+`python mx.py usages <Module.Name>` and put what it lists into the plan (which pages, flows and rules follow).
 
 **Step 2: Write the change file** `edits/<short-name>.json`. Use only operations and fields from section 7
 (`python mx.py ops <name>` shows the live fields). Several operations in one file run in order. If no operation
@@ -216,6 +221,8 @@ The live list is `python mx.py ops`. If it differs from this table, trust the li
 | `addIndex` | **entity**, **attributes** `["A", {"name":"B","ascending":false}]` | |
 | `createEnumeration` | **module**, **name**, **values** (`["A", {"name":"B","caption":"Bee"}]`), folder | Captions are written in the project's default language |
 | `addEnumerationValue` | **enumeration**, **name**, caption | |
+| `changeEntity` | **entity**, persistable, documentation, image (`Module.Images.Name`, `""` none) | `persistable: false` drops the table: `DATA LOSS` line. Refused for an entity with a parent (it inherits persistability) or when a persistable entity owns an association to it. `color` is refused (Mendix does not store one) |
+| `moveEntity` | **entity**, **module**, roles `{"Old.Role": "New.Role"}` | Moves the entity to another module. Associations it owns move with it (`Old.Assoc` becomes `New.Assoc`; cross-module when the other end stays), associations of other entities to it become cross-module ones (or regular ones when they are in the target module). Access rule roles: `roles`, else the same role name in the target module, else refused. Every reference (by name, expressions, XPath, OQL) is renamed. Data stays (same entity id). Java code that names it is listed in Warnings |
 
 Attribute types: `String(200)`, `String(unlimited)`, `String` (=200), `Integer`, `Long`, `Decimal`, `Boolean`,
 `DateTime`, `AutoNumber`, `HashedString`, `Binary`, `Enum(Module.Enumeration)`.
@@ -251,6 +258,7 @@ The default of an `Enum` attribute is the value name, e.g. `"default": "Open"`.
 | `addAnnotation` | **microflow**, **text**, to (step id) | A note, attached to a step or free. On a new action use `"note": "text"` instead |
 | `createJavaAction` | **module**, **name**, folder, parameters `[{name, type, description, required}]`, returns (default `Boolean`; `Nothing` for none), documentation, exposed `{caption, category}` | Also writes `javasource/<module>/actions/<Name>.java` as Studio Pro generates it. Types: `String`, `Integer`/`Long`, `Decimal`, `Boolean`, `DateTime`, `Module.Entity`, `List(Module.Entity)`, `Enum(Module.Enum)`, `EntityType(T)` (declares type parameter T), `Object(T)`, `List(T)`, `Microflow`. A file that exists keeps its imports, user code and extra code |
 | `createJavaScriptAction` | same as `createJavaAction`, platform (`All`/`Web`/`Native`) | Writes `javascriptsource/<module>/actions/<Name>.js`. `Nanoflow` instead of `Microflow` as parameter type |
+| `changeMicroflow` | **microflow** (also a nanoflow or rule), addParameters `[{name, type, value}]`, removeParameters `["Name"]`, renameParameters `{"Old": "New"}`, parameterTypes `{"Name": "type"}`, returns, returnValue | Updates every caller found by `usages`: call steps, rule decisions, page buttons, data sources, on-change (`value` = the argument they pass, required when there are callers). The dry run lists `CALLERS UPDATED`. Refused with the list: callers that pass no parameters (scheduled events, menu items, home pages, after-startup), event handlers / calculated attributes, published services and workflows; removing a parameter the flow still uses; `returns` Nothing while a caller uses the result; a new return type for a data source. Renaming a parameter also renames `$Old` in the flow. Rename the flow itself with `rename` |
 | `createRule` | **module**, **name**, **returns** (`Boolean` or `Enum(...)`), **returnValue**, parameters, actions, folder, documentation | Rules only read and compute: retrieve, variable, set, aggregateList, listOperation, createList, changeList, if, switch, loop, end. Use it in `if`/`switch` with `"rule"` + `"args"` |
 
 Data types for parameters, variables and returns: `String`, `Integer`, `Long`, `Decimal`, `Boolean`, `DateTime`,
@@ -956,8 +964,9 @@ Pro (if a path does not match, Studio Pro shows an error on the mapping; right-c
 | Op | Fields | Notes |
 |---|---|---|
 | `moveDocument` | **document**, folder (missing or `""` = module root) | Within the same module |
-| `rename` | **target** (qualified name, or a module name), **newName** | Updates every reference. A module rename also updates `Module.` in expressions and XPath and lists code folders to move. Other renames report old names left in expressions, XPath and Java (`OLD NAME STILL USED`) |
-| `delete` | **target** | Deletes a document, entity, attribute, association, enumeration value or module role. Lists documents that still use it (`STILL USED BY`) |
+| `copyDocument` | **document** (page, snippet, layout, microflow, nanoflow, rule, enumeration or entity), name, module, folder, entity `{"Module.Source": "Module.Target"}`, skipUnmatched, roles `{"Old.Role": "New.Role"}`, associations | Copies what Studio Pro stored, with new ids; references inside the copy point to the copy. `entity`: the copy works on Target: attributes and associations by name; names Target lacks are listed and refused, or with `"skipUnmatched": true` the widgets / member changes showing them are left out (not steps or expressions: refused). In another module the module roles map by `roles`, else by the same role name, else refused. An entity copy takes its attributes, validation rules, access rules, indexes and event handlers; `"associations": true` also the associations it owns. A page URL is not copied. Ops after it in the same file cannot change the copy: put them in a second change |
+| `rename` | **target** (qualified name, or a module name), **newName** | Run `usages` first. Updates every reference (flow parameters too: callers' mappings follow). A module rename also updates `Module.` in expressions and XPath and lists code folders to move. Other renames report old names left in expressions, XPath and Java (`OLD NAME STILL USED`) |
+| `delete` | **target** | Run `usages` first (and `unused` to find candidates). Deletes a document, entity, attribute, association, enumeration value or module role. Lists documents that still use it (`STILL USED BY`) |
 
 ### Examples
 
@@ -986,6 +995,24 @@ App settings, a test configuration, an image:
   { "op": "setConfiguration", "name": "Test", "applicationRootUrl": "https://test.example.com/", "constants": { "Sales.ApiUrl": "https://api-test.example.com" }, "customSettings": { "ClientRequestTimeout": "60000" } },
   { "op": "createImageCollection", "module": "Sales", "name": "Images" },
   { "op": "addImage", "collection": "Sales.Images", "file": "edits/logo.png" }
+] }
+```
+
+Add a parameter to a microflow that a page button and another microflow call (both get `'web'`), and rename
+one ($Order in the flow follows):
+
+```json
+{ "ops": [ { "op": "changeMicroflow", "microflow": "Sales.ACT_Order_Submit", "addParameters": [ { "name": "Channel", "type": "String", "value": "'web'" } ], "renameParameters": { "Order": "SalesOrder" } } ] }
+```
+
+Copy a page for another entity (attributes by name), a microflow into another module, and move an entity:
+
+```json
+{ "ops": [
+  { "op": "copyDocument", "document": "Sales.Order_Edit", "name": "Invoice_Edit", "entity": { "Sales.Order": "Sales.Invoice" } },
+  { "op": "copyDocument", "document": "Sales.ACT_Order_Submit", "module": "Billing", "roles": { "Sales.User": "Billing.User" } },
+  { "op": "changeEntity", "entity": "Sales.OrderDraft", "persistable": false, "documentation": "Only on screen" },
+  { "op": "moveEntity", "entity": "Sales.Invoice", "module": "Billing", "roles": { "Sales.User": "Billing.User" } }
 ] }
 ```
 
@@ -1191,6 +1218,13 @@ First run `python mx.py gap "<what the user wants>"`. It records the missing ope
 Then give the user exact Studio Pro steps. SDK scripts (`edits/<name>.js`) run only in folders exported with
 `--allow-scripts`, because a script runs with full rights before the user approves anything; otherwise `dryrun`
 refuses them.
+
+Usages, unused, `changeMicroflow`, `copyDocument`, `changeEntity` and `moveEntity` work on what the model stores:
+names built at runtime (Java/JavaScript code, reflection, `Core.microflowCall` with a computed name) are not seen, and
+`$Var/Attr` paths are followed only where the variable's entity is known (parameters, created/retrieved objects,
+loop items, `$currentObject` of a data widget). Moving a view or external entity, copying documents other than pages,
+snippets, layouts, flows, rules, enumerations and entities, and callers that map parameters themselves (workflows,
+published services) are Studio Pro work.
 
 Operations cannot do these things: changing a layout's widgets (`createLayout` copies one), Data grid 2 export
 without the Data Widgets module (or to CSV), icon properties and linked data sources of pluggable widgets, adding a
