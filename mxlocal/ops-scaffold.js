@@ -8,9 +8,9 @@
 //   one, else a classic Data grid, with New / Edit / Delete) and <Entity>_NewEdit (a form with Save / Cancel), an
 //   optional menu item, page access and an entity access rule for module roles.
 const sdk = require("mendixmodelsdk");
-const { fail, bool, validName, suggest } = require("./ops-util");
+const { fail, validName } = require("./ops-util");
 
-const { pages, datatypes, domainmodels: dm, security } = sdk;
+const { pages, datatypes } = sdk;
 
 const SCAFFOLD_OPS = {
     createSnippet: {
@@ -42,7 +42,7 @@ const SCAFFOLD_SYNONYMS = {
 
 // x: { model, client, get, exists, entity, folder, impl: () => ops impl, pageOps, pageEdit }
 function makeScaffold(x) {
-    const { model, client } = x;
+    const { model } = x;
     const I = () => x.pageOps.internals;
 
     async function createSnippet(o) {
@@ -79,7 +79,6 @@ function makeScaffold(x) {
             t.entity = p.ent;
             sp.parameterType = t;
         }
-        if (ents.length && !model.allSnippets().some(s => s !== sn && s.isLoaded && s.parameters.length)) client.warnFirst(`Forms$SnippetParameter first use in this project (Studio Pro 11.12 samples): check ${qn} in Studio Pro`);
         let widgets = o.widgets;
         if (widgets === undefined && o.entity !== undefined) widgets = [{ widget: "dataView", source: "parameter", entity: String(o.entity), buttons: false, ...(o.fields !== undefined ? { fields: o.fields } : {}) }];
         if (Array.isArray(widgets)) widgets = widgets.map(w => (w && typeof w === "object" && /^dataview$/i.test(String(w.widget)) && w.source === "parameter" && w.buttons === undefined ? { ...w, buttons: false } : w));
