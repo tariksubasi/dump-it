@@ -280,7 +280,7 @@ function makeCopy(h) {
             }
             lines.push(`left out ${gone.length} widget(s)/member change(s) naming ${list.slice(0, 6).join(", ")}: ${[...new Set(gone)].slice(0, 8).join(", ")}`);
         }
-        if (Array.isArray(tree.AllowedModuleRoles)) tree.AllowedModuleRoles = tree.AllowedModuleRoles.filter(Boolean);
+        if (Array.isArray(tree.AllowedModuleRoles)) tree.AllowedModuleRoles = [...new Set(tree.AllowedModuleRoles.filter(Boolean))];
         if (typeof tree.Url === "string" && tree.Url) {
             lines.push(`URL '${tree.Url}' not copied (a URL belongs to one page)`);
             tree.Url = "";
@@ -317,7 +317,7 @@ function makeCopy(h) {
             return mapName(n);
         }, unmatched);
         if (refusedRoles.size) throw new Error(`module roles of ${src} have no match in ${toModule}: ${[...refusedRoles].join(", ")}. Give "roles": { "${[...refusedRoles][0]}": "${toModule}.<Role>" } (or "" to drop one)`);
-        for (const r of copy.AccessRules || []) r.AllowedModuleRoles = (r.AllowedModuleRoles || []).filter(Boolean);
+        for (const r of copy.AccessRules || []) r.AllowedModuleRoles = [...new Set((r.AllowedModuleRoles || []).filter(Boolean))];
         copy.AccessRules = (copy.AccessRules || []).filter(r => r.AllowedModuleRoles.length);
         // member rights of associations that are not copied
         const lines = [];

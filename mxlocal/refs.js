@@ -380,6 +380,24 @@ function graph(client) {
     return g;
 }
 
+// Nearest names by edit distance (case-insensitive), at most n, none far off.
+function closest(word, pool, n) {
+    const w = word.toLowerCase();
+    const dist = (a, b) => {
+        if (Math.abs(a.length - b.length) > 6) return 99;
+        let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+        for (let i = 1; i <= a.length; i++) {
+            const cur = [i];
+            for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+            prev = cur;
+        }
+        return prev[b.length];
+    };
+    const limit = Math.max(2, Math.floor(w.length / 4));
+    const scored = pool.map(o => ({ o, d: dist(w, o.toLowerCase()) })).filter(x => x.d <= limit).sort((a, b) => a.d - b.d);
+    return scored.length ? scored.slice(0, n).map(x => x.o) : require("./ops-util").suggest(word, pool, n);
+}
+
 // A name the model knows, or a did-you-mean error.
 function known(g, qn) {
     qn = String(qn || "").trim();
@@ -390,7 +408,7 @@ function known(g, qn) {
     if (same.length) throw new Error(`'${qn}' not found; names are case-sensitive: ${same[0]}?`);
     const parent = qn.split(".").slice(0, -1).join(".");
     const pool = g.names.has(parent) ? [...g.names.keys()].filter(n => n.startsWith(parent + ".")) : [...g.names.keys()];
-    const s = require("./ops-util").suggest(qn, pool, 3);
+    const s = closest(qn, pool, 3);
     throw new Error(`'${qn}' not found in the model.${s.length ? ` Did you mean: ${s.join(", ")}?` : ""} Check it with: find ${qn.split(".").pop()}`);
 }
 

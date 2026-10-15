@@ -149,7 +149,7 @@ function makeEntity(h) {
         };
         const mapped = (e.AccessRules || []).map(rule => (rule.AllowedModuleRoles || []).map(mapRole));
         if (missing.size) throw new Error(`REFUSED: access rules of ${src} use roles of ${from} with no match in ${to}: ${[...missing].join(", ")}. Give "roles": { "${[...missing][0]}": "${to}.<Role>" } (or "" to drop it from the rule)`);
-        (e.AccessRules || []).forEach((rule, i) => (rule.AllowedModuleRoles = mapped[i]));
+        (e.AccessRules || []).forEach((rule, i) => (rule.AllowedModuleRoles = [...new Set(mapped[i])]));
         for (const rule of e.AccessRules || []) rule.AllowedModuleRoles = rule.AllowedModuleRoles.filter(Boolean);
         const emptied = (e.AccessRules || []).filter(r => !r.AllowedModuleRoles.length).length;
         e.AccessRules = (e.AccessRules || []).filter(r => r.AllowedModuleRoles.length);

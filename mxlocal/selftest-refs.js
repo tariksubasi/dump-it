@@ -30,6 +30,12 @@ function timed(fn) {
     return { r, ms: Number(process.hrtime.bigint() - t) / 1e6 };
 }
 
+// every module role of mod -> one role (the selftest's phases add rules with several roles)
+function rolesTo(s, mod, role) {
+    const g = refs.graph(s.client);
+    return Object.fromEntries([...g.names].filter(([n, t]) => t === "Security$ModuleRole" && n.startsWith(mod + ".")).map(([n]) => [n, role]));
+}
+
 async function usagesPhase(x) {
     const { reopen, copy, mod, T, check } = x;
     const E = `${mod}.${T}`;
@@ -154,7 +160,7 @@ async function changeMicroflowPhase(x) {
         { op: "createMicroflow", module: mod, name: `${T}_Callee`, folder: "ZzTest", parameters: [{ name: "Item", type: E }], returns: "Boolean", returnValue: "$Item/Count > 0",
             actions: [{ action: "log", message: "callee {1}", args: ["$Item/Title"] }, { action: "change", variable: "Item", set: { Count: "$Item/Count + 1" } }] },
         { op: "createMicroflow", module: mod, name: `${T}_Caller`, folder: "ZzTest", parameters: [{ name: "Thing", type: E }], actions: [{ action: "call", microflow: `${E}_Callee`, args: { Item: "$Thing" }, variable: "Ok" }] },
-        ...(pageable ? [{ op: "createPage", module: mod, name: `${T}_Calls`, entity: E, folder: "ZzTest", widgets: [{ widget: "dataView", widgets: [{ widget: "actionButton", name: "zzCallBtn", action: "callMicroflow", microflow: `${E}_Callee`, caption: "Call" }] }] }] : [])
+        ...(pageable ? [{ op: "createPage", module: mod, name: `${T}_CallPage`, entity: E, folder: "ZzTest", widgets: [{ widget: "dataView", widgets: [{ widget: "actionButton", name: "zzCallBtn", action: "callMicroflow", microflow: `${E}_Callee`, caption: "Call" }] }] }] : [])
     ] };
     let r = await runApply(x, s, setup);
     const problems = [...r.failed];
@@ -178,7 +184,7 @@ async function changeMicroflowPhase(x) {
     const caller = json(plain(`${T}_Caller`));
     if (!caller.includes(`"Parameter":"${E}_Callee.Obj"`) || !caller.includes(`"Argument":"'from caller'"`) || !caller.includes(`"Parameter":"${E}_Callee.Note"`)) problems.push("caller call step lacks the Obj / Note mappings");
     if (pageable) {
-        const page = json(plain(`${T}_Calls`));
+        const page = json(plain(`${T}_CallPage`));
         // the object of the data view is passed implicitly (Studio Pro stores no mapping for it)
         if (!page.includes(`"Parameter":"${E}_Callee.Note"`) || !page.includes(`"Expression":"'from caller'"`)) problems.push("page button lacks the Note mapping");
     }
@@ -219,8 +225,8 @@ async function copyPhase(x) {
     const plan = { ops: [
         { op: "copyDocument", document: E, name: `${T}Twin` },
         { op: "copyDocument", document: `${E}Line`, module: M, name: "ZzLine", associations: true },
-        { op: "copyDocument", document: E, module: M, name: "ZzCopied", roles: { [`${mod}.ZzRole`]: `${M}.HR` } },
-        { op: "copyDocument", document: `${E}_Main`, module: M, roles: { [`${mod}.ZzRole`]: `${M}.User` } },
+        { op: "copyDocument", document: E, module: M, name: "ZzCopied", roles: rolesTo(s, mod, `${M}.HR`) },
+        { op: "copyDocument", document: `${E}_Main`, module: M, roles: rolesTo(s, mod, `${M}.User`) },
         { op: "copyDocument", document: `${E}Status`, name: `${T}Status2` }
     ] };
     let r = await runApply(x, s, plan);
@@ -248,14 +254,14 @@ async function copyPhase(x) {
         [{ op: "copyDocument", document: E, name: `${T}Twin` }, /already exists/],
         [{ op: "copyDocument", document: `${E}_Nightly`, name: "ZzNightly" }, /copies pages, snippets/],
         [{ op: "copyDocument", document: `${E}_Mian`, name: "X" }, /Did you mean: .*_Main/],
-        ...(pageable ? [[{ op: "copyDocument", document: `${E}_Edit`, name: `${T}On_Edit`, module: M, entity: { [E]: `${M}.Onboarding` }, roles: { [`${mod}.ZzRole`]: `${M}.User` } }, /lacks: .*Title.*skipUnmatched/]] : [])
+        ...(pageable ? [[{ op: "copyDocument", document: `${E}_Edit`, name: `${T}On_Edit`, module: M, entity: { [E]: `${M}.Onboarding` }, roles: rolesTo(s, mod, `${M}.User`) }, /lacks: .*Title.*skipUnmatched/]] : [])
     ];
     for (const [op, re] of refusals) {
         const p = await refused(await reopen(copy), { ops: [op] }, re);
         if (p) problems.push(p);
     }
     if (pageable) {
-        r = await runApply(x, await reopen(copy), { ops: [{ op: "copyDocument", document: `${E}_Edit`, name: `${T}On_Edit`, module: M, entity: { [E]: `${M}.Onboarding` }, roles: { [`${mod}.ZzRole`]: `${M}.User` }, skipUnmatched: true }] });
+        r = await runApply(x, await reopen(copy), { ops: [{ op: "copyDocument", document: `${E}_Edit`, name: `${T}On_Edit`, module: M, entity: { [E]: `${M}.Onboarding` }, roles: rolesTo(s, mod, `${M}.User`), skipUnmatched: true }] });
         s = r.s;
         problems.push(...r.failed, ...r.lay.slice(0, 3), ...r.lost);
         if (!/left out \d+ widget/.test(r.lines.join("\n"))) problems.push("skipUnmatched did not list what it left out");
@@ -290,7 +296,7 @@ async function entityPhase(x) {
     s = r.s;
     problems.push(...r.failed);
     // move into the new module and back
-    r = await runApply(x, s, { ops: [{ op: "moveEntity", entity: E, module: M, roles: { [`${mod}.ZzRole`]: `${M}.User` } }] });
+    r = await runApply(x, s, { ops: [{ op: "moveEntity", entity: E, module: M, roles: rolesTo(s, mod, `${M}.User`) }] });
     s = r.s;
     problems.push(...r.failed, ...r.lay.slice(0, 3), ...r.lost);
     const out = r.lines.join("\n");
