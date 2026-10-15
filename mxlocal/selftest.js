@@ -1363,6 +1363,8 @@ async function selftest(mpr, keep, { out, relevant }) {
         // phase pages2 (selftest-pages2.js): attribute paths, the action model, validation, formats, form settings, page
         // variables, select page, Data grid 2 export, native navigation, and the refusals
         s2 = await require("./selftest-pages2").pages2Phase({ s2, reopen, copy, mod, T, layout, layoutProblems, check, results, userRole });
+        // phase R (before phase S, which deletes the event handler it looks at): reference graph (usages, unused) and the ops built on it (selftest-refs.js)
+        s2 = await require("./selftest-refs").refsPhase({ reopen, copy, mod, T, check, results, layout, layoutProblems, lostProperties, relevant, userRole });
         // phase S (selftest-smallops.js): retrieve sort/range, reference set add/remove, snippets, CRUD pages, changing
         // and deleting constants, scheduled events, rules, handlers, indexes, enumeration values
         s2 = await require("./selftest-smallops").smallPhase({ s2, reopen, copy, mod, T, role, layout, layoutProblems, check, results, src });
@@ -1423,8 +1425,6 @@ async function selftest(mpr, keep, { out, relevant }) {
         await require("./selftest-tools").phase({ src, copy, reopen, check, results, layout, mod, T, layoutProblems, sameOutside, out });
         s2 = await reopen(copy);
 
-        // phase R: reference graph (usages, unused) and the ops built on it (selftest-refs.js)
-        s2 = await require("./selftest-refs").refsPhase({ reopen, copy, mod, T, check, results, layout, layoutProblems, lostProperties, relevant, userRole });
 
         // phase 3: attribute rename + module rename
         const phase3 = { ops: [{ op: "rename", target: `${E}.Flag`, newName: "Active" }, { op: "rename", target: mod, newName: `${mod}Zz` }] };
