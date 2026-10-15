@@ -26,6 +26,7 @@ const { makeRest, REST_OPS } = require("./ops-rest");
 const { makeOData, ODATA_OPS } = require("./ops-odata");
 const { makeXml, XML_OPS } = require("./ops-xml");
 const { makeWorkflows, WORKFLOW_OPS, USER_TASK_PAGE_FIELDS, SYSTEM_ENTITIES, STEP_FIELDS, STEP_COMMON } = require("./ops-workflows");
+const { makeScaffold, SCAFFOLD_OPS, SCAFFOLD_SYNONYMS } = require("./ops-scaffold");
 
 const OPS = {
     createEntity: {
@@ -116,6 +117,7 @@ const OPS = {
     ...ODATA_OPS,
     ...XML_OPS,
     ...WORKFLOW_OPS,
+    ...SCAFFOLD_OPS,
     moveDocument: { doc: "Move a document to another folder of the same module.", fields: { document: "R Module.Document", folder: "optional folder path, e.g. Orders/Actions (missing or \"\" = the module root)" } },
     rename: { doc: "Rename a module, document, entity, attribute, association or enumeration value. Updates references, reports names left in expressions/XPath/Java.", fields: { target: "R qualified name, e.g. Module.Entity.Attribute", newName: "R new short name" } },
     delete: { doc: "Delete a document, entity, attribute, association, enumeration value or module role. Lists what still uses it.", fields: { target: "R qualified name" } }
@@ -457,6 +459,7 @@ function bind(model, client) {
     const xmlOps = makeXml({ model, client, get, exists, entity, folder, version, attributeChain, loadParents, mappingInternals: mappingOps.internals });
     const workflowOps = makeWorkflows({ model, client, get, exists, entity, folder, version, persistable, attributeChain, loadParents, grantAccess: o => impl.grantAccess(o), impl: () => impl,
         textAll: (owner, prop, value) => pageOps.internals.templateAll(owner, prop, value, null, "", true) });
+    const scaffoldOps = makeScaffold({ model, client, get, exists, entity, folder, impl: () => impl, pageOps, pageEdit });
 
     // ------------------------------------------------ operations
 
@@ -881,7 +884,8 @@ function bind(model, client) {
         ...restOps.impl,
         ...odataOps.impl,
         ...xmlOps.impl,
-        ...workflowOps.impl
+        ...workflowOps.impl,
+        ...scaffoldOps.impl
     };
 
     // ------------------------------------------------ checks (run after apply on a freshly loaded model)
@@ -1040,6 +1044,7 @@ function bind(model, client) {
         ...restOps.checks,
         ...odataOps.checks,
         ...xmlOps.checks,
+        ...scaffoldOps.checks,
         createWorkflow: o => workflowOps.checks.createWorkflow(o),
         createPage: o => (o.kind === "userTaskPage" ? workflowOps.checks.userTaskPage(o) : pageOps.checks.createPage(o))
     };
@@ -1050,7 +1055,7 @@ function bind(model, client) {
         const name = Object.keys(OPS).find(k => k.toLowerCase() === String(o.op).toLowerCase());
         if (!name) fail(`${where}: unknown op '${o.op}'`, o.op, Object.keys(OPS));
         if (name === "addMenuItem" && o.roles !== undefined) throw new Error(`${where} (addMenuItem): ${NO_MENU_ROLES(o.page)}`);
-        for (const [k, hint] of Object.entries({ ...(DOMAIN_SYNONYMS[name] || {}), ...(FIELD_SYNONYMS[name] || {}) })) if (o[k] !== undefined && !OPS[name].fields[k]) throw new Error(`${where} (${name}): unknown field '${k}': ${hint}`);
+        for (const [k, hint] of Object.entries({ ...(DOMAIN_SYNONYMS[name] || {}), ...(FIELD_SYNONYMS[name] || {}), ...(SCAFFOLD_SYNONYMS[name] || {}) })) if (o[k] !== undefined && !OPS[name].fields[k]) throw new Error(`${where} (${name}): unknown field '${k}': ${hint}`);
         validate("op", name, OPS[name], o, where);
         return { name, where };
     }

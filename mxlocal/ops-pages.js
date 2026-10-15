@@ -1196,8 +1196,9 @@ function makePages(h) {
             } else if (n.source === "parameter") {
                 const item = inItem(n);
                 if (item) throw new Error(`${n.where}: a data view inside ${item.name || item.kind} (a list item) cannot add a page parameter; leave out "source" to show the ${item.ent ? item.ent.name : "item"} itself ("source": "context"), or use "source": "association"`);
-                if (o.snippet) throw new Error(`${n.where}: on a snippet a new data view cannot add a parameter; give it "listenTo", or "source": "context" / "association" / "microflow"`);
                 n.ent = await entityOf(s.entity || o.dflt, n.where);
+                // a snippet: only a parameter it has (createSnippet "parameters"); a new one would break its callers
+                if (o.snippet && !(o.ctx && o.ctx.params.has(n.ent.qualifiedName))) throw new Error(`${n.where}: on a snippet a new data view cannot add a parameter (this snippet has none of ${n.ent.qualifiedName}); give it "listenTo", or "source": "context" / "association" / "microflow"`);
             } else if (n.source === "context") {
                 if (!outer) throw new Error(`${n.where}: source context is the object of the data view or list item around it, and this data view is in none; use "source": "parameter", "listenTo" or "microflow"`);
                 if (s.entity && !isA(outer.ent, String(s.entity))) {
@@ -1649,7 +1650,8 @@ function makePages(h) {
         let v = null;
         if (w instanceof pages.AttributeWidget) v = pages.PageVariable.createInAttributeWidgetUnderSourceVariable(w);
         else w.sourceVariable = v = pages.PageVariable.create(model); // attach first: the parameter reference is local to the page
-        v.pageParameter = dv.param;
+        if (dv.param instanceof pages.SnippetParameter) v.snippetParameter = dv.param;
+        else v.pageParameter = dv.param;
         v.widget = dv.widget;
     }
 
@@ -2953,7 +2955,10 @@ function makePages(h) {
                 dm.DirectEntityRef.createInEntityPathSourceUnderEntityRef(src).entity = ent;
                 const sv = pages.PageVariable.create(model);
                 src.sourceVariable = sv; // attach first: the parameter reference is local to the page
-                sv.pageParameter = node.param;
+                if (node.param instanceof pages.SnippetParameter) {
+                    sv.snippetParameter = node.param;
+                    client.warnFirst(`Forms$DataViewSource on a snippet parameter first use (no Studio Pro sample has one): check ${ctx.qn} ${dv.name} in Studio Pro`);
+                } else sv.pageParameter = node.param;
                 how = `parameter ${node.param.name}`;
             } else if (node.source === "context" || node.source === "association") {
                 // the object around it (SourceVariable null, as inputs in a listening data view), or over references from it
@@ -2984,7 +2989,7 @@ function makePages(h) {
             for (const ch of node.widgets) inner.push(await build(ch, dv.widgets, ctx));
             let saved = node.saves;
             for (let c = node.container; c && !saved; c = c.container) saved = !!c.saves || !!c.existing;
-            if (editable && ctx.count.inputs > before && !saved) client.warn(`${ctx.qn}: ${dv.name} is editable but has no Save button: add "buttons": true (or a save actionButton in "footer"), or "editable": false`);
+            if (editable && ctx.count.inputs > before && !saved && !(ctx.page instanceof pages.Snippet)) client.warn(`${ctx.qn}: ${dv.name} is editable but has no Save button: add "buttons": true (or a save actionButton in "footer"), or "editable": false`);
             const foot = [];
             if (buttons) {
                 foot.push((await button(dv.footerWidgets, "Save", "save", pages.ButtonStyle.Success, node.source === "parameter", ctx)).name);

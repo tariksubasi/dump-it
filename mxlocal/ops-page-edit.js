@@ -302,7 +302,8 @@ function makePageEdit(h, I) {
         walk(dvNode);
         const sv = (sibs.find(s => s.sourceVariable) || {}).sourceVariable;
         const src = dvNode.el.dataSource;
-        const own = !sibs.length && src instanceof pages.DataViewSource && src.sourceVariable && src.sourceVariable.pageParameter ? { pageParameter: src.sourceVariable.pageParameter, widget: dvNode.el } : null;
+        const own = !sibs.length && src instanceof pages.DataViewSource && src.sourceVariable && src.sourceVariable.pageParameter ? { pageParameter: src.sourceVariable.pageParameter, widget: dvNode.el }
+            : !sibs.length && src instanceof pages.DataViewSource && src.sourceVariable && src.sourceVariable.snippetParameter ? { snippetParameter: src.sourceVariable.snippetParameter, widget: dvNode.el } : null;
         const like = sv || own;
         return w => {
             if (!like) return;
@@ -925,7 +926,7 @@ function makePageEdit(h, I) {
         if (!top.length) throw new Error(`${where}: 'widgets' is empty`);
         const ctx = newCtx(P);
         // default entity: the op's, else the page's only object parameter
-        const params = (P.snippet ? [] : P.doc.parameters).filter(p => p.parameterType instanceof datatypes.ObjectType);
+        const params = P.doc.parameters.filter(p => p.parameterType instanceof datatypes.ObjectType); // also snippet parameters (createSnippet)
         for (const p of params) if (!ctx.params.has(p.parameterType.entityQualifiedName)) ctx.params.set(p.parameterType.entityQualifiedName, p);
         const dflt = o.entity || (params.length === 1 ? params[0].parameterType.entityQualifiedName : undefined);
         I.prepare(nodes);
