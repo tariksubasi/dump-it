@@ -27,6 +27,21 @@ export const find = {
     execute: (args, context) => mx(context, ["find", args.text])
 };
 
+export const usages = {
+    description: "Who uses a Mendix document, entity, attribute, association, enumeration value or constant (by name and " +
+        "in expressions/XPath), grouped by document with the place (widget, step id, column). Run it before rename, " +
+        "delete, moveEntity or changeMicroflow.",
+    args: { name: text("qualified name, e.g. Sales.Order"), depth: text("1-5: also who uses those users, or \"\" for 1") },
+    execute: (args, context) => mx(context, ["usages", args.name, ...(args.depth ? ["--depth", String(args.depth)] : [])])
+};
+
+export const unused = {
+    description: "Documents, entities, attributes and enumeration values nobody references (entry points excluded), with " +
+        "reasons. Probably unused only: never delete without checking usages and asking the user.",
+    args: { module: text("module name, or \"\" for the app's own modules") },
+    execute: (args, context) => mx(context, ["unused", ...(args.module ? [String(args.module)] : [])])
+};
+
 export const steps = {
     description: "Steps of a microflow or nanoflow in order, with stable ids. Use the ids in changeAction, deleteAction " +
         "and addActions 'after'.",

@@ -1,7 +1,7 @@
 "use strict";
 // Per-project cache in .mxlocal-backup/cache.bin, so a command does not decode every unit again.
 // Per unit, keyed by its ContentsHash: what the catalog learned from it, its $Type and Name, the names inside it and its
-// public SDK interface. Per project: the schema calibration, reused while the catalog's keys and kinds stay the same.
+// public SDK interface, its candidate references (refs.js). Per project: the schema calibration, reused while the catalog's keys and kinds stay the same.
 // A Studio Pro save changes only the hashes of the units it saved, so only those are decoded again.
 const fs = require("fs");
 const path = require("path");
@@ -11,7 +11,7 @@ const v8 = require("v8");
 const FRAGMENT_CAP = 256; // distinct sample values per key in one unit; see Catalog.merge
 
 // Code and data files whose change makes every cached entry stale.
-const SOURCES = ["bson.js", "convert.js", "schema.js", "client.js", "cache.js", "storage-names.json", "reference-catalog.json", "list-markers.json"];
+const SOURCES = ["bson.js", "convert.js", "schema.js", "client.js", "cache.js", "storage-names.json", "reference-catalog.json", "list-markers.json", "refs.js"];
 let codeKey = null;
 function code() {
     if (!codeKey) {
@@ -106,7 +106,7 @@ function localNames(plain) {
         walk(plain, "", 0);
         return { base: "module", items };
     }
-    if (/Enumeration|Microflow|Nanoflow/.test(plain.$Type)) walk(plain, "", 0);
+    if (/Enumeration|Microflow|Nanoflow|ImageCollection/.test(plain.$Type)) walk(plain, "", 0);
     return { base: "unit", items };
 }
 
