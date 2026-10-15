@@ -213,7 +213,9 @@ Bilinmesi gerekenler:
 1. Onay kodu **son dry run'a** bağlıdır. Arada model değiştiyse (Studio Pro'da kaydettin, pull yaptın) uygulama
    reddedilir ve dry run tekrarlanır. Böylece onaylamadığın bir değişiklik yazılmaz.
 2. Dry run şu uyarıları gösterir. Hepsini oku:
-   - `EXPRESSION CHECK`: ifadede olmayan bir attribute ya da değişken var (`$Order/Remak` → `Remark`).
+   - `XPATH CHECK` / `EXPRESSION CHECK`: XPath ya da ifadede olmayan bir attribute, ilişki, değişken, fonksiyon veya
+     yanlış tip var (`$Order/Remak` → `Remark`, Decimal alana `'abc'`). `(warning)` olmayan satır varsa dry run
+     onay kodu vermez; OpenCode değişiklik dosyasını düzeltip tekrar dener.
    - `OLD NAME STILL USED`: yeniden adlandırma; expression, XPath ve Java içindeki eski isimleri güncellemez.
    - `STILL USED BY`: silinen şeyi kullanan dokümanlar.
    - `NOT STORED`: script'in verdiği bir değer bu Mendix sürümünde saklanmıyor.

@@ -33,13 +33,14 @@ STEP 3 - DRY RUN (writes nothing)
   edits/<short-name>.json and dry-runs it.
   If it prints ERROR: read the HINT line, fix the file, run again. After 5 failed tries: stop, show the user the
   last error and ask for help.
-  If it prints EXPRESSION CHECK lines: fix the names in the change file and run again (Studio Pro would show errors).
+  If it prints XPATH CHECK / EXPRESSION CHECK lines without "(warning)": it refused (no code). Fix the change file and
+  run again (Studio Pro would show errors). "(warning)" lines do not stop it: show them under ATTENTION.
 
 STEP 4 - SHOW AND ASK
   Show the user, in this format:
     PLAN: <1-5 bullets: what changes and why>
     DRY RUN: <the numbered op lines and the "Changes:" lines from the output>
-    ATTENTION: <every DATA LOSS line first, then every line under EXPRESSION CHECK / NOT STORED / OLD NAME STILL USED / STILL USED BY / Warnings,
+    ATTENTION: <every DATA LOSS line first, then every line under XPATH CHECK / EXPRESSION CHECK / NOT STORED / OLD NAME STILL USED / STILL USED BY / Warnings,
                or "none">
     To apply: close Studio Pro and answer "yes <CODE>".
   Then STOP and wait for the answer.
@@ -256,6 +257,12 @@ ERRORS AND FIXES
 - "decimals goes with a Decimal attribute" / "date goes with a Date and time attribute" -> use the format of the attribute's type.
 - "needs an import mapping" / "export mapping" -> publishRest supports only simple parameters/results; do it in Studio Pro.
 - "has no attribute 'A' (in $V/A). Did you mean: B" -> use B in that expression.
+- XPATH CHECK / EXPRESSION CHECK "... Did you mean: B" -> use B in that XPath or expression.
+- "the expression gives A, but B is expected" -> convert as the hint says (toString, round, parseDecimal,
+  Module.Enum.Value, true()) or pass the right variable; "(cast it first)" -> ifType + cast.
+- "after the association X comes the entity" -> XPath paths are X/Module.Entity/Attribute.
+- "Refused: N XPATH CHECK / EXPRESSION CHECK error(s)" -> fix those lines. Only if you are sure Studio Pro accepts
+  it: "expressionCheck": "warn" next to "ops", tell the user, and record a gap.
 - "Studio Pro has this project open" -> ask the user to close Studio Pro, then run the same command again.
 - "is a script. Scripts are off" -> use operations; if none fits: @PY@ mx.py gap "<what>" + Studio Pro steps.
 - "Unknown command 'APPLY'" -> commands are lowercase.
