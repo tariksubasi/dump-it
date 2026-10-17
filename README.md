@@ -343,6 +343,25 @@ Onay workflow'unda "Yönetici onayı" task'ı neden bazı kullanıcılara düşm
 | `--no-opencode-tools` | OpenCode'a özel araçları (`.opencode/tools`) yazmaz. OpenCode açılışta takılırsa kullan |
 | `--no-mcp` | MCP sunucusunu kaydetmez; OpenCode daha yavaş, komut başına başlayan araçları kullanır |
 | `--allow-scripts` | Ajanın Model SDK script'i (`.js`) çalıştırmasına izin verir. Script onaydan önce tam yetkiyle çalışır; sadece güvendiğin bir modelle kullan |
+| `--inside-project` | Çıktıyı Mendix proje klasörünün içine yazmaya izin verir (önerilmez, uyarı verir) |
+
+---
+
+## Koruma: ajan sadece `edits/` içine yazar
+
+Zayıf modeller (DeepSeek, Qwen, ...) bazen export klasörüne, hatta Mendix projesine yardımcı `.js` / `.py`
+dosyaları yazar. Export bunu engeller:
+
+- **OpenCode** (`opencode.json`): ajan sadece `edits/*.json` dosyalarını düzenleyebilir (`--allow-scripts` ile
+  `edits/*.js` de). Kabukta `>` / `>>` yönlendirmesi, here-doc (`<<EOF`), `tee`, `cp`, `mv`, `node`, `python -c`,
+  `powershell`, `Set-Content`, `Out-File` gibi dosya yazan komutlar **yasak**; `cat` / `head` / `tail` artık sormadan
+  çalışmaz. Python sadece `python mx.py ...` ile çalışır.
+- **Claude Code**: `.claude/hooks/guard.py` her Write/Edit ve kabuk komutundan önce çalışır; `edits/` dışına yazmayı,
+  dosyaya yönlendirmeyi ve `mx.py` dışında bir script çalıştırmayı reddeder (izin listesi ne derse desin).
+- **Export yeri**: çıktı klasörü Mendix proje klasörünün içi olamaz (varsayılan zaten yanındaki `<Proje>-context`).
+- **`python mx.py clean`**: export'un yazmadığı dosyaları listeler (yardımcı script'ler, notlar, elle değiştirilmiş
+  export dosyaları). `python mx.py clean --move` onları `edits/stray/<zaman>/` altına taşır; hiçbir şey silinmez.
+  Her dry run böyle dosya varsa uyarır; yeniden export da onları silmek yerine `edits/stray/` altına taşır.
 
 ---
 
@@ -362,6 +381,8 @@ Onay workflow'unda "Yönetici onayı" task'ı neden bazı kullanıcılara düşm
 | `python` bulunamadı | `py mxcontext.py ...` dene |
 | `No .mpr file found` | Yol yanlış. İçinde `.mpr` dosyası olan klasörü ver |
 | `Refusing to overwrite` | Hedef klasör başka bir şey içeriyor. `-o` ile boş bir klasör ver |
+| `Refusing to export into ...` | Çıktı klasörü Mendix projesinin içinde ya da onu içeriyor. `-o` vermeden çalıştır (yanına `<Proje>-context` yazar) |
+| `WARNING: N file(s) outside edits/` | Ajan klasöre fazladan dosya yazmış. `python mx.py clean` ile bak, `--move` ile kenara al |
 | `Cannot clean ...` | Çıktı klasöründe açık bir dosya var. Onu kapatıp tekrar çalıştır |
 | `git not found: change checks are disabled` | Git kurulu değil. Export çalışır ama `/kontrol` çalışmaz. Git'i kur |
 | OpenCode kontrolde değişiklik bulamıyor | Studio Pro'da Ctrl+S yaptın mı? Kaydetmeden export eski modeli görür |
