@@ -320,6 +320,10 @@ async function run(file, mpr, allowJs, ctx, opts = {}) {
     layoutCheck(ops, change, file, say, opts);
     const a11y = require("./ui").a11yLint(client);
     if (a11y.length) say("A11Y CHECK (accessibility of the new or changed widgets; warnings, nothing refused):\n" + a11y.map(w => "  ! " + w).join("\n"));
+    // STYLE CHECK: the theme compiled as Studio Pro builds it (when a .scss changed), classes, inline styles, contrast
+    const strict = !!(change.plan && (change.plan.styleCheck === "strict" || change.plan.ops.some(o => o && o.op === "setTokens" && o.strict === true)));
+    const style = await require("./stylecheck").styleCheck(client, model, { strict, mode: change.plan && change.plan.styleCheck });
+    if (style.lines.length) say("STYLE CHECK (web theme compiled with Dart Sass as Studio Pro builds it, classes, contrast; lines without (warning) / (info) refuse the change):\n" + style.lines.map(w => "  ! " + w).join("\n"));
     if (lost.length) say("NOT STORED (the script set these, but this Mendix version does not keep them; use api <Type>):\n" + lost.map(w => "  ! " + w).join("\n"));
     if (s.leftovers.length) say("OLD NAME STILL USED (rename does not update expressions, XPath, Java; fix these too):\n" + s.leftovers.map(w => "  ! " + w).join("\n"));
     if (warnings.length) say("Warnings:\n" + warnings.map(w => "  ! " + w).join("\n"));
@@ -329,6 +333,11 @@ async function run(file, mpr, allowJs, ctx, opts = {}) {
         out(`Refused: ${lint.length} XPATH CHECK / EXPRESSION CHECK error(s) above (lines without "(warning)"). Fix them in the change file and run again. Nothing written, no approval code.`);
         process.exitCode = 1;
         return { client, refused: lint.length };
+    }
+    if (style.errors) {
+        out(`Refused: ${style.errors} STYLE CHECK error(s) above (lines without "(warning)" / "(info)"). Fix the SCSS or tokens in the change file and run again. Nothing written, no approval code.`);
+        process.exitCode = 1;
+        return { client, refused: style.errors };
     }
     if (opts.check) say(studioCheck(client.project.mpr, opts, "run", enc).text);
     const code = pending.save(client.project.dir, enc, { fingerprint, source: path.resolve(file), summary: lines, plan: change.plan,

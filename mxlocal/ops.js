@@ -18,6 +18,7 @@ const { makeMappings, MAPPING_OPS } = require("./ops-mappings");
 const { makeTexts, TEXT_OPS } = require("./ops-texts");
 const { makeNav, NAV_OPS, MENU_EXTRA, extendedMenuItem } = require("./ops-nav");
 const { makeTheme, THEME_OPS } = require("./theme");
+const { makeDsTheme, DS_THEME_OPS } = require("./ds-theme");
 const { makeMarket, MARKET_OPS } = require("./marketplace");
 const { makeCode, CODE_OPS } = require("./ops-code");
 const { makeFlowEdit, FLOW_EDIT_OPS } = require("./ops-flow-edit");
@@ -120,6 +121,7 @@ const OPS = {
     setHomePage: { doc: "Set the home page (or home microflow) of a navigation profile, for everyone or for some user roles (native profile: a native page or nanoflow).", fields: HOME_FIELDS },
     ...NAV_OPS,
     ...THEME_OPS,
+    ...DS_THEME_OPS,
     ...MARKET_OPS,
     ...MAPPING_OPS,
     ...REST_OPS,
@@ -458,6 +460,7 @@ function bind(model, client) {
     const copyOps = makeCopy({ model, client, get, folder });
     const entityOps = makeEntity({ model, client, get, entity, persistable, isFresh: qn => isFresh(qn) });
     const themeOps = makeTheme({ client });
+    const dsTheme = makeDsTheme({ model, client, impl: () => impl, theme: themeOps });
     const marketOps = makeMarket({ client, model });
     const navOps = makeNav({ model, client, get, exists, text, translationsOf, folder, grantAccess: o => impl.grantAccess(o) }, pageOps.internals);
     const mappingOps = makeMappings({ model, get, exists, entity, folder, attributeChain, loadParents, impl: () => impl });
@@ -859,6 +862,7 @@ function bind(model, client) {
         addMenuItem: o => (extendedMenuItem(o) ? navOps.addMenuItem(o) : pageOps.addMenuItem(o)),
         ...navOps.impl,
         ...themeOps.impl,
+        ...dsTheme.impl,
         ...marketOps.impl,
         async createLayout(o) {
             validName(o.name, "layout name");
@@ -1048,6 +1052,7 @@ function bind(model, client) {
         ...navOps.checks,
         addMenuItem: o => (extendedMenuItem(o) ? navOps.checks.addMenuItem(o) : pageOps.checks.addMenuItem(o)),
         ...themeOps.checks,
+        ...dsTheme.checks,
         ...marketOps.checks,
         async moveDocument(o) {
             const doc = await get(o.document);
