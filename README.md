@@ -122,6 +122,7 @@ istemiyorsan export'u `--no-mcp` ile al.
 | Enumeration kararı ve rule | **switch**: enumeration değerine göre her değer (ya da "A, B") için ayrı yol, kalanlar için `other`, boş değer için `empty`, sonra birleşme; **rule** dokümanı (Boolean ya da enumeration döner, sadece okur/hesaplar) ve rule çağıran karar (`if`/`switch` + `rule` + `args`) |
 | Java / JavaScript action | `createJavaAction` / `createJavaScriptAction`: parametreler (metin, sayı, tarih, entity, liste, enumeration, tip parametresi `EntityType(T)` / `Object(T)` / `List(T)`, microflow / nanoflow), dönüş tipi, toolbox'ta aksiyon olarak gösterme; **Java/JS dosyası Studio Pro'nun ürettiği gibi** (`javasource/<modül>/actions/<Ad>.java`, `javascriptsource/.../<Ad>.js`) değişikliğin parçası: dry run'da görünür, yedeklenir, `/geri-al` ile geri alınır; var olan dosyanın import'ları, USER CODE ve EXTRA CODE kısmı korunur; uygulamadan sonra elle değiştirilmiş dosyayı geri alma silmez (önce sorar) |
 | Akışı yeniden düzenleme | `moveAction` (adımı başka yere, bir karar dalına ya da döngüye taşıma; değişken sırası bozulursa reddedilir), `extractMicroflow` (ardışık adımları yeni alt microflow'a taşıyıp yerine çağrı koyar; parametreler kullanılan değişkenler, dönüş değeri sonra kullanılan değişken), `addAnnotation` ve aksiyonlarda `note` (not), `changeAction` ile karar koşulu/caption, rule argümanları, döngü koşulu |
+| Akış yerleşimi (layout) | Eklenen adımlar akışı bozmaz: yalnızca eklenen yerden sonrası kayar, karar dalında dal kendi şeridinde kalır, döngü içeriğine göre (en dıştakine kadar) büyür, yoldaki nesneler kenara itilir, bağlı notlar adımla birlikte taşınır; silme/taşıma boşluğu kapatır. `formatMicroflow`: akışın tamamını Studio Pro düzeninde yeniden yerleştirir (iki kez çalıştırmak aynı sonucu verir). Dry run'da **LAYOUT CHECK** satırları (çakışan nesneler, döngü dışına taşan nesne, nesnenin içinden geçen akış, çok uzun ana hat); `--preview` ile önce/sonra SVG çizimi (`edits/preview/`) |
 | Diğer aksiyonlar | **reduce** aggregate (dönüş tipi başlangıç değerinden, gerekirse `type`), **metrikler** (counter, increment, gauge), REST çağrısında **kimlik doğrulama** (constant/expression ile basic), header, timeout, **proxy** (varsayılan / yok / özel), **form-data** ve **binary (dosya)** gövde, export mapping gövdesi, cevap: yok / metin / **dosya dokümanı** / import mapping, hata gövdesini `$latestHttpResponse`'ta tutma |
 | Liste ve diğer aksiyonlar | Liste oluşturma/değiştirme (ekle, çıkar, değiştir, temizle), aggregate (count, sum, average, min, max, all, any), liste işlemleri (union, intersect, subtract, contains, equals, head, tail, find, filter, sort, range), validation feedback, Java action ve JavaScript action çağırma (parametreleri kontrol edilerek), REST çağrısı (URL şablonu, method, header, timeout, metin ya da export mapping gövdesi; cevap yok / String / import mapping), import mapping ile içe aktarma, export mapping ile dışa aktarma, dosya indirme. Test projelerindeki aksiyonların ~%99'u |
 | Var olan akış | Araya adım ekleme (döngü içine de), **tek bir adımı değiştirme** (XPath, değer, koşul, devre dışı bırakma, sıralama, aralık, referans set ekle/çıkar...) ve **silme** |
@@ -343,6 +344,25 @@ Onay workflow'unda "Yönetici onayı" task'ı neden bazı kullanıcılara düşm
 | `--no-opencode-tools` | OpenCode'a özel araçları (`.opencode/tools`) yazmaz. OpenCode açılışta takılırsa kullan |
 | `--no-mcp` | MCP sunucusunu kaydetmez; OpenCode daha yavaş, komut başına başlayan araçları kullanır |
 | `--allow-scripts` | Ajanın Model SDK script'i (`.js`) çalıştırmasına izin verir. Script onaydan önce tam yetkiyle çalışır; sadece güvendiğin bir modelle kullan |
+| `--inside-project` | Çıktıyı Mendix proje klasörünün içine yazmaya izin verir (önerilmez, uyarı verir) |
+
+---
+
+## Koruma: ajan sadece `edits/` içine yazar
+
+Zayıf modeller (DeepSeek, Qwen, ...) bazen export klasörüne, hatta Mendix projesine yardımcı `.js` / `.py`
+dosyaları yazar. Export bunu engeller:
+
+- **OpenCode** (`opencode.json`): ajan sadece `edits/*.json` dosyalarını düzenleyebilir (`--allow-scripts` ile
+  `edits/*.js` de). Kabukta `>` / `>>` yönlendirmesi, here-doc (`<<EOF`), `tee`, `cp`, `mv`, `node`, `python -c`,
+  `powershell`, `Set-Content`, `Out-File` gibi dosya yazan komutlar **yasak**; `cat` / `head` / `tail` artık sormadan
+  çalışmaz. Python sadece `python mx.py ...` ile çalışır.
+- **Claude Code**: `.claude/hooks/guard.py` her Write/Edit ve kabuk komutundan önce çalışır; `edits/` dışına yazmayı,
+  dosyaya yönlendirmeyi ve `mx.py` dışında bir script çalıştırmayı reddeder (izin listesi ne derse desin).
+- **Export yeri**: çıktı klasörü Mendix proje klasörünün içi olamaz (varsayılan zaten yanındaki `<Proje>-context`).
+- **`python mx.py clean`**: export'un yazmadığı dosyaları listeler (yardımcı script'ler, notlar, elle değiştirilmiş
+  export dosyaları). `python mx.py clean --move` onları `edits/stray/<zaman>/` altına taşır; hiçbir şey silinmez.
+  Her dry run böyle dosya varsa uyarır; yeniden export da onları silmek yerine `edits/stray/` altına taşır.
 
 ---
 
@@ -362,6 +382,8 @@ Onay workflow'unda "Yönetici onayı" task'ı neden bazı kullanıcılara düşm
 | `python` bulunamadı | `py mxcontext.py ...` dene |
 | `No .mpr file found` | Yol yanlış. İçinde `.mpr` dosyası olan klasörü ver |
 | `Refusing to overwrite` | Hedef klasör başka bir şey içeriyor. `-o` ile boş bir klasör ver |
+| `Refusing to export into ...` | Çıktı klasörü Mendix projesinin içinde ya da onu içeriyor. `-o` vermeden çalıştır (yanına `<Proje>-context` yazar) |
+| `WARNING: N file(s) outside edits/` | Ajan klasöre fazladan dosya yazmış. `python mx.py clean` ile bak, `--move` ile kenara al |
 | `Cannot clean ...` | Çıktı klasöründe açık bir dosya var. Onu kapatıp tekrar çalıştır |
 | `git not found: change checks are disabled` | Git kurulu değil. Export çalışır ama `/kontrol` çalışmaz. Git'i kur |
 | OpenCode kontrolde değişiklik bulamıyor | Studio Pro'da Ctrl+S yaptın mı? Kaydetmeden export eski modeli görür |

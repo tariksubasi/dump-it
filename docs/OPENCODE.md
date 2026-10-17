@@ -17,7 +17,10 @@ safely, and what each output means. Answer the user in their own language (often
 2. **Never claim without proof.** Say something is done only when a command output shows it (`Saved ...`,
    `Checked: ...`). Cite a file path and step number for every claim about the app. If something is not in the
    export, say so. Do not guess.
-3. **Write only in `edits/`.** Every other file in the export folder is regenerated and must not be edited.
+3. **Write only `edits/<name>.json`** (and `edits/<name>.js` only when scripts are allowed). Never create helper
+   scripts (`.js`, `.py`, `.ts`, `.sh`) or any other file elsewhere: not in the export folder, not in the Mendix
+   project; no `>` or `tee`. If no operation fits, run `python mx.py gap "<what>"`. The export folder is guarded:
+   such writes are denied, and `python mx.py clean` lists files that do not belong there.
 
 If you forget everything else, keep these three.
 
@@ -73,6 +76,7 @@ Run all of these from the export folder.
 | `python mx.py undo [--force]` | Restores the model from before the last apply, then re-exports. Refuses when the model changed after that apply; `--force` only when the user accepts losing the listed changes | **yes** |
 | `python mx.py check` | Runs Studio Pro's `mx check` (only when `mx.exe` is installed) | no |
 | `python mx.py ok "<summary>"` | Saves the current export as the checked state (git commit) | no |
+| `python mx.py clean [--move]` | Lists files outside `edits/` that the export did not write (helper scripts, notes, edited export files); `--move` moves them to `edits/stray/<time>/`, nothing is deleted. Every dry run warns when there are such files | no (`--move`: asks) |
 | `python mx.py selftest` | Runs every operation on a temporary copy of the project and checks the result | no |
 | `python mx.py mergecheck` | After a `git merge` of the app with conflicts in the `.mpr` or `mprcontents/*.mxunit`: per document, which side changed it (resolved automatically) and the **true conflicts** (both sides changed the same document) with what each side changed. Without a merge: checks the `.mpr` unit table against `mprcontents` | no |
 | `python mx.py mergefix [--pick "<id or Module.Doc>=ours\|theirs,..."] [--all ours\|theirs]` | Dry run of the merge fix: writes nothing, prints the merged documents and an approval code. Every true conflict needs a side (the other side's change to that document is lost; tell the user to redo it in Studio Pro). Then `python mx.py apply <CODE>` writes the merged unit files and rebuilds the unit table; the user finishes with `git add <app>.mpr mprcontents` and `git commit` | no (apply: **yes**) |
@@ -264,6 +268,7 @@ The default of an `Enum` attribute is the value name, e.g. `"default": "Open"`.
 | `moveAction` | **microflow**, **id**, **after** (`"start"`, a variable, a step id), branch (with a decision: `"true"`, `"false"`, an enumeration value, `"empty"`) | Moves one action or loop (keeps its id), also into a branch or a loop. Refused when the step then uses a variable made after it, or has an error handler |
 | `extractMicroflow` | **microflow**, **from** (step id), to (step id, default from), **name**, module, folder | The steps from..to (one line, no decisions or error handlers) go into a new microflow (nanoflow in a nanoflow) that the old place calls. Parameters = the variables they use; returns the one variable they make that is used later (more than one: refused) |
 | `addAnnotation` | **microflow**, **text**, to (step id) | A note, attached to a step or free. On a new action use `"note": "text"` instead |
+| `formatMicroflow` | **microflow** (also a nanoflow or rule), keepAnnotations (`true`: notes stay put) | Lays the whole flow out again as Studio Pro draws it: main path on one line at the start event's height, branches and error handlers as lanes below, merges after their branches, loops sized to their content, every flow on Studio Pro's sides. Only positions, sizes and flow sides change (steps and ids stay). Formatting twice gives the same result. Use it when LAYOUT CHECK shows errors or the user calls a flow unreadable |
 | `createJavaAction` | **module**, **name**, folder, parameters `[{name, type, description, required}]`, returns (default `Boolean`; `Nothing` for none), documentation, exposed `{caption, category}` | Also writes `javasource/<module>/actions/<Name>.java` as Studio Pro generates it. Types: `String`, `Integer`/`Long`, `Decimal`, `Boolean`, `DateTime`, `Module.Entity`, `List(Module.Entity)`, `Enum(Module.Enum)`, `EntityType(T)` (declares type parameter T), `Object(T)`, `List(T)`, `Microflow`. A file that exists keeps its imports, user code and extra code |
 | `createJavaScriptAction` | same as `createJavaAction`, platform (`All`/`Web`/`Native`) | Writes `javascriptsource/<module>/actions/<Name>.js`. `Nanoflow` instead of `Microflow` as parameter type |
 | `changeMicroflow` | **microflow** (also a nanoflow or rule), addParameters `[{name, type, value}]`, removeParameters `["Name"]`, renameParameters `{"Old": "New"}`, parameterTypes `{"Name": "type"}`, returns, returnValue | Updates every caller found by `usages`: call steps, rule decisions, page buttons, data sources, on-change (`value` = the argument they pass, required when there are callers). The dry run lists `CALLERS UPDATED`. Refused with the list: callers that pass no parameters (scheduled events, menu items, home pages, after-startup), event handlers / calculated attributes, published services and workflows; removing a parameter the flow still uses; `returns` Nothing while a caller uses the result; a new return type for a data source. Renaming a parameter also renames `$Old` in the flow. Rename the flow itself with `rename` |
@@ -1115,6 +1120,19 @@ Java action with its file, a REST call with authentication and form data, then r
 ] }
 ```
 
+Lay out a messy flow again and draw it before/after (`"preview": true`, or `run ... --preview`):
+
+```json
+{ "preview": true, "ops": [
+  { "op": "formatMicroflow", "microflow": "Sales.ACT_Order_Close" }
+] }
+```
+
+Layout of edits: new steps go where the anchor is (on the main line, in the branch lane, inside the loop); only
+what follows them moves right, a loop grows (width and height, up to the outermost loop) round what is put in it,
+objects in the way are pushed aside, a note attached to a step moves with it, parameters and free notes stay.
+`deleteAction`, `moveAction` and `extractMicroflow` close the gap again.
+
 Decision, loop and error handler:
 
 ```json
@@ -1337,6 +1355,10 @@ XPATH CHECK ...                                            <- wrong name/value i
 EXPRESSION CHECK ...                                       <- wrong name/type in an expression: fix the file
 NOT STORED ...                                             <- a value this Mendix version does not keep: fix the script
 OLD NAME STILL USED ...                                    <- rename left old names in expressions/XPath/Java
+LAYOUT CHECK (...)                                         <- per changed flow: layout errors/warnings, before -> after
+  Sales.ACT_Order_Close: 0 error(s), 1 warning(s) (before: 0 error(s), 0 warning(s))
+  ! (warning) the flow [3f2a9c1b] ... runs through [7c0d11e2] ...   <- '!' = new since the change
+PREVIEW: 1 flow(s) drawn in .../edits/preview              <- only with --preview or "preview": true
       DATA LOSS: the column A and its values are dropped ...  <- deleting/retyping stored data: tell the user first
 Warnings:
   > Module.Doc -> Module/Folder                              <- a document moved to another folder
@@ -1346,6 +1368,13 @@ Dry run: nothing written. Approval code: 7F3A              <- the code the user 
 ```
 
 Show the user every line between `Changes:` and `Dry run:`. Do not hide warnings.
+
+LAYOUT CHECK lines (never a reason to refuse): errors are objects that overlap and objects outside their loop;
+warnings are a flow running through an object, two steps closer than 15 px on a line, a note covering a step and a
+main line wider than 3800 px (about 20 steps: suggest `extractMicroflow`). A new error after your change: add
+`{ "op": "formatMicroflow", "microflow": "..." }` to the plan and run again. With `--preview` (or `"preview": true` in
+the plan) the dry run also writes `edits/preview/<Module.Flow>.before.svg` and `.after.svg` (boxes, captions, flows;
+errors in red): give the user these paths when they want to see the change.
 
 ### XPATH CHECK and EXPRESSION CHECK
 

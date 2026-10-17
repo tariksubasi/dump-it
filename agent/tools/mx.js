@@ -113,6 +113,14 @@ export const gap = {
     execute: (args, context) => mx(context, ["gap", args.need])
 };
 
+export const clean = {
+    description: "Files outside edits/ that the export did not write (helper scripts, notes, edited export files). " +
+        "Read-only: lists them. To move them into edits/stray/ the user runs python mx.py clean --move. Never " +
+        "create such files: change files are edits/<name>.json only.",
+    args: {},
+    execute: (args, context) => mx(context, ["clean"])
+};
+
 export const mergecheck = {
     description: "After a git merge of the Mendix app (conflicts in the .mpr or mprcontents): which documents each " +
         "branch changed, which are resolved automatically, and the true conflicts with what each side changed. Read-only.",

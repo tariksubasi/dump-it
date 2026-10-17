@@ -54,6 +54,8 @@ function tools(allowApply) {
             inputSchema: { type: "object", properties: { file: str("file name in edits/, e.g. add-note.json") }, required: ["file"] } },
         { name: "mergecheck", description: "After a git merge of the Mendix app: per-document 3-way analysis of mprcontents and the .mpr unit table (resolved automatically / true conflicts with what each side changed). Read-only; the fix is the command python mx.py mergefix (dry run) then apply.",
             inputSchema: { type: "object", properties: {} } },
+        { name: "clean", description: "Files outside edits/ that the export did not write (helper scripts, notes, edited export files). Read-only list; the user moves them with python mx.py clean --move. Never create such files: change files go through plan only.",
+            inputSchema: { type: "object", properties: {} } },
         { name: "gap", description: "Record a change that no operation can do yet (edits/gaps.jsonl). Then give the user Studio Pro steps.",
             inputSchema: { type: "object", properties: { need: str("what the user wants, in one sentence") }, required: ["need"] } }
     ];
@@ -205,6 +207,7 @@ class Server {
                     }
                     fs.writeFileSync(file, text);
                     await this.dryrun(file);
+                    lines.push(require("./stray").warning(path.dirname(this.edits)));
                     break;
                 }
                 case "dryrun": {
@@ -212,10 +215,14 @@ class Server {
                     file = path.join(this.edits, path.basename(f).endsWith(".json") ? path.basename(f) : path.basename(f) + ".json");
                     if (!fs.existsSync(file)) throw new Error(`No change file '${f}' in edits/. Use the plan tool to write one.`);
                     await this.dryrun(file);
+                    lines.push(require("./stray").warning(path.dirname(this.edits)));
                     break;
                 }
                 case "mergecheck":
                     lines.push(require("./merge").mergecheck(this.mpr));
+                    break;
+                case "clean":
+                    lines.push(require("./stray").report(path.dirname(this.edits)));
                     break;
                 case "gap": {
                     fs.mkdirSync(this.edits, { recursive: true });
@@ -239,7 +246,7 @@ class Server {
                 default:
                     throw new Error(`Unknown tool '${name}'`);
             }
-            return { content: [{ type: "text", text: lines.join("\n") || "(no output)" }] };
+            return { content: [{ type: "text", text: lines.filter(Boolean).join("\n") || "(no output)" }] };
         } catch (e) {
             const text = lines.join("\n") + (lines.length ? "\n" : "") + cli.report(e, file);
             return { content: [{ type: "text", text }], isError: true };

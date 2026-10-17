@@ -31,7 +31,8 @@ const setOutput = fn => (out = fn); // serve.js collects the output of a command
 const USAGE = `mxlocal - Mendix Model SDK offline on a local .mpr (v2)
 
   node mxlocal.js run <change.json|change.js> --project <app.mpr|folder>
-        Dry run: computes the change, writes nothing, prints it and an approval code.
+        Dry run: computes the change, writes nothing, prints it and an approval code. --preview also draws every
+        changed flow before/after as SVG in edits/preview/ (LAYOUT CHECK lists the layout issues either way).
   node mxlocal.js apply --code <CODE> --project <app.mpr|folder>
         Writes the change of the last dry run (Studio Pro closed). CODE comes from that dry run.
   node mxlocal.js restore --project <app.mpr|folder> [--backup <name>] [--force]
@@ -240,8 +241,34 @@ function loadChange(file, allowJs) {
     return { fn };
 }
 
+// LAYOUT CHECK: per flow the plan created or changed, the layout issues and the ones the change added (not a reason
+// to refuse); with --preview or "preview": true in the plan, edits/preview/<Module.Flow>.before.svg / .after.svg.
+function layoutCheck(ops, change, file, say, opts = {}) {
+    const L = require("./flow-layout");
+    const report = ops.layoutCheck ? ops.layoutCheck() : [];
+    if (!report.length) return;
+    const count = list => `${list.filter(i => i.level === "error").length} error(s), ${list.filter(i => i.level === "warning").length} warning(s)`;
+    const lines = [];
+    for (const r of report) {
+        lines.push(`  ${r.qn}: ${count(r.issues)}${r.before ? ` (before: ${count(r.was)})` : " (new)"}`);
+        for (const i of r.fresh.slice(0, 12)) lines.push(`  ! ${i.level === "error" ? "" : "(warning) "}${i.text}`);
+        if (r.fresh.length > 12) lines.push(`  ! ... ${r.fresh.length - 12} more`);
+    }
+    say("LAYOUT CHECK (positions in the changed flows; '!' = new since the change; formatMicroflow re-lays out a flow):\n" + lines.join("\n"));
+    if (!(opts.preview || (change.plan && change.plan.preview === true))) return;
+    const base = path.basename(path.dirname(path.resolve(file))) === "edits" ? path.dirname(path.resolve(file)) : path.resolve("edits");
+    const dir = path.join(base, "preview");
+    fs.mkdirSync(dir, { recursive: true });
+    for (const r of report) {
+        if (r.before) fs.writeFileSync(path.join(dir, `${r.qn}.before.svg`), L.svg(r.before, `${r.qn} (before)`, r.was));
+        fs.writeFileSync(path.join(dir, `${r.qn}.after.svg`), L.svg(r.after, `${r.qn} (after)`, r.issues));
+    }
+    say(`PREVIEW: ${report.length} flow(s) drawn in ${dir} (<Module.Flow>.before.svg / .after.svg; open them in a browser)`);
+}
+
 // ctx: an already loaded project (serve.js keeps one in memory); otherwise it is loaded here.
-async function run(file, mpr, allowJs, ctx) {
+// opts: { preview } (--preview)
+async function run(file, mpr, allowJs, ctx, opts = {}) {
     const change = loadChange(file, allowJs);
     ctx = ctx || (await loadProject(mpr));
     const fingerprint = ctx.project.fingerprint();
@@ -283,6 +310,7 @@ async function run(file, mpr, allowJs, ctx) {
     const warnings = relevant(client.summary().warnings, enc);
     if (checked.xpath.length) say("XPATH CHECK (wrong attribute/association/entity/value in an XPath constraint; fix the change file):\n" + checked.xpath.map(w => "  ! " + w).join("\n"));
     if (checked.expression.length) say("EXPRESSION CHECK (Studio Pro will show these as errors; fix the change file):\n" + checked.expression.map(w => "  ! " + w).join("\n"));
+    layoutCheck(ops, change, file, say, opts);
     if (lost.length) say("NOT STORED (the script set these, but this Mendix version does not keep them; use api <Type>):\n" + lost.map(w => "  ! " + w).join("\n"));
     if (s.leftovers.length) say("OLD NAME STILL USED (rename does not update expressions, XPath, Java; fix these too):\n" + s.leftovers.map(w => "  ! " + w).join("\n"));
     if (warnings.length) say("Warnings:\n" + warnings.map(w => "  ! " + w).join("\n"));
@@ -440,9 +468,10 @@ async function main() {
     else if (cmd === "selftest") ok = await require("./selftest").selftest(mpr, a.keep === true, { out, relevant });
     else if (cmd === "serve") return require("./serve").serve(mpr, path.resolve(a.edits && a.edits !== true ? a.edits : "edits"), a["allow-apply"] === true);
     else if (cmd === "run") {
+        if (typeof a.preview === "string" && !a._[1]) a._.push(a.preview); // run --preview change.json
         if (!a._[1]) throw new Error("run needs a change file (.json or .js)");
         if (a.apply) throw new Error("run only does a dry run now. Apply with: apply --code <CODE> (the code is printed by the dry run)");
-        await run(a._[1], mpr, a["allow-js"] === true);
+        await run(a._[1], mpr, a["allow-js"] === true, null, { preview: !!a.preview });
     } else if (cmd === "apply") await apply(mpr, a.code);
     else if (cmd === "restore") restoreCmd(mpr, a.backup, a.force);
     else if (cmd === "mergecheck") out(require("./merge").mergecheck(mpr));

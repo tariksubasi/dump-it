@@ -1111,7 +1111,7 @@ function bind(model, client) {
             const rest = plan.ops.slice(i + 1);
             const later = rest.some(x => ["rename", "delete"].includes(x.op));
             const qn = o.module && o.name ? `${o.module}.${o.name}` : null;
-            const edited = qn && rest.some(x => ["addActions", "changeAction", "deleteAction", "moveAction", "extractMicroflow", "addAnnotation"].includes(x.op) && x.microflow === qn);
+            const edited = qn && rest.some(x => ["addActions", "changeAction", "deleteAction", "moveAction", "extractMicroflow", "addAnnotation", "formatMicroflow"].includes(x.op) && x.microflow === qn);
             const opposite = { grantAccess: "revokeAccess", revokeAccess: "grantAccess" }[name];
             const undone = opposite && rest.some(x => x.op === opposite && x.document === o.document);
             // a later page edit of the same page that deletes, moves or renames one of this op's widgets (or changes it again)
@@ -1128,7 +1128,7 @@ function bind(model, client) {
         return failed;
     }
 
-    const api = { get, runPlan, checkPlan, dataType, folder, lintExpressions: () => lintChanged(), steps: qn => flows.steps(qn), widgets: qn => pageEdit.widgets(qn), widgetType: name => (name ? pageOps.internals.widgetType(name) : pageOps.internals.widgetTypes()), texts: (scope, missing) => textOps.list(scope, missing) };
+    const api = { get, runPlan, checkPlan, dataType, folder, lintExpressions: () => lintChanged(), layoutCheck: () => flows.layoutReport(), steps: qn => flows.steps(qn), widgets: qn => pageEdit.widgets(qn), widgetType: name => (name ? pageOps.internals.widgetType(name) : pageOps.internals.widgetTypes()), texts: (scope, missing) => textOps.list(scope, missing) };
     for (const name of Object.keys(OPS)) {
         api[name] = o => {
             validate("op", name, OPS[name], o || {}, `ops.${name}`);

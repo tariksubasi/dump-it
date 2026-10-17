@@ -20,9 +20,9 @@ from mx_docs import (PageRenderer, code_action_signature, code_refs, constant_li
                      scheduled_event_line, security_lines, settings_lines, view_entity_lines, image_collection_line)
 from mx_flows import FlowRenderer, flow_signature
 from mx_model import FLOW_TYPES, STRUCTURAL, Context, Index, Project, clean, collect_texts, harvest, kind_of
+from mx_stray import FILES_HEADER, KEEP, MARKER, move_stray, stray_files
 from mx_workflows import WorkflowRenderer
 
-MARKER = ".mxcontext"
 FOLDERS = {
     "Microflows$Microflow": "microflows",
     "Microflows$Nanoflow": "nanoflows",
@@ -52,7 +52,7 @@ ENTITY_OPS = ("create", "retrieve", "change", "commit", "delete", "page", "refer
 
 GUIDE = """You are analysing a Mendix {version} app. Its model was exported to text by mxcontext. Only custom modules
 are exported in detail. Answer in the user's language.
-
+{hard_rule}
 RULES
 1. Cite file path + step number for every claim. If something is not in the export, say so instead of guessing.
 2. Grep first, then read only the files you need. Do not read whole folders.
@@ -93,6 +93,13 @@ HOW TO WORK
   callers from called-by.txt, scheduled events, REST operations). For a bug: trace from the entry point.
 """
 
+HARD_RULE = """
+HARD RULE: write only change files edits/<name>.json{js}. Never create helper scripts (.js, .py, .ts, .sh) or any
+other file anywhere else: not in this folder, not in the Mendix project. No >, 2>&1 or tee in commands. Use
+{py} mx.py commands to look things up and dry-run. If no operation fits, run {py} mx.py gap "<what>".
+Files that do not belong here: {py} mx.py clean
+"""
+
 CHANGE_GUIDE = """
 CHANGING OR CHECKING THE MODEL
 - The user asks to change the model (modules, entities, attributes, associations, enumerations, microflows, pages
@@ -115,15 +122,48 @@ CHANGING OR CHECKING THE MODEL
 """
 
 AGENT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent")
-KEEP = {".git", "edits", ".opencode", ".claude"}  # survive re-exports: history, change files, agents' own files
 # mx.py commands an agent may run without asking: lookups, dry runs and the export's own history. apply/undo always ask.
 SAFE_MX_COMMANDS = ("help", "refresh", "find", "usages", "unused", "steps", "widgets", "widgettype", "texts", "ops", "api", "dryrun", "rerun", "gap", "check", "ok",
-                    "selftest", "mergecheck", "mergefix")
+                    "selftest", "mergecheck", "mergefix", "clean")
 # Tools of the mxlocal MCP server (mxlocal/serve.js) that may run without asking: none of them writes the model.
-MCP_TOOLS = ("find", "usages", "unused", "steps", "widgets", "widgettype", "texts", "ops", "api", "plan", "dryrun", "gap", "mergecheck")
+MCP_TOOLS = ("find", "usages", "unused", "steps", "widgets", "widgettype", "texts", "ops", "api", "plan", "dryrun", "gap", "mergecheck", "clean")
 # git commands that could rewrite the export history, touch the Mendix project's repo (-C) or send data out.
 GIT_DENY = ("-C", "push", "remote", "reset", "clean", "checkout", "restore", "switch", "rebase", "stash", "rm",
             "filter-branch", "update-ref", "config", "gc", "reflog", "submodule", "worktree", "commit --amend")
+
+
+def quote(path):
+    path = path.replace("\\", "/")
+    return '"%s"' % path if " " in path else path
+
+
+# OpenCode bash rules. OpenCode (1.x, packages/core/src/permission.ts) takes the LAST rule in this order whose
+# wildcard matches ("*" = any text, newlines included), and matches each command of a pipeline/list separately against
+# its full text including its redirections and here-documents ("cat > a.js <<EOF ...", "python mx.py find x > a.txt").
+# Order here: ask for everything, allow read-only lookups, deny writers and interpreters, re-ask/allow mx.py, and last
+# deny every output redirection and the git commands that rewrite history, so nothing after can re-allow them.
+# Older OpenCode versions matched only the command words (no redirections): there the missing cat/head/tail/type
+# allows and the interpreter/writer denials are what keeps "cat > helper.js" from running unasked.
+READ_ONLY_BASH = ("git *", "grep *", "rg *", "ls *", "dir *")
+WRITER_BASH = ("node *", "nodejs *", "deno *", "bun *", "npx *", "tsx *", "ts-node *", "python *", "python3 *", "py *",
+               "python -c*", "python3 -c*", "py -c*", "perl *", "ruby *", "php *", "powershell*", "pwsh*", "cmd /c*",
+               "Set-Content*", "Add-Content*", "Out-File*", "New-Item*", "Copy-Item*", "Move-Item*", "tee *", "cp *",
+               "mv *", "copy *", "move *", "xcopy *", "robocopy *", "touch *", "dd *", "install *", "ln *", "sed -i*",
+               "echo * > *", "printf * > *")
+REDIRECT_BASH = ("* > *", "*>*", "* >> *", "*<<*")
+
+
+def opencode_bash_rules(py):
+    bash = {"*": "ask"}
+    bash.update({p: "allow" for p in READ_ONLY_BASH})
+    bash.update({p: "deny" for p in WRITER_BASH})
+    # python only through mx.py: the safe commands run unasked with the export's Python command, the rest asks
+    bash.update({"%s mx.py *" % name: "ask" for name in dict.fromkeys(("python", "python3", "py", py))})
+    bash.update({"%s mx.py %s*" % (py, c): "allow" for c in SAFE_MX_COMMANDS})
+    bash["%s mx.py clean*--move*" % py] = "ask"  # listing runs unasked, moving files away asks
+    bash.update({p: "deny" for p in REDIRECT_BASH})
+    bash.update({"git %s*" % c: "deny" for c in GIT_DENY})
+    return bash
 
 
 def parse_args():
@@ -137,6 +177,9 @@ def parse_args():
                     help="do not register the mxlocal MCP server (OpenCode gets its slower custom tools instead)")
     ap.add_argument("--allow-scripts", action="store_true",
                     help="let the agent dry-run .js Model SDK scripts (they run with full rights before approval)")
+    ap.add_argument("--inside-project", action="store_true",
+                    help="allow an output folder inside the Mendix project folder (not recommended: agent files end up "
+                         "next to the app and in its version control)")
     return ap.parse_args()
 
 
@@ -146,6 +189,14 @@ def prepare_output(path):
     if os.path.isdir(path) and os.listdir(path):
         if not os.path.exists(os.path.join(path, MARKER)):
             raise SystemExit("Refusing to overwrite %s: it is not an mxcontext output folder." % path)
+        # files an agent left here (helper scripts, notes) are moved to edits/stray/, never deleted
+        stray = [(rel, kind) for rel, kind in stray_files(path) if kind == "new"]
+        if stray:
+            try:
+                where = move_stray(path, stray)
+                print("Moved %d file(s) the export did not write to %s" % (len(stray), where))
+            except OSError as e:
+                raise SystemExit("Cannot move stray files out of %s (%s). Close programs that lock them and retry." % (path, e))
         try:
             for name in os.listdir(path):
                 if name in KEEP:
@@ -170,8 +221,11 @@ class Exporter:
         self.project = Project(args.project)
         self.ctx = Context(self.project, self.warnings)
         self.index = Index()
-        self.out = os.path.abspath(args.out or self.project.root.rstrip("\\/") + "-context")
+        # default: a sibling folder <project folder>-context, never inside the project
+        self.default_out = os.path.abspath(self.project.root).rstrip("\\/") + "-context"
+        self.out = os.path.abspath(args.out or self.default_out)
         self.files = {}
+        self.written = set()  # every file this export writes, for the file list in the marker (mx.py clean)
         self.paths = {}
         self.modules = {}
         self.overview = []
@@ -179,7 +233,27 @@ class Exporter:
         self.marketplace_api = {}
         self.with_url = set()
 
+    def check_location(self):
+        """The export folder must not be the Mendix project folder, lie inside it or contain it: agents working there
+        would put their files into the app (and its version control), and a re-export would empty the app folder."""
+        real = lambda p: os.path.normcase(os.path.realpath(p))  # noqa: E731
+        out, root = real(self.out), real(self.project.root)
+        within = lambda a, b: a == b or a.startswith(b.rstrip(os.sep) + os.sep)  # noqa: E731
+        if within(root, out):
+            raise SystemExit("Refusing to export into %s: it contains the Mendix project (%s); a re-export empties the "
+                             "output folder. Use a sibling folder, e.g. the default: -o \"%s\"" % (
+                                 self.out, self.project.mpr, self.default_out))
+        if within(out, root):
+            if not self.args.inside_project:
+                raise SystemExit("Refusing to export into %s: it is inside the Mendix project folder %s, so agent files "
+                                 "would end up in the app and its version control.\nUse a folder next to the project, e.g. "
+                                 "the default: -o \"%s\" (or pass --inside-project if you really want this)." % (
+                                     self.out, self.project.root, self.default_out))
+            print("WARNING: exporting inside the Mendix project folder (--inside-project). Keep %s out of the app's "
+                  "version control and Studio Pro deployments." % self.out)
+
     def run(self):
+        self.check_location()
         prepare_output(self.out)
         units = [u for u in self.project.units.values() if u.type and u.type not in STRUCTURAL and u.type not in SKIPPED]
         units.sort(key=lambda u: (u.module.name if u.module else "", u.type, u.name or ""))
@@ -197,6 +271,7 @@ class Exporter:
         self._write_overview()
         git = shutil.which("git")
         self._write_agent_files(bool(git))
+        self._write_file_list()
         history = self._stage_history(git) if git else "git not found: change checks are disabled"
         print("Exported %d documents from %d modules to %s in %.1fs (%d warnings). %s" % (
             len(self.files), len(self.modules), self.out, time.time() - self.started, len(self.warnings), history))
@@ -240,7 +315,11 @@ class Exporter:
         py = self._python_command()
         fill = lambda text: text.replace("@PY@", py)  # noqa: E731
 
-        guide = GUIDE.format(version=self.project.version,
+        hard_rule = (HARD_RULE.format(py=py, js=" (edits/<name>.js only because scripts are allowed here)"
+                                      if self.args.allow_scripts else "") if can_edit else
+                     "\nHARD RULE: never create, copy or move files anywhere (no helper scripts, no notes, nothing in "
+                     "the Mendix project). Only read and answer.\n")
+        guide = GUIDE.format(version=self.project.version, hard_rule=hard_rule,
                              edit_rule="Write change files only in edits/." if can_edit else "")
         guide += (CHANGE_GUIDE if can_edit else NO_EDIT_GUIDE).format(py=py)
         self._write("AI_GUIDE.txt", guide)
@@ -256,7 +335,8 @@ class Exporter:
                                        ("--show-constant-values", self.args.show_constant_values),
                                        ("--no-opencode-tools", self.args.no_opencode_tools),
                                        ("--no-mcp", self.args.no_mcp),
-                                       ("--allow-scripts", self.args.allow_scripts)) if on]
+                                       ("--allow-scripts", self.args.allow_scripts),
+                                       ("--inside-project", self.args.inside_project)) if on]
         config = {"mxcontext": os.path.abspath(__file__), "mpr": os.path.abspath(self.project.mpr),
                   "export_flags": flags, "mxlocal": mxlocal, "mx_exe": self._mx_exe(),
                   "allow_scripts": bool(self.args.allow_scripts)}
@@ -282,13 +362,12 @@ class Exporter:
             self._write(".opencode/tools/mx.js", self._agent_template("tools", "mx.js").replace("@PYTHON_JSON@", json.dumps(exe)))
 
         edits = os.path.join(self.out, "edits")
-        # Allow-list: only the read-only and dry-run mx.py commands run without asking. Anything else, including
-        # apply/undo in any spelling, falls back to "*": ask. Later rules win, so the git denials come last.
-        bash = {"*": "ask", "git *": "allow", "grep *": "allow", "rg *": "allow", "ls *": "allow", "dir *": "allow",
-                "cat *": "allow", "type *": "allow", "head *": "allow", "tail *": "allow"}
-        bash.update({"%s mx.py %s*" % (py, c): "allow" for c in SAFE_MX_COMMANDS})
-        bash.update({"git %s*" % c: "deny" for c in GIT_DENY})
-        edit = {"*": "deny", "edits/*": "allow", edits + os.sep + "*": "allow", edits.replace("\\", "/") + "/*": "allow"}
+        bash = opencode_bash_rules(py)
+        # edit covers OpenCode's edit, write and patch tools; the path may come relative or absolute
+        edit = {"*": "deny"}
+        for folder in dict.fromkeys(("edits", edits, edits.replace("\\", "/"))):
+            for ext in ("json", "js")[:2 if self.args.allow_scripts else 1]:
+                edit["%s%s*.%s" % (folder, "\\" if "\\" in folder else "/", ext)] = "allow"
         settings = {"$schema": "https://opencode.ai/config.json",
                     "instructions": ["AI_GUIDE.txt"],
                     "permission": {"edit": edit, "bash": bash},
@@ -300,10 +379,18 @@ class Exporter:
 
         # Claude Code: same gate. apply/undo ask the user; the agent cannot loosen its own rules or rewrite history.
         mx = lambda c: "Bash(%s mx.py %s:*)" % (py, c)  # noqa: E731
-        claude = {"permissions": {
-            "allow": [mx(c) for c in SAFE_MX_COMMANDS] + ["Edit(edits/**)", "Write(edits/**)"] +
+        # The hook denies every file write outside edits/ (Write/Edit tools and shell redirections), even where the
+        # lists below would ask: a weak agent's helper script never gets a chance to be approved by a hurried click.
+        self._write(".claude/hooks/guard.py", self._agent_template("hooks", "guard.py").replace(
+            "ALLOW_SCRIPTS = False  # set by mxcontext.py", "ALLOW_SCRIPTS = %r  # written by mxcontext.py" % bool(self.args.allow_scripts)))
+        hook = "%s %s" % (quote(sys.executable), quote(os.path.join(self.out, ".claude", "hooks", "guard.py")))
+        claude = {"hooks": {"PreToolUse": [{"matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash|PowerShell",
+                                            "hooks": [{"type": "command", "command": hook, "timeout": 10}]}]},
+                  "permissions": {
+            "allow": [mx(c) for c in SAFE_MX_COMMANDS] + ["%s(edits/%s)" % (tool, f) for tool in ("Edit", "Write")
+                                                            for f in ("*.json", "*.js")[:2 if self.args.allow_scripts else 1]] +
                      (["mcp__mendix__%s" % t for t in MCP_TOOLS] if mcp else []),
-            "ask": [mx("apply"), mx("undo")],
+            "ask": [mx("apply"), mx("undo"), mx("clean --move")],
             "deny": ["Bash(git %s:*)" % c for c in GIT_DENY] +
                     ["%s(%s)" % (tool, f) for tool in ("Edit", "Write") for f in
                      (".claude/**", "opencode.json", ".opencode/**", ".mcp.json", "mx.py", "AI_GUIDE.txt", "CLAUDE.md", "guides/**")]}}
@@ -473,13 +560,20 @@ class Exporter:
                         target = os.path.join(self.out, "modules", name, "java", rel_folder, n)
                         os.makedirs(os.path.dirname(target), exist_ok=True)
                         shutil.copyfile(path, target)
+                        self.written.add(os.path.relpath(target, self.out).replace(os.sep, "/"))
                         calls = code_refs(read_source(path) or "", self.ctx)
                         if calls:
                             self.index.ref(os.path.relpath(target, self.out).replace(os.sep, "/"), calls)
 
     # --------------------------------------------------------------- output
 
+    def _write_file_list(self):
+        with open(os.path.join(self.out, MARKER), "w", encoding="utf-8", newline="\n") as f:
+            f.write("Generated by mxcontext. This folder is emptied and rebuilt on every run (edits/ is kept).\n%s\n%s" % (
+                FILES_HEADER, "".join(p + "\n" for p in sorted(self.written) if p.split("/")[0] not in KEEP)))
+
     def _write(self, rel, content):
+        self.written.add(rel)
         path = os.path.join(self.out, *rel.split("/"))
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8", newline="\n") as f:
