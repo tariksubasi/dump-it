@@ -11,6 +11,8 @@ Copied into the export folder by mxcontext.py with CONFIG filled in, so the agen
     python mx.py steps <Module.Flow>  steps of a microflow/nanoflow with ids (for changeAction / deleteAction)
     python mx.py widgets <Module.Page> widgets of a page or snippet: names, kinds, entity, where new ones go
                                       (for addWidgets / changeWidget / deleteWidget / moveWidget)
+    python mx.py preview <Module.Page> approximate picture of a page with the compiled theme: edits/preview/<page>.html
+                                      (+ phone/tablet/desktop .png when Playwright is installed)
     python mx.py widgettype [name]   pluggable widgets in widgets/*.mpk; with a name: its properties, types, defaults
                                       (for { "widget": "pluggable", "type": ..., "properties": ... })
     python mx.py texts [Module[.Doc]] [--missing <lang>]
@@ -58,7 +60,7 @@ for stream in (sys.stdout, sys.stderr):
     except (AttributeError, ValueError):
         pass
 EDITS = os.path.join(HERE, "edits")
-COMMANDS = ("refresh", "find", "usages", "unused", "steps", "widgets", "widgettype", "texts", "ops", "api", "dryrun", "rerun", "gap", "apply", "undo", "check", "ok",
+COMMANDS = ("refresh", "find", "usages", "unused", "steps", "widgets", "preview", "widgettype", "texts", "ops", "api", "dryrun", "rerun", "gap", "apply", "undo", "check", "ok",
             "selftest", "mergecheck", "mergefix", "clean")
 last_output = ""
 
@@ -270,6 +272,11 @@ def main(argv):
             say("Usage: python mx.py widgets <Module.Page or Module.Snippet>")
             return 1
         return mxlocal("widgets", rest[0])
+    if cmd == "preview":
+        if not rest:
+            say("Usage: python mx.py preview <Module.Page>")
+            return 1
+        return mxlocal("preview", rest[0], "--out", os.path.join(EDITS, "preview", rest[0] + ".html"))
     if cmd == "widgettype":
         return mxlocal("widgettype", *([" ".join(rest)] if rest else []))
     if cmd == "texts":

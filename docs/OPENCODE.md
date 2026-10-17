@@ -66,6 +66,7 @@ Run all of these from the export folder.
 | `python mx.py unused [Module]` | Documents, entities, attributes and enumeration values nobody references, with the reason (default: the app's own modules). Entry points are not listed (menus, home pages, scheduled events, published services, after-startup, event handlers, flows named in Java/JavaScript code, pages with a URL, toolbox actions, "mark as used"). Only "probably unused": never delete without `usages` and the user's yes | no |
 | `python mx.py steps <Module.Flow>` | Lists the steps of a microflow/nanoflow with stable ids (for `changeAction`, `deleteAction`, `addActions` `after`) | no |
 | `python mx.py widgets <Module.Page>` | Lists the widget tree of a page or snippet: names, kinds, entity of each data view / list view, and where new widgets can go (`[into]`, layout grid column paths). For `addWidgets`, `changeWidget`, `deleteWidget`, `moveWidget` | no |
+| `python mx.py preview <Module.Page>` | APPROXIMATE picture of a page with the compiled theme: `edits/preview/<Module.Page>.html`, and phone / tablet / desktop `.png` screenshots when Playwright is installed (see "Design system") | no |
 | `python mx.py texts [Module\|Module.Doc\|menu] [--missing <lang>]` | Lists translatable texts (page titles, widget captions/texts/labels/placeholders, enumeration captions, show-message and validation feedback texts, validation messages, menu captions) as `where [part]` with their text in every project language; `--missing tr_TR`: only those without Turkish. For `setTranslations` | no |
 | `python mx.py ops [name]` | One line per operation; with a name (`ops createPage`, `ops retrieve`): its fields. `ops all`: everything | no |
 | `python mx.py api <Type> [word]` | SDK type reference for this Mendix version (for `.js` files only) | no |
@@ -1009,9 +1010,11 @@ Pro (if a path does not match, Studio Pro shows an error on the mapping; right-c
 
 ### Theme files (SCSS)
 
+A company design system (design module, tokens, components, fonts, dark mode): see "Design system" below.
+
 | Op | Fields | Notes |
 |---|---|---|
-| `editThemeFile` | **path** (under `theme/` or `themesource/`; `.scss`, `.css`, `.json`), content, edits (`[{"find", "replace", "all"}]`), append | Plain files, not model documents, but the same dry run (it shows a diff), approval code, backup and undo. `find` must match exactly once (or `"all": true`). `content` replaces the whole file or creates it. Refused: paths outside those two folders, a JSON file that would not parse, SCSS whose braces would not balance. Studio Pro compiles `main.scss` of each folder: `@import` a new file there |
+| `editThemeFile` | **path** (under `theme/` or `themesource/`; `.scss`, `.css`, `.json`; in `theme/web` also `.html` and `.webmanifest`), content, edits (`[{"find", "replace", "all"}]`), append | Plain files, not model documents, but the same dry run (it shows a diff), approval code, backup and undo. `find` must match exactly once (or `"all": true`). `content` replaces the whole file or creates it. Refused: paths outside those two folders, a JSON file that would not parse, SCSS whose braces would not balance. Studio Pro compiles `main.scss` of each folder: `@import` a new file there |
 | `addCssClass` | **name** (without the dot), **css** (`"color: #fff; padding: 8px"` or an object), file (default `theme/web/main.scss`) | Appends `.name { ... }`. Refused when the file already has a rule for that class. Use the class with `"class": "name"` on a widget |
 | `addDesignProperty` | **widgetType** (`Widget`, `DivContainer`, `ActionButton`, `DynamicText`, `LayoutGridRow`, ... or a pluggable widget id), **name**, **type** (`Toggle`, `Dropdown`, `ToggleButtonGroup`, `ColorPicker`), options `[{"name", "class", "css"}]`, class + css (Toggle), multiSelect, description, category, module | A design property of your own in `themesource/<module>/web/design-properties.json` (default: the app module that has a themesource folder) and the rules of its classes in that folder's `main.scss` (Studio Pro compiles it). Later ops of the same change can use it in `design`. Diff in the dry run, backup and undo as for theme files. Refused: an unknown widget type (`Did you mean`), a name the type already has, bad class names |
 | `setThemeVariable` | **variables** `{"brand-primary": "#264ae5", "font-family-base": "'Inter', sans-serif", "spacing-medium": "16px"}`, file (default `theme/web/custom-variables.scss`), new | Sets SCSS variables: one already in the file gets the new value (its `!default` and comment kept), an Atlas variable not there yet is added. Values are checked: colours for `brand-*` / `*-color` / `*-bg`, sizes for `*-size` / `spacing-*` / `*-radius` ..., no `;` `{` `}`, balanced brackets. An unknown name is refused with `Did you mean` (`"new": true` for a variable of your own) |
@@ -1344,6 +1347,104 @@ Theme: a design property of your own (with its CSS), used on a container, and th
 
 ---
 
+## Design system
+
+A company design system is built in layers: **tokens** (colours, spacing, radius, shadows, fonts) -> **atoms**
+(button, badge, input) -> **molecules** (card, form field) -> **organisms** (page header, data card list) ->
+**utilities** (stack, visually hidden). Everything lives in one module of the app, the **design module**. Never put
+company styles into Atlas_Core or another Marketplace module: an update replaces them.
+
+### Theme and tokens
+
+Start with `createDesignModule`, then `setTokens`, then one `addComponentStyle` per component. Widgets use the
+classes with `"class"` (or a design property with `"design"`).
+
+The design module:
+
+- It is a **UI resources module** (Studio Pro: App Settings > Theme). It comes after the Marketplace UI modules
+  (Atlas_Core, DataWidgets), so its rules win.
+- Its folder is `themesource/<module lowercase>/web/`: `main.scss` imports `tokens/index`, `atoms/index`,
+  `molecules/index`, `organisms/index`, `utilities/index`. Each folder has an `_index.scss` with one `@import` per
+  file, sorted. `design-properties.json` holds its design properties.
+- Every class starts with the **prefix** (default: the first two letters of the module name, e.g. `co-`). It is in
+  the first lines of `main.scss`: `// @ds-prefix: co-`. Do not edit that line.
+- Tokens are in `tokens/tokens.json`. `setTokens` writes `tokens/_tokens.scss` (SCSS variables `$co-...`) and
+  `tokens/_css-vars.scss` (CSS custom properties `--co-...` on `:root`) from it. Change tokens only with `setTokens`.
+
+Token names (prefix `co-`): `$co-color-primary-50` ... `$co-color-primary-900` (also `neutral`, `success`,
+`warning`, `danger`, `info`), `$co-surface-0` (page) ... `$co-surface-3` (popover), `$co-text-primary`,
+`$co-text-secondary`, `$co-text-on-primary`, `$co-text-link`, `$co-border-subtle`, `$co-border-default`,
+`$co-radius-sm` / `md` / `lg` / `pill`, `$co-space-1` (4px) ... `$co-space-16` (64px), `$co-shadow-1` ... `$co-shadow-4`,
+`$co-z-dropdown`, `$co-z-modal`, `$co-z-toast`, ..., `$co-font-family`, `$co-font-size-md`, `$co-breakpoint-md`,
+`$co-duration-base`, `$co-easing`. The same names exist as `var(--co-...)`.
+
+Rules for good-looking, accessible styles (the checks below look for them):
+
+- Use tokens, not raw values: `padding: $co-space-4`, not `padding: 15px`. Spacing is on a 4px grid.
+- Nested boxes use the next surface level (`$co-surface-1` on the page, `$co-surface-2` inside a card), soft borders
+  (`$co-border-subtle`) and elevation shadows (`$co-shadow-1` ... `4`) instead of hard black borders.
+- One z-index scale: `$co-z-...`, never a made-up number.
+- Colours that dark mode must change: write `var(--co-surface-1)`, `var(--co-text-primary)` (not `$co-...`).
+- No `style` on widgets: make a component class.
+
+| Op | Fields | Notes |
+|---|---|---|
+| `createDesignModule` | **name**, prefix (`"co-"`), order (position among the UI resources modules, 1 = first) | Creates the module (or adopts an own module: its `main.scss` content is kept below the header), makes it a UI resources module, puts it after the Marketplace UI modules, writes the folder above with default tokens. Refused: a Marketplace module, a prefix Mendix uses (`mx-`, `btn-`, ...), changing the prefix later |
+| `setThemeModuleOrder` | **order** (every UI resources module once) | The order Studio Pro compiles them: later ones win. Refused: a module missing from the list, a module that is not a UI resources module |
+| `setTokens` | brand (`"#0b5fff"`), tokens, module, atlas (`false`: leave Atlas variables alone), strict | Merges over the current tokens. One colour becomes a 50..900 scale. Also sets the Atlas variables in `theme/web/custom-variables.scss` (brand-primary, brand-success, ..., bg-color, bg-color-secondary, font-color-default, font-color-detail, link-color, border-color-default, border-radius-default, font-family-base, font-size-default, spacing-*, screen-*). Only `brand` is enough: the rest gets calm, high-contrast defaults |
+| `addComponentStyle` | **level** (`atom`, `molecule`, `organism`, `utility`), **name** (kebab case), css or scss, module, replace | Writes `<level>s/_<name>.scss` with the class `.co-<name>` and adds the `@import`. `css`: declarations. `scss`: the body of the class (`&:hover { ... }` allowed) or whole rules that mention `.co-<name>`. Refused: an existing component (give `"replace": true`), a bad name |
+| `removeComponentStyle` | **level**, **name**, module | Deletes the file and its `@import`. Names the widgets that still use the class |
+| `addThemeAsset` | **from** (a file in the export folder, or an absolute path), **to** (`theme/web/...` or `themesource/<design module>/web/...`), replace | Fonts and images only (`.woff2 .woff .ttf .otf .png .svg .jpg .gif .webp .ico`), checked by content, at most 2 MB. Studio Pro serves these files next to the compiled theme: in SCSS `url("images/logo.svg")` |
+| `addFont` | **family**, **files** (`[{"from", "weight", "style"}]`), fallback, base (`false`: font only), module | Copies the files to `fonts/<prefix>/`, writes `@font-face` rules in `tokens/_fonts.scss`, sets the token font family and Atlas `$font-family-base` (and `$font-family-import: false`, so Open Sans is not loaded) |
+| `changeDesignProperty` | **widgetType**, **name**, newName, addOptions (`[{"name", "class", "css"}]`), removeOptions, renameOptions (`{"Old": "New"}`), description, category, module | Only properties of own modules. A rename keeps the widgets' values (`oldNames`). Removing an option lists the widgets that use it |
+| `deleteDesignProperty` | **widgetType**, **name**, module | Only own modules. Lists the widgets that still use it (Studio Pro shows them as errors: change them first). Its CSS rules stay |
+
+`editThemeFile` also changes `theme/web/settings.json`, `theme/web/login.html` (and other `.html` there) and
+`theme/web/*.webmanifest`. JSON and manifests must stay valid JSON. `login.html` must keep the ids `loginForm`,
+`usernameInput`, `passwordInput`, `loginButton`.
+
+A design system in one change:
+
+```json
+{ "ops": [
+  { "op": "createDesignModule", "name": "CompanyDesign", "prefix": "co-" },
+  { "op": "setTokens", "brand": "#0b5fff", "tokens": { "radius": { "md": "8px" }, "dark": true } },
+  { "op": "addComponentStyle", "level": "atom", "name": "button", "css": "border-radius: $co-radius-md; padding: $co-space-2 $co-space-4" },
+  { "op": "addComponentStyle", "level": "molecule", "name": "card", "scss": "background: var(--co-surface-1);\nborder: 1px solid var(--co-border-subtle);\nborder-radius: $co-radius-lg;\nbox-shadow: $co-shadow-1;\npadding: $co-space-4;\n&:hover { box-shadow: $co-shadow-2; }" },
+  { "op": "addComponentStyle", "level": "utility", "name": "stack", "css": { "display": "flex", "flex-direction": "column", "gap": "$co-space-3" } }
+] }
+```
+
+More examples, one per op:
+
+```json
+{ "ops": [
+  { "op": "setThemeModuleOrder", "order": ["Atlas_Core", "DataWidgets", "CompanyDesign"] },
+  { "op": "removeComponentStyle", "level": "utility", "name": "stack" },
+  { "op": "addThemeAsset", "from": "edits/logo.svg", "to": "themesource/companydesign/web/images/logo.svg" },
+  { "op": "addFont", "family": "Inter", "files": [ { "from": "edits/Inter-Regular.woff2", "weight": 400 }, { "from": "edits/Inter-SemiBold.woff2", "weight": 600 } ] },
+  { "op": "changeDesignProperty", "widgetType": "DivContainer", "name": "Card style", "renameOptions": { "Raised": "Elevated" }, "addOptions": [ { "name": "Outlined", "class": "co-card-outlined", "css": "border: 1px solid $co-border-default" } ] },
+  { "op": "deleteDesignProperty", "widgetType": "DivContainer", "name": "Old style" },
+  { "op": "editThemeFile", "path": "theme/web/manifest-overrides.webmanifest", "content": "{ \"background_color\": \"#F4F6F9\", \"theme_color\": \"#0B5FFF\" }\n" }
+] }
+```
+
+**Dark mode.** `setTokens` with `"dark": true` (or your own `"dark": { "surface": {...}, "text": {...}, "border": {...} }`)
+writes a second set of the `--co-...` colours. It is active when the page, its layout or `<html>` has the class
+`co-dark` (or `data-theme="dark"`). Simplest switch: a page or layout class (`changePage` with `"class": "co-dark"`),
+or a JavaScript action that runs `document.documentElement.classList.toggle("co-dark")`. With `"darkMode": "auto"`
+it also follows the device setting (unless the page says `data-theme="light"` / `co-light`). Only styles written
+with `var(--co-...)` change; Atlas widgets keep their SCSS colours.
+
+**STYLE CHECK** (in every dry run that changes a theme file or a page): see section 9.
+
+**Preview.** `python mx.py preview <Module.Page>` writes `edits/preview/<Module.Page>.html`: the page's widgets as
+HTML with the compiled theme, and phone / tablet / desktop screenshots (`.phone.png`, `.tablet.png`,
+`.desktop.png`) when Playwright is installed. It is **approximate**: no data, no conditional visibility, pluggable
+widgets only sketched. Use it to judge colours, spacing and layout, and say "approximate" to the user.
+
+---
+
 ## 8. When no operation fits: gap, Studio Pro steps, or (if allowed) SDK scripts
 
 First run `python mx.py gap "<what the user wants>"`. It records the missing operation so it can be added later.
@@ -1439,6 +1540,9 @@ LAYOUT CHECK (...)                                         <- per changed flow: 
 PREVIEW: 1 flow(s) drawn in .../edits/preview              <- only with --preview or "preview": true
 A11Y CHECK (...)                                           <- accessibility of new/changed widgets (warnings)
   ! Sales.Order_Edit actionButton3: the button has no caption and no tooltip, ...
+STYLE CHECK (...)                                          <- theme compiled + classes, inline styles, contrast
+  ! the theme would not compile: themesource/companydesign/web/atoms/_button.scss:3: Undefined variable. ($co-spce-2)
+  ! (warning) Sales.Order_Edit container1: class 'co-crad' (class) is defined by no theme SCSS; did you mean co-card?
       DATA LOSS: the column A and its values are dropped ...  <- deleting/retyping stored data: tell the user first
 Warnings:
   > Module.Doc -> Module/Folder                              <- a document moved to another folder
@@ -1460,6 +1564,19 @@ errors in red): give the user these paths when they want to see the change.
 A11Y CHECK lines (never a reason to refuse) name new or changed widgets that screen readers cannot use well: a
 button without caption and tooltip (`iconOnly` without `tooltip`), an image without `alt`, an input without label and
 `ariaLabel`, a heading that skips a level (H1 then H3). Fix them in the change file unless the user wants it so.
+
+STYLE CHECK lines come with every dry run that changes a theme file, or a page, snippet or layout. When a `.scss`
+file changed, the web theme is compiled the way Studio Pro does it (Dart Sass; every UI resources module's
+`main.scss` in the theme order, then `theme/web/main.scss`). A line **without** `(warning)` or `(info)` refuses the
+change (no approval code): an undefined variable or mixin, an `@import` that does not resolve, a syntax error, with
+`file:line`. Fix the change file and run again. Errors the theme already had before the change are only warnings.
+`(warning)` lines: a class on a new or changed widget that no SCSS defines (`did you mean`), an inline `style` (make a
+component class), a class of the design module without its prefix that Atlas also has, a text/background pair below
+WCAG AA contrast (4.5:1) in the tokens or the Atlas variables. With `"strict": true` on `setTokens` (or
+`"styleCheck": "strict"` in the change file) contrast lines refuse the change too. `(info)` lines: the compile result,
+Sass deprecation warnings (Studio Pro shows them too; harmless), classes of the design module no widget uses yet.
+Without `theme/web/main.scss` the compile is skipped. `"styleCheck": "warn"` in the change file turns a compile error
+into a warning: only when the user says the check is wrong.
 
 ### XPATH CHECK and EXPRESSION CHECK
 
