@@ -25,6 +25,8 @@ Copied into the export folder by mxcontext.py with CONFIG filled in, so the agen
                                       --force only when the user agrees to lose later changes it lists
     python mx.py check                run Studio Pro's mx check on the project (when mx.exe is installed)
     python mx.py ok "<summary>"       mark the current export as the checked state (git commit)
+    python mx.py clean [--move]       files outside edits/ the export did not write (helper scripts, notes, edited
+                                      exports); --move puts them into edits/stray/<time>/ (nothing is deleted)
     python mx.py selftest             run every operation on a temporary copy of the project
     python mx.py mergecheck           after a git merge of the app: which documents each side changed, which
                                       are resolved automatically, true conflicts with both changes
@@ -53,7 +55,7 @@ for stream in (sys.stdout, sys.stderr):
         pass
 EDITS = os.path.join(HERE, "edits")
 COMMANDS = ("refresh", "find", "usages", "unused", "steps", "widgets", "widgettype", "texts", "ops", "api", "dryrun", "rerun", "gap", "apply", "undo", "check", "ok",
-            "selftest", "mergecheck", "mergefix")
+            "selftest", "mergecheck", "mergefix", "clean")
 last_output = ""
 
 
@@ -127,6 +129,40 @@ def backup_root():
     return os.path.join(os.path.dirname(CONFIG["mpr"]), ".mxlocal-backup")
 
 
+def stray():
+    sys.path.insert(0, os.path.dirname(CONFIG["mxcontext"]))
+    import mx_stray
+    return mx_stray
+
+
+def clean(move):
+    """List (and with --move: move to edits/stray/) the files outside edits/ that the export did not write."""
+    found = stray().stray_files(HERE)
+    if not found:
+        say("Clean: no files outside edits/ besides the export.")
+        return 0
+    label = {"new": "not written by the export", "changed": "export file edited after the export",
+             "deleted": "export file deleted (python mx.py refresh brings it back)"}
+    say("%d file(s) outside edits/ that are not the export:" % len(found))
+    say("\n".join("  %s  (%s)" % (rel, label[kind]) for rel, kind in found))
+    if not move:
+        say("Change files belong in edits/<name>.json only. Move these away (nothing is deleted): python mx.py clean --move")
+        return 0
+    where = stray().move_stray(HERE, found)
+    journal(cmd="clean", moved=[rel for rel, kind in found if kind != "deleted"], to=where)
+    say("Moved to %s/ (edited export files got their exported content back)." % where)
+    return 0
+
+
+def stray_warning():
+    try:
+        n = len(stray().stray_files(HERE))
+    except Exception:  # noqa: BLE001 - a warning must never break the dry run
+        return
+    if n:
+        say("WARNING: %d file(s) outside edits/: run python mx.py clean" % n)
+
+
 def dryrun(path):
     if path.endswith(".js") and not CONFIG.get("allow_scripts"):
         say("ERROR: %s is a script, and scripts are off in this folder (they run with full rights before the user "
@@ -137,6 +173,7 @@ def dryrun(path):
     code = mxlocal("run", path, *(["--allow-js"] if path.endswith(".js") else []))
     m = re.search(r"Approval code: (\w+)", last_output)
     journal(cmd="dryrun", file=os.path.relpath(path, HERE), code=m.group(1) if m else None, ok=code == 0)
+    stray_warning()
     return code
 
 
@@ -287,6 +324,8 @@ def main(argv):
         if code == 0:
             say("Saved as the checked state.")
         return code
+    if cmd == "clean":
+        return clean("--move" in rest)
     if cmd == "selftest":
         return mxlocal("selftest")
     if cmd == "mergecheck":
