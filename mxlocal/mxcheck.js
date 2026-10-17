@@ -466,12 +466,21 @@ function interpret(run, jsonText) {
     if (run.error) [res.status, res.reason] = ["failed", `mx could not start: ${run.error.message}`];
     else if (run.timedOut) [res.status, res.reason] = ["failed", `mx check did not finish in ${run.timeout}s (raise checkTimeout / --check-timeout)`];
     else if (counts.errors > 0) res.status = "errors";
+    else if (run.code !== 0 && parsed) res.reason = `mx exited with code ${run.code}; its JSON report lists no errors (the report is taken as the verdict)`; // mx 11 exits non-zero on warnings/deprecations with -w -d
     else if (run.code !== 0) {
         // non-zero without a listed error: the model did not load (stack trace) or mx refused the project
         res.status = "failed";
         res.reason = verdict ? `mx exited with code ${run.code} although it reported no errors` : `mx exited with code ${run.code} without a verdict (the model may not load, or mx refused the project)`;
     } else if (!verdict) res.reason = "mx printed no verdict line (exit code 0 taken as no errors)";
     return res;
+}
+
+// The lines of mx's output worth showing: around the first exception (its message, not only the 'at ...' frames), else the last n.
+function excerpt(raw, n = 5) {
+    const at = raw.findIndex(l => /^\s*at\s/.test(l));
+    if (at < 0) return raw.slice(-n);
+    const head = raw.slice(Math.max(0, at - 3), at).filter(l => !/^\s*at\s/.test(l));
+    return [...head, ...raw.slice(at, at + Math.max(1, n - head.length))];
 }
 
 const unknownOption = out => /unknown (option|argument|switch)|unrecognized (option|argument)|invalid option|option '?-j'? .*(unknown|not)|usage:/i.test(out);
@@ -655,7 +664,7 @@ function report(res, { what, before, norm, max = 25, undo } = {}) {
     const lines = [head];
     if (res.status === "failed") {
         lines.push(`  ! mx check FAILED: ${res.reason}`);
-        for (const r of res.raw.slice(-15)) lines.push("    " + r);
+        for (const r of excerpt(res.raw, 15)) lines.push("    " + r);
         if (before && before.status !== "failed") lines.push(`  ! Before the change mx check worked (${countText(before.counts)}): the change probably broke loading the model.${undo ? " " + undo : ""}`);
         return { text: lines.join("\n"), fresh: before && before.status !== "failed" ? 1 : 0, failed: true };
     }
@@ -699,7 +708,7 @@ function locate(mpr, a = {}) {
     return { line: `STUDIO PRO CHECK: not run - ${found.missing || found.refused}`, cfg, version, timeout, refused: !!found.refused };
 }
 
-module.exports = { parts, versionOf, fit, config, defaultCheck, timeoutOf, candidates, explicit, find, binaryOS, copyProject, parseJson, parseText, interpret,
+module.exports = { parts, versionOf, fit, config, defaultCheck, timeoutOf, candidates, explicit, find, binaryOS, copyProject, parseJson, parseText, interpret, excerpt,
     runCheck, check, diff, signature, report, locate, stateKey, cacheGet, cachePut, fingerprint, projectVersion, countText, SET_MX, DEFAULT_TIMEOUT };
 
 // node mxcheck.js version <app.mpr>   the project's full Mendix version (CI: which MxBuild to download)

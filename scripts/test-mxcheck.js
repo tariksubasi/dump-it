@@ -133,6 +133,10 @@ const SAMPLE = JSON.stringify({ serialization_version: 1, errors: [{ code: "CE04
     ok("exit code 1 without a verdict: failed (model did not load), raw kept", crash.status === "failed" && /without a verdict/.test(crash.reason) && crash.raw.some(l => /ArgumentException/.test(l)));
     ok("exit code 0, no verdict line: no errors, with a remark", (r => r.status === "ok" && /no verdict/.test(r.reason))(C.interpret({ code: 0, output: "done" })));
     ok("exit code 1 although 0 errors reported: failed", C.interpret({ code: 1, output: "The app contains: 0 errors." }).status === "failed");
+    const clean = JSON.stringify({ serialization_version: 1, errors: [], warnings: [{ code: "CW0001", message: "Unused.", locations: [] }], deprecations: [{ code: "CD0001", message: "Old.", locations: [] }], "total-problems": 2 });
+    ok("exit code 6 with a JSON report of 0 errors (mx 11 with -w -d): ok, exit code noted", (r => r.status === "ok" && /code 6/.test(r.reason) && r.counts.warnings === 1)(C.interpret({ code: 6, output: "Checking app..." }, clean)));
+    ok("excerpt: the exception message before its 'at' frames", (x => x.includes("System.ArgumentException: boom") && x.length === 5 && x.some(l => /at Loader/.test(l)))(C.excerpt(["Checking...", "System.ArgumentException: boom", "   at Loader.Load()", "   at A()", "   at B()", "   at C()", "   at D()", "   at E()"], 5)));
+    ok("excerpt: no stack trace -> the last lines", C.excerpt(["a", "b", "c"], 2).join() === "b,c");
     ok("JSON preferred over the text", (r => r.format === "json" && r.errors.length === 1 && r.status === "errors")(C.interpret({ code: 1, output: "garbage" }, SAMPLE)));
     const countsOnly = C.interpret({ code: 1, output: "The app contains: 4 errors.\nfirst odd line\nsecond odd line" });
     ok("text with a count but no readable error lines: counted", countsOnly.status === "errors" && countsOnly.counts.errors === 4 && countsOnly.errors.length === 0);

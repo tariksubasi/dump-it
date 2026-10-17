@@ -54,11 +54,11 @@ function run({ src, tmp, mod, check, results, opts = {} }) {
     const norm = s => String(s || "").replace(re, mod);
     const what = `mx check ${l.found.version} of the selftest copy (all phases) against the unchanged project`;
     if (before.status === "failed") {
-        check(what, false, `mx check of the unchanged project failed: ${before.reason}; ${before.raw.slice(-3).join(" | ")}`);
+        check(what, false, `mx check of the unchanged project failed: ${before.reason}; ${C.excerpt(before.raw, 4).join(" | ")}`);
         return { ran: true };
     }
     if (after.status === "failed") {
-        check(what, false, `mx check of the selftest copy failed (before: ${C.countText(before.counts)}): ${after.reason}; ${after.raw.slice(-5).join(" | ")}`);
+        check(what, false, `mx check of the selftest copy failed (before: ${C.countText(before.counts)}): ${after.reason}; ${C.excerpt(after.raw, 6).join(" | ")}`);
         return { ran: true };
     }
     const d = C.diff(before, after, norm);
