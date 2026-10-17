@@ -1418,6 +1418,9 @@ async function selftest(mpr, keep, { out, relevant }) {
             s2 = await reopen(copy);
         }
 
+        // phase L (selftest-layout.js): the layout engine on the project's own flows, on a copy of its own
+        await require("./selftest-layout").layoutPhase({ src, reopen, check, tmp, out });
+
         // XPath and expression checks (selftest-parsers.js): the project's own, then wrong inputs (dry run only)
         await require("./selftest-parsers").phase({ src, copy, reopen, check, mod, pageable });
 

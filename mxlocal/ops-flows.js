@@ -4,6 +4,7 @@
 const sdk = require("mendixmodelsdk");
 const { DATA_TYPES, suggest, fail, validate, bool, noDollar, enumValue } = require("./ops-util");
 const { makeFlowExtras, RETRIEVE_FIELDS, MEMBER_FIELDS } = require("./ops-flow-extras");
+const L = require("./flow-layout");
 
 const { microflows: mf, domainmodels: dm, datatypes, pages, codeactions, javaactions, javascriptactions, importmappings, exportmappings, services } = sdk;
 
@@ -153,10 +154,27 @@ function makeFlows(h) {
     const errorDefault = f => (f.nano ? mf.ErrorHandlingType.Abort : mf.ErrorHandlingType.Rollback);
     const returnsValue = m => !!m.microflowReturnType && !(m.microflowReturnType instanceof datatypes.VoidType);
 
+    // flow documents this plan opened, with their layout before the first change (LAYOUT CHECK, --preview)
+    const layoutSeen = new Map();
     async function flowDoc(qn) {
         const d = await h.get(qn);
         if (!isFlowDoc(d)) throw new Error(`'${qn}' is not a microflow, nanoflow or rule`);
+        if (!layoutSeen.has(d.id)) layoutSeen.set(d.id, { m: d, before: L.snapshot(d) });
         return d;
+    }
+    // { qn, before, after (snapshots; before null for a new flow), issues, fresh (issues the change added) } of every
+    // flow document the plan created or changed
+    function layoutReport() {
+        const out = [];
+        for (const { m, before } of layoutSeen.values()) {
+            if (m.isDeleted) continue;
+            const after = L.snapshot(m);
+            if (before && JSON.stringify(before) === JSON.stringify(after)) continue;
+            const issues = L.lint(after);
+            const was = before ? L.lint(before) : [];
+            out.push({ qn: m.qualifiedName, before, after, issues, was, fresh: L.newIssues(was, issues) });
+        }
+        return out.sort((a, b) => (a.qn < b.qn ? -1 : 1));
     }
 
     // ------------------------------------------------ flows (lines)
@@ -200,6 +218,7 @@ function makeFlows(h) {
         fl.destinationConnectionIndex = destIndex;
         fl.isErrorHandler = errorHandler;
         addCase(fl, caseValue);
+        L.defaultLine(fl); // Studio Pro's Bezier vectors for these sides
         return fl;
     }
 
@@ -1104,6 +1123,7 @@ function makeFlows(h) {
             fl.destination = obj;
             fl.originConnectionIndex = 2;
             fl.destinationConnectionIndex = 0;
+            L.defaultLine(fl);
         }
         return note;
     }
@@ -1480,6 +1500,7 @@ function makeFlows(h) {
         const qn = `${o.module}.${o.name}`;
         const m = (rule ? mf.Rule : nano ? mf.Nanoflow : mf.Microflow).createIn(container);
         m.name = o.name;
+        layoutSeen.set(m.id, { m, before: null });
         const f = { m, coll: m.objectCollection, nano, rule, inLoop: false, inHandler: false, returns: false };
         const start = mf.StartEvent.createIn(m.objectCollection);
         point(start, 100, 200);
@@ -1514,22 +1535,6 @@ function makeFlows(h) {
         return { m, count };
     }
 
-    // Moves everything right of x in coll by dx (only the objects in 'only', when given) and widens the loops around it.
-    function makeRoom(coll, x, dx, only = null) {
-        for (const o of coll.objects) {
-            if (o instanceof mf.MicroflowParameterObject || o instanceof mf.Annotation) continue;
-            if (only && !only.has(o.id)) continue;
-            if (o.relativeMiddlePoint.x > x) point(o, o.relativeMiddlePoint.x + dx, o.relativeMiddlePoint.y);
-        }
-        const loop = coll.container;
-        if (loop instanceof mf.LoopedActivity) {
-            const p = loop.relativeMiddlePoint;
-            size(loop, loop.size.width + dx, loop.size.height);
-            point(loop, p.x + dx / 2, p.y);
-            makeRoom(loop.container, p.x, dx);
-        }
-    }
-
     function flowsOf(m) {
         return [...m.flows].filter(x => x instanceof mf.SequenceFlow);
     }
@@ -1560,27 +1565,33 @@ function makeFlows(h) {
         return out[0];
     }
 
-    // Opens the anchor flow for new steps: returns { f, coll, x, y, tail, to, destIndex, before } and deletes the flow.
-    function openAnchor(m, anchorFlow) {
-        const from = anchorFlow.origin;
-        const to = anchorFlow.destination;
-        const coll = from.container;
+    // The new steps go on the anchor flow; only what follows them moves (flow-layout.js): the anchor flow keeps its id,
+    // case and origin side and runs into the first new step; the last new step takes over its destination side.
+    async function insertSteps(m, anchor, build, where) {
+        const lay = L.begin(m);
+        const geo = lay.prepare(lay.insertGeometry(anchor));
+        const { from, to, coll } = geo;
         const f = { m, coll, nano: m instanceof mf.Nanoflow, rule: m instanceof mf.Rule, inLoop: coll.container instanceof mf.LoopedActivity, inHandler: false, returns: returnsValue(m) };
-        const branchY = caseOf(anchorFlow) !== null && to.container === coll ? to.relativeMiddlePoint.y : from.relativeMiddlePoint.y;
-        const tail = { obj: from, originIndex: anchorFlow.originConnectionIndex, caseValue: caseOf(anchorFlow), errorHandler: anchorFlow.isErrorHandler };
-        const out = { f, coll, x: from.relativeMiddlePoint.x, y: branchY, tail, to, destIndex: anchorFlow.destinationConnectionIndex, before: new Set(coll.objects.map(x => x.id)) };
-        anchorFlow.delete();
-        return out;
+        const tail = { obj: from, originIndex: anchor.originConnectionIndex, caseValue: caseOf(anchor), errorHandler: anchor.isErrorHandler };
+        const objsBefore = new Set(coll.objects.map(x => x.id));
+        const flowsBefore = new Set([...m.flows].map(x => x.id));
+        const donor = L.sideOf(anchor, "dest");
+        const seg = await build(f, geo, tail);
+        if (!seg.tail) throw new Error(`${where}: inserted actions must not end the flow (end/break/continue); the steps after them would be cut off`);
+        const first = [...m.flows].find(x => !flowsBefore.has(x.id) && x.origin === from && x.destination === seg.first);
+        lay.redirect(anchor, seg.first, first ? L.sideOf(first, "dest") : null);
+        if (first) first.delete();
+        lay.inserted(geo, [...coll.objects].filter(x => !objsBefore.has(x.id) || (seg.objs || []).includes(x)), seg.width);
+        lay.adopt(connect(f, seg.tail, to, donor.idx), donor);
+        lay.finish();
+        return seg;
     }
 
     async function addActions(o) {
         const m = await flowDoc(o.microflow);
         if (!Array.isArray(o.actions) || !o.actions.length) throw new Error("addActions needs actions: [ ... ]");
-        const at = openAnchor(m, anchorOf(m, o.after, o.branch, o.microflow));
-        const seg = await buildSeq(at.f, o.actions, at.x + X_STEP, at.y, at.tail, o.microflow);
-        if (!seg.tail) throw new Error(`${o.microflow}: inserted actions must not end the flow (end/break/continue); the steps after them would be cut off`);
-        makeRoom(at.coll, at.x, seg.width, at.before);
-        connect(at.f, seg.tail, at.to, at.destIndex);
+        const anchor = anchorOf(m, o.after, o.branch, o.microflow);
+        await insertSteps(m, anchor, (f, geo, tail) => buildSeq(f, o.actions, geo.x0, geo.y0, tail, o.microflow), o.microflow);
         return `${o.microflow}: ${o.actions.length} action(s) after ${o.after || "the last step"}${o.branch !== undefined ? ` [${o.branch}]` : ""}`;
     }
 
@@ -1990,21 +2001,27 @@ function makeFlows(h) {
         const outgoing = flows.filter(x => x.origin.id === step.id);
         if (outgoing.length > 1) throw new Error(`${where}: it has ${outgoing.length} outgoing flows`);
         const next = outgoing[0];
+        // close the gap for what follows (flow-layout.js): add + delete gives the old positions back
+        const lay = L.begin(m);
+        const coll = step.container;
+        const gap = next ? lay.gapOf(step) : null;
         for (const x of incoming) {
-            if (next) {
-                x.destination = next.destination;
-                x.destinationConnectionIndex = next.destinationConnectionIndex;
-            } else x.delete();
+            if (next) lay.redirect(x, next.destination, L.sideOf(next, "dest"));
+            else x.delete();
         }
         if (next) next.delete();
         for (const x of flowsOf(m)) if (doomed.has(x.origin.id) || doomed.has(x.destination.id)) x.delete();
         step.delete();
+        lay.invalidate();
+        if (gap) lay.closeGap(gap);
+        lay.mark(coll, []);
+        lay.finish();
         return where;
     }
 
     // for ops-flow-edit.js (moveAction, extractMicroflow, addAnnotation)
-    const internals = { flowDoc, findStep, flowsOf, walkObjects, variablesOf, typeOfVariable, variableInfo, anchorOf, openAnchor, makeRoom, connect, flow, caseOf, caseLabel, activity, annotate, describe, point, size, returnsValue, errorDefault, X_STEP, LANE };
-    return { createFlow, addActions, changeAction, deleteAction, steps, describe, variablesOf, walkObjects, flowDoc, findStep, internals };
+    const internals = { flowDoc, findStep, flowsOf, walkObjects, variablesOf, typeOfVariable, variableInfo, anchorOf, insertSteps, connect, flow, caseOf, caseLabel, activity, annotate, describe, point, size, returnsValue, errorDefault, X_STEP, LANE };
+    return { createFlow, addActions, changeAction, deleteAction, steps, describe, variablesOf, walkObjects, flowDoc, findStep, layoutReport, internals };
 }
 
 module.exports = { makeFlows, ACTIONS, CONTROL, COMMON, CREATES };

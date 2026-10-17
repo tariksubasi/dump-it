@@ -4,6 +4,7 @@
 // later) and annotations. Steps keep their ids; the line is reconnected as Studio Pro does when you drag a step.
 const sdk = require("mendixmodelsdk");
 const { validName, noDollar } = require("./ops-util");
+const L = require("./flow-layout");
 
 const { microflows: mf } = sdk;
 
@@ -15,6 +16,10 @@ const FLOW_EDIT_OPS = {
     extractMicroflow: {
         doc: "Move a run of steps (from .. to, one after the other) into a new microflow (nanoflow in a nanoflow) and call it in their place. Parameters: the variables the steps use; returns the one variable they create that is used later.",
         fields: { microflow: "R Module.Microflow or Module.Nanoflow", from: "R id of the first step", to: "optional id of the last step (default: from)", name: "R name of the new flow", module: "optional module (default: the module of microflow)", folder: "optional folder path (default: the module root)" }
+    },
+    formatMicroflow: {
+        doc: "Lay out a whole microflow, nanoflow or rule again, the way Studio Pro draws it: the main path on one line, branches and error handlers as lanes below, merges after their branches, loops sized to their content, every flow on Studio Pro's sides. Steps, flows and ids stay; only positions, sizes and flow sides change. Formatting twice gives the same result.",
+        fields: { microflow: "R Module.Microflow, Module.Nanoflow or Module.Rule", keepAnnotations: "optional true: annotations stay exactly where they are (default: an attached note moves with its step)" }
     },
     addAnnotation: {
         doc: "Add an annotation (a note) to a flow, attached to a step or free.",
@@ -124,10 +129,6 @@ function makeFlowEdit(h, flows) {
         coll.objects.push(obj);
     }
 
-    function widthOf(o) {
-        return o instanceof mf.LoopedActivity ? o.size.width + 70 : x.X_STEP;
-    }
-
     async function moveAction(o) {
         const m = await x.flowDoc(o.microflow);
         const step = findStep(m, o.id);
@@ -145,20 +146,26 @@ function makeFlowEdit(h, flows) {
             walkObjects(step.objectCollection, y => (inside = inside || y === anchorStep));
             if (inside) throw new Error(`${where}: a loop cannot move into itself`);
         }
-        // take it off the line: what came in goes on to what came after it
+        // take it off the line: what came in goes on to what came after it; the gap closes (flow-layout.js)
         const next = outgoing[0];
-        for (const f of incoming) {
-            f.destination = next.destination;
-            f.destinationConnectionIndex = next.destinationConnectionIndex;
-        }
+        const lay = L.begin(m);
+        const gap = lay.gapOf(step);
+        for (const f of incoming) lay.redirect(f, next.destination, L.sideOf(next, "dest"));
         next.delete();
-        const at = x.openAnchor(m, x.anchorOf(m, o.after, o.branch, where));
-        moveInto(step, at.coll);
-        at.before.delete(step.id);
-        x.point(step, at.x + x.X_STEP + (step instanceof mf.LoopedActivity ? step.size.width / 2 - 60 : 0), at.y + (step instanceof mf.LoopedActivity ? step.size.height / 2 - 80 : 0));
-        x.makeRoom(at.coll, at.x, widthOf(step), at.before);
-        x.connect(at.f, at.tail, step);
-        x.connect(at.f, { obj: step, originIndex: 1 }, at.to, at.destIndex);
+        lay.invalidate();
+        lay.closeGap(gap);
+        lay.mark(step.container, []);
+        lay.finish();
+        // then in at the new place, making room for it there
+        await x.insertSteps(m, x.anchorOf(m, o.after, o.branch, where), (f, geo, tail) => {
+            moveInto(step, geo.coll);
+            const r = L.rect(step);
+            const w = r.r - r.l;
+            const left = geo.mode === "t" ? L.rect(geo.to).l : geo.x0 - 60;
+            x.point(step, left + w / 2, geo.y0);
+            x.connect(f, tail, step);
+            return { first: step, tail: { obj: step, originIndex: 1 }, width: w + L.GAP, objs: [step] };
+        }, where);
         const problems = orderProblems(m, step);
         if (problems.length) throw new Error(`${where}: after the move ${problems.slice(0, 3).join("; ")}. Pick another place`);
         return `${where} -> after ${o.after}${o.branch !== undefined ? ` [${o.branch}]` : ""}`;
@@ -237,14 +244,18 @@ function makeFlowEdit(h, flows) {
         const inner = [...m.flows].filter(f => f.origin && f.destination && inChain.has(f.origin.id) && inChain.has(f.destination.id));
         const keep = inner.map(f => ({ f, origin: f.origin, destination: f.destination, note: f instanceof mf.AnnotationFlow }));
         const notes = [...m.flows].filter(f => f instanceof mf.AnnotationFlow && f.destination && inChain.has(f.destination.id) && f.origin && !inChain.has(f.origin.id));
-        // the call replaces the steps; the line runs through it
-        const fx = from.relativeMiddlePoint.x;
+        // the call replaces the steps (its left edge where the first one began); the line runs through it and what
+        // follows closes up (flow-layout.js)
+        const lay = L.begin(m);
+        const gap = { coll: from.container, dx: Math.max(0, L.rect(to).r - (L.rect(from).l + 120)), side: 1, bound: from.relativeMiddlePoint.x, starts: [exit.destination], ids: inChain };
+        const fx = L.rect(from).l + 60;
         const fy = from.relativeMiddlePoint.y;
         const f = { m, coll: from.container, nano, inLoop: from.container.container instanceof mf.LoopedActivity, inHandler: false, returns: x.returnsValue(m) };
         const call = await x.activity(f, { action: "call", microflow: qn, args: Object.fromEntries(params.map(p => [p.name, `$${p.name}`])), ...(result ? { variable: result } : {}) }, fx, fy, where);
-        for (const e of entry) e.destination = call;
+        for (const e of entry) lay.redirect(e, call, null);
         exit.origin = call;
-        exit.originConnectionIndex = 1;
+        L.setOriginSide(exit, 1);
+        lay.touched.add(exit);
         const shift = { x: 100 + x.X_STEP - fx, y: 200 - fy };
         const records = keep.map(k => ({ origin: k.origin, destination: k.destination, note: k.note, oi: k.f.originConnectionIndex, di: k.f.destinationConnectionIndex, cv: k.note ? null : x.caseOf(k.f), eh: k.note ? false : k.f.isErrorHandler }));
         keep.forEach(k => k.f.delete());
@@ -289,6 +300,10 @@ function makeFlowEdit(h, flows) {
                 af.destinationConnectionIndex = r.di;
             } else x.flow(sub, r.origin, r.destination, { originIndex: r.oi, destIndex: r.di, caseValue: r.cv, errorHandler: r.eh });
         }
+        lay.invalidate();
+        lay.closeGap(gap);
+        lay.mark(call.container, [call]);
+        lay.finish();
         x.point(end, right + 80, 200);
         const sf = { m: sub };
         x.connect(sf, { obj: start, originIndex: 1 }, copies[0]);
@@ -298,19 +313,34 @@ function makeFlowEdit(h, flows) {
 
     async function addAnnotation(o) {
         const m = await x.flowDoc(o.microflow);
+        // the note moves up until it covers nothing (flow-layout.js)
+        const lay = L.begin(m);
         if (o.to) {
             const step = findStep(m, o.to);
-            x.annotate(m, step.container, String(o.text), step);
+            const note = x.annotate(m, step.container, String(o.text), step);
+            lay.mark(step.container, [note]);
+            lay.finish();
             return `${o.microflow}: note on [${o.to}] ${describe(step)}`;
         }
         const objs = m.objectCollection.objects.filter(y => !(y instanceof mf.Annotation));
         const minX = Math.min(...objs.map(y => y.relativeMiddlePoint.x), 100);
         const minY = Math.min(...objs.map(y => y.relativeMiddlePoint.y), 200);
-        x.annotate(m, m.objectCollection, String(o.text), null, { x: minX + 100, y: minY - 100 });
+        const note = x.annotate(m, m.objectCollection, String(o.text), null, { x: minX + 100, y: minY - 100 });
+        lay.mark(m.objectCollection, [note]);
+        lay.finish();
         return `${o.microflow}: free note`;
     }
 
-    const impl = { moveAction, extractMicroflow, addAnnotation };
+    async function formatMicroflow(o) {
+        const m = await x.flowDoc(o.microflow);
+        const before = L.lint(L.snapshot(m));
+        L.format(m, { keepAnnotations: o.keepAnnotations === true });
+        const after = L.lint(L.snapshot(m));
+        const n = list => `${list.filter(i => i.level === "error").length} error(s), ${list.filter(i => i.level === "warning").length} warning(s)`;
+        return `${o.microflow}: laid out again (LAYOUT CHECK before ${n(before)}, after ${n(after)})`;
+    }
+
+    const impl = { moveAction, extractMicroflow, addAnnotation, formatMicroflow };
 
     const checks = {
         async moveAction(o) {
@@ -331,6 +361,10 @@ function makeFlowEdit(h, flows) {
                 if (c && (c.microflowQualifiedName || c.nanoflowQualifiedName) === qn) calls = true;
             });
             return calls ? [] : [`${o.microflow} does not call ${qn}`];
+        },
+        async formatMicroflow(o) {
+            const m = await x.flowDoc(o.microflow);
+            return L.lint(L.snapshot(m)).filter(i => i.level === "error").map(i => `${o.microflow}: ${i.text}`);
         },
         async addAnnotation(o) {
             const m = await x.flowDoc(o.microflow);
