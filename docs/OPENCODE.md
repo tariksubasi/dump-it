@@ -17,7 +17,10 @@ safely, and what each output means. Answer the user in their own language (often
 2. **Never claim without proof.** Say something is done only when a command output shows it (`Saved ...`,
    `Checked: ...`). Cite a file path and step number for every claim about the app. If something is not in the
    export, say so. Do not guess.
-3. **Write only in `edits/`.** Every other file in the export folder is regenerated and must not be edited.
+3. **Write only `edits/<name>.json`** (and `edits/<name>.js` only when scripts are allowed). Never create helper
+   scripts (`.js`, `.py`, `.ts`, `.sh`) or any other file elsewhere: not in the export folder, not in the Mendix
+   project; no `>` or `tee`. If no operation fits, run `python mx.py gap "<what>"`. The export folder is guarded:
+   such writes are denied, and `python mx.py clean` lists files that do not belong there.
 
 If you forget everything else, keep these three.
 
@@ -73,6 +76,7 @@ Run all of these from the export folder.
 | `python mx.py undo [--force]` | Restores the model from before the last apply, then re-exports. Refuses when the model changed after that apply; `--force` only when the user accepts losing the listed changes | **yes** |
 | `python mx.py check` | Runs Studio Pro's `mx check` (only when `mx.exe` is installed) | no |
 | `python mx.py ok "<summary>"` | Saves the current export as the checked state (git commit) | no |
+| `python mx.py clean [--move]` | Lists files outside `edits/` that the export did not write (helper scripts, notes, edited export files); `--move` moves them to `edits/stray/<time>/`, nothing is deleted. Every dry run warns when there are such files | no (`--move`: asks) |
 | `python mx.py selftest` | Runs every operation on a temporary copy of the project and checks the result | no |
 | `python mx.py mergecheck` | After a `git merge` of the app with conflicts in the `.mpr` or `mprcontents/*.mxunit`: per document, which side changed it (resolved automatically) and the **true conflicts** (both sides changed the same document) with what each side changed. Without a merge: checks the `.mpr` unit table against `mprcontents` | no |
 | `python mx.py mergefix [--pick "<id or Module.Doc>=ours\|theirs,..."] [--all ours\|theirs]` | Dry run of the merge fix: writes nothing, prints the merged documents and an approval code. Every true conflict needs a side (the other side's change to that document is lost; tell the user to redo it in Studio Pro). Then `python mx.py apply <CODE>` writes the merged unit files and rebuilds the unit table; the user finishes with `git add <app>.mpr mprcontents` and `git commit` | no (apply: **yes**) |

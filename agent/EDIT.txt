@@ -3,7 +3,8 @@ MODEL EDIT PROTOCOL - follow these steps in order. Do not skip a step. Do not in
 THREE RULES (most important)
 R1. Never run "@PY@ mx.py apply" before the user says yes to the approval code of the LAST dry run.
 R2. Never say something is done unless a command output shows it ("Checked: ...", "Saved ...").
-R3. Write change files only in edits/. Never edit other files in this folder: they are regenerated.
+R3. Write only edits/<name>.json. Never create helper scripts or any other file (in this folder or the Mendix
+    project), never use > or tee. No operation fits: @PY@ mx.py gap "<what>". Never edit other files: they are regenerated.
 
 STEP 1 - FIND THE NAMES
   Find the exact names of everything you will touch (case matters):

@@ -52,7 +52,7 @@ ENTITY_OPS = ("create", "retrieve", "change", "commit", "delete", "page", "refer
 
 GUIDE = """You are analysing a Mendix {version} app. Its model was exported to text by mxcontext. Only custom modules
 are exported in detail. Answer in the user's language.
-
+{hard_rule}
 RULES
 1. Cite file path + step number for every claim. If something is not in the export, say so instead of guessing.
 2. Grep first, then read only the files you need. Do not read whole folders.
@@ -91,6 +91,13 @@ HOW TO WORK
 - Cite file path + step number for every claim. If something is not in the export, say so instead of guessing.
 - For a change request: list affected entities, flows, pages, security roles and side effects (entity events,
   callers from called-by.txt, scheduled events, REST operations). For a bug: trace from the entry point.
+"""
+
+HARD_RULE = """
+HARD RULE: write only change files edits/<name>.json{js}. Never create helper scripts (.js, .py, .ts, .sh) or any
+other file anywhere else: not in this folder, not in the Mendix project. No >, 2>&1 or tee in commands. Use
+{py} mx.py commands to look things up and dry-run. If no operation fits, run {py} mx.py gap "<what>".
+Files that do not belong here: {py} mx.py clean
 """
 
 CHANGE_GUIDE = """
@@ -308,7 +315,11 @@ class Exporter:
         py = self._python_command()
         fill = lambda text: text.replace("@PY@", py)  # noqa: E731
 
-        guide = GUIDE.format(version=self.project.version,
+        hard_rule = (HARD_RULE.format(py=py, js=" (edits/<name>.js only because scripts are allowed here)"
+                                      if self.args.allow_scripts else "") if can_edit else
+                     "\nHARD RULE: never create, copy or move files anywhere (no helper scripts, no notes, nothing in "
+                     "the Mendix project). Only read and answer.\n")
+        guide = GUIDE.format(version=self.project.version, hard_rule=hard_rule,
                              edit_rule="Write change files only in edits/." if can_edit else "")
         guide += (CHANGE_GUIDE if can_edit else NO_EDIT_GUIDE).format(py=py)
         self._write("AI_GUIDE.txt", guide)
