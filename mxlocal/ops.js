@@ -33,6 +33,7 @@ const { makeScaffold, SCAFFOLD_OPS, SCAFFOLD_SYNONYMS } = require("./ops-scaffol
 const { makeSmall, smallChangedLater, SMALL_OPS, SMALL_SYNONYMS } = require("./ops-small");
 const { makeOffline, OFFLINE_OPS } = require("./ops-offline");
 const { makeDmLayout, DMLAYOUT_OPS } = require("./ops-dmlayout");
+const { makeComposite, COMPOSITE_OPS, COMPOSITE_SYNONYMS } = require("./ops-composite");
 
 const OPS = {
     createEntity: {
@@ -113,7 +114,14 @@ const OPS = {
         doc: "Run a microflow (without parameters) on a schedule.",
         fields: { module: "R module name", name: "R event name", microflow: "R Module.Microflow", every: "R Minute | Hour | Day | Week", interval: "optional number for Minute/Hour (default 1)", at: "optional time HH:MM for Day/Week, minutes MM for Hour (default 00:00)", days: "Week: [ \"Monday\", ... ]", enabled: "optional true/false (default false)", timeZone: "optional UTC | Server (default UTC)", onOverlap: "optional DelayNext | SkipNext (default DelayNext)", folder: "optional folder path" }
     },
-    createLayout: { doc: "Create a layout as a copy of an existing one (its placeholders, header, sidebar and menu widgets), to change in Studio Pro or use in createPage \"layout\".", fields: { module: "R module name", name: "R layout name", from: "R Module.Layout to copy (e.g. Atlas_Core.Atlas_Default)", folder: "optional folder path" } },
+    createLayout: {
+        doc: "Create a web layout: a copy of an existing one (\"from\"), or a new app shell like Atlas's (preset sidebar: navigation tree in a side bar + top bar; topbar: menu bar in the top bar; blank: content only, for pop-ups) with placeholders, header / side bar / footer widgets as in createPage and a menu. Pages use it with createPage \"layout\"; its widgets change with addWidgets / changeWidget (page = Module.Layout).",
+        fields: { module: "R module name", name: "R layout name", from: "optional Module.Layout to copy (e.g. Atlas_Core.Atlas_Default); without it a new layout is built", folder: "optional folder path",
+            type: "optional Responsive | Popup | ModalPopup | Tablet | Phone (default Responsive)", preset: "optional sidebar | topbar | blank (default sidebar; blank for pop-ups and Phone)",
+            placeholders: "optional [ \"Main\", ... ] placeholder names in the content region (default [ \"Main\" ])",
+            header: "optional [ widgets ] in the top bar, after the side bar toggle and brand (createPage kinds)", sidebar: "optional [ widgets ] in the side bar, below the menu (sidebar / topbar)", footer: "optional [ widgets ] in a footer region at the bottom",
+            menu: "optional what the menu shows: a navigation profile (default \"Responsive\"), a menu document Module.Menu, or false (no menu); sidebar: a navigation tree, topbar: a menu bar (and a navigation tree for phones)",
+            brand: "optional text or Module.Images.Logo at the start of the top bar (default: the module name; \"\" = none)", class: "optional CSS class(es) of the layout (default Atlas's: layout-atlas layout-atlas-responsive-default / -topbar)" } },
     createPage: { doc: "Create a page (or with kind userTaskPage a workflow user task page): an edit form for an entity (inputs by attribute type, Save/Cancel), an empty page, or a page from widgets (layout grids, containers, texts, data grids (classic, or a Data grid 2 built from widgets/*.mpk), data views that listen to a grid, list views, buttons, inputs), optionally with a menu item. Uses the layout the project's other pages use.", fields: { ...PAGE_FIELDS, ...USER_TASK_PAGE_FIELDS } },
     ...PAGE_EDIT_OPS,
     addMenuItem: { doc: "Add a menu item that opens a page, runs a microflow or another action (sign out, open a link, call a flow) to a navigation profile's menu or a menu document; a native page becomes a bottom bar item of the native profile.", fields: { ...MENU_FIELDS, ...MENU_EXTRA } },
@@ -127,6 +135,7 @@ const OPS = {
     ...XML_OPS,
     ...WORKFLOW_OPS,
     ...SCAFFOLD_OPS,
+    ...COMPOSITE_OPS,
     ...SMALL_OPS,
     ...OFFLINE_OPS,
     ...DMLAYOUT_OPS,
@@ -478,6 +487,7 @@ function bind(model, client) {
     const offlineOps = makeOffline({ model, client, entity, persistable });
     const dmLayout = makeDmLayout({ model, client, domainModel, isFresh: qn => isFresh(qn) });
     const scaffoldOps = makeScaffold({ model, client, get, exists, entity, folder, impl: () => impl, pageOps, pageEdit });
+    const compositeOps = makeComposite({ model, client, get, exists, entity, folder, impl: () => impl, pageOps, pageEdit, themeOps });
 
     // ------------------------------------------------ operations
 
@@ -861,6 +871,9 @@ function bind(model, client) {
         ...themeOps.impl,
         ...marketOps.impl,
         async createLayout(o) {
+            if (o.from === undefined) return compositeOps.createLayoutFresh(o);
+            const extra = compositeOps.LAYOUT_FROM_ONLY.filter(k => o[k] !== undefined);
+            if (extra.length) throw new Error(`createLayout ${o.module}.${o.name}: "from" copies ${o.from} as it is; ${extra.join(", ")} build a new layout (leave out "from"), or change the copy afterwards with addWidgets / changeWidget (page = ${o.module}.${o.name})`);
             validName(o.name, "layout name");
             const qn = `${o.module}.${o.name}`;
             if (await exists(qn)) throw new Error(`${qn} already exists`);
@@ -915,6 +928,7 @@ function bind(model, client) {
         ...xmlOps.impl,
         ...workflowOps.impl,
         ...scaffoldOps.impl,
+        ...compositeOps.impl,
         ...smallOps.impl,
         ...offlineOps.impl,
         ...dmLayout.impl
@@ -1041,7 +1055,13 @@ function bind(model, client) {
             return ev.microflowQualifiedName === o.microflow && ev.schedule ? [] : [`${o.module}.${o.name} is incomplete`];
         },
         async createLayout(o) {
-            return (await exists(`${o.module}.${o.name}`)) ? [] : [`${o.module}.${o.name} missing`];
+            const qn = `${o.module}.${o.name}`;
+            if (!(await exists(qn))) return [`${qn} missing`];
+            const l = await get(qn);
+            const phs = [];
+            l.traverse(el => el instanceof pages.Placeholder && phs.push(el.name));
+            const want = o.from === undefined ? o.placeholders || ["Main"] : [];
+            return want.filter(n => !phs.includes(n)).map(n => `${qn} lacks placeholder ${n}`);
         },
         ...pageEdit.checks,
         setHomePage: o => pageOps.checks.setHomePage(o),
@@ -1080,6 +1100,7 @@ function bind(model, client) {
         ...odataOps.checks,
         ...xmlOps.checks,
         ...scaffoldOps.checks,
+        ...compositeOps.checks,
         ...smallOps.checks,
         ...offlineOps.checks,
         ...dmLayout.checks,
@@ -1093,7 +1114,7 @@ function bind(model, client) {
         const name = Object.keys(OPS).find(k => k.toLowerCase() === String(o.op).toLowerCase());
         if (!name) fail(`${where}: unknown op '${o.op}'`, o.op, Object.keys(OPS));
         if (name === "addMenuItem" && o.roles !== undefined) throw new Error(`${where} (addMenuItem): ${NO_MENU_ROLES(o.page)}`);
-        for (const [k, hint] of Object.entries({ ...(DOMAIN_SYNONYMS[name] || {}), ...(FIELD_SYNONYMS[name] || {}), ...(SCAFFOLD_SYNONYMS[name] || {}), ...(SMALL_SYNONYMS[name] || {}) })) if (o[k] !== undefined && !OPS[name].fields[k]) throw new Error(`${where} (${name}): unknown field '${k}': ${hint}`);
+        for (const [k, hint] of Object.entries({ ...(DOMAIN_SYNONYMS[name] || {}), ...(FIELD_SYNONYMS[name] || {}), ...(SCAFFOLD_SYNONYMS[name] || {}), ...(SMALL_SYNONYMS[name] || {}), ...(COMPOSITE_SYNONYMS[name] || {}) })) if (o[k] !== undefined && !OPS[name].fields[k]) throw new Error(`${where} (${name}): unknown field '${k}': ${hint}`);
         validate("op", name, OPS[name], o, where);
         return { name, where };
     }

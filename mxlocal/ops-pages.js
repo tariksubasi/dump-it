@@ -156,6 +156,10 @@ const WIDGETS = {
         doc: "upload the image of the data view around it (classic image uploader; its entity inherits System.Image)",
         fields: { label: "optional label (default: Upload image)", maxFileSize: "optional MB (default 5)", allowedExtensions: "optional e.g. \"png;jpg\" (default: any image)", thumbnail: "optional thumbnail size \"100x75\" (default)", editable: EDITABLE }
     },
+    buildingBlock: {
+        doc: "a copy of a web building block of the project (as Studio Pro drops one from the toolbox): its widgets, with new names where the page has them already; data views and lists in it without an entity stay unconfigured (set them in Studio Pro or build them with widgets)",
+        fields: { from: "R Module.BuildingBlock (or its display name, e.g. \"Card\")" }
+    },
     pluggable: {
         doc: "any pluggable widget installed in widgets/*.mpk (Data grid 2, Gallery, Combo box, filters, charts, ...), built from its definition with every property at its default, exactly as Studio Pro drops it; then the given properties. widgettype <name> (CLI, MCP tool) lists a widget's properties, types and defaults",
         fields: {
@@ -1211,6 +1215,7 @@ function makePages(h) {
             } else if (n.source === "parameter") {
                 const item = inItem(n);
                 if (item) throw new Error(`${n.where}: a data view inside ${item.name || item.kind} (a list item) cannot add a page parameter; leave out "source" to show the ${item.ent ? item.ent.name : "item"} itself ("source": "context"), or use "source": "association"`);
+                if (typeof o.snippet === "string") throw new Error(`${n.where}: a ${o.snippet} has no parameters; give the data view "listenTo", or "source": "context" / "association" / "microflow", or leave out "entity" (and "source") for an unconfigured data view as in Studio Pro's own ${o.snippet}s (the page it is dropped on sets it)`);
                 n.ent = await entityOf(s.entity || o.dflt, n.where);
                 // a snippet: only a parameter it has (createSnippet "parameters"); a new one would break its callers
                 if (o.snippet && !(o.ctx && o.ctx.params.has(n.ent.qualifiedName))) throw new Error(`${n.where}: on a snippet a new data view cannot add a parameter (this snippet has none of ${n.ent.qualifiedName}); give it "listenTo", or "source": "context" / "association" / "microflow"`);
@@ -2908,6 +2913,22 @@ function makePages(h) {
     }
 
     const BUILD = {
+        async buildingBlock(node, target, ctx) {
+            const tpl = await templateOf(String(node.spec.from), node.where);
+            if (!(tpl.doc instanceof pages.BuildingBlock)) throw new Error(`${node.where}: ${tpl.doc.qualifiedName} is a page template; a page takes it with createPage "from", a widget list takes a building block`);
+            if (ctx.page && tpl.doc === ctx.page) throw new Error(`${node.where}: a building block cannot hold a copy of itself`);
+            const copied = [];
+            for (const w of tpl.doc.widgets) {
+                const c = w.deepCopy(model);
+                target.push(c);
+                copied.push(c);
+            }
+            if (!copied.length) client.warn(`${ctx.qn}: building block ${tpl.doc.qualifiedName} has no widgets`);
+            if (node.name && copied.length !== 1) throw new Error(`${node.where}: ${tpl.doc.qualifiedName} has ${copied.length} top-level widgets; "name" names one widget, so leave it out`);
+            const open = adopt(copied, ctx, tpl.doc.qualifiedName);
+            if (node.name) copied[0].name = node.name; // reserved for it already
+            return `${copied.map(c => c.name).join(", ") || "nothing"} (copy of building block ${tpl.doc.qualifiedName}${open.length ? `; unconfigured: ${open.join(", ")}` : ""})`;
+        },
         fileManager: (node, target, ctx) => fileWidget(node, target, ctx, false),
         imageUploader: (node, target, ctx) => fileWidget(node, target, ctx, true),
         async pluggable(node, target, ctx) {
@@ -3784,7 +3805,13 @@ function makePages(h) {
                 put(arg.widgets, a.widgets);
             }
         } else put(mainArg.widgets, tpl.doc.widgets);
-        // names stay unique on the page; data widgets without an entity wait for Studio Pro (as after "new page from template")
+        adopt(copied, ctx, tpl.doc.qualifiedName);
+        return `${copied.length} widget(s) from ${tpl.kind} ${tpl.doc.qualifiedName}`;
+    }
+
+    // Copied widgets join the page: names stay unique on it; data widgets without an entity wait for Studio Pro (as
+    // after "new page from template" or dropping a building block).
+    function adopt(copied, ctx, from) {
         const open = [];
         for (const c of copied) {
             c.traverse(el => {
@@ -3800,8 +3827,8 @@ function makePages(h) {
                 if (el instanceof pages.Widget && (el instanceof pages.DataView || el instanceof pages.ListView || el instanceof pages.TemplateGrid || el instanceof pages.DataGrid) && (!src || !src.entityRef)) open.push(el.name);
             });
         }
-        if (open.length) client.warn(`${ctx.qn}: from ${tpl.doc.qualifiedName}: ${open.join(", ")} still need${open.length > 1 ? "" : "s"} a data source and entity (set them in Studio Pro, or build them with "widgets")`);
-        return `${copied.length} widget(s) from ${tpl.kind} ${tpl.doc.qualifiedName}`;
+        if (open.length) client.warn(`${ctx.qn}: from ${from}: ${open.join(", ")} still need${open.length > 1 ? "" : "s"} a data source and entity (set them in Studio Pro, or build them with "widgets")`);
+        return open;
     }
 
     function listenTarget(n, nodes) {
@@ -4032,7 +4059,7 @@ function makePages(h) {
     const internals = { scan, build, gridKind, entityOf, attributeOf, pathOf, attrRefOf, prepareAssocs, formatInto, pageVariables, dvSettings, inputExtras, onChange, selectPage, ACTION_DOC, names, textAll, templateAll, noPlaceholder, checkXPath, dg2Info,
         isGrid2, isPl, valueOf, humanize, condition, sameCondition, fill, languages, shown, listenTarget, classicColumn, dg2Column, typeOf, isA, list, unitNamed,
         prepare, listEntity, resolveSources, sourceKind, makeAction, plDef, plApply, plScan, widgetType, widgetTypes,
-        blankObject, exprCheck, textTemplate, buildPluggable: (n, t, c) => BUILD.pluggable(n, t, c), associations: () => ASSOCS || [], gridExtras: () => GX(), ui: () => uiFns() };
+        blankObject, exprCheck, textTemplate, inputDefaults, templateOf, adopt, buildPluggable: (n, t, c) => BUILD.pluggable(n, t, c), associations: () => ASSOCS || [], gridExtras: () => GX(), ui: () => uiFns() };
     let uiMade = null;
     function uiFns() {
         return uiMade || (uiMade = ui.makeUi(h, () => internals));

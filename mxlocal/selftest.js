@@ -1369,6 +1369,8 @@ async function selftest(mpr, keep, { out, relevant, mxcheck, mx, timeout }) {
         // phase UI (selftest-ui.js): dynamic classes, icons, tooltips, accessibility, container render mode / on click,
         // layout grid alignment, multi-select design, page look and layout switch, layout widgets, theme ops, A11Y CHECK
         s2 = await require("./selftest-ui").uiPhase({ s2, reopen, copy, mod, T, layout, layoutProblems, check, results });
+        // phase DS-model (selftest-ds-model.js): building blocks, page templates, layouts from scratch, applyStyle, component kits, style guide
+        s2 = await require("./selftest-ds-model").dsModelPhase({ s2, reopen, copy, mod, T, layout, layoutProblems, check, results });
         // phase R (before phase S, which deletes the event handler it looks at): reference graph (usages, unused) and the ops built on it (selftest-refs.js)
         s2 = await require("./selftest-refs").refsPhase({ reopen, copy, mod, T, check, results, layout, layoutProblems, lostProperties, relevant, userRole });
         // phase S (selftest-smallops.js): retrieve sort/range, reference set add/remove, snippets, CRUD pages, changing
