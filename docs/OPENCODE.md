@@ -1344,6 +1344,79 @@ Theme: a design property of your own (with its CSS), used on a container, and th
 
 ---
 
+## Design system
+
+### Native mobile
+
+Native mobile pages (React Native) are styled with JavaScript files, not SCSS:
+- `theme/native/custom-variables.js`: the theme variables (brand colours, fonts, spacing, radius). Atlas merges each
+  group, so a file may hold only the keys you change.
+- `themesource/<module>/native/main.js`: style classes. A native widget's `"class"` is the name of an export there.
+- `themesource/<module>/native/design-properties.json`: native design properties.
+
+Rules for native styles:
+- Names are camelCase (`backgroundColor`, not `background-color`). Class names are JavaScript names (`cardRaised`, no dashes).
+- Sizes are numbers without a unit (`16`, not `"16px"`). `"50%"` and `"auto"` are allowed for widths, margins, paddings.
+- A shadow is `elevation` (Android) plus `shadowColor`, `shadowOffset`, `shadowOpacity`, `shadowRadius` (iOS). There is no `box-shadow`.
+- A style class has one object per element of the widget: a button has `container`, `icon`, `caption`; a text has `container`, `text`; a text box has `container`, `label`, `input`, `validationMessage`.
+- `"$spacing.regular"` uses a theme variable. `{ "light": "#FFFFFF", "dark": "#0A1325" }` follows the phone's dark mode.
+- A native widget has no inline CSS: `"style"` is refused. Use `"class"` or `"design"`.
+- Only your own module gets files. Marketplace modules (Atlas_Core, ...) are refused.
+
+| Op | Fields | Notes |
+|---|---|---|
+| `setNativeVariables` | **variables** `{"brand.primary": "#0B5FFF", "spacing.regular": 16, "border.radiusLarge": 12, "background.primary": {"light": "#FFFFFF", "dark": "#0A1325"}}`, file, new | Sets Atlas native variables (`group.key`, nested objects allowed). A value already in the file is changed in place; a missing one is added. Colours and numbers are checked; `"16px"` is refused with the number to use. `"$border.radiusLarge"` refers to another variable. Unknown names: `Did you mean` (`"new": true` for your own) |
+| `setNativeTokens` | **tokens** (`colors`, `spacing`, `radius`, `typography`, `elevation`, `dark`), file | The same token JSON as the web theme, mapped to Atlas native: `colors.primary/success/warning/danger/info` (a colour or a scale `{"50": ..., "500": ...}`) to `brand.*`; `background`, `surface`, `text`, `textMuted`, `border` (+ `dark`) to the background, font and border colours with dark mode; `spacing xs..xl`; `radius sm/md/full`; `typography fontFamily, fontSize (+ lineHeight ratio)`; `elevation` levels (CSS shadow text or React Native keys) to `elevation.level1, ...`. Tokens without a native place are listed |
+| `addNativeStyle` | **name**, **style** `{"container": {...}, "caption": {...}}`, widgetType, module, replace | Adds `export const <name> = {...}` to `themesource/<module>/native/main.js` (made when missing) and imports the variables it uses. `"use": "$elevation.level2"` in an element includes an elevation level. Refused: web CSS (with the React Native way), units, unknown properties or elements (`Did you mean`), a class the module already has (`"replace": true`) |
+| `addNativeDesignProperty` | **widgetType**, **name**, **type** (`Toggle`, `Dropdown`, `ToggleButtonGroup`), options `[{"name", "class", "style"}]`, class + style (Toggle), multiSelect, description, category, module | A native design property in `themesource/<module>/native/design-properties.json`; an option with `"style"` also gets its class in `main.js`. Widgets on native pages then take it in `"design"` (later ops of the same change too). `ColorPicker` is refused (it needs CSS) |
+
+Native pages: `createPage` with `"native": true`, then `"class"` and `"design"` on its widgets (also with `addWidgets`
+and `changeWidget`). Design properties of a native page come from the `native/design-properties.json` files.
+
+The dry run shows **NATIVE STYLE CHECK** lines (warnings): a changed JS file that does not parse, a style key React
+Native does not know, a class on a native widget that no native `main.js` exports, a scrolling list inside another
+list or scroll container (nested scrolling), a list or button inside a clickable container (taps and scrolling
+conflict). Fix them before the user applies.
+
+Brand colour, spacing and dark mode for the native app:
+
+```json
+{ "ops": [
+  { "op": "setNativeVariables", "variables": { "brand.primary": "#0B5FFF", "spacing.regular": 16, "background.primary": { "light": "#FFFFFF", "dark": "#0A1325" } } } ] }
+```
+
+Company tokens on native:
+
+```json
+{ "ops": [
+  { "op": "setNativeTokens", "tokens": { "colors": { "primary": { "50": "#EEF4FF", "500": "#0B5FFF" }, "surface": "#F6F7F9", "text": "#111827", "border": "#D1D5DB" },
+    "spacing": { "xs": 4, "sm": 8, "md": 16, "lg": 24 }, "radius": { "sm": 4, "md": 8, "full": 9999 },
+    "elevation": { "1": "0 1px 2px rgba(0,0,0,0.15)", "2": "0 4px 8px rgba(0,0,0,0.2)" },
+    "dark": { "surface": "#161F30", "text": "#F9FAFB", "border": "#3B4251" } } } ] }
+```
+
+A card class and a native page that uses it:
+
+```json
+{ "ops": [
+  { "op": "addNativeStyle", "module": "Sales", "name": "cardRaised", "widgetType": "Container",
+    "style": { "container": { "use": "$elevation.level2", "backgroundColor": "$background.primary", "borderRadius": 8, "padding": "$spacing.regular" } } },
+  { "op": "createPage", "module": "Sales", "name": "Home_Native", "native": true,
+    "widgets": [ { "widget": "container", "class": "cardRaised", "widgets": [ { "widget": "text", "text": "Orders" } ] } ] } ] }
+```
+
+A native design property with two looks:
+
+```json
+{ "ops": [
+  { "op": "addNativeDesignProperty", "module": "Sales", "widgetType": "DivContainer", "name": "Card look", "type": "Dropdown",
+    "options": [ { "name": "Flat", "class": "cardFlat", "style": { "container": { "elevation": 0 } } },
+                 { "name": "Raised", "class": "cardRaised" } ] },
+  { "op": "changeWidget", "page": "Sales.Home_Native", "widget": "container1", "design": { "Card look": "Flat" } } ] }
+```
+
+---
+
 ## 8. When no operation fits: gap, Studio Pro steps, or (if allowed) SDK scripts
 
 First run `python mx.py gap "<what the user wants>"`. It records the missing operation so it can be added later.
@@ -1439,6 +1512,7 @@ LAYOUT CHECK (...)                                         <- per changed flow: 
 PREVIEW: 1 flow(s) drawn in .../edits/preview              <- only with --preview or "preview": true
 A11Y CHECK (...)                                           <- accessibility of new/changed widgets (warnings)
   ! Sales.Order_Edit actionButton3: the button has no caption and no tooltip, ...
+NATIVE STYLE CHECK (...)                                   <- native styles, classes and native pages of the change (warnings)
       DATA LOSS: the column A and its values are dropped ...  <- deleting/retyping stored data: tell the user first
 Warnings:
   > Module.Doc -> Module/Folder                              <- a document moved to another folder
@@ -1460,6 +1534,10 @@ errors in red): give the user these paths when they want to see the change.
 A11Y CHECK lines (never a reason to refuse) name new or changed widgets that screen readers cannot use well: a
 button without caption and tooltip (`iconOnly` without `tooltip`), an image without `alt`, an input without label and
 `ariaLabel`, a heading that skips a level (H1 then H3). Fix them in the change file unless the user wants it so.
+
+NATIVE STYLE CHECK lines (never a reason to refuse): a native JS file that does not parse, an unknown React Native
+style key, a class that no native `main.js` exports, nested scrolling, a list or button inside a clickable container.
+See "Native mobile" under "Design system".
 
 ### XPATH CHECK and EXPRESSION CHECK
 

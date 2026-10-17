@@ -823,6 +823,53 @@
           "Order_List\\.txt$": "(?s)Kart stili: Yükseltilmiş.*Siparişler|Siparişler.*Kart stili: Yükseltilmiş"
         }
       }
+    },
+    {
+      "id": "dsnvars",
+      "text": "Native mobil uygulamada ana marka rengini #0B5FFF yap; arka plan açık modda #FFFFFF, karanlık modda #0A1325 olsun. Sonra MyFirstModule'de Mobile_Home adında native bir sayfa oluştur, üstünde 'Hoş geldiniz' yazısı olsun.",
+      "checks": {
+        "find": [
+          "MyFirstModule.Mobile_Home"
+        ],
+        "files": {
+          "Mobile_Home\\.txt$": "Hoş geldiniz"
+        }
+      }
+    },
+    {
+      "id": "dsnstyle",
+      "text": "Native sayfalar için kartYukseltilmis adında bir stil class'ı tanımla: beyaz arka plan, 8 köşe yarıçapı, 16 iç boşluk ve hafif bir gölge. MyFirstModule'de Mobile_Orders adında native bir sayfa oluştur; içinde bu class'ı kullanan bir container ve container'ın içinde 'Siparişler' yazısı olsun.",
+      "checks": {
+        "find": [
+          "MyFirstModule.Mobile_Orders"
+        ],
+        "files": {
+          "Mobile_Orders\\.txt$": "(?s)kartYukseltilmis.*Siparişler"
+        }
+      }
+    },
+    {
+      "id": "dsndesign",
+      "setup": [
+        {
+          "op": "createPage",
+          "module": "MyFirstModule",
+          "name": "Mobile_Start",
+          "native": true,
+          "widgets": [
+            {
+              "widget": "text",
+              "text": "Start"
+            }
+          ]
+        }
+      ],
+      "text": "Native container'lar için 'Kart görünümü' adında bir tasarım özelliği tanımla: 'Düz' (gölgesiz) ve 'Yükseltilmiş' (gölgeli) seçenekleri olsun. Mobile_Start native sayfasının en üstüne bu özelliği 'Yükseltilmiş' olan bir container ekle; içinde 'Özet' yazısı olsun.",
+      "checks": {
+        "files": {
+          "Mobile_Start\\.txt$": "(?s)Kart görünümü: Yükseltilmiş.*Özet|Özet.*Kart görünümü: Yükseltilmiş"
+        }
+      }
     }
   ]
 }
