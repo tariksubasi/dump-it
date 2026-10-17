@@ -374,7 +374,7 @@ Mendix expressions as text: `"'Hello'"`, `"$Order/Total * 2"`, `"empty"`, `"[%Cu
 | Op | Fields | Notes |
 |---|---|---|
 | `createPage` | **module**, **name**, title, entity, fields `["Attr"]`, buttons (default true), widgets, arrange, menu, layout, folder, roles, url, popupWidth, popupHeight, popupResizable, from, native, variables, design, class, style | `class` / `style`: CSS class(es) and inline CSS of the page itself. `variables` (Mendix 10+): page variables `[{"name": "Search", "type": "String", "default": "''"}]` (types Boolean, Integer, Long, Decimal, String, DateTime, `Enum(Module.E)`; `default` is an expression): an input takes `"variable": "Search"` instead of an attribute (anywhere on the page), expressions, XPath and flow `params` use `$Search`. `design`: design properties of the page itself (Atlas `Form orientation`, `Label width` where the theme has them). `from`: a page template or building block of the project (`"Dashboard_Action_Center"`, its display name or `Module.Name`): its widgets are copied first, data widgets in it stay unconfigured (the dry run lists them), then `widgets`. `native: true`: a native mobile page on the project's NativePhone layout (text, container, actionButton, dataView, listView, inputs; refused without a native layout). `layout` may also be a layout no page uses yet (its placeholder `Main`). Without `widgets`: with `entity` an edit form (page parameter, data view, an input per attribute, Save/Cancel), without `entity` an empty page. With `widgets`: the page content from the widget list below; `entity` is then the default entity of grids and data views. `menu` (`"Responsive"` or `{profile, caption, parent}`) adds a menu item, `roles` lets module roles open the page. The layout is the one the project's own pages use most |
-| `createLayout` | **module**, **name**, **from** (a layout), folder | A copy of an existing layout (placeholders, header, sidebar, menu widgets) to change in Studio Pro; `createPage` takes it in `layout` (the content goes in its placeholder `Main`, or its only one). Its own widgets (header, sidebar, menu bar) change with `addWidgets` / `changeWidget` / `moveWidget` / `deleteWidget` and `"page": "Module.Layout"` (`widgets Module.Layout` lists them and its placeholders); a placeholder that pages fill cannot be deleted or renamed (the error lists the pages) |
+| `createLayout` | **module**, **name**, from (a layout to copy), folder; without from: type, preset, placeholders, header, sidebar, footer, menu, brand, class | With `from`: a copy of an existing layout. Without it: a new layout (see [Design system](#building-blocks-page-templates-layouts-kits)). `createPage` takes it in `layout` (the content goes in its placeholder `Main`, or its only one). Its own widgets (header, sidebar, menu bar) change with `addWidgets` / `changeWidget` / `moveWidget` / `deleteWidget` and `"page": "Module.Layout"` (`widgets Module.Layout` lists them and its placeholders); a placeholder that pages fill cannot be deleted or renamed (the error lists the pages) |
 | `createSnippet` | **module**, **name**, folder, parameters `[{"name":"Order","entity":"Sales.Order"}]`, entity (shorthand: one parameter of it; without widgets a form of it, fields), widgets | Widgets as in `createPage`; a data view with `"source": "parameter"` shows a snippet parameter (no Save/Cancel unless `"buttons": true`). Pages show it with `snippetCall` (parameters from `params` or the objects around it). `addWidgets`/`changeWidget` work on snippets too. A data view on a snippet parameter: first use, check it in Studio Pro |
 | `createCrud` | **entity**, module, folder, grid (`auto`/`datagrid2`/`classic`), columns, fields, overview, edit, menu, roles, access | Studio Pro's "Generate overview pages": `<Entity>_NewEdit` (form, Save/Cancel) and `<Entity>_Overview` (a New button + Data grid 2 with Edit/Delete per row when the project can build one, else a classic grid with New/Edit/Delete). `roles` may open both pages and get an access rule on the entity when they have none (`access`: `ReadWrite` default with create/delete, `ReadOnly`, `none`). `menu` adds a menu item to the overview |
 | `addMenuItem` | **page** or **microflow**, profile (default Responsive) or menu (a menu document `Module.Menu`), caption (default: the page title), parent (caption or path of an existing item), after / before (a sibling caption), icon | Only pages without parameters. A page is in a menu once. New items go at the end unless after/before. A menu item has no roles of its own: it shows for the user roles that may open the page (change that with `grantAccess` / `revokeAccess` on the page, or `changeMenuItem` roles). The dry-run line ends with `seen by: <user roles>`. `icon`: an icon collection icon `"Atlas_Core.Atlas_Filled.home"`, an image `"Module.Images.Logo"`, a glyph code number (`57377`). With `action` instead of `page`/`microflow`: what the item does, as on `actionButton` (`"signOut"`, `{"action": "openLink", "url": ...}`, `{"action": "callMicroflow", ...}` without object parameters, `create`, `sync` in an offline profile); needs `caption`. A native page (or `"profile": "Native"`) becomes a bottom bar item of the native profile (refused when the project has none: add one in Studio Pro). |
@@ -425,7 +425,7 @@ also take `editable` (true, false or a condition like `visible`). Full field lis
 | `referenceSetSelector` | **association**, attribute, label, xpath, selectableMicroflow, selectPage, readOnlyStyle, editable, onChange | Several objects of a reference set the entity around it owns (Studio Pro's input reference set selector) |
 | `comboBox` | attribute or association, captionAttribute, label, editable, onChange | `captionAttribute` may be a path from the other entity (`"City_Country/Name"`). Combo box (pluggable) for an enumeration/Boolean attribute or a reference, built from `widgets/*.mpk` with Studio Pro's defaults (other modes: `pluggable` with `properties`). Without the .mpk refused with the classic alternative (`referenceSelector`, `dropDown`, `checkBox`) |
 | `templateGrid` | entity, source, association, microflow, nanoflow, xpath, widgets (per tile), columns (tiles per row, default 2), rows (default 3), selection, selectFirst, buttons, search (true or `["Attr"]`), sort | Classic template grid (as the Studio Pro 10.24 / 11.12 samples store it): tiles with their own widgets (inputs too), control bar `buttons` as `dataGrid`; a data view can listen to it; addWidgets `into` it |
-| `gallery` | entity, source, association, microflow, nanoflow, xpath, widgets (per item), selection (default Single), pageSize, columns (desktop 1-12), onClick, sort, headerFilters (as `dataGrid`) | Gallery (pluggable), data source as `listView`, built from `widgets/*.mpk` like `comboBox`; a data view can listen to it (`listenTo`). Without the .mpk it is refused: use `listView` |
+| `gallery` | entity, source, association, microflow, nanoflow, xpath, widgets (per item), selection (default Single), pageSize, columns (desktop 1-12), tabletColumns, phoneColumns, onClick, sort, headerFilters (as `dataGrid`) | Gallery (pluggable), data source as `listView`, built from `widgets/*.mpk` like `comboBox`; a data view can listen to it (`listenTo`). Without the .mpk it is refused: use `listView` |
 | `pluggable` | **type** (widget id or short name: `Datagrid`, `"Data grid 2"`, `Badge`), properties, label, editable | Any pluggable widget of `widgets/*.mpk`, built from its definition exactly as Studio Pro drops it (every property at its default, texts in the project's languages). `python mx.py widgettype` lists the installed widgets, `python mx.py widgettype <name>` their property keys, types, defaults and values. `properties` by type: boolean, number, string, enumeration key (or caption), expression, text with `{Attribute}`, attribute name (of the widget's data source, else of the data view around it), `Module.Assoc`, `Module.Entity`, an image, an action as on `actionButton`, selection `Single`/`Multi`/`None`, data source `"Module.Entity"` or `{entity, xpath}` (the first one also `association` / `microflow` / `nanoflow` + `params`), `widgets` lists (inside the data source's item when linked to it), object lists `[{key: value}]`. Wrong keys and values: error with `Did you mean`. Required properties left empty: a warning. A data view can `listenTo` it when it has a selection set to `Single`. Icons and linked data sources (filters outside a grid): Studio Pro |
 | `fileManager` | type (`upload`/`download`/`both`), label, maxFileSize (MB, default 5), allowedExtensions, showInBrowser, editable | In a data view of an entity that inherits `System.FileDocument` (an image entity too) |
 | `imageUploader` | label (default "Upload image"), maxFileSize (MB, default 5), allowedExtensions, thumbnail (`"100x75"`), editable | In a data view of an entity that inherits `System.Image` |
@@ -758,8 +758,9 @@ Data grid 2 export (G12) and native navigation (G13; only when the project has a
 ```
 
 What pages cannot do yet (use Studio Pro, and `python mx.py gap "<what>"`):
-- Layouts: `createLayout` copies one; changing a layout's own widgets and placeholders is Studio Pro. Building blocks /
-  page templates are only read (`from`); data widgets copied from them stay unconfigured.
+- Layouts: no native layouts; a new layout has the Atlas regions only (no other scroll container shapes). Data widgets
+  copied from building blocks / page templates stay unconfigured (set them in Studio Pro). Custom icon collections:
+  Studio Pro (they hold a font made from the SVG files).
 - `changeWidget`: no change of a data source (other than `xpath`), an input's attribute, or a pluggable widget's other
   properties (add it again with `pluggable`). `moveWidget`: within one page, not into or
   out of a pluggable widget. Renaming a widget does not change `$widgetName` in expressions (the dry run lists them).
@@ -1343,6 +1344,59 @@ Theme: a design property of your own (with its CSS), used on a container, and th
 ```
 
 ---
+
+## Design system
+
+### Building blocks, page templates, layouts, kits
+
+These ops make the composite layer of a company design system: building blocks and page templates (Studio Pro's
+toolbox), app layouts, one style on many widgets, a kit of ready building blocks, and a style guide page. Classes are
+plain strings: Atlas classes (`card`, `card-title`) and your own (`acme-card`). The SCSS for your classes comes from the
+theme (theme ops), or from `createComponentKit` with `"withStyles": true`.
+
+| Op | Fields | Notes |
+|---|---|---|
+| `createBuildingBlock` | **module**, **name**, **widgets**, folder, entity, displayName, category, categoryWeight, documentationUrl, documentation | Widgets as in `createPage`. A `dataView` or `listView` without `entity` (and without source fields) stays unconfigured, as in Atlas building blocks: the page it lands on sets the entity. Inside it: inputs with only `label` (`{"widget": "textBox", "label": "Name"}`, also textArea, datePicker, checkBox, radioButtons, dropDown) and `save` / `cancel` buttons (or `"buttons": true`). A button without `action` gets none yet. A data view with an entity needs `listenTo` or a source (a building block has no parameters). A gallery / data grid needs `entity` |
+| `changeBuildingBlock` | **document** (a building block or page template), displayName, category, categoryWeight, documentationUrl, documentation | Toolbox details only. Widgets change with `addWidgets` / `changeWidget` / `deleteWidget` and `"page": "Module.BuildingBlock"`. Marketplace modules are refused |
+| `createPageTemplate` | **module**, **name**, layout (default: the most used), widgets (main placeholder) or placeholders `{"Main": [...]}`, type (`regular`, `edit`, `select`, `overview`), entity, class, style, displayName, category, categoryWeight, documentationUrl | Unconfigured data views and inputs as in building blocks. `createPage` with `"from": "Module.Template"` makes a page of it |
+| `createLayout` (new) | **module**, **name**, type (`Responsive`, `Popup`, `ModalPopup`, `Tablet`, `Phone`), preset (`sidebar`, `topbar`, `blank`), placeholders (default `["Main"]`), header, sidebar, footer (widget lists), menu (navigation profile, default `Responsive`; or `Module.Menu`; or `false`), brand (text or `Module.Images.Logo`), class | Built like Atlas: a scroll container with `region-content` (the placeholders), `region-sidebar` (navigation tree), `region-topbar` (side bar toggle, brand, menu bar for `topbar`, your header widgets) and `region-footer`. `sidebar` is like Atlas_Default, `topbar` like Atlas_TopBar, `blank` like PopupLayout. With `from` none of these fields are allowed |
+| `applyStyle` | **widget** (kind: `dataGrid2`, `dataGrid`, `listView`, `gallery`, `dataView`, `actionButton`, `container`, `text`, `input`, ... or `any`), page (one or a list) or module (+ folder) or `"all": true`, match (`"save*"`), hasClass, class or addClass / removeClass, design, style, buttonStyle, limit (default 200) | Sets the look on every matching widget; the dry run lists each one. Refused: no scope (give page, module or all), Marketplace modules, more matches than `limit`, no match |
+| `createComponentKit` | **module**, **prefix**, kit (recipes), entity, folder (default `Kit`), category, withStyles, file | One building block per recipe: `card`, `kpiTile`, `pageHeader`, `toolbar`, `formSection`, `listCards`, `gallery`, `emptyState`, `masterDetail` (default: all but gallery). Names `<Prefix>_<Recipe>`, classes `<prefix>-<part>` (`acme-card__title`). With `entity`: toolbar gets a Data grid 2 with a search filter, listCards / gallery / masterDetail show it. Item options: `{"recipe": "formSection", "fields": ["Name", {"label": "Born", "input": "datePicker"}], "labels": "side"}`. `withStyles: true` appends the SCSS to `themesource/<module>/web/main.scss` (or `theme/web/main.scss`) |
+| `createStyleGuide` | **module**, name (default `StyleGuide`), folder, title, layout, prefix (a kit), entity, menu, roles | A page with typography, all Atlas button styles, inputs (page variables), cards, alerts, badges (Badge widget), a Data grid 2 and list view of `entity`, and the kit's building blocks (those without unconfigured data widgets) |
+
+Pluggable presets (widget kinds in `createPage` / `addWidgets` / building blocks; refused when `widgets/*.mpk` lacks
+the widget, with the Marketplace package to import): `badge` (text, type), `progressBar` / `progressCircle` (value: a
+number or `{"attribute": "Done"}`, min, max, showLabel), `accordion` (groups `[{"header", "widgets", "collapsed"}]`,
+multiple), `popupMenu` (items `[{"caption", "action", "style"} | "divider"]`, trigger, position), `treeNode` (entity,
+caption `"{Name}"`, xpath, widgets, expanded), `lineChart` / `columnChart` / `barChart` / `areaChart` (entity, x, y,
+xpath, series, aggregation, xLabel, yLabel), `pieChart` (entity, value, caption, hole).
+
+The SCSS of a kit reads CSS custom properties with a fallback, so it works alone and follows the tokens when the theme
+sets them: `--<prefix>-surface-0` (page), `--<prefix>-surface-1` (card), `--<prefix>-text`, `--<prefix>-text-muted`,
+`--<prefix>-border-soft`, `--<prefix>-radius-m`, `--<prefix>-elevation-1`, `--<prefix>-elevation-2`,
+`--<prefix>-space-s`, `--<prefix>-space-m`, `--<prefix>-space-l`, `--<prefix>-success`.
+
+Example: a kit with styles, a layout, a style guide on it.
+
+```json
+{ "ops": [
+  { "op": "createComponentKit", "module": "Sales", "prefix": "acme", "entity": "Sales.Order", "withStyles": true },
+  { "op": "createLayout", "module": "Sales", "name": "AcmeShell", "preset": "topbar", "brand": "Acme", "footer": [ { "widget": "text", "text": "Acme Inc." } ] },
+  { "op": "createStyleGuide", "module": "Sales", "prefix": "acme", "entity": "Sales.Order", "layout": "Sales.AcmeShell", "menu": "Responsive" }
+] }
+```
+
+Example: your own building block with an unconfigured form, and a page that uses it.
+
+```json
+{ "ops": [
+  { "op": "createBuildingBlock", "module": "Sales", "name": "Acme_Address", "category": "Acme kit", "widgets": [
+    { "widget": "dataView", "class": "acme-form-section", "buttons": true, "widgets": [ { "widget": "textBox", "label": "Street" }, { "widget": "textBox", "label": "City" } ] } ] },
+  { "op": "createPage", "module": "Sales", "name": "Contact", "widgets": [ { "widget": "buildingBlock", "from": "Sales.Acme_Card" }, { "widget": "badge", "text": "New" } ] },
+  { "op": "applyStyle", "widget": "actionButton", "module": "Sales", "match": "save*", "addClass": "acme-btn" }
+] }
+```
+
 
 ## 8. When no operation fits: gap, Studio Pro steps, or (if allowed) SDK scripts
 

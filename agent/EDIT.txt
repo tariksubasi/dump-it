@@ -244,7 +244,9 @@ addValidationRule, addEventHandler, addIndex, createConstant, createScheduledEve
 of a module, addMenuItem (menu item for a page), setHomePage (home page, also per user role); changing and deleting:
 changeConstant, changeScheduledEvent, changeValidationRule, deleteValidationRule, deleteEventHandler, changeIndex,
 deleteIndex, moveEnumerationValue, changeEnumerationValue. Pages: createSnippet, createCrud (overview + edit page of
-an entity, like Studio Pro's Generate overview pages). A sorted top 10: retrieve with "sort": [ { "attribute":
+an entity, like Studio Pro's Generate overview pages). Design system: createBuildingBlock, createPageTemplate,
+createLayout (no "from": preset sidebar | topbar | blank), applyStyle, createComponentKit, createStyleGuide; widget
+kinds buildingBlock, badge, progressBar, accordion, popupMenu, treeNode, lineChart, pieChart. A sorted top 10: retrieve with "sort": [ { "attribute":
 "Total", "descending": true } ] and "range": { "limit": "10" }; reference sets: change with "add" / "remove".
 Changing what others use (callers / references follow; the dry run lists them or refuses):
   { "ops": [ { "op": "changeMicroflow", "microflow": "Sales.ACT_Submit", "addParameters": [ { "name": "Channel", "type": "String", "value": "'web'" } ] } ] }
