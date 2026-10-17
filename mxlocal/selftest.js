@@ -1363,6 +1363,9 @@ async function selftest(mpr, keep, { out, relevant }) {
         // phase pages2 (selftest-pages2.js): attribute paths, the action model, validation, formats, form settings, page
         // variables, select page, Data grid 2 export, native navigation, and the refusals
         s2 = await require("./selftest-pages2").pages2Phase({ s2, reopen, copy, mod, T, layout, layoutProblems, check, results, userRole });
+        // phase grid (selftest-grid.js): Data grid 2 column settings, association filters, filters above a grid / gallery,
+        // page variables in XPath, offline sync + synchronize, domain model placement and arrangeDomainModel
+        s2 = await require("./selftest-grid").gridPhase({ s2, reopen, copy, mod, T, layout, layoutProblems, check, results });
         // phase R (before phase S, which deletes the event handler it looks at): reference graph (usages, unused) and the ops built on it (selftest-refs.js)
         s2 = await require("./selftest-refs").refsPhase({ reopen, copy, mod, T, check, results, layout, layoutProblems, lostProperties, relevant, userRole });
         // phase S (selftest-smallops.js): retrieve sort/range, reference set add/remove, snippets, CRUD pages, changing
