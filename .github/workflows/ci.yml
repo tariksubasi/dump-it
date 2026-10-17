@@ -1,6 +1,8 @@
 name: CI
 
-# Agent docs check, export smoke test and the mxlocal selftest on 16 public Mendix projects (Mendix 10.22 - 11.14).
+# Agent docs check, export smoke test and the mxlocal selftest on 16 public Mendix projects (Mendix 10.22 - 11.14),
+# one parallel job per project (scripts/ci.sh --list), plus Mendix's own consistency check (mx check from MxBuild)
+# of the selftest result on a few versions. Locally: bash scripts/ci.sh (CI_ONLY=<project> for one).
 on:
   push:
     branches: [main, "feature/**"]
@@ -8,9 +10,23 @@ on:
   workflow_dispatch:
 
 jobs:
-  selftest:
+  plan:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 5
+    outputs:
+      projects: ${{ steps.list.outputs.projects }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: list
+        run: |
+          projects="$(bash scripts/ci.sh --list)"
+          echo "projects: $projects"
+          echo "projects=$projects" >> "$GITHUB_OUTPUT"
+
+  # docs, permission guard, STUDIO PRO CHECK with a fake mx (no project matrix needed)
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -23,6 +39,112 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .ci-projects
-          key: ci-projects-${{ hashFiles('scripts/ci.sh') }}
-      - name: Run CI
-        run: bash scripts/ci.sh
+          key: ci-projects-checks-${{ hashFiles('scripts/ci.sh') }}
+      - name: Docs, guard, fake-mx tests
+        run: CI_STAGES=docs,guard,mxcheck-fake CI_ONLY=minimal bash scripts/ci.sh
+
+  # export + selftest, one job per test project (the full selftest takes about 5 minutes per project)
+  project:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        project: ${{ fromJSON(needs.plan.outputs.projects) }}
+    name: project (${{ matrix.project }})
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Cache test project
+        uses: actions/cache@v4
+        with:
+          path: .ci-projects
+          key: ci-projects-${{ matrix.project }}-${{ hashFiles('scripts/ci.sh') }}
+      - name: Export + selftest
+        run: CI_ONLY=${{ matrix.project }} CI_STAGES=export,selftest bash scripts/ci.sh
+
+  # STUDIO PRO CHECK for real: MxBuild of the project's exact version from the Mendix CDN, selftest --mxcheck on the
+  # copy; fails on errors the selftest added. Independent of the jobs above (no needs), so it never blocks them.
+  mxcheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        # one Mendix 10.24 (build number in the .mpr) and one Mendix 11 project of scripts/ci.sh
+        project: [ImageViewer, Badge]
+    name: mxcheck (${{ matrix.project }})
+    env:
+      TMPDIR: ${{ runner.temp }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Cache test project
+        uses: actions/cache@v4
+        with:
+          path: .ci-projects
+          key: ci-projects-${{ matrix.project }}-${{ hashFiles('scripts/ci.sh') }}
+      - name: Check out the project, read its Mendix version
+        id: project
+        run: |
+          mpr="$(bash scripts/ci.sh --path ${{ matrix.project }})"
+          version="$(node mxlocal/mxcheck.js version "$mpr")"
+          echo "project: $mpr"
+          echo "Mendix version (from the .mpr): $version"
+          echo "mpr=$mpr" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Cache MxBuild ${{ steps.project.outputs.version }}
+        uses: actions/cache@v4
+        with:
+          path: ~/.mendix/mxbuild
+          key: mxbuild-${{ steps.project.outputs.version }}-${{ runner.arch }}
+      - name: Download MxBuild ${{ steps.project.outputs.version }}
+        id: mxbuild
+        run: bash scripts/get-mxbuild.sh "${{ steps.project.outputs.version }}"
+      - name: .NET runtime for mx (only when mx is framework-dependent)
+        if: steps.mxbuild.outputs.dotnet != ''
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ steps.mxbuild.outputs.dotnet }}
+      - name: Probe mx (libraries it needs)
+        run: |
+          mx="${{ steps.mxbuild.outputs.mx }}"
+          echo "java: $(java -version 2>&1 | head -n1)"; echo "dotnet: $(dotnet --list-runtimes 2>/dev/null | tr '\n' ' ')"
+          set +e
+          timeout 120 "$mx" --help > probe.log 2>&1; code=$?
+          set -e
+          echo "mx --help exit $code:"; head -n 40 probe.log
+          # MxBuild 9 draws with System.Drawing (libgdiplus); some builds need ICU
+          if grep -qiE 'gdip|libgdiplus' probe.log; then echo "installing libgdiplus"; sudo apt-get update -q && sudo apt-get install -y -q libgdiplus; fi
+          if grep -qiE 'libicu|ICU package' probe.log; then echo "installing libicu"; sudo apt-get update -q && sudo apt-get install -y -q libicu-dev; fi
+          ldd "$mx" 2>/dev/null | grep -i 'not found' || true
+      - name: mx check of the unchanged project (baseline, pre-existing errors allowed)
+        env:
+          MX_PATH: ${{ steps.mxbuild.outputs.mx }}
+        run: |
+          set +e
+          node mxlocal/mxlocal.js check --project "${{ steps.project.outputs.mpr }}" | tee check.log
+          set -e
+          if grep -qE 'STUDIO PRO CHECK: not run|mx check FAILED' check.log; then echo "::error::mx check could not check the unchanged project"; exit 1; fi
+      - name: selftest --keep --mxcheck (fails on new errors)
+        env:
+          MX_PATH: ${{ steps.mxbuild.outputs.mx }}
+        run: CI_ONLY=${{ matrix.project }} CI_STAGES=selftest CI_SELFTEST_ARGS="--keep --mxcheck" bash scripts/ci.sh
+      - name: Upload the mx check reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mxcheck-${{ matrix.project }}
+          path: |
+            ${{ runner.temp }}/mxlocal-selftest-*/mxcheck-*.json
+            check.log
+            probe.log
+          if-no-files-found: warn
