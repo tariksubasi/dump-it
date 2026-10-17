@@ -128,6 +128,7 @@ Enumeration switch, a Boolean rule, reduce and a note (a rule: op createRule, re
   Java/JavaScript actions: op createJavaAction / createJavaScriptAction (the .java/.js file is written too; code goes
   between BEGIN USER CODE and END USER CODE). REST options: auth, proxy, formData, binaryBody, response "file".
   Restructure: moveAction (id, after, branch), extractMicroflow (from, to, name), addAnnotation.
+  Layout: formatMicroflow (microflow) re-lays out a whole flow; the dry run prints LAYOUT CHECK (--preview: SVGs).
 
 Change and delete existing steps (ids from: @PY@ mx.py steps Sales.ACT_Orders_Process):
 { "ops": [
