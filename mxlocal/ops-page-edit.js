@@ -627,11 +627,13 @@ function makePageEdit(h, I) {
         async design(P, node, v, dc, ctx, where) {
             const ap = prop(node.el, "appearance");
             if (!ap) throw new Error(`${where}: a ${kindOf(node.el)} has no design properties`);
-            return `design ${design.apply(sdk, model, node.el, design.resolve(client.project.dir, node.el, v, `${where}: design`), client.warn) || "unchanged"}`;
+            const platform = require("./theme-native").isNativeDoc(client, P.doc) ? "native" : "web";
+            return `design ${design.apply(sdk, model, node.el, design.resolve(client.project.dir, node.el, v, `${where}: design`, platform), client.warn) || "unchanged"}`;
         },
         async style(P, node, v, dc, ctx, where) {
             const ap = prop(node.el, "appearance");
             if (!ap) throw new Error(`${where}: a ${kindOf(node.el)} has no CSS style`);
+            if (require("./theme-native").isNativeDoc(client, P.doc)) throw new Error(`${where}: ${require("./theme-native").NATIVE_STYLE_REFUSAL}`);
             if (/^(text|paragraph|h[1-6])$/i.test(String(v))) throw new Error(`${where}: "style" is inline CSS; for a heading use "textStyle": "${v}"`);
             if (/^(default|primary|success|info|warning|danger|inverse)$/i.test(String(v))) throw new Error(`${where}: "style" is inline CSS; for a button colour use "buttonStyle": "${v}"`);
             if (ap.style !== String(v)) ap.style = String(v);
@@ -1515,7 +1517,7 @@ function makePageEdit(h, I) {
         }
         if (o.url !== undefined) out.push(await pageUrl(page, o.url, where));
         if (o.variables !== undefined) out.push(await I.pageVariables(page, o.variables, where, { qn: page.qualifiedName }));
-        if (o.design !== undefined) out.push(`design ${design.apply(sdk, model, page, design.resolve(client.project.dir, page, o.design, `${where}: design`), client.warn) || "unchanged"}`);
+        if (o.design !== undefined) out.push(`design ${design.apply(sdk, model, page, design.resolve(client.project.dir, page, o.design, `${where}: design`, require("./theme-native").isNativeDoc(client, page) ? "native" : "web"), client.warn) || "unchanged"}`);
         if (o.class !== undefined || o.style !== undefined) out.push(uiOf().pageLook(page, o, where));
         if (o.layout !== undefined) out.push(await switchLayout(page, String(o.layout), where));
         for (const [k, prop] of [["popupWidth", "popupWidth"], ["popupHeight", "popupHeight"]]) {

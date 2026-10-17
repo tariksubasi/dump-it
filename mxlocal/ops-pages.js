@@ -2343,6 +2343,9 @@ function makePages(h) {
         const s = node.spec, out = [];
         const dc = node.container || null;
         const css = cssOf(node);
+        // a native page (G20): no inline CSS; design properties of the native theme
+        const native = require("./theme-native").isNativeDoc(client, ctx && ctx.page);
+        if (native && css !== undefined) throw new Error(`${node.where}: ${require("./theme-native").NATIVE_STYLE_REFUSAL}`);
         if (s.class !== undefined || css !== undefined) {
             if (!has(w, "appearance")) throw new Error(`${node.where}: a ${node.kind} has no CSS class or style`);
             if (s.class !== undefined && w.appearance.class !== String(s.class)) w.appearance.class = String(s.class);
@@ -2352,7 +2355,7 @@ function makePages(h) {
         }
         if (s.design !== undefined) {
             if (!has(w, "appearance")) throw new Error(`${node.where}: a ${node.kind} has no design properties`);
-            const t = design.apply(sdk, model, w, design.resolve(client.project.dir, w, s.design, `${node.where}: design`), client.warn);
+            const t = design.apply(sdk, model, w, design.resolve(client.project.dir, w, s.design, `${node.where}: design`, native ? "native" : "web"), client.warn);
             if (t) out.push(`design ${t}`);
         }
         if (s.visible !== undefined && s.visible !== true && s.visible !== "true") {
@@ -3727,7 +3730,8 @@ function makePages(h) {
         arg.parameter = lp;
         const parts = [];
         if (o.variables !== undefined) parts.push(await pageVariables(page, o.variables, qn, ctx));
-        if (o.design !== undefined) parts.push(`design ${design.apply(sdk, model, page, design.resolve(client.project.dir, page, o.design, `${qn}: design`), client.warn)}`);
+        if (nativeAsked && o.style !== undefined) throw new Error(`${qn}: ${require("./theme-native").NATIVE_STYLE_REFUSAL.replace("widget", "page")}`);
+        if (o.design !== undefined) parts.push(`design ${design.apply(sdk, model, page, design.resolve(client.project.dir, page, o.design, `${qn}: design`, nativeAsked ? "native" : "web"), client.warn)}`);
         if (o.class !== undefined || o.style !== undefined) parts.push(uiFns().pageLook(page, o, qn));
         if (tpl) parts.push(await copyTemplate(tpl, call, arg, layoutDoc, ctx));
         for (const n of arranged) parts.push(await build(n, arg.widgets, ctx));
