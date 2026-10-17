@@ -167,8 +167,8 @@ if (!project) {
     const log = path.join(tmp, "fake-mx.log");
     const baseEnv = { PATH: process.env.PATH, HOME: empty, USERPROFILE: empty, TMPDIR: tmp, TEMP: tmp, TMP: tmp, FAKE_MX_LIB: path.join(ROOT, "mxlocal"), FAKE_MX_LOG: log, MXLOCAL_NO_PRELOAD: "1" };
     const mx = (args, env = {}) => {
-        const r = spawnSync(process.execPath, [MXLOCAL, ...args, "--project", mpr], { encoding: "utf8", env: { ...baseEnv, MX_PATH: mxRoot, ...env }, timeout: 600000 });
-        return { code: r.status, out: (r.stdout || "") + (r.stderr || "") };
+        const r = spawnSync(process.execPath, [MXLOCAL, ...args, "--project", mpr], { encoding: "utf8", env: { ...baseEnv, MX_PATH: mxRoot, ...env }, timeout: 1800000 });
+        return { code: r.status, out: (r.stdout || "") + (r.stderr || "") + (r.error ? `\n(${r.error.message})` : "") };
     };
     const edits = path.join(tmp, "edits");
     fs.mkdirSync(edits, { recursive: true });
@@ -241,10 +241,14 @@ if (!project) {
     ok("the project was never given to mx", userUntouched());
 
     if (process.argv.includes("--selftest")) {
-        fs.rmSync(path.join(user, ".mxlocal.json"));
-        r = mx(["selftest", "--mxcheck"], { FAKE_MX_FLAG: "ZzMxlocalTest_(Job|Main)$" });
+        // a fresh copy of the project, the normal environment (the selftest needs its full heap and caches)
+        const fresh = path.join(tmp, "fresh", "App");
+        fs.cpSync(path.dirname(project), fresh, { recursive: true, filter: f => !/[\\/](\.git|\.mxlocal-backup|theme-cache|deployment)$/.test(f) });
+        const st = spawnSync(process.execPath, [MXLOCAL, "selftest", "--mxcheck", "--project", path.join(fresh, path.basename(project))], { encoding: "utf8", timeout: 1800000,
+            env: { ...process.env, MX_PATH: mxRoot, FAKE_MX_LIB: baseEnv.FAKE_MX_LIB, FAKE_MX_LOG: log, MXLOCAL_NO_PRELOAD: "1", FAKE_MX_FLAG: "ZzMxlocalTest_(Job|Main)$" } });
+        r = { code: st.status, out: (st.stdout || "") + (st.stderr || "") + (st.error ? `\n(${st.error.message})` : "") };
         ok("selftest --mxcheck: FAIL line with the new errors per selftest document", /FAIL mx check \S+ of the selftest copy/.test(r.out) && /ZzMxlocalTest_Job \(Microflow, selftest document\): 1 new error/.test(r.out) && /ZzMxlocalTest_Main \(Microflow, selftest document\)/.test(r.out),
-            r.out.split("\n").filter(l => /mx check|Zz.*new error|Self test/.test(l)).join("\n"));
+            r.out.split("\n").filter(l => /mx check|Zz.*new error|Self test|FAIL/.test(l)).join("\n") || r.out.slice(-1500));
         ok("selftest --mxcheck: the pre-existing error and the module rename of phase 3 are not new", /\(\d+ selftest document\(s\), 0 existing document\(s\) changed by an op\)/.test(r.out) && !/NEW.*CE0463|CE0463.*new/.test(r.out));
     }
 }
