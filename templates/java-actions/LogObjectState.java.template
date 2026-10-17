@@ -1,0 +1,55 @@
+package {{MODULE}}.actions;
+
+import com.mendix.core.Core;
+import com.mendix.logging.ILogNode;
+import com.mendix.systemwideinterfaces.core.IContext;
+import com.mendix.systemwideinterfaces.core.IMendixObject;
+import com.mendix.systemwideinterfaces.core.UserAction;
+import communitycommons.proxies.LogLevel;
+
+public class LogObjectState extends UserAction<java.lang.Void>
+{
+	private final java.lang.String DummyType;
+	private final IMendixObject InputObject;
+	private final java.lang.String LogNodeName;
+	private final communitycommons.proxies.LogLevel Level;
+	private final java.lang.Long MaxLength;
+
+	public LogObjectState(IContext context, java.lang.String _dummyType, IMendixObject _inputObject, java.lang.String _logNodeName, java.lang.String _level, java.lang.Long _maxLength) {
+		super(context);
+		this.DummyType = _dummyType;
+		this.InputObject = _inputObject;
+		this.LogNodeName = _logNodeName;
+		this.Level = _level == null ? null : communitycommons.proxies.LogLevel.valueOf(_level);
+		this.MaxLength = _maxLength;
+	}
+
+	@Override
+	public java.lang.Void executeAction() throws Exception {
+		// BEGIN USER CODE
+		try {
+			String node = (LogNodeName == null || LogNodeName.isEmpty()) ? "Logging" : LogNodeName;
+			ILogNode log = Core.getLogger(node);
+			if (isEnabled(log, Level)) {
+				String message = "ObjectState | cid=" + {{MODULE}}.TraceContext.get() + " | flow=" + {{MODULE}}.LogSink.currentMicroflow(getContext()) + " | obj=" + {{MODULE}}.Journal.describeObject(getContext(), InputObject);
+				{{MODULE}}.LogSink.dispatch(log, Level == null ? LogLevel.Info : Level, node, message);
+			}
+		} catch (Throwable t) {
+			try { Core.getLogger("Logging").error("LogObjectState failed (ignored): " + t.getMessage()); } catch (Throwable ignored) {}
+		}
+		return null;
+		// END USER CODE
+	}
+
+	@Override
+	public java.lang.String toString() { return "LogObjectState"; }
+
+	// BEGIN EXTRA CODE
+	private static boolean isEnabled(ILogNode log, LogLevel level) {
+		if (level == null) level = LogLevel.Info;
+		if (level == LogLevel.Trace) return log.isTraceEnabled();
+		if (level == LogLevel.Debug) return log.isDebugEnabled();
+		return true;
+	}
+	// END EXTRA CODE
+}

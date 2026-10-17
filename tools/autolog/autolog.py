@@ -16,6 +16,14 @@ Usage (close Studio Pro first, commit your work first):
   python autolog.py <app-dir> --apply               # writes the model
   python autolog.py <app-dir> --java-action Logging.LogActivity --js-action Logging.JS_LogActivity
 
+Journal mode (one FlushJournal call is all you add by hand):
+  python autolog.py <app-dir> --insert [--deep] [--flow Mod.MF] [--apply]
+  For every microflow with a FlushJournal call (plus the --flow ones; --deep: plus all they call) it puts
+  StartJournal after the start event, a filled LogActivity after every activity, decision branch and loop
+  (also on error-handler paths and at the start and end of each loop turn) and FlushJournal before every
+  end/error event. Inserted activities are marked [autolog:auto]; each --insert run replaces them, and
+  python autolog.py <app-dir> --remove [--apply] deletes them again.
+
 Only calls whose ActivityName argument is empty ('' or 'empty') or whose activity
 documentation contains [autolog] are touched. Touched calls get [autolog] in their
 documentation, so a later run refreshes them after you move them. Remove the marker
@@ -483,6 +491,283 @@ def _all_objects(doc):
     return out
 
 
+# ---------------------------------------------------------------- insert / remove
+
+AUTO = "[autolog:auto]"        # activities the tool inserted itself; --remove and every --insert run delete them
+GAP = 30                       # free space between inserted activities
+ACT_W, ACT_H = 120, 60
+CONTROL = {0: "0;-30", 1: "30;0", 2: "0;30", 3: "-30;0"}   # connection index (top/right/bottom/left) -> curve vector
+SKIP_MOVE = ("MicroflowParameter", "MicroflowParameterObject", "Annotation")
+
+
+def pt(s):
+    x, y = (s or "0;0").split(";")
+    return [float(x), float(y)]
+
+
+def fmt(p):
+    return "%d;%d" % (round(p[0]), round(p[1]))
+
+
+def call_target(o):
+    if o["$Type"] != "Microflows$ActionActivity":
+        return None
+    a = o.get("Action") or {}
+    return a.get("JavaAction") or a.get("JavaScriptAction")
+
+
+class Layout:
+    """Object positions per collection, and room-making that widens the loops around a collection."""
+
+    def __init__(self, doc):
+        self.doc = doc
+        self.coll_of = {}          # object $ID -> collection
+        self.up = {}               # id(collection) -> (loop, parent collection)
+        self._index(doc["ObjectCollection"])
+
+    def _index(self, coll):
+        for o in items(coll.get("Objects")):
+            self.coll_of[as_bytes(o["$ID"])] = coll
+            if o["$Type"] == "Microflows$LoopedActivity":
+                self.up[id(o["ObjectCollection"])] = (o, coll)
+                self._index(o["ObjectCollection"])
+
+    def add(self, coll, o):
+        coll["Objects"].append(o)
+        self.coll_of[as_bytes(o["$ID"])] = coll
+
+    def make_room(self, coll, axis, at, delta, sign, skip=None):
+        """Moves everything past 'at' on 'axis' (in direction 'sign') by delta; grows the enclosing loops."""
+        if delta <= 0:
+            return
+        for o in items(coll.get("Objects")):
+            if o is skip or short(o["$Type"]) in SKIP_MOVE:
+                continue
+            p = pt(o.get("RelativeMiddlePoint"))
+            if (p[axis] - at) * sign > 0:
+                p[axis] += delta * sign
+                o["RelativeMiddlePoint"] = fmt(p)
+        if id(coll) in self.up:
+            loop, parent = self.up[id(coll)]
+            center = pt(loop["RelativeMiddlePoint"])
+            self.make_room(parent, axis, center[axis], delta, sign, skip=loop)
+            size = pt(loop["Size"])
+            size[axis] += delta
+            center[axis] += delta / 2.0 * sign
+            loop["Size"], loop["RelativeMiddlePoint"] = fmt(size), fmt(center)
+
+
+def new_activity(action_qn, p):
+    return {
+        "$ID": new_id(), "$Type": "Microflows$ActionActivity",
+        "Action": {"$ID": new_id(), "$Type": "Microflows$JavaActionCallAction", "ErrorHandlingType": "Rollback",
+                   "JavaAction": action_qn, "ParameterMappings": [2], "QueueSettings": None,
+                   "ResultVariableName": "", "UseReturnVariable": False},
+        "AutoGenerateCaption": True, "BackgroundColor": "Default", "Caption": "Activity", "Disabled": False,
+        "Documentation": AUTO, "RelativeMiddlePoint": fmt(p), "Size": "%d;%d" % (ACT_W, ACT_H),
+    }
+
+
+def new_flow(origin, dest, oi, di, cases=None, error=False):
+    return {
+        "$ID": new_id(), "$Type": "Microflows$SequenceFlow", "CaseValues": cases or [2],
+        "DestinationConnectionIndex": di, "DestinationPointer": dest, "IsErrorHandler": error,
+        "Line": {"$ID": new_id(), "$Type": "Microflows$BezierCurve",
+                 "DestinationControlVector": CONTROL[di], "OriginControlVector": CONTROL[oi]},
+        "OriginConnectionIndex": oi, "OriginPointer": origin,
+    }
+
+
+def set_dest(flow, dest, di):
+    flow["DestinationPointer"], flow["DestinationConnectionIndex"] = dest, di
+    if isinstance(flow.get("Line"), dict) and "DestinationControlVector" in flow["Line"]:
+        flow["Line"]["DestinationControlVector"] = CONTROL[di]
+
+
+def remove_auto(doc):
+    """Deletes the activities an earlier --insert added and joins the flows around them. Returns (removed, kept)."""
+    flows = doc.setdefault("Flows", [3])
+    removed = kept = 0
+    for coll in _collections(doc["ObjectCollection"]):
+        for o in [x for x in items(coll.get("Objects")) if AUTO in (x.get("Documentation") or "")]:
+            oid = as_bytes(o["$ID"])
+            seq = [f for f in items(flows) if f["$Type"] == "Microflows$SequenceFlow"]
+            inc = [f for f in seq if as_bytes(f["DestinationPointer"]) == oid]
+            out = [f for f in seq if as_bytes(f["OriginPointer"]) == oid]
+            if len(out) > 1 or len(inc) > 1 or not (inc or out):
+                kept += 1          # someone wired it differently by hand: leave it
+                continue
+            if inc and out:
+                set_dest(inc[0], out[0]["DestinationPointer"], out[0]["DestinationConnectionIndex"])
+            gone = out[0] if out else inc[0]   # loop-start logs have no incoming flow, loop-end logs no outgoing one
+            for f in [x for x in items(flows) if oid in (as_bytes(x.get("OriginPointer", b"")), as_bytes(x.get("DestinationPointer", b"")))
+                      and (x is gone or x["$Type"] == "Microflows$AnnotationFlow")]:
+                flows.remove(f)
+            coll["Objects"].remove(o)
+            removed += 1
+    return removed, kept
+
+
+def _collections(coll):
+    out = [coll]
+    for o in items(coll.get("Objects")):
+        if o["$Type"] == "Microflows$LoopedActivity":
+            out.extend(_collections(o["ObjectCollection"]))
+    return out
+
+
+def insert_steps(project, doc, names):
+    """Puts StartJournal after the start event, LogActivity after every activity, decision branch and loop
+    (also on error-handler paths and at the start of each loop turn), and FlushJournal before every end/error event.
+    names: dict with keys log, start, flush (qualified Java action names)."""
+    calls = {names["log"], names["start"], names["flush"]}
+    flows = doc.setdefault("Flows", [3])
+    lay = Layout(doc)
+    objects = {}
+    for coll in _collections(doc["ObjectCollection"]):
+        for o in items(coll.get("Objects")):
+            objects[as_bytes(o["$ID"])] = o
+    seq = [f for f in items(flows) if f["$Type"] == "Microflows$SequenceFlow"]
+
+    def wants_log(o):
+        t = short(o["$Type"])
+        if t == "ActionActivity":
+            return not o.get("Disabled") and call_target(o) not in calls
+        return t in ("ExclusiveSplit", "InheritanceSplit", "LoopedActivity")
+
+    added = 0
+    # 1. loop bodies: a log in front of the first object (start of every turn) and after the last activity,
+    #    which has no outgoing flow
+    targets = {as_bytes(f["DestinationPointer"]) for f in seq}
+    origins = {as_bytes(f["OriginPointer"]) for f in seq}
+    for coll in _collections(doc["ObjectCollection"])[1:]:
+        loop = lay.up[id(coll)][0]
+        firsts = [o for o in items(coll.get("Objects")) if short(o["$Type"]) not in SKIP_MOVE
+                  and as_bytes(o["$ID"]) not in targets]
+        if len(firsts) == 1 and call_target(firsts[0]) not in calls:
+            first = firsts[0]
+            fp, fs = pt(first["RelativeMiddlePoint"]), pt(first.get("Size"))
+            lay.make_room(coll, 0, fp[0] - fs[0] / 2.0 - 1, ACT_W + 2 * GAP - (fp[0] - fs[0] / 2.0), 1)
+            fp = pt(first["RelativeMiddlePoint"])
+            log = new_activity(names["log"], (fp[0] - fs[0] / 2.0 - GAP - ACT_W / 2.0, fp[1]))
+            lay.add(coll, log)
+            flows.append(new_flow(log["$ID"], first["$ID"], 1, 3))
+            added += 1
+        for last in [o for o in items(coll.get("Objects")) if wants_log(o) and as_bytes(o["$ID"]) not in origins]:
+            lp, ls = pt(last["RelativeMiddlePoint"]), pt(last.get("Size"))
+            spot = lp[0] + ls[0] / 2.0 + GAP + ACT_W / 2.0
+            lay.make_room(coll, 0, lp[0], spot + ACT_W / 2.0 + GAP - pt(loop["Size"])[0], 1)
+            log = new_activity(names["log"], (spot, free_lane(coll, 0, [spot], lp[1], 1)))
+            lay.add(coll, log)
+            flows.append(new_flow(last["$ID"], log["$ID"], 1, 3))
+            added += 1
+
+    # 2. every sequence flow: open it and put the chain of new activities on it
+    for f in seq:
+        x, y = objects.get(as_bytes(f["OriginPointer"])), objects.get(as_bytes(f["DestinationPointer"]))
+        if x is None or y is None:
+            continue
+        chain = []
+        if short(x["$Type"]) == "StartEvent":
+            chain.append(names["start"])
+        if wants_log(x) and call_target(y) != names["log"]:
+            chain.append(names["log"])
+        if short(y["$Type"]) in ("EndEvent", "ErrorEvent") and call_target(x) != names["flush"]:
+            chain.append(names["flush"])
+        if not chain:
+            continue
+        coll = lay.coll_of[as_bytes(x["$ID"])]
+        xp, yp = pt(x["RelativeMiddlePoint"]), pt(y["RelativeMiddlePoint"])
+        axis = 0 if abs(yp[0] - xp[0]) >= abs(yp[1] - xp[1]) else 1
+        sign = 1 if yp[axis] >= xp[axis] else -1
+        half_x = pt(x.get("Size"))[axis] / 2.0
+        half_y = pt(y.get("Size"))[axis] / 2.0
+        step = (ACT_W if axis == 0 else ACT_H) + GAP
+        need = half_x + GAP + len(chain) * step + half_y
+        lay.make_room(coll, axis, xp[axis], need - abs(yp[axis] - xp[axis]), sign)
+        yp = pt(y["RelativeMiddlePoint"])
+        # branches (decision cases, error handlers) line up with where they go, plain flows with where they come from
+        other = yp[1 - axis] if (short(x["$Type"]) in ("ExclusiveSplit", "InheritanceSplit") or f.get("IsErrorHandler")) else xp[1 - axis]
+        out_i, in_i = ((1, 3) if sign > 0 else (3, 1)) if axis == 0 else ((2, 0) if sign > 0 else (0, 2))
+        spots = [xp[axis] + sign * (half_x + GAP + step / 2.0 + i * step) for i in range(len(chain))]
+        other = free_lane(coll, axis, spots, other, f.get("OriginConnectionIndex"))
+        new = []
+        for i, qn in enumerate(chain):
+            p = [0, 0]
+            p[axis] = spots[i]
+            p[1 - axis] = other
+            new.append(new_activity(qn, p))
+            lay.add(coll, new[-1])
+        old_dest, old_di = f["DestinationPointer"], f["DestinationConnectionIndex"]
+        set_dest(f, new[0]["$ID"], in_i)
+        for a, b in zip(new, new[1:]):
+            flows.append(new_flow(a["$ID"], b["$ID"], out_i, in_i))
+        flows.append(new_flow(new[-1]["$ID"], old_dest, out_i, old_di))
+        added += len(new)
+    return added
+
+
+def free_lane(coll, axis, spots, other, origin_index):
+    """A cross-axis position where activities at 'spots' overlap nothing: first 'other' itself, then lanes moving
+    to the side the flow leaves its origin (below for a bottom exit, above for a top one), then the other side."""
+    size = (ACT_W, ACT_H)
+    lane = size[1 - axis] + GAP
+    first = -1 if origin_index in (0, 3) else 1
+    boxes = []
+    for o in items(coll.get("Objects")):
+        if short(o["$Type"]) in SKIP_MOVE:
+            continue
+        p, s = pt(o.get("RelativeMiddlePoint")), pt(o.get("Size"))
+        boxes.append((p, s))
+
+    def free(c):
+        for at in spots:
+            q = [0, 0]
+            q[axis], q[1 - axis] = at, c
+            for p, s in boxes:
+                if abs(p[0] - q[0]) < (s[0] + ACT_W) / 2.0 + GAP / 2.0 and abs(p[1] - q[1]) < (s[1] + ACT_H) / 2.0 + GAP / 2.0:
+                    return False
+        return True
+    for k in range(0, 7):
+        for c in ((other,) if k == 0 else (other + first * k * lane, other - first * k * lane)):
+            if free(c):
+                return c
+    return other
+
+
+def fill_defaults(project, doc, qn, level):
+    """Arguments for StartJournal / FlushJournal calls: Level gets the default, every other parameter 'empty'."""
+    for o in _all_objects(doc):
+        if call_target(o) == qn and AUTO in (o.get("Documentation") or ""):
+            for param in sorted(project.code_params.get(qn, ())):
+                if get_argument(o["Action"], qn, param, False).strip() == "":
+                    set_argument(o["Action"], qn, param, level if param == P_LEVEL else "empty", False)
+
+
+def journal_flows(project, names, wanted, deep):
+    """Microflows to journal: those with a FlushJournal call, the ones named with --flow, and (deep) all they call."""
+    by_name = {}
+    for uid, (_, doc) in project.units.items():
+        if doc["$Type"] == "Microflows$Microflow":
+            by_name[project.module_of(uid) + "." + doc["Name"]] = uid
+    picked = set(wanted)
+    for qn, uid in by_name.items():
+        if any(call_target(o) == names["flush"] and AUTO not in (o.get("Documentation") or "")
+               for o in _all_objects(project.units[uid][1])):
+            picked.add(qn)
+    missing = sorted(q for q in picked if q not in by_name)
+    todo = sorted(q for q in picked if q in by_name)
+    while deep and todo:
+        qn = todo.pop()
+        for o in _all_objects(project.units[by_name[qn]][1]):
+            a = o.get("Action") or {}
+            callee = (a.get("MicroflowCall") or {}).get("Microflow") if a.get("$Type") == "Microflows$MicroflowCallAction" else None
+            if callee in by_name and callee not in picked:
+                picked.add(callee)
+                todo.append(callee)
+    return {q: by_name[q] for q in picked if q in by_name}, missing
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("app_dir")
@@ -493,13 +778,67 @@ def main():
     ap.add_argument("--apply", action="store_true", help="write the model (default: dry run)")
     ap.add_argument("--report-only", action="store_true",
                     help="only print what would be resolved for every call of the given actions (any action, nothing is written)")
+    ap.add_argument("--insert", action="store_true",
+                    help="journal mode: put StartJournal, a LogActivity after every activity and FlushJournal before every end "
+                         "into each microflow that has a FlushJournal call (and the --flow ones)")
+    ap.add_argument("--remove", action="store_true", help="delete everything --insert added (only from --flow ones, if given)")
+    ap.add_argument("--flow", action="append", default=[], metavar="Mod.Microflow", help="also journal this microflow (repeatable)")
+    ap.add_argument("--deep", action="store_true", help="with --insert: also journal every microflow they call, all the way down")
+    ap.add_argument("--start-action", default="Logging.StartJournal")
+    ap.add_argument("--flush-action", default="Logging.FlushJournal")
+    ap.add_argument("--insert-level", default="CommunityCommons.LogLevel.Debug", help="Level of the calls --insert adds")
     args = ap.parse_args()
+    if args.insert and args.remove:
+        sys.exit("use --insert or --remove, not both")
 
     project = Project(args.app_dir)
     for qn in (args.java_action, args.js_action):
         if qn not in project.code_params:
             print("note: %s is not defined in this project" % qn)
-    changed, report = process(project, args.java_action, args.js_action, args.level, args.js_level, args.report_only)
+
+    changed = {}
+    if args.insert or args.remove:
+        names = {"log": args.java_action, "start": args.start_action, "flush": args.flush_action}
+        if args.insert:
+            absent = [qn for qn in names.values() if qn not in project.code_params]
+            if absent:
+                sys.exit("create these Java actions in Studio Pro first (see tools/autolog/README.md): " + ", ".join(absent))
+            targets, missing = journal_flows(project, names, args.flow, args.deep)
+            if missing:
+                sys.exit("no such microflow: " + ", ".join(missing))
+            if not targets:
+                print("no microflow to journal: put a FlushJournal call before the end event of one, or pass --flow Mod.Microflow")
+        else:
+            targets = {}
+            for uid, (_, doc) in project.units.items():
+                if doc["$Type"] == "Microflows$Microflow" and any(AUTO in (o.get("Documentation") or "") for o in _all_objects(doc)):
+                    targets[project.module_of(uid) + "." + doc["Name"]] = uid
+            if args.flow:
+                targets = {q: u for q, u in targets.items() if q in args.flow}
+        for qn in sorted(targets):
+            uid = targets[qn]
+            doc = project.units[uid][1]
+            removed, kept = remove_auto(doc)
+            added = 0
+            if args.insert:
+                added = insert_steps(project, doc, names)
+                fill_defaults(project, doc, args.start_action, args.insert_level)
+                fill_defaults(project, doc, args.flush_action, args.insert_level)
+                for o in _all_objects(doc):
+                    if call_target(o) == args.java_action and AUTO in (o.get("Documentation") or ""):
+                        set_argument(o["Action"], args.java_action, P_LEVEL, args.insert_level, False)
+            if removed or added:
+                changed[uid] = doc
+            print("%-55s | %s%s" % (qn, ("+%d activities" % added) if args.insert else "", (" (-%d old)" % removed) if removed else "")
+                  + (" | %d auto activities re-wired by hand, left as they are" % kept if kept else ""))
+        print()
+        if args.remove:
+            report = []
+        else:
+            filled, report = process(project, args.java_action, args.js_action, args.level, args.js_level, False)
+            changed.update(filled)
+    else:
+        changed, report = process(project, args.java_action, args.js_action, args.level, args.js_level, args.report_only)
 
     for flow, caption, var, kind, value in report:
         print("%-55s | %-45s | %-25s | %-8s | %s" % (flow, caption[:45], var or "<void>", kind or "-", value or ""))

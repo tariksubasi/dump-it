@@ -452,6 +452,14 @@ bırakarak ekle; tek komut flow adını, önceki aktivitenin adını ve değişk
    ```
 3. Yazmak için sonuna `--apply` ekle. Sonra Studio Pro'yu aç ve F4 bas.
 
+**Günlük modu (tam otomatik):** microflow'un sonuna, End'den önce tek bir `FlushJournal` koy. Sonra:
+```
+python C:\tools\dump-it\tools\autolog\autolog.py "C:\Projeler\BenimProje" --insert --apply
+```
+Araç her aktivitenin arkasına doldurulmuş bir `LogActivity` koyar (decision kolları, error handler yolları, loop
+turları dahil). Çalışınca bütün adımlar tek bir `Journal` bloğu olarak yazılır. `--deep` çağrılan sub-microflow'ları
+da ekler; `--remove` eklenen her şeyi siler.
+
 Gerekli: `pip install pymongo`. İlk kurulum (Java action, JS action, `ClientLogEntry`) ve kurallar:
 [tools/autolog/README.md](tools/autolog/README.md).
 

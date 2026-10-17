@@ -1,0 +1,19 @@
+package {{MODULE}}.actions;
+
+import com.mendix.systemwideinterfaces.core.IContext;
+import com.mendix.systemwideinterfaces.core.UserAction;
+
+public class StartJournal extends UserAction<java.lang.Void>
+{
+	public StartJournal(IContext context) { super(context); }
+
+	@Override
+	public java.lang.Void executeAction() throws Exception {
+		// BEGIN USER CODE
+		try { {{MODULE}}.Journal.open(getContext()); } catch (Throwable t) {
+			try { com.mendix.core.Core.getLogger("Logging").error("StartJournal failed (ignored): " + t.getMessage()); } catch (Throwable ignored) {}
+		}
+		return null;
+		// END USER CODE
+	}
+}
