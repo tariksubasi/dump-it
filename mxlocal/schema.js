@@ -118,6 +118,9 @@ class Schema {
                     const tShort = t.split("$")[1];
                     const claimed = this.storageType(t) === st;
                     const related = claimed || tShort === short || tShort.startsWith(short);
+                    // "fixed": the storage name and keys of this SDK type are known (mxcli metamodel, Studio Pro 11 samples):
+                    // another storage type with the same keys (Forms$DataGridSelectButton ~ DropDownButton) is not it
+                    if (!related && overrides[t] && overrides[t].fixed) continue;
                     const { fit, hit } = fitOf(st, t);
                     if (related ? fit < 0.5 : fit < 0.9 || hit < 2) continue;
                     options.push({ st, t, score: fit + (claimed || tShort === short ? 0.2 : 0) + (claimed ? 0.02 : 0) + (related ? 0.01 : 0) });

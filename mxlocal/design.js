@@ -4,12 +4,27 @@
 //   Dropdown / ToggleButtonGroup / ColorPicker  -> OptionDesignPropertyValue { Option }
 //   Toggle                                      -> ToggleDesignPropertyValue (present = on)
 //   Spacing                                     -> CompoundDesignPropertyValue { margin-top / padding-left ...: Option }
-// (layouts from the Studio Pro-saved samples of Mendix 10.22-11.14).
+// (layouts from the Studio Pro-saved samples of Mendix 10.22-11.14), and without a sample in the test projects:
+//   ToggleButtonGroup with "multiSelect": true  -> CompoundDesignPropertyValue { <option name>: ToggleDesignPropertyValue }
+//                                                  per chosen option (as Studio Pro 11.12 saves "Hide on": Phone + Tablet)
+//   ColorPicker with a colour of its own        -> CustomDesignPropertyValue { Value: "#ff0000" } (Mendix 10.2+)
+// Older option and property names (oldNames in design-properties.json) are understood too.
 const fs = require("fs");
 const path = require("path");
 const { fail, suggest } = require("./ops-util");
 
 const cache = new Map();
+// design-properties.json texts an op of this change staged (theme.js), per project folder: abs file -> text
+const overlays = new Map();
+function overlay(dir, file, text) {
+    if (!overlays.has(dir)) overlays.set(dir, new Map());
+    overlays.get(dir).set(path.resolve(file), text);
+    for (const k of [...cache.keys()]) if (k.startsWith(dir + "|")) cache.delete(k);
+}
+function reset(dir) {
+    overlays.delete(dir);
+    for (const k of [...cache.keys()]) if (k.startsWith(dir + "|")) cache.delete(k);
+}
 // typeKey -> [ property definitions ] merged over every design-properties.json of the project (web or native)
 function definitions(dir, platform = "web") {
     const k = dir + "|" + platform;
@@ -19,11 +34,13 @@ function definitions(dir, platform = "web") {
     const ts = path.join(dir, "themesource");
     if (fs.existsSync(ts)) for (const m of fs.readdirSync(ts).sort()) files.push(path.join(ts, m, platform, "design-properties.json"));
     files.push(path.join(dir, "theme", platform, "design-properties.json"));
+    const staged = overlays.get(dir) || new Map();
+    for (const [f] of staged) if (!files.includes(f) && f.endsWith(path.join(platform, "design-properties.json"))) files.push(f);
     for (const f of files) {
-        if (!fs.existsSync(f)) continue;
+        if (!staged.has(path.resolve(f)) && !fs.existsSync(f)) continue;
         let d;
         try {
-            d = JSON.parse(fs.readFileSync(f, "utf8").replace(/^﻿/, ""));
+            d = JSON.parse((staged.has(path.resolve(f)) ? staged.get(path.resolve(f)) : fs.readFileSync(f, "utf8")).replace(/^﻿/, ""));
         } catch (e) {
             continue; // a broken theme file: Studio Pro ignores it too
         }
@@ -91,7 +108,8 @@ function resolve(dir, el, spec, where, platform = "web") {
     const out = [];
     const spaced = [];
     for (const [key, value] of Object.entries(spec)) {
-        let def = defs.find(d => d.name === key) || defs.find(d => d.name.toLowerCase() === String(key).toLowerCase());
+        let def = defs.find(d => d.name === key) || defs.find(d => d.name.toLowerCase() === String(key).toLowerCase()) ||
+            defs.find(d => (d.oldNames || []).some(n => n.toLowerCase() === String(key).toLowerCase()));
         if (!def && spacing) {
             const a = spacingAlias(spacing, key, value);
             if (a) {
@@ -105,21 +123,41 @@ function resolve(dir, el, spec, where, platform = "web") {
             fail(`${where}: design '${key}': no option '${value}' (options: ${opts.join(", ")}; or "Spacing": { "margin-${side[1].toLowerCase()}": "${(spacing.margin || []).map(o => o.name).join(" | ")}" })`, String(value), opts);
         }
         if (!def) fail(`${where}: no design property '${key}' for this widget (${names.join(", ") || "none"})`, key, names);
-        if (value === null || value === false) {
+        if (value === null || value === false || (def.multiSelect && Array.isArray(value) && !value.length)) {
             out.push({ key: def.name, kind: "remove" });
             continue;
         }
+        const opts = (def.options || []).map(o => o.name);
+        const optionOf = v => {
+            const x = String(v).toLowerCase();
+            const o = (def.options || []).find(o => o.name === String(v)) || (def.options || []).find(o => o.name.toLowerCase() === x) || (def.options || []).find(o => (o.oldNames || []).some(n => n.toLowerCase() === x));
+            return o ? o.name : null;
+        };
         if (def.type === "Toggle") {
             if (value !== true && value !== "true") throw new Error(`${where}: design '${def.name}' is a toggle: true or false`);
             out.push({ key: def.name, kind: "toggle" });
         } else if (def.type === "Spacing") {
             if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${where}: design '${def.name}' is { "margin-top": "M", "padding-left": "S", ... }`);
             for (const [side, opt] of Object.entries(value)) spaced.push([side, opt]);
+        } else if (def.multiSelect && ["ToggleButtonGroup", "Dropdown"].includes(def.type)) {
+            // several options at once: [ "Phone", "Tablet" ] (one name alone, or "Phone, Tablet", is the same)
+            const list = Array.isArray(value) ? value : typeof value === "string" ? value.split(",").map(x => x.trim()).filter(Boolean) : null;
+            if (!list) throw new Error(`${where}: design '${def.name}' takes several options: [ ${opts.slice(0, 2).map(o => `"${o}"`).join(", ")} ] ([] or null removes it)`);
+            const picked = [];
+            for (const v of list) {
+                const hit = optionOf(v);
+                if (!hit) fail(`${where}: design '${def.name}': no option '${v}' (options: ${opts.join(", ")})`, String(v), opts);
+                if (!picked.includes(hit)) picked.push(hit);
+            }
+            out.push({ key: def.name, kind: "multi", options: picked });
         } else if (["Dropdown", "ToggleButtonGroup", "ColorPicker"].includes(def.type)) {
-            if (def.multiSelect) throw new Error(`${where}: design '${def.name}' takes several options; set it in Studio Pro`);
-            const opts = (def.options || []).map(o => o.name);
-            const hit = opts.find(o => o === String(value)) || opts.find(o => o.toLowerCase() === String(value).toLowerCase());
-            if (!hit) fail(`${where}: design '${def.name}': no option '${value}' (options: ${opts.join(", ")})`, String(value), opts);
+            if (Array.isArray(value)) throw new Error(`${where}: design '${def.name}' takes one option (options: ${opts.join(", ")})`);
+            const hit = optionOf(value);
+            if (!hit && def.type === "ColorPicker" && /^(#[0-9a-f]{3,8}|(rgb|rgba|hsl|hsla)\([^)]*\)|var\(--[\w-]+\))$/i.test(String(value).trim())) {
+                out.push({ key: def.name, kind: "custom", value: String(value).trim() });
+                continue;
+            }
+            if (!hit) fail(`${where}: design '${def.name}': no option '${value}' (options: ${opts.join(", ")}${def.type === "ColorPicker" ? "; or a colour #rrggbb, rgb(...), hsl(...), var(--name)" : ""})`, String(value), opts);
             out.push({ key: def.name, kind: "option", option: hit });
         } else throw new Error(`${where}: design '${def.name}' (${def.type}) is not supported here; set it in Studio Pro`);
     }
@@ -145,7 +183,8 @@ function resolve(dir, el, spec, where, platform = "web") {
 }
 
 // Writes resolved values into el.appearance.designProperties (only what changes). Returns a short text.
-function apply(sdk, model, el, values) {
+// warn: optional (text) => void for a value kind no Studio Pro sample in the test projects shows (multi-select)
+function apply(sdk, model, el, values, warn) {
     const { pages } = sdk;
     const list = el.appearance.designProperties;
     const find = k => list.find(x => x.key === k);
@@ -169,6 +208,26 @@ function apply(sdk, model, el, values) {
         if (v.kind === "toggle") {
             if (!(dpv.value instanceof pages.ToggleDesignPropertyValue)) pages.ToggleDesignPropertyValue.createIn(dpv);
             text.push(v.key);
+        } else if (v.kind === "multi") {
+            // one Toggle entry per chosen option, in the order of the theme's options as Studio Pro lists them
+            if (!(dpv.value instanceof pages.CompoundDesignPropertyValue)) pages.CompoundDesignPropertyValue.createIn(dpv);
+            const parts = dpv.value.properties;
+            for (const x of [...parts]) if (!v.options.includes(x.key)) x.delete();
+            for (const o of v.options) {
+                let x = parts.find(p => p.key === o);
+                if (!x) {
+                    x = pages.DesignPropertyValue.create(model);
+                    parts.push(x);
+                    x.key = o;
+                }
+                if (!(x.value instanceof pages.ToggleDesignPropertyValue)) pages.ToggleDesignPropertyValue.createIn(x);
+            }
+            text.push(`${v.key}: ${v.options.join(" + ")}`);
+            if (warn) warn(`design '${v.key}' (several options: a CompoundDesignPropertyValue of toggles, as Studio Pro 11.12 saves it) first use in this project: check it in Studio Pro`);
+        } else if (v.kind === "custom") {
+            if (!pages.CustomDesignPropertyValue) throw new Error(`design '${v.key}': this Mendix version stores no custom colours; pick one of the options`);
+            if (!(dpv.value instanceof pages.CustomDesignPropertyValue) || dpv.value.value !== v.value) pages.CustomDesignPropertyValue.createIn(dpv).value = v.value;
+            text.push(`${v.key}: ${v.value}`);
         } else if (v.kind === "option") {
             option(dpv, v.option);
             text.push(`${v.key}: ${v.option}`);
@@ -198,7 +257,7 @@ function apply(sdk, model, el, values) {
 
 // One line per design property el can take (for messages and the docs)
 function describe(dir, el, platform) {
-    return available(dir, el, platform).map(d => `${d.name} (${d.type === "Toggle" ? "true/false" : d.type === "Spacing" ? "margin-/padding-top|right|bottom|left: " + (d.margin || []).map(o => o.name).join("|") : (d.options || []).map(o => o.name).join(" | ")})`);
+    return available(dir, el, platform).map(d => `${d.name} (${d.type === "Toggle" ? "true/false" : d.type === "Spacing" ? "margin-/padding-top|right|bottom|left: " + (d.margin || []).map(o => o.name).join("|") : (d.multiSelect ? "several of: " : "") + (d.options || []).map(o => o.name).join(" | ") + (d.type === "ColorPicker" ? " | #rrggbb" : "")})`);
 }
 
-module.exports = { definitions, typeKeys, available, resolve, apply, describe, suggest };
+module.exports = { definitions, typeKeys, available, resolve, apply, describe, suggest, overlay, reset };

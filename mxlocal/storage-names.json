@@ -130,7 +130,7 @@
 "Pages$DesignPropertyValue":{"$":"Forms$DesignPropertyValue"},
 "Pages$DivContainer":{"$":"Forms$DivContainer"},
 "Pages$DropDown":{"$":"Forms$DropDown"},
-"Pages$DropDownButton":{"$":"Forms$DropDownButton"},
+"Pages$DropDownButton":{"$":"Forms$DropDownButton","p":{"caption":"CaptionTemplate"},"fixed":true},
 "Pages$DropDownButtonItem":{"$":"Forms$DropDownButtonItem"},
 "Pages$DropDownSearchField":{"$":"Forms$DropDownSearchField"},
 "Pages$DynamicImageViewer":{"$":"Forms$ImageViewer"},

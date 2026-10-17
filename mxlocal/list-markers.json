@@ -40,6 +40,7 @@
 "Forms$DataView.Widgets":2,
 "Forms$DbTableCell.Widgets":2,
 "Forms$DivContainer.Widgets":2,
+"Forms$DropDownButton.Items":2,
 "Forms$FormAction.PagesForSpecializations":2,
 "Forms$FormCallArgument.Widgets":2,
 "Forms$FormSettings.ParameterMappings":2,

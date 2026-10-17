@@ -781,6 +781,48 @@
           "Order_Search2\\.txt$": "(?s)^(?=.*Data grid 2)(?=.*attrChoice: linked)(?=.*'Ara')"
         }
       }
+    },
+    {
+      "id": "uilook",
+      "setup": [
+        {
+          "op": "createPage",
+          "module": "MyFirstModule",
+          "name": "Order_NewEdit",
+          "entity": "MyFirstModule.Order"
+        }
+      ],
+      "text": "Order_Card sayfası yap: sipariş parametreli. En üstte sadece kalem ikonlu (yazısız) bir buton olsun, üzerine gelince 'Düzenle' yazsın ve Order_NewEdit sayfasını açsın; telefonda gizlenen bir container içinde 'Sipariş' başlığı (H2) bulunsun; Note alanının görünür etiketi olmasın ama ekran okuyucu 'Sipariş notu' desin; Paid ise container'a 'paid' class'ı eklensin.",
+      "checks": {
+        "find": [
+          "MyFirstModule.Order_Card"
+        ],
+        "files": {
+          "Order_Card\\.txt$": "(?s)^(?=.*icon glyphicon-pencil[^\\n]*icon only[^\\n]*tooltip \"Düzenle\")(?=.*Hide on: Phone)(?=.*screen reader text \"Sipariş notu\")(?=.*dynamic class [^\\n]*Paid[^\\n]*paid)"
+        }
+      }
+    },
+    {
+      "id": "uitheme",
+      "setup": [
+        {
+          "op": "createPage",
+          "module": "MyFirstModule",
+          "name": "Order_List",
+          "widgets": [
+            {
+              "widget": "dataGrid",
+              "entity": "MyFirstModule.Order"
+            }
+          ]
+        }
+      ],
+      "text": "Uygulamanın ana rengini #0B5FFF yap. Container'lar için 'Kart stili' adında bir tasarım özelliği tanımla: 'Düz' (gölgesiz) ve 'Yükseltilmiş' (hafif gölgeli) seçenekleri olsun. Order_List sayfasının en üstüne bu özelliği 'Yükseltilmiş' olan bir container ekle; içinde 'Siparişler' başlığı olsun.",
+      "checks": {
+        "files": {
+          "Order_List\\.txt$": "(?s)Kart stili: Yükseltilmiş.*Siparişler|Siparişler.*Kart stili: Yükseltilmiş"
+        }
+      }
     }
   ]
 }
