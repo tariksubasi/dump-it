@@ -77,7 +77,11 @@ const DOMAIN_SYNONYMS = {
         oql: "a view entity is made with createViewEntity { module, name, oql }",
         external: "external entities come from a consumed OData service: add them in Studio Pro (Integration pane); ops can only read them",
         service: "external entities come from a consumed OData service: add them in Studio Pro (Integration pane); ops can only read them",
-        calculated: "calculated attributes: addAttribute with \"calculated\": \"Module.Microflow\""
+        calculated: "calculated attributes: addAttribute with \"calculated\": \"Module.Microflow\"",
+        color: "Mendix does not store an entity color (the domain model colors entities by kind); leave out color",
+        colour: "Mendix does not store an entity color (the domain model colors entities by kind); leave out color",
+        location: "new entities get a free spot next to related ones; to tidy a diagram use arrangeDomainModel { \"module\": ... }",
+        position: "new entities get a free spot next to related ones; to tidy a diagram use arrangeDomainModel { \"module\": ... }"
     },
     addAttribute: { microflow: "use \"calculated\": \"Module.Microflow\"", calculatedBy: "use \"calculated\": \"Module.Microflow\"" },
     changeAttribute: { microflow: "use \"calculated\": \"Module.Microflow\" (or \"stored\": true to store it again)" },
