@@ -31,6 +31,7 @@ function dsTargets(s) {
     const store = s.model.allModules().find(m => m.fromAppStore);
     x.atlasCore = s.model.allModules().some(m => m.name === "Atlas_Core" && m.fromAppStore);
     const inst = require("./pluggable").installed(project.dir);
+    x.installed = inst;
     x.gallery = inst.has("com.mendix.widget.web.gallery.Gallery");
     x.grid2 = inst.has("com.mendix.widget.web.datagrid.Datagrid");
     x.store = store ? store.name : null;
@@ -42,7 +43,7 @@ function dsTargets(s) {
 function dsPlan(mod, T, x) {
     const q = n => `${mod}.${T}${n}`;
     const ops = [
-        { op: "createEntity", module: mod, name: `${T}DsE`, attributes: [{ name: "Name", type: "String(100)" }, { name: "Active", type: "Boolean" }] },
+        { op: "createEntity", module: mod, name: `${T}DsE`, attributes: [{ name: "Name", type: "String(100)" }, { name: "Active", type: "Boolean" }, { name: "Amount", type: "Decimal" }, { name: "Done", type: "Integer" }] },
         { op: "createBuildingBlock", module: mod, name: `${T}BbCard`, folder: "ZzDs", category: "Zz kit", categoryWeight: 10, displayName: "Zz card", documentationUrl: "https://example.com/card", widgets: [
             { widget: "container", name: "zzCard", class: "card zz-card", widgets: [{ widget: "text", name: "zzCardTitle", text: "Card title", style: "H4" }, { widget: "text", text: "Body" }] }] },
         { op: "createBuildingBlock", module: mod, name: `${T}BbForm`, folder: "ZzDs", widgets: [
@@ -98,6 +99,25 @@ function dsPlan(mod, T, x) {
         [{ op: "createComponentKit", module: mod, prefix: "zzx", kit: [{ recipe: "card", colour: "red" }] }, /card takes recipe, name, title, text; not 'colour'/]
     );
     if (x.atlasCore) refuse.push([{ op: "createComponentKit", module: mod, prefix: "zzy", kit: ["card"], withStyles: true, file: "themesource/atlas_core/web/main.scss" }, /Marketplace module Atlas_Core/]);
+    // pluggable presets: the ones whose .mpk this project has
+    const E = `${mod}.${T}DsE`;
+    const presetSpecs = {
+        badge: { widget: "badge", name: "zzBadge", text: "Beta" }, progressBar: { widget: "progressBar", name: "zzBar", value: 40, showLabel: true }, progressCircle: { widget: "progressCircle", name: "zzCircle", value: 70 },
+        accordion: { widget: "accordion", name: "zzAcc", groups: [{ header: "One", widgets: [{ widget: "text", text: "a" }] }, { header: "Two", collapsed: false }] },
+        popupMenu: { widget: "popupMenu", name: "zzMenu", items: [{ caption: "Close", action: { action: "close" } }, "divider", { caption: "Close too", action: { action: "close" }, style: "danger" }] },
+        treeNode: { widget: "treeNode", name: "zzTree", entity: E, caption: "{Name}" }, lineChart: { widget: "lineChart", name: "zzLine", entity: E, x: "Name", y: "Amount" },
+        columnChart: { widget: "columnChart", name: "zzColumns", entity: E, x: "Name", y: "Amount", aggregation: "sum" }, pieChart: { widget: "pieChart", name: "zzPie", entity: E, value: "Amount", caption: "{Name}", hole: 50 },
+        barChart: { widget: "barChart", name: "zzBars", entity: E, x: "Name", y: "Done", xLabel: "Name", yLabel: "Done" }, areaChart: { widget: "areaChart", name: "zzArea", entity: E, x: "Name", y: "Amount", xpath: "[Active = true()]" }
+    };
+    const P = require("./pl-presets").PRESETS;
+    x.presets = Object.keys(presetSpecs).filter(k => x.installed.has(P[k].id));
+    if (x.layout && x.presets.length) {
+        ops.push({ op: "createPage", module: mod, name: `${T}_DsPresets`, folder: "ZzDs", layout: x.layout, widgets: x.presets.map(k => presetSpecs[k]) });
+        if (x.presets.includes("accordion")) refuse.push([{ op: "createPage", module: mod, name: `${T}_DsR1`, widgets: [{ widget: "accordion", groups: [{ widgets: [] }] }] }, /needs "header"/]);
+        if (x.presets.includes("progressBar")) refuse.push([{ op: "createPage", module: mod, name: `${T}_DsR2`, widgets: [{ widget: "progressBar", value: { attribute: "Done" }, min: 1 }] }, /min \/ max go with a fixed number/]);
+    }
+    const missing = Object.keys(P).find(k => !x.installed.has(P[k].id));
+    if (missing && x.layout) refuse.push([{ op: "createPage", module: mod, name: `${T}_DsR3`, widgets: [{ widget: missing, ...Object.fromEntries(Object.entries(P[missing].fields).filter(([, d]) => d.startsWith("R ")).map(([k]) => [k, k === "groups" || k === "items" ? [{ header: "x", caption: "x" }] : "x"])) }] }, /needs the .* widget .*importWidget/]);
     if (x.store) refuse.push([{ op: "applyStyle", widget: "container", module: x.store, addClass: "x" }, /is a Marketplace module/]);
     if (x.layout) {
         ops.push(
@@ -177,6 +197,14 @@ function dsProblems(project, mod, T, x) {
     let grid = null;
     walk(tb || {}, o => (o.$Type === "CustomWidgets$CustomWidget" || o.$Type === "Forms$DataGrid") && !grid && (grid = o));
     say(tb && grid && (!x.grid2 || grid.$Type === "CustomWidgets$CustomWidget"), "kit toolbar with a grid of the entity not stored");
+    if (x.layout && x.presets.length) {
+        const pp = units[`${T}_DsPresets`];
+        const ids = [];
+        walk(pp || {}, o => o.$Type === "CustomWidgets$CustomWidget" && o.Type && ids.push(o.Type.WidgetId));
+        const P = require("./pl-presets").PRESETS;
+        const want = [...new Set(x.presets.map(k => P[k].id))];
+        say(want.every(id => ids.includes(id)), `pluggable presets not stored: ${want.filter(id => !ids.includes(id)).join(", ")}`);
+    }
     if (x.layout) {
         const tl = units[`${T}TplList`], te = units[`${T}TplEdit`];
         say(tl && tl.$Type === "Forms$PageTemplate" && tl.TemplateType.$Type === "Forms$RegularPageTemplateType" && tl.LayoutCall.Form === x.layout && tl.TemplateCategory === "Zz kit", "regular page template not stored");
@@ -206,6 +234,8 @@ async function dsModelPhase({ s2, reopen, copy, mod, T, layout, layoutProblems, 
     let s = s2;
     const before = new Set(s.ctx.project.units.keys());
     problems.push(...(await s.ops.runPlan({ ops: plan.ops }, () => {})));
+    // the presets fill every required property: no "leaves required ... empty"
+    problems.push(...s.client.summary().warnings.filter(w => /_DsPresets.*leaves required/.test(w)));
     await s.model.flushChanges();
     const enc = s.client.encode();
     enc.plainFiles = require("./files").encode(s.client);
@@ -226,9 +256,10 @@ async function dsModelPhase({ s2, reopen, copy, mod, T, layout, layoutProblems, 
     problems.push(...dsProblems(s.ctx.project, mod, T, x));
     await refused(s, plan.refuse);
     if (!x.layout) results.push("SKIP ds-model: page templates: this project has no page with a layout placeholder Main");
+    if (x.layout && x.presets.length < 11) results.push(`SKIP ds-model: pluggable presets without their .mpk here: ${Object.keys(require("./pl-presets").PRESETS).filter(k => !x.presets.includes(k)).join(", ")} (refused, tested)`);
     if (!x.nav) results.push("SKIP ds-model: layout menus: no Responsive navigation profile (layouts built with menu false)");
     const what = ["building blocks (toolbox details, unconfigured data view with 5 inputs + Save / Cancel, unconfigured list view, bound list view)", "addWidgets / changeWidget / changeBuildingBlock on a building block",
-        "buildingBlock widget on a page", x.layout && "page templates (regular, edit) + createPage from them", "createLayout sidebar / topbar / modal pop-up with header, side bar, footer, menu", "applyStyle (page + hasClass, module folder + match + style + button style)", `component kits (8 recipes + SCSS, ${3 + Number(x.gallery)} bound to an entity)`, `${plan.refuse.length} refusals`].filter(Boolean);
+        "buildingBlock widget on a page", x.layout && "page templates (regular, edit) + createPage from them", "createLayout sidebar / topbar / modal pop-up with header, side bar, footer, menu", "applyStyle (page + hasClass, module folder + match + style + button style)", `component kits (8 recipes + SCSS, ${3 + Number(x.gallery)} bound to an entity)`, x.layout && x.presets.length && `pluggable presets ${x.presets.join(", ")}`, `${plan.refuse.length} refusals`].filter(Boolean);
     check(`ds-model: ${what.join("; ")}; stored with Studio Pro's keys, reopen 0 errors`, !problems.length, [...new Set(problems)].slice(0, 6).join("; "));
     if (firstUse.length) results.push(`NOTE ds-model: no Studio Pro sample in this project of ${firstUse.length} type(s) (SDK layout): ${firstUse.slice(0, 10).join(", ")}`);
     return reopen(copy);

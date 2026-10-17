@@ -186,6 +186,9 @@ const COMMON_FIELDS = {
 // UI details per kind (ui.js): button icons, tooltips, aria, container render mode and on click, image alt text; the drop-down button kind
 WIDGETS.dropDownButton = ui.DROPDOWN;
 for (const [k, f] of Object.entries(ui.KIND_UI)) Object.assign(WIDGETS[k].fields, f);
+// pluggable widget presets (pl-presets.js): badge, progressBar, accordion, popupMenu, treeNode, charts
+const presets = require("./pl-presets");
+for (const [k, p] of Object.entries(presets.PRESETS)) WIDGETS[k] = { doc: `${p.doc}; needs widgets/*.mpk with ${p.id.split(".").pop()} (else refused); becomes a "pluggable" widget with working values`, fields: p.fields };
 
 const INPUTS = { textBox: "TextBox", textArea: "TextArea", checkBox: "CheckBox", datePicker: "DatePicker", radioButtons: "RadioButtonGroup", dropDown: "DropDown" };
 const ALIASES = { button: "actionButton", grid: "dataGrid", datagrid: "dataGrid", datagrid2: "dataGrid", list: "listView", heading: "text", div: "container", radiobuttongroup: "radioButtons",
@@ -442,7 +445,11 @@ function makePages(h) {
     function scan(specs, where, container, nodes) {
         return list(specs, where).map((spec, i) => {
             const at = `${where}[${i + 1}]`;
-            const kind = kindOf(spec, at);
+            let kind = kindOf(spec, at);
+            if (presets.PRESETS[kind]) {
+                spec = presets.expand(kind, spec, at, client.project.dir);
+                kind = "pluggable";
+            }
             const node = { kind, spec, where: `${at} (${kind})`, container, name: spec.name !== undefined ? String(spec.name) : null, heading: /^heading$/i.test(spec.widget || spec.type) };
             nodes.push(node);
             if (kind === "layoutGrid") {
