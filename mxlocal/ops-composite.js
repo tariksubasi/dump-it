@@ -26,7 +26,7 @@ const TEMPLATE_INFO = {
     documentationUrl: "optional link shown in Studio Pro's toolbox",
     documentation: "optional documentation text"
 };
-const UNBOUND = "a data view or list view without \"entity\" (and without source fields) stays unconfigured, as in Studio Pro's own building blocks: inside it, inputs without \"attribute\" ({ \"widget\": \"textBox\", \"label\": \"Name\" }; also textArea, datePicker, checkBox, radioButtons, dropDown) and save / cancel buttons; the page it lands on sets the entity";
+const UNBOUND = "a button without \"action\" gets none yet (as Atlas building blocks); a data view or list view without \"entity\" (and without source fields) stays unconfigured, as in Studio Pro's own building blocks: inside it, inputs without \"attribute\" ({ \"widget\": \"textBox\", \"label\": \"Name\" }; also textArea, datePicker, checkBox, radioButtons, dropDown) and save / cancel buttons; the page it lands on sets the entity";
 const COMPOSITE_OPS = {
     createBuildingBlock: {
         doc: "Create a web building block (Studio Pro toolbox) from widgets as in createPage. A data view or list view without an entity stays unconfigured (the page it is dropped on sets it), as in Atlas building blocks. Pages take it with createPage / addWidgets { \"widget\": \"buildingBlock\", \"from\": \"Module.Name\" }; its own widgets change with addWidgets / changeWidget (page = Module.BuildingBlock).",
@@ -71,10 +71,21 @@ const COMPOSITE_OPS = {
             buttonStyle: "optional with widget actionButton: Default | Primary | Success | Info | Warning | Danger | Inverse",
             limit: "optional the most widgets it may change (default 200); more matches are refused with the count"
         }
+    },
+    createComponentKit: {
+        doc: "Create a component kit: one web building block per recipe (card, KPI tile, page header with actions, toolbar above a Data grid 2, form section, list of cards, gallery, empty state, master-detail) with Atlas classes and \"<prefix>-...\" classes, in one toolbox category; withStyles also writes the SCSS those classes expect.",
+        fields: {
+            module: "R module name", prefix: "R short company prefix for names and classes, e.g. \"acme\" (building blocks Acme_Card, ...; classes acme-card, acme-card__title, ...)",
+            kit: "optional [ \"card\" | \"kpiTile\" | \"pageHeader\" | \"toolbar\" | \"formSection\" | \"listCards\" | \"gallery\" | \"emptyState\" | \"masterDetail\" or { \"recipe\": ..., \"name\": ..., options } ] (default all but gallery); options: title, text, label, value, delta, subtitle, actions [captions], fields [labels, or attributes with entity], labels top | side (formSection), columns, tabletColumns, phoneColumns (gallery), entity",
+            entity: "optional Module.Entity for the recipes that show data (toolbar: a Data grid 2 with a search filter; listCards, gallery, masterDetail: bound to it); without it they stay unconfigured (gallery needs it)",
+            folder: "optional folder path (default Kit)", category: "optional toolbox category (default \"<Prefix> kit\")",
+            withStyles: "optional true: append the kit's SCSS (CSS custom properties with fallbacks) to the theme file", file: "optional with withStyles: the SCSS file (default themesource/<module>/web/main.scss when the module has one, else theme/web/main.scss)"
+        }
     }
 };
 
 const COMPOSITE_SYNONYMS = {
+    createComponentKit: { recipes: "use \"kit\"", components: "use \"kit\"", styles: "use \"withStyles\": true", name: "a kit makes several building blocks: give \"prefix\" (and per item { \"recipe\": ..., \"name\": ... })", widgets: "a kit is made of recipes (\"kit\"); one building block of your own widgets: createBuildingBlock" },
     createBuildingBlock: { title: "a building block has no title; \"displayName\" is its toolbox name", templateCategory: "use \"category\"", templateCategoryWeight: "use \"categoryWeight\"", layout: "a building block has no layout (a page template has: createPageTemplate)", parameters: "a building block has no parameters: leave out the data view's entity (unconfigured) or give it listenTo / source", preset: "use createComponentKit for ready-made recipes" },
     createPageTemplate: { templateCategory: "use \"category\"", templateCategoryWeight: "use \"categoryWeight\"", templateType: "use \"type\"", title: "a page template has no title (pages made from it get one)", from: "a template is not copied from another; give \"widgets\" or \"placeholders\"" },
     changeBuildingBlock: { name: "renaming is the rename op", page: "use \"document\"", templateCategory: "use \"category\"", templateCategoryWeight: "use \"categoryWeight\"" },
@@ -187,6 +198,13 @@ function makeComposite(x) {
                 st.markers.push({ kind: "input", name, input, label, where: at });
                 return { widget: "text", name, text: label || " " };
             }
+            if (kind === "actionButton" && spec.action === undefined) {
+                // no action yet (as Atlas building blocks' buttons): the page author sets it
+                const name = spec.name !== undefined ? String(spec.name) : st.names.next("actionButton");
+                if (spec.caption === undefined) throw new Error(`${at}: a button without an action needs "caption"`);
+                st.markers.push({ kind: "button", name, action: "none", where: at });
+                return { ...spec, action: "close", name };
+            }
             if (inFree && kind === "actionButton" && /^(save|cancel)$/i.test(String(spec.action))) {
                 const a = String(spec.action).toLowerCase();
                 const name = spec.name !== undefined ? String(spec.name) : st.names.next("actionButton");
@@ -267,7 +285,8 @@ function makeComposite(x) {
                 w.name = m.name;
                 await I().inputDefaults(w, m.input);
                 await I().templateAll(w, "labelTemplate", m.label, null, m.where);
-            } else if (m.kind === "button") {
+            } else if (m.kind === "button" && m.action === "none") pages.NoClientAction.createInActionButtonUnderAction(old);
+            else if (m.kind === "button") {
                 const cls = m.action === "save" ? pages.SaveChangesClientAction : pages.CancelChangesClientAction;
                 cls.createInActionButtonUnderAction(old).closePage = bool(m.closePage, true);
             }
@@ -292,7 +311,7 @@ function makeComposite(x) {
     // the builders' summary with the stand-ins named as what they became
     function told(text, st) {
         let t = text.replace(/zzFooterStandIn\d+ \[([^\]]*)\]/g, "footer [$1]");
-        for (const m of st.markers) if (m.kind === "button") t = t.replace(`${m.name} (close page)`, `${m.name} (${m.action})`);
+        for (const m of st.markers) if (m.kind === "button") t = t.replace(`${m.name} (close page)`, `${m.name} (${m.action === "none" ? "no action yet" : m.action})`);
         return t;
     }
 
@@ -658,7 +677,105 @@ function makeComposite(x) {
         return `${out.length} ${kind} widget(s) in ${byDoc.size} document(s): ${what}` + [...byDoc.entries()].map(([qn, ns]) => `\n      ${qn}: ${ns.join(", ")}`).join("");
     }
 
+    // ------------------------------------------------ component kits (ds-kit.js recipes)
+
+    // { items: [{ recipe, name, ...options }], p (class prefix), P (name prefix) } with every field checked
+    async function kitPlan(o, where) {
+        const kit = require("./ds-kit");
+        const P = kit.pascal(String(o.prefix)), p = kit.kebab(String(o.prefix));
+        if (!/^[A-Za-z][A-Za-z0-9-_]*$/.test(String(o.prefix)) || !P) throw new Error(`${where}: prefix '${o.prefix}' must start with a letter (letters, digits, - and _), e.g. "acme"`);
+        const raw = o.kit === undefined ? kit.DEFAULT_KIT : o.kit;
+        if (!Array.isArray(raw) || !raw.length) throw new Error(`${where}: kit is a list of recipes [ ${Object.keys(kit.RECIPES).map(r => `"${r}"`).join(", ")} ]`);
+        const names = Object.keys(kit.RECIPES);
+        const items = raw.map((r, i) => {
+            const at = `${where}: kit[${i + 1}]`;
+            const it = typeof r === "string" ? { recipe: r } : r;
+            if (!it || typeof it !== "object" || Array.isArray(it) || typeof it.recipe !== "string") throw new Error(`${at}: a recipe name ("card") or { "recipe": "card", ... }`);
+            const recipe = names.find(n => n.toLowerCase() === it.recipe.toLowerCase()) || fail(`${at}: no recipe '${it.recipe}' (recipes: ${names.join(", ")})`, it.recipe, names);
+            const allowed = ["recipe", "name", ...kit.RECIPES[recipe].options];
+            for (const k of Object.keys(it)) if (!allowed.includes(k)) fail(`${at}: ${recipe} takes ${allowed.join(", ")}; not '${k}'`, k, allowed);
+            const name = it.name !== undefined ? String(it.name) : `${P}_${recipe[0].toUpperCase()}${recipe.slice(1)}`;
+            validName(name, "building block name");
+            return { ...it, recipe, name, at };
+        });
+        const dup = items.map(i => i.name).find((n, i, a) => a.indexOf(n) !== i);
+        if (dup) throw new Error(`${where}: two building blocks named ${dup}; give "name" to one`);
+        return { kit, items, p, P };
+    }
+
+    async function kitEntity(qn, where) {
+        const e = await x.entity(String(qn));
+        const attrs = [];
+        for (let c = e, i = 0; c && i < 10; i++) {
+            for (const a of c.attributes) attrs.push({ name: a.name, type: a.type ? a.type.structureTypeName.split("$")[1].replace("AttributeType", "") : "?" });
+            const g = c.generalization;
+            c = g instanceof sdk.domainmodels.Generalization && g.generalization && g.generalization.isLoaded ? g.generalization : null;
+        }
+        if (!attrs.length) throw new Error(`${where}: ${qn} has no attributes to show`);
+        return { qn: e.qualifiedName, name: e.name, attrs };
+    }
+
+    // The theme file the kit's SCSS goes to.
+    function kitFile(o) {
+        if (o.file !== undefined) return String(o.file);
+        const fs = require("fs"), path = require("path");
+        const own = model.allModules().find(m => m.name === o.module);
+        const dir = path.join(client.project.dir, "themesource", String(o.module).toLowerCase(), "web");
+        return own && !own.fromAppStore && fs.existsSync(dir) ? `themesource/${String(o.module).toLowerCase()}/web/main.scss` : "theme/web/main.scss";
+    }
+
+    async function createComponentKit(o) {
+        const where = `createComponentKit ${o.prefix}`;
+        x.folder(o.module, undefined); // the module exists ("did you mean")
+        if (o.file !== undefined && o.withStyles !== true) throw new Error(`${where}: "file" goes with "withStyles": true`);
+        const { kit, items, p, P } = await kitPlan(o, where);
+        for (const it of items) if (await x.exists(`${o.module}.${it.name}`)) throw new Error(`${where}: ${o.module}.${it.name} already exists; give the kit another prefix, a "name" per item, or delete it first`);
+        const dir = client.project.dir;
+        const inst = require("./pluggable").installed(dir);
+        const can = { grid2: inst.has("com.mendix.widget.web.datagrid.Datagrid"), gallery: inst.has("com.mendix.widget.web.gallery.Gallery") };
+        const outs = [];
+        const used = [];
+        for (const it of items) {
+            const entQn = it.entity !== undefined ? it.entity : kit.RECIPES[it.recipe].options.includes("entity") ? o.entity : undefined;
+            if (kit.NEEDS_ENTITY.includes(it.recipe) && entQn === undefined) throw new Error(`${it.at}: the ${it.recipe} recipe needs an entity: { "recipe": "${it.recipe}", "entity": "Module.Entity" } or the kit's "entity"`);
+            if (it.recipe === "gallery" && !can.gallery) throw new Error(`${it.at}: the gallery recipe needs the Gallery widget (widgets/com.mendix.widget.web.Gallery.mpk: Marketplace "Gallery" / Data Widgets); this project has none: use listCards`);
+            const ent = entQn !== undefined ? await kitEntity(entQn, it.at) : null;
+            const widgets = kit.build(it, p, ent, can);
+            const text = await createBuildingBlock({ module: o.module, name: it.name, folder: o.folder !== undefined ? o.folder : "Kit", category: o.category !== undefined ? o.category : `${P} kit`, categoryWeight: (outs.length + 1) * 10, displayName: `${P} ${kit.kebab(it.recipe).replace(/-/g, " ")}`, widgets });
+            outs.push(`${it.name} (${it.recipe}${ent ? ` of ${ent.name}` : ""}): ${[...kit.classesOf(widgets)].filter(c => c.startsWith(p + "-")).join(" ")}`);
+            if (!used.includes(it.recipe)) used.push(it.recipe);
+            void text;
+        }
+        let styles = "";
+        if (o.withStyles === true) {
+            const file = kitFile(o);
+            const fs = require("fs"), path = require("path");
+            const mod = /^themesource\/([^/]+)\//.exec(file.replace(/\\/g, "/"));
+            if (mod) {
+                const owner = model.allModules().find(m => m.name.toLowerCase() === mod[1].toLowerCase());
+                if (owner && owner.fromAppStore) throw new Error(`${where}: ${file} belongs to the Marketplace module ${owner.name} (an update overwrites it); write the kit styles to your own module's themesource or theme/web/main.scss`);
+            }
+            const rel = file.replace(/\\/g, "/");
+            const cur = require("./files").current(client, rel);
+            const body = kit.scss(p, used);
+            if (cur && cur.toString("utf8").includes(`/* ${p} component kit`)) throw new Error(`${where}: ${rel} already has the ${p} component kit styles; change them with editThemeFile edits (or use another prefix)`);
+            styles = "\n      styles: " + (await x.themeOps.impl.editThemeFile(cur === null ? { path: rel, content: body.replace(/^\n/, "") } : { path: rel, append: body }));
+            void fs; void path;
+        } else styles = `\n      styles: none written; the classes need SCSS (withStyles: true, or the theme's component styles)`;
+        return `${items.length} building block(s) in ${o.module}/${o.folder !== undefined ? o.folder : "Kit"}, category "${o.category !== undefined ? o.category : `${P} kit`}":` + outs.map(t => `\n      ${t}`).join("") + styles;
+    }
+
     const checks = {
+        async createComponentKit(o) {
+            const { items, p } = await kitPlan(o, "check");
+            const r = [];
+            for (const it of items) if (!(await x.exists(`${o.module}.${it.name}`))) r.push(`${o.module}.${it.name} missing`);
+            if (o.withStyles === true) {
+                const b = require("./files").onDisk(client.project.dir, kitFile(o));
+                if (!b || !b.toString("utf8").includes(`/* ${p} component kit`)) r.push(`${kitFile(o)} lacks the ${p} kit styles`);
+            }
+            return r;
+        },
         async applyStyle(o) {
             const replaced = o.class !== undefined || classList(o.removeClass).includes(String(o.hasClass));
             const { out: all } = await styleTargets(o, "check", !replaced);
@@ -703,7 +820,7 @@ function makeComposite(x) {
         }
     };
 
-    return { impl: { createBuildingBlock, changeBuildingBlock, createPageTemplate, applyStyle }, createLayoutFresh, LAYOUT_FROM_ONLY, checks, internals: { unbound, swap, fill, newState, givenNames, usualLayout, templateInfo } };
+    return { impl: { createBuildingBlock, changeBuildingBlock, createPageTemplate, applyStyle, createComponentKit }, createLayoutFresh, LAYOUT_FROM_ONLY, checks, internals: { unbound, swap, fill, newState, givenNames, usualLayout, templateInfo } };
 }
 
 module.exports = { makeComposite, COMPOSITE_OPS, COMPOSITE_SYNONYMS };

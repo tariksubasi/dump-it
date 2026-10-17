@@ -29,6 +29,10 @@ function dsTargets(s) {
     }
     for (const l of s.model.allLayouts()) mains.add(l.qualifiedName);
     const store = s.model.allModules().find(m => m.fromAppStore);
+    x.atlasCore = s.model.allModules().some(m => m.name === "Atlas_Core" && m.fromAppStore);
+    const inst = require("./pluggable").installed(project.dir);
+    x.gallery = inst.has("com.mendix.widget.web.gallery.Gallery");
+    x.grid2 = inst.has("com.mendix.widget.web.datagrid.Datagrid");
     x.store = store ? store.name : null;
     const byUse = [...used.entries()].filter(([l]) => mains.has(l)).sort((a, b) => b[1] - a[1]);
     if (byUse.length) x.layout = byUse[0][0];
@@ -81,6 +85,19 @@ function dsPlan(mod, T, x) {
         [{ op: "applyStyle", widget: "container", module: mod, class: "a", addClass: "x" }, /class replaces all classes/],
         [{ op: "applyStyle", widget: "text", page: `${mod}.${T}_DsShell`, match: "nothingLikeThis*", addClass: "x" }, /no text widget named like/]
     );
+    const dataKit = ["toolbar", "listCards", "masterDetail", ...(x.gallery ? ["gallery"] : [])];
+    ops.push(
+        { op: "createComponentKit", module: mod, prefix: "zzk", folder: "ZzDs", withStyles: true },
+        { op: "createComponentKit", module: mod, prefix: "zzd", folder: "ZzDs", entity: `${mod}.${T}DsE`, kit: dataKit }
+    );
+    refuse.push(
+        [{ op: "createComponentKit", module: mod, prefix: "zzx", kit: ["carrd"] }, /Did you mean: card/],
+        [{ op: "createComponentKit", module: mod, prefix: "zzx", kit: ["gallery"] }, /needs an entity/],
+        [{ op: "createComponentKit", module: mod, prefix: "zzk", kit: [{ recipe: "card", name: `${T}KitOther` }], withStyles: true }, /already has the zzk component kit styles/],
+        [{ op: "createComponentKit", module: mod, prefix: "zzk", kit: ["card"] }, /already exists/],
+        [{ op: "createComponentKit", module: mod, prefix: "zzx", kit: [{ recipe: "card", colour: "red" }] }, /card takes recipe, name, title, text; not 'colour'/]
+    );
+    if (x.atlasCore) refuse.push([{ op: "createComponentKit", module: mod, prefix: "zzy", kit: ["card"], withStyles: true, file: "themesource/atlas_core/web/main.scss" }, /Marketplace module Atlas_Core/]);
     if (x.store) refuse.push([{ op: "applyStyle", widget: "container", module: x.store, addClass: "x" }, /is a Marketplace module/]);
     if (x.layout) {
         ops.push(
@@ -147,6 +164,19 @@ function dsProblems(project, mod, T, x) {
     say(copies.length === 2 && copies.every(c => c === "zz-card zz-styled"), `applyStyle hasClass / removeClass / addClass not stored (${copies.join(" | ")})`);
     const more = named(card, "zzCardMore"), out = named(shell, "zzSignOut");
     say(more && more.Appearance.Style === "margin: 2px;" && more.ButtonStyle === "Primary" && out && out.Appearance.Style === "margin: 2px;", "applyStyle in a module folder (building block + layout buttons) not stored");
+    const kitNames = ["Card", "KpiTile", "PageHeader", "Toolbar", "FormSection", "ListCards", "EmptyState", "MasterDetail"];
+    const kitUnits = kitNames.map(n => units[`Zzk_${n}`] || project.read([...project.units.keys()].find(id => project.read(id).Name === `Zzk_${n}`) || ""));
+    say(kitUnits.every(u => u && u.$Type === "Forms$BuildingBlock" && u.TemplateCategory === "Zzk kit") && kitUnits.map(u => u.TemplateCategoryWeight).join() === "10,20,30,40,50,60,70,80", "component kit building blocks / category / order not stored");
+    const kcard = kitUnits[0] && kitUnits[0].Widgets[0];
+    say(kcard && kcard.Appearance.Class === "card zzk-card", "kit card classes not stored");
+    const fs = require("fs"), path = require("path");
+    const scssFile = ["themesource/" + mod.toLowerCase() + "/web/main.scss", "theme/web/main.scss"].map(f => path.join(project.dir, f)).find(f => fs.existsSync(f) && /\/\* zzk component kit/.test(fs.readFileSync(f, "utf8")));
+    say(scssFile && /\.zzk-card \{/.test(fs.readFileSync(scssFile, "utf8")) && /var\(--zzk-surface-1, #ffffff\)/.test(fs.readFileSync(scssFile, "utf8")), "kit SCSS not written");
+    const unitNamed = n => project.read([...project.units.keys()].find(id => project.read(id).Name === n) || "");
+    const tb = unitNamed("Zzd_Toolbar");
+    let grid = null;
+    walk(tb || {}, o => (o.$Type === "CustomWidgets$CustomWidget" || o.$Type === "Forms$DataGrid") && !grid && (grid = o));
+    say(tb && grid && (!x.grid2 || grid.$Type === "CustomWidgets$CustomWidget"), "kit toolbar with a grid of the entity not stored");
     if (x.layout) {
         const tl = units[`${T}TplList`], te = units[`${T}TplEdit`];
         say(tl && tl.$Type === "Forms$PageTemplate" && tl.TemplateType.$Type === "Forms$RegularPageTemplateType" && tl.LayoutCall.Form === x.layout && tl.TemplateCategory === "Zz kit", "regular page template not stored");
@@ -198,7 +228,7 @@ async function dsModelPhase({ s2, reopen, copy, mod, T, layout, layoutProblems, 
     if (!x.layout) results.push("SKIP ds-model: page templates: this project has no page with a layout placeholder Main");
     if (!x.nav) results.push("SKIP ds-model: layout menus: no Responsive navigation profile (layouts built with menu false)");
     const what = ["building blocks (toolbox details, unconfigured data view with 5 inputs + Save / Cancel, unconfigured list view, bound list view)", "addWidgets / changeWidget / changeBuildingBlock on a building block",
-        "buildingBlock widget on a page", x.layout && "page templates (regular, edit) + createPage from them", "createLayout sidebar / topbar / modal pop-up with header, side bar, footer, menu", "applyStyle (page + hasClass, module folder + match + style + button style)", `${plan.refuse.length} refusals`].filter(Boolean);
+        "buildingBlock widget on a page", x.layout && "page templates (regular, edit) + createPage from them", "createLayout sidebar / topbar / modal pop-up with header, side bar, footer, menu", "applyStyle (page + hasClass, module folder + match + style + button style)", `component kits (8 recipes + SCSS, ${3 + Number(x.gallery)} bound to an entity)`, `${plan.refuse.length} refusals`].filter(Boolean);
     check(`ds-model: ${what.join("; ")}; stored with Studio Pro's keys, reopen 0 errors`, !problems.length, [...new Set(problems)].slice(0, 6).join("; "));
     if (firstUse.length) results.push(`NOTE ds-model: no Studio Pro sample in this project of ${firstUse.length} type(s) (SDK layout): ${firstUse.slice(0, 10).join(", ")}`);
     return reopen(copy);

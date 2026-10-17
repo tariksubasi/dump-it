@@ -171,7 +171,7 @@ const WIDGETS = {
     },
     gallery: {
         doc: "Gallery (pluggable, built from widgets/*.mpk like Data grid 2): objects (database, association or microflow/nanoflow, as listView) as tiles, each item with its own widgets; a data view can listen to it. Without the .mpk it is refused: use listView",
-        fields: { entity: "optional Module.Entity (default: the page entity)", ...LIST_SOURCE, xpath: "optional XPath constraint", widgets: "optional [ widgets ] per item (default: one text per attribute)", selection: "optional Single | Multi | None (default Single)", pageSize: "optional (default 20)", columns: "optional desktop columns 1-12 (default 1)", headerFilters: HEADER_FILTERS, onClick: "optional: on an item click " + ACTION + "; the item is passed", sort: "optional default sort order (source database): [ \"Attribute\" | { \"attribute\": \"Name\", \"direction\": \"desc\" } ] (default direction asc)" }
+        fields: { entity: "optional Module.Entity (default: the page entity)", ...LIST_SOURCE, xpath: "optional XPath constraint", widgets: "optional [ widgets ] per item (default: one text per attribute)", selection: "optional Single | Multi | None (default Single)", pageSize: "optional (default 20)", columns: "optional desktop columns 1-12 (default 1)", tabletColumns: "optional tablet columns 1-12 (default 1)", phoneColumns: "optional phone columns 1-12 (default 1)", headerFilters: HEADER_FILTERS, onClick: "optional: on an item click " + ACTION + "; the item is passed", sort: "optional default sort order (source database): [ \"Attribute\" | { \"attribute\": \"Name\", \"direction\": \"desc\" } ] (default direction asc)" }
     }
 };
 // Fields every widget kind takes (style: inline CSS, but for text and actionButton it is the text / button style
@@ -3439,6 +3439,11 @@ function makePages(h) {
             sel.selection = cw.CustomWidgetSelectionType[selName];
             if (pageSize && props.has("pageSize")) props.get("pageSize").value.primitiveValue = pageSize;
             if (cols && props.has("desktopItems")) props.get("desktopItems").value.primitiveValue = cols;
+            for (const [k, key] of [["tabletColumns", "tabletItems"], ["phoneColumns", "phoneItems"]]) {
+                if (s[k] === undefined) continue;
+                if (!props.has(key)) throw new Error(`${node.where}: Gallery ${info.def.version} has no ${key}; leave out ${k}`);
+                props.get(key).value.primitiveValue = num(s[k], k, 12);
+            }
             leftovers(w, [ent], node.where, "gallery", alt);
             // the content: one text per attribute, or the given widgets, in the context of an item
             const content = props.get("content").value.widgets;
