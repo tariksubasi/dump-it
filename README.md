@@ -403,6 +403,21 @@ isteği düz yazıyla yaz (örnek: `Değişikliğimi kontrol et, guides/CHECK.tx
 
 ---
 
+## Aktivite loglama (autolog)
+
+`tools/autolog` içinde. Bir microflow'a `LogActivity` (nanoflow'a `JS_LogActivity`) çağrısını parametreleri boş
+bırakarak ekle; tek komut flow adını, önceki aktivitenin adını ve değişkenini modelden okuyup doldurur.
+
+1. Studio Pro'yu kapat ve işini commit et.
+2. Önce dry run (hiçbir şey değiştirmez):
+   ```
+   python C:\tools\dump-it\tools\autolog\autolog.py "C:\Projeler\BenimProje"
+   ```
+3. Yazmak için sonuna `--apply` ekle. Sonra Studio Pro'yu aç ve F4 bas.
+
+Gerekli: `pip install pymongo`. İlk kurulum (Java action, JS action, `ClientLogEntry`) ve kurallar:
+[tools/autolog/README.md](tools/autolog/README.md).
+
 ## Otomatik test (CI)
 
 Her push'ta GitHub Actions `scripts/ci.sh` çalıştırır: doküman örnekleri (`doccheck`), 16 herkese açık Mendix
