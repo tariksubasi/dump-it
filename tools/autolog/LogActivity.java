@@ -1,6 +1,7 @@
 // Reference copy. Create the Java action "LogActivity" in Studio Pro with the parameters below,
 // deploy once so Studio Pro generates javasource/logging/actions/LogActivity.java,
 // then paste the USER CODE and EXTRA CODE blocks into that generated file.
+// Needs logging/Journal.java (copy it from this folder to javasource/logging/).
 //
 // Studio Pro parameters (names must match, autolog.py fills them):
 //   Type parameters : ObjType, ListType
@@ -56,14 +57,19 @@ public class LogActivity extends CustomJavaAction<java.lang.Void>
 			ILogNode log = Core.getLogger(node);
 			LogLevel level = Level == null ? LogLevel.Info : Level;
 			if (isEnabled(log, level)) {
+				String step = "[" + (isBlank(ActivityName) ? "<unnamed>" : ActivityName) + "] "
+					+ (isBlank(VariableName) ? "<void>" : VariableName + " = " + describeValue(getContext(), VariableObject, VariableList, VariableValue));
+				// Inside StartJournal ... FlushJournal the step joins the journal block; otherwise it is written now.
+				if (logging.Journal.record(getContext(), log, level, ActivityName, step)) {
+					return null;
+				}
 				String chain = callChain(getContext());
 				String flow = isBlank(FlowName) ? logging.LogSink.currentMicroflow(getContext()) : FlowName;
 				String message = "Activity | cid=" + logging.TraceContext.get()
 					+ " | at=" + java.time.OffsetDateTime.now()
 					+ " | flow=" + flow
 					+ (chain.isEmpty() ? "" : " | chain=" + chain)
-					+ " | activity=" + (isBlank(ActivityName) ? "<unnamed>" : ActivityName)
-					+ " | var=" + (isBlank(VariableName) ? "<void>" : VariableName + " = " + describeValue(getContext(), VariableObject, VariableList, VariableValue));
+					+ " | " + step;
 				logging.LogSink.dispatch(log, level, node, message);
 			}
 		} catch (Throwable t) {
@@ -89,7 +95,6 @@ public class LogActivity extends CustomJavaAction<java.lang.Void>
 
 	// BEGIN EXTRA CODE
 	private static final int MAX_VALUE_LENGTH = 2000;
-	private static final int MAX_LIST_IDS = 5;
 
 	private static boolean isBlank(String s) {
 		return s == null || s.trim().isEmpty();
@@ -127,17 +132,10 @@ public class LogActivity extends CustomJavaAction<java.lang.Void>
 	// Object and list win over the string value: they arrive as real Mendix objects.
 	private static String describeValue(IContext context, IMendixObject object, java.util.List<IMendixObject> list, String value) {
 		if (object != null) {
-			return describeObject(object);
+			return logging.Journal.describeObject(context, object);
 		}
 		if (list != null) {
-			StringBuilder sb = new StringBuilder("list[").append(list.size()).append("]");
-			for (int i = 0; i < Math.min(list.size(), MAX_LIST_IDS); i++) {
-				sb.append(i == 0 ? " " : ", ").append(describeObject(list.get(i)));
-			}
-			if (list.size() > MAX_LIST_IDS) {
-				sb.append(", ...");
-			}
-			return sb.toString();
+			return logging.Journal.describeList(context, list);
 		}
 		if (value == null) {
 			return "<null>";
@@ -149,10 +147,6 @@ public class LogActivity extends CustomJavaAction<java.lang.Void>
 			return value;
 		}
 		return value.substring(0, MAX_VALUE_LENGTH) + "...(+" + (value.length() - MAX_VALUE_LENGTH) + " chars)";
-	}
-
-	private static String describeObject(IMendixObject object) {
-		return object.getType() + "[id=" + (object.getId() == null ? "new" : object.getId().toLong()) + "]";
 	}
 	// END EXTRA CODE
 }
