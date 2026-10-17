@@ -1128,7 +1128,7 @@ async function reopen(copy) {
     return { ctx, client, model, ops: require("./ops").bind(model, client) };
 }
 
-async function selftest(mpr, keep, { out, relevant }) {
+async function selftest(mpr, keep, { out, relevant, mxcheck, mx, timeout }) {
     const src = new Project(mpr);
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mxlocal-selftest-"));
     const results = [];
@@ -1458,9 +1458,12 @@ async function selftest(mpr, keep, { out, relevant }) {
         const apiOk = /editability/.test(dv) && /ListenTargetSource/.test(dv) && !/^\s+editable: boolean/m.test(dv);
         check(`api for Mendix ${src.version} + version rules`, !vr.problems.length && apiOk, vr.problems.length ? vr.problems.slice(0, 5).join("; ") : apiOk ? `${vr.rules} rules match the SDK` : "api DataView lacks editability/ListenTargetSource");
 
+        // --mxcheck: Studio Pro's own check (mx check) of the copy, new errors per document (selftest-mxcheck.js)
+        const mxc = mxcheck ? require("./selftest-mxcheck").phase({ src, tmp, mod, check, results, opts: { mx, timeout } }) : { ran: false };
+
         out(`Self test on a copy (module ${mod}, Mendix ${src.meta._ProductVersion}):`);
         out(results.map(r => "  " + r).join("\n"));
-        if (firstUse.length) out("  Note: first use of these types in this project (layout from other projects or SDK defaults; check the copy in Studio Pro with --keep): " + [...new Set(firstUse.map(w => w.split(" ")[0]))].join(", "));
+        if (firstUse.length) out(`  Note: first use of these types in this project (layout from other projects or SDK defaults; ${mxc.ran ? "mx check above checked the copy" : "check the copy in Studio Pro with --keep, or run with --mxcheck"}): ` + [...new Set(firstUse.map(w => w.split(" ")[0]))].join(", "));
         const ok = results.every(r => !r.startsWith("FAIL"));
         if (ok && !keep) fs.rmSync(tmp, { recursive: true, force: true });
         else out(`Copy kept: ${tmp} (open it in Studio Pro to inspect, then delete it)`);

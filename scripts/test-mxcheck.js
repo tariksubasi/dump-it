@@ -245,7 +245,7 @@ if (!project) {
         r = mx(["selftest", "--mxcheck"], { FAKE_MX_FLAG: "ZzMxlocalTest_(Job|Main)$" });
         ok("selftest --mxcheck: FAIL line with the new errors per selftest document", /FAIL mx check \S+ of the selftest copy/.test(r.out) && /ZzMxlocalTest_Job \(Microflow, selftest document\): 1 new error/.test(r.out) && /ZzMxlocalTest_Main \(Microflow, selftest document\)/.test(r.out),
             r.out.split("\n").filter(l => /mx check|Zz.*new error|Self test/.test(l)).join("\n"));
-        ok("selftest --mxcheck: the module rename of phase 3 is not a new error", !/Zz\.\w+ \(.*existing document/.test(r.out) || !/CE0463/.test(r.out.split("FAIL mx check")[1] || ""));
+        ok("selftest --mxcheck: the pre-existing error and the module rename of phase 3 are not new", /\(\d+ selftest document\(s\), 0 existing document\(s\) changed by an op\)/.test(r.out) && !/NEW.*CE0463|CE0463.*new/.test(r.out));
     }
 }
 
