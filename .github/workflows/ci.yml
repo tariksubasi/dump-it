@@ -9,6 +9,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+# selftest loads big models; the default node heap ran out on the runner (DataGrid, Gallery, minimal, PedApp)
+env:
+  NODE_OPTIONS: --max-old-space-size=8192
+
 jobs:
   plan:
     runs-on: ubuntu-latest
