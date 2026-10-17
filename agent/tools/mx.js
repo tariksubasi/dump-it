@@ -90,8 +90,19 @@ export const api = {
 export const dryrun = {
     description: "Dry run of a change file in edits/: shows what would change and the approval code. " +
         "Writes nothing to the model.",
-    args: { file: text("file name in edits/, e.g. add-note.json") },
-    execute: (args, context) => mx(context, ["dryrun", args.file])
+    args: {
+        file: text("file name in edits/, e.g. add-note.json"),
+        check: text("\"yes\" to also run Studio Pro's mx check on a temporary copy with the change (slow), or \"\"")
+    },
+    execute: (args, context) => mx(context, ["dryrun", args.file, ...(/^(yes|true|1)$/i.test(String(args.check || "")) ? ["--check"] : [])])
+};
+
+export const check = {
+    description: "STUDIO PRO CHECK: Mendix's own consistency check (mx check = the Errors pane of Studio Pro) of the " +
+        "saved model, on a temporary copy. Read-only. Lists errors with document names. Needs Studio Pro or MxBuild " +
+        "of the project's version; otherwise it says in one line how to set MX_PATH.",
+    args: {},
+    execute: (args, context) => mx(context, ["check"])
 };
 
 export const refresh = {

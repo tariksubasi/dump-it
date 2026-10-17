@@ -126,7 +126,8 @@ AGENT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent")
 SAFE_MX_COMMANDS = ("help", "refresh", "find", "usages", "unused", "steps", "widgets", "widgettype", "texts", "ops", "api", "dryrun", "rerun", "gap", "check", "ok",
                     "selftest", "mergecheck", "mergefix", "clean")
 # Tools of the mxlocal MCP server (mxlocal/serve.js) that may run without asking: none of them writes the model.
-MCP_TOOLS = ("find", "usages", "unused", "steps", "widgets", "widgettype", "texts", "ops", "api", "plan", "dryrun", "gap", "mergecheck", "clean")
+MCP_TOOLS = ("find", "usages", "unused", "steps", "widgets", "widgettype", "texts", "ops", "api", "plan", "dryrun", "check", "gap", "mergecheck",
+             "clean")
 # git commands that could rewrite the export history, touch the Mendix project's repo (-C) or send data out.
 GIT_DENY = ("-C", "push", "remote", "reset", "clean", "checkout", "restore", "switch", "rebase", "stash", "rm",
             "filter-branch", "update-ref", "config", "gc", "reflog", "submodule", "worktree", "commit --amend")
@@ -357,6 +358,8 @@ class Exporter:
         mcp = can_edit and not self.args.no_mcp
         node = shutil.which("node") or "node"
         serve = [node, mxlocal, "serve", "--project", os.path.abspath(self.project.mpr), "--edits", os.path.join(self.out, "edits")]
+        if self._mx_exe():
+            serve += ["--mx", self._mx_exe()]
         if not self.args.no_opencode_tools and not mcp:
             exe = sys.executable
             self._write(".opencode/tools/mx.js", self._agent_template("tools", "mx.js").replace("@PYTHON_JSON@", json.dumps(exe)))

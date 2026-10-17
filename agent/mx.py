@@ -17,13 +17,17 @@ Copied into the export folder by mxcontext.py with CONFIG filled in, so the agen
                                       translatable texts in every project language (for setTranslations)
     python mx.py ops [name]           the operations a change file can use; with a name: its fields
     python mx.py api <Type> [word]    Model SDK type details (for .js change files)
-    python mx.py dryrun <file>        compute a change from edits/<file>; writes nothing
+    python mx.py dryrun <file> [--check]
+                                      compute a change from edits/<file>; writes nothing; --check also runs Studio
+                                      Pro's check (mx check) on a temporary copy with the change: NEW errors
     python mx.py rerun [file]         dry run a change file again (after undo); brings it back from the backup if gone
     python mx.py gap "<what>"         record a change no operation can do yet (then give the user Studio Pro steps)
     python mx.py apply <CODE>         write the last dry run (user approved, Studio Pro closed), re-export, check
+                                      (STUDIO PRO CHECK: mx check on a copy, errors the change added are NEW)
     python mx.py undo [--force]       restore the model from before the last apply (Studio Pro closed), re-export;
                                       --force only when the user agrees to lose later changes it lists
-    python mx.py check                run Studio Pro's mx check on the project (when mx.exe is installed)
+    python mx.py check                STUDIO PRO CHECK: Studio Pro's own consistency check (mx check, the Errors pane)
+                                      on a temporary copy of the saved model; read-only (needs Studio Pro / MX_PATH)
     python mx.py ok "<summary>"       mark the current export as the checked state (git commit)
     python mx.py clean [--move]       files outside edits/ the export did not write (helper scripts, notes, edited
                                       exports); --move puts them into edits/stray/<time>/ (nothing is deleted)
@@ -104,17 +108,15 @@ def refresh():
     return 0
 
 
-def mx_check():
+def mx_args():
+    """--mx <Studio Pro's mx> when the export found one; otherwise mxlocal looks itself (MX_PATH, Studio Pro, MxBuild)."""
     exe = CONFIG.get("mx_exe")
-    if not exe or not os.path.isfile(exe):
-        say("mx check: NOT RUN (mx.exe not found%s). Ask the user to open the app in Studio Pro and look at the "
-            "Errors pane." % (" at " + exe if exe else ""))
-        return 0
-    if os.path.exists(CONFIG["mpr"] + ".lock"):
-        say("mx check: NOT RUN (Studio Pro has the project open). Ask the user to check the Errors pane in Studio Pro.")
-        return 0
-    say("mx check (Studio Pro's own validation):")
-    return run([exe, "check", CONFIG["mpr"]])
+    return ["--mx", exe] if exe and os.path.isfile(exe) else []
+
+
+def mx_check():
+    """STUDIO PRO CHECK on a temporary copy (mx writes into the project it checks, so never on the user's files)."""
+    return mxlocal("check", *mx_args())
 
 
 def journal(**entry):
@@ -163,14 +165,14 @@ def stray_warning():
         say("WARNING: %d file(s) outside edits/: run python mx.py clean" % n)
 
 
-def dryrun(path):
+def dryrun(path, check=False):
     if path.endswith(".js") and not CONFIG.get("allow_scripts"):
         say("ERROR: %s is a script, and scripts are off in this folder (they run with full rights before the user "
             "approves anything).\nUse operations: python mx.py ops. If no operation fits: python mx.py gap \"<what is "
             "missing>\", then give the user the Studio Pro steps.\n(The user can switch scripts on by exporting with "
             "--allow-scripts.)" % os.path.basename(path))
         return 1
-    code = mxlocal("run", path, *(["--allow-js"] if path.endswith(".js") else []))
+    code = mxlocal("run", path, *(["--allow-js"] if path.endswith(".js") else []), *(["--check"] + mx_args() if check else []))
     m = re.search(r"Approval code: (\w+)", last_output)
     journal(cmd="dryrun", file=os.path.relpath(path, HERE), code=m.group(1) if m else None, ok=code == 0)
     stray_warning()
@@ -282,10 +284,11 @@ def main(argv):
             return 1
         return mxlocal("api", *rest)
     if cmd == "dryrun":
-        if not rest:
-            say("Usage: python mx.py dryrun <file in edits/>")
+        names = [a for a in rest if not a.startswith("--")]
+        if not names:
+            say("Usage: python mx.py dryrun <file in edits/> [--check]")
             return 1
-        return dryrun(change_file(rest[0]))
+        return dryrun(change_file(names[0]), "--check" in rest)
     if cmd == "rerun":
         return rerun(rest[0] if rest else None)
     if cmd == "gap":
@@ -297,16 +300,15 @@ def main(argv):
         if not rest:
             say("Usage: python mx.py apply <CODE>  (the code from the dry run, after the user approved it)")
             return 1
-        code = mxlocal("apply", "--code", rest[0])
+        code = mxlocal("apply", "--code", rest[0], "--check", *mx_args())
         m = re.search(r"Backup: (\S+)", last_output)
         journal(cmd="apply", code=rest[0], backup=m.group(1) if m else None, ok=code == 0)
-        if code:
+        if not m:  # nothing written
             return code
+        # written: the export must follow the model even when CHECK FAILED or the STUDIO PRO CHECK found new errors
         say("")
         refresh()
-        say("")
-        mx_check()
-        return 0
+        return code
     if cmd == "undo":
         code = mxlocal("restore", *(["--force"] if "--force" in rest else []))
         journal(cmd="undo", ok=code == 0)

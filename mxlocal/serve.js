@@ -3,7 +3,7 @@
 // API app). stdio transport: one JSON-RPC 2.0 message per line. No dependencies.
 // The project stays loaded between calls, so a dry run costs a fraction of a second; every call first checks the
 // model fingerprint and reloads after a Studio Pro save, pull or apply.
-//   node mxlocal.js serve --project <app.mpr|folder> --edits <export folder>/edits [--allow-apply]
+//   node mxlocal.js serve --project <app.mpr|folder> --edits <export folder>/edits [--allow-apply] [--mx <Studio Pro's mx>]
 // Writing the model needs the user's approval code. apply/undo are tools only with --allow-apply; otherwise the user
 // runs them as commands (python mx.py apply <CODE>), where the client asks for permission.
 const fs = require("fs");
@@ -20,8 +20,8 @@ const INSTRUCTIONS = `Mendix model tools for one local project (Studio Pro app).
 Change protocol: 1) find the exact names (find; who uses something: usages, before every rename/delete/move; widget names of a page: widgets; texts to translate: texts); 2) pick operations (ops, then ops with a name for its fields);
 3) plan = write the change and dry-run it (nothing is written; it returns an approval code);
 4) show the user the dry run (every DATA LOSS / EXPRESSION CHECK / Warnings line) and ask them to close Studio Pro and
-answer "yes <CODE>"; 5) only then apply with that code. Never invent operations or fields. No operation fits: gap,
-then give the user Studio Pro steps.`;
+answer "yes <CODE>"; 5) only then apply with that code; 6) check (Studio Pro's own mx check, when installed) shows
+errors the change added. Never invent operations or fields. No operation fits: gap, then give the user Studio Pro steps.`;
 
 const str = description => ({ type: "string", description });
 
@@ -48,10 +48,13 @@ function tools(allowApply) {
         { name: "plan", description: "Save a change as edits/<name>.json and dry-run it. Writes nothing to the model; returns what would change and the approval code.",
             inputSchema: { type: "object", properties: {
                 name: str("short file name, e.g. add-note"),
-                ops: { type: "array", description: "operations, e.g. [{\"op\": \"addAttribute\", \"entity\": \"Sales.Order\", \"name\": \"Note\", \"type\": \"String(200)\"}]", items: { type: "object" } } },
+                ops: { type: "array", description: "operations, e.g. [{\"op\": \"addAttribute\", \"entity\": \"Sales.Order\", \"name\": \"Note\", \"type\": \"String(200)\"}]", items: { type: "object" } },
+                check: str("optional \"yes\": also run Studio Pro's mx check on a temporary copy with the change (slow: about a minute)") },
             required: ["name", "ops"] } },
         { name: "dryrun", description: "Dry-run a change file that is already in edits/ (e.g. after an undo). Writes nothing; returns the approval code.",
-            inputSchema: { type: "object", properties: { file: str("file name in edits/, e.g. add-note.json") }, required: ["file"] } },
+            inputSchema: { type: "object", properties: { file: str("file name in edits/, e.g. add-note.json"), check: str("optional \"yes\": also run Studio Pro's mx check on a temporary copy with the change") }, required: ["file"] } },
+        { name: "check", description: "STUDIO PRO CHECK: Mendix's own consistency check (mx check = the Errors pane of Studio Pro) of the saved model, on a temporary copy. Read-only. Run it after an apply; errors with document names. Needs Studio Pro or MxBuild of the project's version (else one line how to set MX_PATH).",
+            inputSchema: { type: "object", properties: {} } },
         { name: "mergecheck", description: "After a git merge of the Mendix app: per-document 3-way analysis of mprcontents and the .mpr unit table (resolved automatically / true conflicts with what each side changed). Read-only; the fix is the command python mx.py mergefix (dry run) then apply.",
             inputSchema: { type: "object", properties: {} } },
         { name: "clean", description: "Files outside edits/ that the export did not write (helper scripts, notes, edited export files). Read-only list; the user moves them with python mx.py clean --move. Never create such files: change files go through plan only.",
@@ -69,8 +72,9 @@ function tools(allowApply) {
 }
 
 class Server {
-    constructor(mpr, editsDir, allowApply) {
+    constructor(mpr, editsDir, allowApply, mx) {
         this.mpr = mpr;
+        this.mx = mx && mx !== true ? mx : undefined; // --mx: Studio Pro's mx for the check tool (else found by mxcheck.js)
         this.edits = editsDir;
         this.allowApply = allowApply;
         this.ctx = null;
@@ -107,11 +111,11 @@ class Server {
         fs.appendFileSync(path.join(this.edits, "journal.jsonl"), JSON.stringify({ time, ...entry, via: "mcp" }) + "\n");
     }
 
-    async dryrun(file) {
+    async dryrun(file, check) {
         const ctx = await this.project();
         let r;
         try {
-            r = await cli.run(file, this.mpr, false, ctx);
+            r = await cli.run(file, this.mpr, false, ctx, { check: /^(yes|true|1|on)$/i.test(String(check || "")), mx: this.mx });
         } catch (e) {
             this.ctx = null; // a failed run may leave edits in memory: load fresh next time
             this.journal({ cmd: "dryrun", file: path.relative(path.dirname(this.edits), file), code: null, ok: false });
@@ -206,7 +210,7 @@ class Server {
                         fs.copyFileSync(file, path.join(hist, `${base}-${new Date().toISOString().replace(/[:.]/g, "-")}.json`));
                     }
                     fs.writeFileSync(file, text);
-                    await this.dryrun(file);
+                    await this.dryrun(file, a.check);
                     lines.push(require("./stray").warning(path.dirname(this.edits)));
                     break;
                 }
@@ -214,12 +218,15 @@ class Server {
                     const f = String(a.file || "");
                     file = path.join(this.edits, path.basename(f).endsWith(".json") ? path.basename(f) : path.basename(f) + ".json");
                     if (!fs.existsSync(file)) throw new Error(`No change file '${f}' in edits/. Use the plan tool to write one.`);
-                    await this.dryrun(file);
+                    await this.dryrun(file, a.check);
                     lines.push(require("./stray").warning(path.dirname(this.edits)));
                     break;
                 }
                 case "mergecheck":
                     lines.push(require("./merge").mergecheck(this.mpr));
+                    break;
+                case "check":
+                    cli.checkCmd(this.mpr, { mx: this.mx });
                     break;
                 case "clean":
                     lines.push(require("./stray").report(path.dirname(this.edits)));
@@ -235,7 +242,7 @@ class Server {
                 }
                 case "apply":
                     if (!this.allowApply) throw new Error("apply is not a tool here; the user runs: python mx.py apply <CODE>");
-                    await cli.apply(this.mpr, a.code);
+                    await cli.apply(this.mpr, a.code, { check: true, mx: this.mx });
                     this.journal({ cmd: "apply", code: a.code, ok: true });
                     break;
                 case "undo":
@@ -276,10 +283,10 @@ class Server {
     }
 }
 
-async function serve(mpr, editsDir, allowApply) {
+async function serve(mpr, editsDir, allowApply, mx) {
     // stdout carries the protocol only; anything else printed goes to stderr
     console.log = console.info = console.warn = (...x) => process.stderr.write(x.join(" ") + "\n");
-    const server = new Server(mpr, editsDir, allowApply);
+    const server = new Server(mpr, editsDir, allowApply, mx);
     const send = m => process.stdout.write(JSON.stringify(m) + "\n");
     const rl = readline.createInterface({ input: process.stdin });
     rl.on("line", line => {

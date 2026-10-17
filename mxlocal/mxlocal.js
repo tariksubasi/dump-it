@@ -30,11 +30,17 @@ const setOutput = fn => (out = fn); // serve.js collects the output of a command
 
 const USAGE = `mxlocal - Mendix Model SDK offline on a local .mpr (v2)
 
-  node mxlocal.js run <change.json|change.js> --project <app.mpr|folder>
+  node mxlocal.js run <change.json|change.js> --project <app.mpr|folder> [--check]
         Dry run: computes the change, writes nothing, prints it and an approval code. --preview also draws every
         changed flow before/after as SVG in edits/preview/ (LAYOUT CHECK lists the layout issues either way).
-  node mxlocal.js apply --code <CODE> --project <app.mpr|folder>
+        --check: STUDIO PRO CHECK (mx check) on a temporary copy with the change applied, new errors listed.
+  node mxlocal.js apply --code <CODE> --project <app.mpr|folder> [--check]
         Writes the change of the last dry run (Studio Pro closed). CODE comes from that dry run.
+        --check: mx check on a copy of the saved model; errors that were not there before are listed as NEW.
+  node mxlocal.js check --project <app.mpr|folder> [--mx <path>] [--check-timeout <s>]
+        STUDIO PRO CHECK: Mendix's own consistency check (mx check, Studio Pro's Errors pane) on a temporary copy
+        (read-only). mx: --mx, MX_PATH, MENDIX_MX, .mxlocal.json "mx", or found (Studio Pro / MxBuild of the
+        project's version).
   node mxlocal.js restore --project <app.mpr|folder> [--backup <name>] [--force]
         Undoes the last (or the given) apply. Refuses when the model changed after that apply (it would erase
         that work) unless --force.
@@ -67,12 +73,13 @@ const USAGE = `mxlocal - Mendix Model SDK offline on a local .mpr (v2)
                                         dry run of the merge fix (approval code): merged unit files + rebuilt unit
                                         table; write it with apply --code
   node mxlocal.js ops [name]            the operations a change.json can use (with a name: its fields)
-  node mxlocal.js serve --project ... --edits <dir> [--allow-apply]
+  node mxlocal.js serve --project ... --edits <dir> [--allow-apply] [--mx <path>]
                                         MCP server (stdio) with these commands as tools; keeps the project loaded
   node mxlocal.js verify --project ...  read-only self check (byte roundtrip + SDK mapping)
   node mxlocal.js open --project ...    load every unit through the Model SDK, report problems
-  node mxlocal.js selftest --project ... [--keep]
-                                        run every operation on a temporary copy and check the result
+  node mxlocal.js selftest --project ... [--keep] [--mxcheck]
+                                        run every operation on a temporary copy and check the result; --mxcheck:
+                                        mx check of that copy at the end, new errors per document
 
   change.json: { "ops": [ { "op": "addAttribute", "entity": "Module.Entity", "name": "Note", "type": "String(200)" } ] }
   change.js:   module.exports = async ({ model, sdk, ops, log }) => { ... }   (ops = the same operations as functions)`;
@@ -321,6 +328,7 @@ async function run(file, mpr, allowJs, ctx, opts = {}) {
         process.exitCode = 1;
         return { client, refused: lint.length };
     }
+    if (opts.check) say(studioCheck(client.project.mpr, opts, "run", enc).text);
     const code = pending.save(client.project.dir, enc, { fingerprint, source: path.resolve(file), summary: lines, plan: change.plan,
         content: fs.readFileSync(path.resolve(file), "utf8") });
     out(`Dry run: nothing written. Approval code: ${code}`);
@@ -328,7 +336,50 @@ async function run(file, mpr, allowJs, ctx, opts = {}) {
     return { client, code };
 }
 
-async function apply(mpr, code) {
+// STUDIO PRO CHECK for run (on a copy with enc written into it) and apply (kind "before" before the write, "apply"
+// after it). Returns { text, fresh } (fresh: number of new errors).
+function studioCheck(mpr, opts, kind, enc, before) {
+    const C = require("./mxcheck");
+    const l = C.locate(mpr, { mx: opts.mx, "check-timeout": opts.timeout });
+    if (!l.found) return { text: l.line, fresh: 0, missing: true };
+    const base = { found: l.found, timeout: l.timeout };
+    try {
+        if (kind === "before") return { result: C.check(mpr, { ...base, cache: "use" }), found: l.found };
+        const baseline = before || C.check(mpr, { ...base, cache: "use" });
+        const after = kind === "run" ? C.check(mpr, { ...base, prepare: copy => new Project(copy).writeEncoded(enc) }) : C.check(mpr, { ...base, cache: "store" });
+        const undo = kind === "run" ? "Fix the change file and dry run again (or apply anyway only if the user agrees)." : "Undo with restore (python mx.py undo), fix the change, dry run again.";
+        const r = C.report(after, { what: kind === "run" ? "the model with this change" : "the saved model", before: baseline, undo, norm: opts.norm });
+        if (l.found.note) r.text += `\n  (note: ${l.found.note})`;
+        return r;
+    } catch (e) {
+        return { text: `STUDIO PRO CHECK: not run - ${e.message}`, fresh: 0 };
+    }
+}
+
+// --check / --no-check, else the config default ("check": "apply" | "all" in .mxlocal.json)
+function wantCheck(a, mpr, cmd) {
+    if (a["no-check"] === true || ["off", "no", "false", "0"].includes(String(a.check).toLowerCase())) return false;
+    if (a.check !== undefined) return true;
+    try {
+        return require("./mxcheck").defaultCheck(require("./mxcheck").config(path.dirname(mpr)), cmd);
+    } catch {
+        return false;
+    }
+}
+
+function checkCmd(mpr, a) {
+    const C = require("./mxcheck");
+    const l = C.locate(mpr, a);
+    if (!l.found) return out(l.line);
+    out(`mx ${l.found.version || "(version unknown)"}: ${l.found.mx} (${l.found.source}); project Mendix ${l.version}`);
+    const res = C.check(mpr, { found: l.found, timeout: l.timeout, cache: "store" });
+    let text = C.report(res, { what: "the saved model" }).text;
+    if (l.found.note) text += `\n  (note: ${l.found.note})`;
+    out(text);
+    if (res.status !== "ok") process.exitCode = 1;
+}
+
+async function apply(mpr, code, opts = {}) {
     const project = new Project(mpr);
     const p = pending.load(project.dir);
     if (!p) throw new Error("No dry run to apply. Run the change first (run <change>).");
@@ -345,6 +396,8 @@ async function apply(mpr, code) {
         pending.clear(project.dir);
         throw new Error(`The model changed since the dry run: ${changedFiles.join(", ")} changed on disk. Run the dry run again.`);
     }
+    // the baseline (mx check of the model before the change): cached per saved model, else run now on a copy
+    const pre = opts.check ? studioCheck(mpr, opts, "before") : null;
     const r = project.writeEncoded({ files: p.files, created: p.created, deleted: p.deleted, moved: p.moved || [], plainFiles: p.plainFiles || [], extra: p.extra || [] });
     // The change itself goes into the backup, so it can be run again after an undo even if edits/ was cleaned.
     fs.writeFileSync(path.join(r.backup, "change.txt"), `Source: ${p.source}\n${p.summary.join("\n")}\n`);
@@ -360,6 +413,11 @@ async function apply(mpr, code) {
         if (failed.length) out("CHECK FAILED - the saved model does not show:\n" + failed.map(f => "  ! " + f).join("\n") + "\nUndo with restore, fix the change, dry run again.");
         else out(`Checked: all ${p.plan.ops.length} operation(s) are in the saved model.`);
         process.exitCode = failed.length ? 1 : 0;
+    }
+    if (pre) {
+        const c = pre.missing || !pre.result ? pre : studioCheck(mpr, opts, "apply", null, pre.result);
+        out(c.text);
+        if (c.fresh) process.exitCode = 1;
     }
 }
 
@@ -465,14 +523,16 @@ async function main() {
     let ok = true;
     if (cmd === "verify") ok = await verify(mpr);
     else if (cmd === "open") ok = await open(mpr);
-    else if (cmd === "selftest") ok = await require("./selftest").selftest(mpr, a.keep === true, { out, relevant });
-    else if (cmd === "serve") return require("./serve").serve(mpr, path.resolve(a.edits && a.edits !== true ? a.edits : "edits"), a["allow-apply"] === true);
+    else if (cmd === "selftest") ok = await require("./selftest").selftest(mpr, a.keep === true, { out, relevant, mxcheck: a.mxcheck === true, mx: a.mx, timeout: a["check-timeout"] });
+    else if (cmd === "check") checkCmd(mpr, a);
+    else if (cmd === "serve") return require("./serve").serve(mpr, path.resolve(a.edits && a.edits !== true ? a.edits : "edits"), a["allow-apply"] === true, a.mx);
     else if (cmd === "run") {
         if (typeof a.preview === "string" && !a._[1]) a._.push(a.preview); // run --preview change.json
+        if (typeof a.check === "string" && !/^(on|off|yes|no|true|false|0|1)$/i.test(a.check)) [a._[1], a.check] = [a._[1] || a.check, true]; // run --check change.json
         if (!a._[1]) throw new Error("run needs a change file (.json or .js)");
         if (a.apply) throw new Error("run only does a dry run now. Apply with: apply --code <CODE> (the code is printed by the dry run)");
-        await run(a._[1], mpr, a["allow-js"] === true, null, { preview: !!a.preview });
-    } else if (cmd === "apply") await apply(mpr, a.code);
+        await run(a._[1], mpr, a["allow-js"] === true, null, { preview: !!a.preview, check: wantCheck(a, mpr, "run"), mx: a.mx, timeout: a["check-timeout"] });
+    } else if (cmd === "apply") await apply(mpr, a.code, { check: wantCheck(a, mpr, "apply"), mx: a.mx, timeout: a["check-timeout"] });
     else if (cmd === "restore") restoreCmd(mpr, a.backup, a.force);
     else if (cmd === "mergecheck") out(require("./merge").mergecheck(mpr));
     else if (cmd === "mergefix") out(require("./merge").mergefix(mpr, a.pick, a.all).text);
@@ -560,7 +620,7 @@ function report(e, file) {
     return lines.join("\n") + "\n";
 }
 
-module.exports = { run, apply, restoreCmd, report, setOutput, findMpr, loadChange, USAGE };
+module.exports = { run, apply, restoreCmd, checkCmd, report, setOutput, findMpr, loadChange, USAGE };
 
 if (require.main === module) main()
     .catch(e => {
