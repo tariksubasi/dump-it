@@ -81,10 +81,20 @@ const COMPOSITE_OPS = {
             folder: "optional folder path (default Kit)", category: "optional toolbox category (default \"<Prefix> kit\")",
             withStyles: "optional true: append the kit's SCSS (CSS custom properties with fallbacks) to the theme file", file: "optional with withStyles: the SCSS file (default themesource/<module>/web/main.scss when the module has one, else theme/web/main.scss)"
         }
+    },
+    createStyleGuide: {
+        doc: "Create a style guide page: typography, buttons in every Atlas style, inputs (page variables), cards, alerts, badges, a Data grid 2 and a list view of an entity, and the component kit's building blocks; optionally a menu item.",
+        fields: {
+            module: "R module name", name: "optional page name (default StyleGuide)", folder: "optional folder path", title: "optional page title (default Style guide)",
+            layout: "optional Module.Layout (default the one most pages use)", prefix: "optional component kit prefix (createComponentKit): its building blocks are shown (those without unconfigured data widgets)",
+            entity: "optional Module.Entity for the data grid and list view section (without it that section is left out)",
+            menu: "optional \"Responsive\" or { \"profile\", \"caption\", \"parent\" }: a menu item that opens it", roles: "optional [ \"Module.Role\" ] that may open it"
+        }
     }
 };
 
 const COMPOSITE_SYNONYMS = {
+    createStyleGuide: { kit: "use \"prefix\" (the kit's prefix)", widgets: "a style guide is generated; add widgets afterwards with addWidgets", sections: "every section is generated; delete one with deleteWidget" },
     createComponentKit: { recipes: "use \"kit\"", components: "use \"kit\"", styles: "use \"withStyles\": true", name: "a kit makes several building blocks: give \"prefix\" (and per item { \"recipe\": ..., \"name\": ... })", widgets: "a kit is made of recipes (\"kit\"); one building block of your own widgets: createBuildingBlock" },
     createBuildingBlock: { title: "a building block has no title; \"displayName\" is its toolbox name", templateCategory: "use \"category\"", templateCategoryWeight: "use \"categoryWeight\"", layout: "a building block has no layout (a page template has: createPageTemplate)", parameters: "a building block has no parameters: leave out the data view's entity (unconfigured) or give it listenTo / source", preset: "use createComponentKit for ready-made recipes" },
     createPageTemplate: { templateCategory: "use \"category\"", templateCategoryWeight: "use \"categoryWeight\"", templateType: "use \"type\"", title: "a page template has no title (pages made from it get one)", from: "a template is not copied from another; give \"widgets\" or \"placeholders\"" },
@@ -765,7 +775,67 @@ function makeComposite(x) {
         return `${items.length} building block(s) in ${o.module}/${o.folder !== undefined ? o.folder : "Kit"}, category "${o.category !== undefined ? o.category : `${P} kit`}":` + outs.map(t => `\n      ${t}`).join("") + styles;
     }
 
+    // ------------------------------------------------ style guide page
+
+    async function createStyleGuide(o) {
+        const name = o.name !== undefined ? String(o.name) : "StyleGuide";
+        const where = `createStyleGuide ${o.module}.${name}`;
+        const h2 = (t, n) => ({ widget: "text", text: t, style: "H2", name: n, class: "styleguide-section" });
+        const row = (ws, cls) => ({ widget: "container", class: cls || "styleguide-row", widgets: ws });
+        const notes = [];
+        const widgets = [{ widget: "text", text: "Typography", style: "H2", class: "styleguide-section", name: "sgTypography" },
+            ...["H1", "H2", "H3", "H4", "H5", "H6"].map(h => ({ widget: "text", text: `Heading ${h.slice(1)}`, style: h })),
+            { widget: "text", text: "Paragraph: body text as it reads in a form or a card, with enough contrast on every surface.", style: "Paragraph" }, { widget: "text", text: "Small detail text", class: "text-detail" },
+            h2("Buttons", "sgButtons"),
+            row(["Default", "Primary", "Success", "Info", "Warning", "Danger", "Inverse"].map(st => ({ widget: "actionButton", action: "close", caption: st, style: st }))),
+            row([{ widget: "actionButton", action: "close", caption: "Icon", style: "Primary", icon: "glyphicon-plus" }, { widget: "actionButton", action: "close", caption: "Link", renderType: "link" }])];
+        const variables = [];
+        const page = model.allPages()[0];
+        if (page && "variables" in (await page.load())) {
+            variables.push({ name: "SgText", type: "String", default: "''" }, { name: "SgFlag", type: "Boolean", default: "false" }, { name: "SgDate", type: "DateTime", default: "empty" });
+            widgets.push(h2("Inputs", "sgInputs"), { widget: "layoutGrid", rows: [{ columns: [
+                { weight: 6, tablet: 6, phone: 12, widgets: [{ widget: "textBox", variable: "SgText", label: "Text box", placeholder: "Type here" }, { widget: "datePicker", variable: "SgDate", label: "Date picker" }] },
+                { weight: 6, tablet: 6, phone: 12, widgets: [{ widget: "checkBox", variable: "SgFlag", label: "Check box" }] }] }] });
+        } else notes.push("inputs left out (page variables need Mendix 10)");
+        widgets.push(h2("Cards", "sgCards"), { widget: "layoutGrid", rows: [{ columns: [1, 2, 3].map(n => ({ weight: 4, tablet: 6, phone: 12, widgets: [{ widget: "container", class: "card", widgets: [{ widget: "text", text: `Card ${n}`, style: "H4", class: "card-title" }, { widget: "text", text: "Card content on a raised surface." }] }] })) }] },
+            h2("Alerts", "sgAlerts"), ...["success", "info", "warning", "danger"].map(a => ({ widget: "container", class: `alert alert-${a}`, widgets: [{ widget: "text", text: `${a[0].toUpperCase()}${a.slice(1)} message` }] })));
+        const inst = require("./pluggable").installed(client.project.dir);
+        if (inst.has("com.mendix.widget.custom.badge.Badge")) widgets.push(h2("Badges", "sgBadges"), row(["New", "Beta", "3"].map((t, i) => ({ widget: "badge", text: t, ...(i === 1 ? { type: "label" } : {}) }))));
+        else notes.push("badges left out (no Badge widget in widgets/)");
+        if (o.entity !== undefined) {
+            const ent = await x.entity(String(o.entity));
+            widgets.push(h2("Data grid", "sgGrid"), { widget: "dataGrid", kind: "auto", entity: ent.qualifiedName, rows: 5 }, h2("List view", "sgList"), { widget: "listView", entity: ent.qualifiedName, pageSize: 5 });
+        } else notes.push("data grid and list view left out (give entity)");
+        if (o.prefix !== undefined) {
+            const P = require("./ds-kit").pascal(String(o.prefix));
+            const bbs = model.allBuildingBlocks().filter(b => b.qualifiedName.startsWith(`${o.module}.${P}_`));
+            if (!bbs.length) throw new Error(`${where}: no building block ${o.module}.${P}_* (make the kit first: createComponentKit with prefix "${o.prefix}")`);
+            const shown = [], skipped = [];
+            for (const b of bbs) {
+                const d = await b.load();
+                let open = false;
+                d.traverse(el => {
+                    const src = el instanceof pages.DataView || el instanceof pages.ListView ? el.dataSource : null;
+                    if (src && !src.entityRef && !(src instanceof pages.ListenTargetSource)) open = true;
+                });
+                (open ? skipped : shown).push(d.qualifiedName);
+            }
+            if (shown.length) widgets.push(h2("Components", "sgComponents"), ...shown.map(q => ({ widget: "buildingBlock", from: q })));
+            if (skipped.length) notes.push(`not shown (unconfigured data widgets would be errors on a page): ${skipped.join(", ")}`);
+        }
+        const text = await x.impl().createPage({ module: o.module, name, title: o.title !== undefined ? o.title : "Style guide", arrange: "rows", widgets, ...(variables.length ? { variables } : {}),
+            ...Object.fromEntries(["folder", "layout", "menu", "roles"].filter(k => o[k] !== undefined).map(k => [k, o[k]])) });
+        return text.split("\n")[0] + ` style guide: ${widgets.filter(w => w.class === "styleguide-section").map(w => w.text).join(", ")}` + notes.map(n => `\n      ${n}`).join("");
+    }
+
     const checks = {
+        async createStyleGuide(o) {
+            const qn = `${o.module}.${o.name !== undefined ? o.name : "StyleGuide"}`;
+            const p = await x.get(qn);
+            let n = 0;
+            p.traverse(el => el instanceof pages.DynamicText && el.appearance && el.appearance.class === "styleguide-section" && n++);
+            return n >= 4 ? [] : [`${qn} has ${n} sections`];
+        },
         async createComponentKit(o) {
             const { items, p } = await kitPlan(o, "check");
             const r = [];
@@ -820,7 +890,7 @@ function makeComposite(x) {
         }
     };
 
-    return { impl: { createBuildingBlock, changeBuildingBlock, createPageTemplate, applyStyle, createComponentKit }, createLayoutFresh, LAYOUT_FROM_ONLY, checks, internals: { unbound, swap, fill, newState, givenNames, usualLayout, templateInfo } };
+    return { impl: { createBuildingBlock, changeBuildingBlock, createPageTemplate, applyStyle, createComponentKit, createStyleGuide }, createLayoutFresh, LAYOUT_FROM_ONLY, checks, internals: { unbound, swap, fill, newState, givenNames, usualLayout, templateInfo } };
 }
 
 module.exports = { makeComposite, COMPOSITE_OPS, COMPOSITE_SYNONYMS };

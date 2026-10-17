@@ -99,6 +99,10 @@ function dsPlan(mod, T, x) {
         [{ op: "createComponentKit", module: mod, prefix: "zzx", kit: [{ recipe: "card", colour: "red" }] }, /card takes recipe, name, title, text; not 'colour'/]
     );
     if (x.atlasCore) refuse.push([{ op: "createComponentKit", module: mod, prefix: "zzy", kit: ["card"], withStyles: true, file: "themesource/atlas_core/web/main.scss" }, /Marketplace module Atlas_Core/]);
+    if (x.layout) {
+        ops.push({ op: "createStyleGuide", module: mod, name: `${T}_DsStyleGuide`, folder: "ZzDs", layout: x.layout, prefix: "zzk", entity: `${mod}.${T}DsE`, ...(x.nav ? { menu: "Responsive" } : {}) });
+        refuse.push([{ op: "createStyleGuide", module: mod, name: `${T}_DsR4`, prefix: "nokit" }, /no building block .*Nokit_\*/]);
+    }
     // pluggable presets: the ones whose .mpk this project has
     const E = `${mod}.${T}DsE`;
     const presetSpecs = {
@@ -197,6 +201,15 @@ function dsProblems(project, mod, T, x) {
     let grid = null;
     walk(tb || {}, o => (o.$Type === "CustomWidgets$CustomWidget" || o.$Type === "Forms$DataGrid") && !grid && (grid = o));
     say(tb && grid && (!x.grid2 || grid.$Type === "CustomWidgets$CustomWidget"), "kit toolbar with a grid of the entity not stored");
+    if (x.layout) {
+        const sg = units[`${T}_DsStyleGuide`];
+        const secs = [], copies2 = [];
+        walk(sg || {}, o => (o.$Type === "Forms$DynamicText" && o.Appearance.Class === "styleguide-section" && secs.push(words(o.Content.Template)), o.$Type === "Forms$DivContainer" && /zzk-card$/.test(o.Appearance.Class) && copies2.push(o)));
+        say(["Typography", "Buttons", "Cards", "Alerts", "Data grid", "List view", "Components"].every(t => secs.includes(t)) && copies2.length === 1, `style guide sections / kit components not stored (${secs.join(", ")})`);
+        let btns = 0;
+        walk(sg || {}, o => o.$Type === "Forms$ActionButton" && btns++);
+        say(btns >= 9, "style guide buttons missing");
+    }
     if (x.layout && x.presets.length) {
         const pp = units[`${T}_DsPresets`];
         const ids = [];
@@ -259,7 +272,7 @@ async function dsModelPhase({ s2, reopen, copy, mod, T, layout, layoutProblems, 
     if (x.layout && x.presets.length < 11) results.push(`SKIP ds-model: pluggable presets without their .mpk here: ${Object.keys(require("./pl-presets").PRESETS).filter(k => !x.presets.includes(k)).join(", ")} (refused, tested)`);
     if (!x.nav) results.push("SKIP ds-model: layout menus: no Responsive navigation profile (layouts built with menu false)");
     const what = ["building blocks (toolbox details, unconfigured data view with 5 inputs + Save / Cancel, unconfigured list view, bound list view)", "addWidgets / changeWidget / changeBuildingBlock on a building block",
-        "buildingBlock widget on a page", x.layout && "page templates (regular, edit) + createPage from them", "createLayout sidebar / topbar / modal pop-up with header, side bar, footer, menu", "applyStyle (page + hasClass, module folder + match + style + button style)", `component kits (8 recipes + SCSS, ${3 + Number(x.gallery)} bound to an entity)`, x.layout && x.presets.length && `pluggable presets ${x.presets.join(", ")}`, `${plan.refuse.length} refusals`].filter(Boolean);
+        "buildingBlock widget on a page", x.layout && "page templates (regular, edit) + createPage from them", "createLayout sidebar / topbar / modal pop-up with header, side bar, footer, menu", "applyStyle (page + hasClass, module folder + match + style + button style)", `component kits (8 recipes + SCSS, ${3 + Number(x.gallery)} bound to an entity)`, x.layout && "style guide (typography, buttons, inputs, cards, alerts, grid, list, kit)", x.layout && x.presets.length && `pluggable presets ${x.presets.join(", ")}`, `${plan.refuse.length} refusals`].filter(Boolean);
     check(`ds-model: ${what.join("; ")}; stored with Studio Pro's keys, reopen 0 errors`, !problems.length, [...new Set(problems)].slice(0, 6).join("; "));
     if (firstUse.length) results.push(`NOTE ds-model: no Studio Pro sample in this project of ${firstUse.length} type(s) (SDK layout): ${firstUse.slice(0, 10).join(", ")}`);
     return reopen(copy);
