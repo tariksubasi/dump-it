@@ -60,6 +60,9 @@ const USAGE = `mxlocal - Mendix Model SDK offline on a local .mpr (v2)
   node mxlocal.js widgets <Module.Page> --project <app.mpr|folder>
                                         the widget tree of a page or snippet: names, kinds, entity, where new
                                         widgets can go (for addWidgets/changeWidget/deleteWidget/moveWidget)
+  node mxlocal.js preview <Module.Page> [--out file.html] --project <app.mpr|folder>
+                                        APPROXIMATE static picture of a page with the compiled theme (Mendix-like
+                                        HTML, no data): the .html, and phone/tablet/desktop .png with Playwright
   node mxlocal.js widgettype [name] --project <app.mpr|folder>
                                         the pluggable widgets in widgets/*.mpk; with a name: its properties
                                         (types, defaults, values) for { "widget": "pluggable", "properties": ... }
@@ -559,6 +562,13 @@ async function main() {
         const client = new LocalClient(ctx);
         const model = await client.open();
         out(await require("./ops").bind(model, client).widgets(a._[1]));
+    } else if (cmd === "preview") {
+        if (!a._[1]) throw new Error("preview needs a page, e.g. preview Module.Customer_Overview [--out edits/preview/page.html]");
+        const ctx = await loadProject(mpr);
+        const client = new LocalClient(ctx);
+        const model = await client.open();
+        const outFile = path.resolve(a.out && a.out !== true ? a.out : path.join("edits", "preview", `${a._[1]}.html`));
+        await require("./preview").preview(client, model, a._[1], outFile, out);
     } else if (cmd === "widgettype" || cmd === "widgettypes") {
         const ctx = await loadProject(mpr);
         const client = new LocalClient(ctx);
