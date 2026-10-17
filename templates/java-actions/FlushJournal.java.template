@@ -1,0 +1,30 @@
+package {{MODULE}}.actions;
+
+import com.mendix.systemwideinterfaces.core.IContext;
+import com.mendix.systemwideinterfaces.core.UserAction;
+import communitycommons.proxies.LogLevel;
+
+public class FlushJournal extends UserAction<java.lang.Void>
+{
+	private final java.lang.String LogNodeName;
+	private final communitycommons.proxies.LogLevel Level;
+
+	public FlushJournal(IContext context, java.lang.String _logNodeName, java.lang.String _level) {
+		super(context);
+		this.LogNodeName = _logNodeName;
+		this.Level = _level == null ? null : communitycommons.proxies.LogLevel.valueOf(_level);
+	}
+
+	@Override
+	public java.lang.Void executeAction() throws Exception {
+		// BEGIN USER CODE
+		try {
+			String node = (LogNodeName == null || LogNodeName.trim().isEmpty()) ? "Logging" : LogNodeName;
+			{{MODULE}}.Journal.flush(getContext(), com.mendix.core.Core.getLogger(node), Level == null ? LogLevel.Info : Level, node);
+		} catch (Throwable t) {
+			try { com.mendix.core.Core.getLogger("Logging").error("FlushJournal failed (ignored): " + t.getMessage()); } catch (Throwable ignored) {}
+		}
+		return null;
+		// END USER CODE
+	}
+}

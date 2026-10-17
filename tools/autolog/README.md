@@ -36,6 +36,12 @@ To use other module or action names, pass `--java-action Mod.Name --js-action Mo
 
 ## Journal mode: log every activity automatically
 
+### Object logging
+
+When `VariableObject` is set, `LogActivityFixed` uses `Journal.describeObject` to render the full object state `Type[id=...] {Attr=value}` instead of leaving `Value` empty. For generic use, create `LogObjectState` Java action with type parameter `T` and call it from `LogActivityFixed` when `VariableObject != null`. This ensures object fields are logged in both Activity and ObjectState lines.
+
+## Journal mode: log every activity automatically
+
 You add **one** activity by hand: a `FlushJournal` call before the end event of the microflow. The tool adds the rest.
 
 ```bash

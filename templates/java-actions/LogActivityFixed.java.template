@@ -1,0 +1,76 @@
+package {{MODULE}}.actions;
+
+import com.mendix.core.Core;
+import com.mendix.logging.ILogNode;
+import com.mendix.systemwideinterfaces.core.IContext;
+import com.mendix.systemwideinterfaces.core.IMendixObject;
+import com.mendix.systemwideinterfaces.core.UserAction;
+import communitycommons.proxies.LogLevel;
+
+public class LogActivityFixed extends UserAction<java.lang.Void>
+{
+	private final java.lang.String ActivityName;
+	private final java.lang.String VariableName;
+	private final java.lang.String VariableValue;
+	private final java.lang.String DummyType;
+	private final IMendixObject VariableObject;
+	private final java.util.List<IMendixObject> VariableList;
+	private final java.lang.String FlowName;
+	private final java.lang.String LogNodeName;
+	private final communitycommons.proxies.LogLevel Level;
+
+	public LogActivityFixed(IContext context, java.lang.String _activityName, java.lang.String _variableName, java.lang.String _variableValue, java.lang.String _dummyType, IMendixObject _variableObject, java.util.List<IMendixObject> _variableList, java.lang.String _flowName, java.lang.String _logNodeName, java.lang.String _level) {
+		super(context);
+		this.ActivityName = _activityName;
+		this.VariableName = _variableName;
+		this.VariableValue = _variableValue;
+		this.DummyType = _dummyType;
+		this.VariableObject = _variableObject;
+		this.VariableList = _variableList;
+		this.FlowName = _flowName;
+		this.LogNodeName = _logNodeName;
+		this.Level = _level == null ? null : communitycommons.proxies.LogLevel.valueOf(_level);
+	}
+
+	@Override
+	public java.lang.Void executeAction() throws Exception {
+		// BEGIN USER CODE
+		try {
+			String node = isBlank(LogNodeName) ? "Logging" : LogNodeName;
+			ILogNode log = Core.getLogger(node);
+			String flow = isBlank(FlowName) ? {{MODULE}}.LogSink.currentMicroflow(getContext()) : FlowName;
+			String activity = isBlank(ActivityName) ? "<unnamed>" : ActivityName;
+			String varName = isBlank(VariableName) ? "<void>" : VariableName;
+			String valueDesc;
+			if (VariableObject != null) {
+				String objDesc = {{MODULE}}.Journal.describeObject(getContext(), VariableObject);
+				String objMsg = "ObjectState | cid=" + {{MODULE}}.TraceContext.get() + " | flow=" + flow + " | obj=" + objDesc;
+				{{MODULE}}.LogSink.dispatch(log, Level == null ? LogLevel.Info : Level, node, objMsg);
+				System.out.println(objMsg);
+				valueDesc = objDesc;
+			} else if (VariableList != null) {
+				valueDesc = {{MODULE}}.Journal.describeList(getContext(), VariableList);
+			} else {
+				valueDesc = VariableValue == null ? "" : VariableValue;
+			}
+			String msg = "Activity | cid=" + {{MODULE}}.TraceContext.get()
+				+ " | flow=" + flow
+				+ " | activity=" + activity
+				+ " | variable=" + varName
+				+ " | value=" + valueDesc;
+			log.info(msg);
+			System.out.println(msg);
+		} catch (Throwable t) {
+			try { Core.getLogger("Logging").error("LogActivity failed: " + t.getMessage()); } catch (Throwable ignored) {}
+		}
+		return null;
+		// END USER CODE
+	}
+
+	@Override
+	public java.lang.String toString() { return "LogActivityFixed"; }
+
+	// BEGIN EXTRA CODE
+	private static boolean isBlank(String s) { return s == null || s.trim().isEmpty(); }
+	// END EXTRA CODE
+}
