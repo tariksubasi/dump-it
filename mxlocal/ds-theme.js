@@ -162,7 +162,9 @@ function makeDsTheme({ model, client, impl, theme }) {
         const lines = cur.split(/\r?\n/);
         const head = lines.filter(l => !/^\s*@import\s+["'][^"']+["'];\s*$/.test(l) && l.trim());
         let imports = lines.map(l => /^\s*@import\s+["']([^"']+)["'];\s*$/.exec(l)).filter(Boolean).map(m => m[1]);
-        imports = [...new Set([...imports, ...add])].filter(i => !remove.includes(i)).sort();
+        const first = ["tokens", "fonts", "css-vars"]; // tokens/_index.scss: the variables before what uses them
+        const rank = i => (first.includes(i) ? first.indexOf(i) : first.length);
+        imports = [...new Set([...imports, ...add])].filter(i => !remove.includes(i)).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
         return [...head, ...imports.map(i => `@import "${i}";`)].join("\n") + "\n";
     }
     const indexHead = layer => `// ${layer}: one @import per file (addComponentStyle keeps this list sorted)`;
@@ -460,7 +462,13 @@ function makeDsTheme({ model, client, impl, theme }) {
         const ts = path.join(dir, "themesource");
         const mods = model.allModules();
         if (o.module !== undefined) folders.push(ownModule(o.module, where).name.toLowerCase());
-        else if (fs.existsSync(ts)) folders.push(...fs.readdirSync(ts));
+        else {
+            if (fs.existsSync(ts)) folders.push(...fs.readdirSync(ts));
+            for (const [rel] of client.fileChanges || []) {
+                const m = /^themesource\/([^/]+)\/web\/design-properties\.json$/.exec(rel);
+                if (m && !folders.includes(m[1])) folders.push(m[1]);
+            }
+        }
         const hits = [];
         for (const f of folders) {
             const rel = `themesource/${f}/web/design-properties.json`;
@@ -482,6 +490,7 @@ function makeDsTheme({ model, client, impl, theme }) {
         if (!own.length) {
             if (hits.length) throw new Error(`${where}: '${name}' of ${wt} belongs to the Marketplace module ${hits[0].mod.name} (replaced on update); define your own with addDesignProperty in your design module`);
             const all = [...(design.definitions(dir).get(wt) || [])].map(p => p.name);
+            if (all.includes(name)) throw new Error(`${where}: '${name}' of ${wt} comes from a Marketplace module (Atlas) and cannot change here; define your own with addDesignProperty in your design module`);
             fail(`${where}: no design property '${name}' for ${wt} in an own module's design-properties.json`, name, all);
         }
         if (own.length > 1) throw new Error(`${where}: '${name}' is in ${own.map(h => h.rel).join(" and ")}; give "module"`);
