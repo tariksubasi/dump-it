@@ -9,6 +9,7 @@ const { fail, suggest, bool, setIfAvailable, enumValue, validName } = require(".
 const { toSdk } = require("./convert");
 const pluggable = require("./pluggable");
 const design = require("./design");
+const ui = require("./ui");
 const { userRoleNamed } = require("./ops-security");
 
 const { pages, domainmodels: dm, datatypes, menus, navigation, microflows: mf, customwidgets: cw, enumerations } = sdk;
@@ -172,8 +173,12 @@ const COMMON_FIELDS = {
     visible: "optional true | an expression \"$currentObject/Active\" | { \"attribute\": \"Status\", \"values\": [\"Open\"] } (Boolean attribute: visible when true); the attribute is of the data view / list view / gallery around the widget; { \"roles\": [\"Module.Role\"] } shows it only to users with one of these module roles (also with attribute / expression)",
     design: "optional Atlas design properties of the theme (themesource/*/web/design-properties.json): { \"Spacing\": { \"margin-top\": \"M\" }, \"Spacing top\": \"Large\", \"Full width\": true, \"Style\": \"Primary\" }; null / false removes one",
     class: "optional CSS class(es)",
-    style: "optional inline CSS, e.g. \"margin-top: 8px;\""
+    style: "optional inline CSS, e.g. \"margin-top: 8px;\"",
+    ...ui.COMMON_UI
 };
+// UI details per kind (ui.js): button icons, tooltips, aria, container render mode and on click, image alt text; the drop-down button kind
+WIDGETS.dropDownButton = ui.DROPDOWN;
+for (const [k, f] of Object.entries(ui.KIND_UI)) Object.assign(WIDGETS[k].fields, f);
 
 const INPUTS = { textBox: "TextBox", textArea: "TextArea", checkBox: "CheckBox", datePicker: "DatePicker", radioButtons: "RadioButtonGroup", dropDown: "DropDown" };
 const ALIASES = { button: "actionButton", grid: "dataGrid", datagrid: "dataGrid", datagrid2: "dataGrid", list: "listView", heading: "text", div: "container", radiobuttongroup: "radioButtons",
@@ -192,11 +197,15 @@ const SYNONYMS = {
     comboBox: { caption: "use \"captionAttribute\" (the attribute of the other entity) or \"label\"",
         required: "a combo box (pluggable) has no validation in Studio Pro; use a referenceSelector or dropDown with \"required\", or check it in the save microflow",
         validation: "a combo box (pluggable) has no validation in Studio Pro; use a referenceSelector or dropDown with \"validation\"", format: "a combo box shows its caption attribute as it is" },
+    input: { tooltip: ui.INPUT_TOOLTIP, ...Object.fromEntries(["helpText", "help", "hint", "title"].map(k => [k, ui.INPUT_TOOLTIP])) },
+    actionButton: { ariaLabel: "a button has no aria label in Mendix; screen readers read its caption; an icon-only button: give \"tooltip\"", image: "use \"icon\" (an image as icon: \"Module.Images.Save\")", glyph: "use \"icon\": \"glyphicon-<name>\"" },
+    image: { alternativeText: "use \"alt\"", altText: "use \"alt\"", ariaLabel: "use \"alt\"" },
+    container: { tag: "use \"renderMode\"", element: "use \"renderMode\"", action: "use \"onClick\": { \"action\": ... }" },
     gallery: { fields: "use \"widgets\" (per item)", rows: "use \"pageSize\"", listenTo: `a gallery cannot listen; ${MASTER_DETAIL}` }
 };
 const KINDS = [...Object.keys(WIDGETS), ...Object.keys(INPUTS)];
 const PREFIX = { fileManager: "fileManager", imageUploader: "imageUploader", pluggable: "widget", layoutGrid: "layoutGrid", container: "container", text: "text", dataView: "dataView", dataGrid: "grid", listView: "listView", actionButton: "actionButton",
-    tabContainer: "tabControl", groupBox: "groupBox", snippetCall: "snippetCall", referenceSelector: "referenceSelector", referenceSetSelector: "referenceSetSelector", templateGrid: "templateGrid", comboBox: "comboBox", gallery: "gallery" };
+    tabContainer: "tabControl", groupBox: "groupBox", dropDownButton: "dropDownButton", snippetCall: "snippetCall", referenceSelector: "referenceSelector", referenceSetSelector: "referenceSetSelector", templateGrid: "templateGrid", comboBox: "comboBox", gallery: "gallery" };
 // enumValue with the widget location in the message
 function choice(cls, value, field, where) {
     try {
@@ -256,6 +265,7 @@ const PAGE_FIELDS = {
     from: "optional page template or building block of the project (Module.Name or its display name): its widgets are copied first (data widgets in it stay unconfigured, as in Studio Pro), then \"widgets\"",
     variables: "optional page variables (Mendix 10+): [ { \"name\": \"Search\", \"type\": \"String\" | \"Boolean\" | \"Integer\" | \"Decimal\" | \"DateTime\" | \"Enum(Module.E)\", \"default\": \"''\" (an expression) } ]; an input takes \"variable\": \"Search\" instead of an attribute, expressions, XPath and flow \"params\" use $Search",
     design: "optional design properties of the page (Atlas FormBase: { \"Form orientation\": \"Horizontal\", \"Label width\": \"3\" }) where the theme has them",
+    ...ui.PAGE_UI,
     native: "optional true: a native mobile page (a NativePhone layout of the project; widgets: text, container, actionButton, dataView, listView, input / textBox / checkBox / datePicker); refused when the project has no native layout"
 };
 const MENU_FIELDS = {
@@ -397,7 +407,7 @@ function makePages(h) {
         const known = ["widget", "type", "name", ...own];
         for (const k of Object.keys(spec)) {
             if (known.includes(k)) continue;
-            const syn = (SYNONYMS[kind] || {})[k];
+            const syn = (SYNONYMS[kind] || {})[k] || (INPUTS[kind] || /^(referenceS|comboBox)/.test(kind) ? SYNONYMS.input[k] : undefined);
             if (syn) throw new Error(`${where}: unknown field '${k}' for ${kind}: ${syn}`);
             const s = suggest(k, own);
             throw new Error(`${where}: unknown field '${k}' for ${kind}. ` + (s.length ? `Did you mean: ${s.join(", ")}?` : `Fields of ${kind}: ${own.join(", ")}, name`));
@@ -435,16 +445,18 @@ function makePages(h) {
                 node.rows = rows.map((r, ri) => {
                     const rw = `${node.where} row ${ri + 1}`;
                     if (!r || typeof r !== "object" || Array.isArray(r)) throw new Error(`${rw}: a row is { "columns": [ ... ] }`);
-                    for (const k of Object.keys(r)) if (k !== "columns") fail(`${rw}: unknown field '${k}'`, k, ["columns"]);
+                    uiFns().checkKeys(r, uiFns().ROW_KEYS, rw, "row");
                     const cols = list(r.columns, `${rw}.columns`);
                     if (!cols.length) throw new Error(`${rw}: needs columns, e.g. [ 8, 4 ]`);
                     const out = cols.map((c, ci) => {
                         const at = `${rw} column ${ci + 1}`;
                         const col = typeof c === "object" && c ? c : { weight: c };
-                        for (const k of Object.keys(col)) if (!["weight", "tablet", "phone", "widgets"].includes(k)) fail(`${at}: unknown field '${k}'`, k, ["weight", "tablet", "phone", "widgets"]);
-                        return { weight: weight(col.weight, at, -1), tablet: weight(col.tablet, at, -1), phone: weight(col.phone, at, -1), widgets: scan(col.widgets, `${at}.widgets`, container, nodes) };
+                        uiFns().checkKeys(col, uiFns().COL_KEYS, at, "column");
+                        return { weight: weight(col.weight, at, -1), tablet: weight(col.tablet, at, -1), phone: weight(col.phone, at, -1), widgets: scan(col.widgets, `${at}.widgets`, container, nodes), spec: col, where: at };
                     });
                     if (out.reduce((s, c) => s + Math.max(c.weight, 0), 0) > 12) client.warn(`layout grid ${rw}: column weights add up to more than 12; the columns wrap`);
+                    out.spec = r;
+                    out.where = rw;
                     return out;
                 });
             } else if (kind === "container") node.widgets = scan(spec.widgets, `${node.where}.widgets`, container, nodes);
@@ -2324,7 +2336,7 @@ function makePages(h) {
         }
         if (s.design !== undefined) {
             if (!has(w, "appearance")) throw new Error(`${node.where}: a ${node.kind} has no design properties`);
-            const t = design.apply(sdk, model, w, design.resolve(client.project.dir, w, s.design, `${node.where}: design`));
+            const t = design.apply(sdk, model, w, design.resolve(client.project.dir, w, s.design, `${node.where}: design`), client.warn);
             if (t) out.push(`design ${t}`);
         }
         if (s.visible !== undefined && s.visible !== true && s.visible !== "true") {
@@ -2337,6 +2349,7 @@ function makePages(h) {
             fill(w.conditionalVisibilitySettings, c);
             out.push(c.text);
         }
+        out.push(...(await uiFns().apply(node, w, ctx)));
         if (s.editable !== undefined && INPUT_KINDS.includes(node.kind)) {
             if (!has(w, "editable") || (w instanceof cw.CustomWidget && !sysProps(w).includes("Editability"))) throw new Error(`${node.where}: this ${node.kind} has no editability setting`);
             const t = await editability(w, s.editable, dc, `${node.where}: editable`);
@@ -2907,15 +2920,18 @@ function makePages(h) {
             for (const r of node.rows) {
                 const row = pages.LayoutGridRow.create(model);
                 lg.rows.push(row);
+                const rowLook = await uiFns().row(row, r.spec, node.container || null, r.where || node.where);
+                if (rowLook.length) parts.push(`row ${lg.rows.length} {${rowLook.join("; ")}}`);
                 for (const c of r) {
                     const col = pages.LayoutGridColumn.create(model);
                     row.columns.push(col);
                     col.weight = c.weight;
                     col.tabletWeight = c.tablet;
                     col.phoneWeight = c.phone;
+                    const colLook = await uiFns().column(col, c.spec, node.container || null, c.where || node.where);
                     const inner = [];
                     for (const ch of c.widgets) inner.push(await build(ch, col.widgets, ctx));
-                    parts.push(`${c.weight === -1 ? "auto" : c.weight}: ${inner.join(", ") || "empty"}`);
+                    parts.push(`${c.weight === -1 ? "auto" : c.weight}${colLook.length ? ` {${colLook.join("; ")}}` : ""}: ${inner.join(", ") || "empty"}`);
                 }
             }
             return `${lg.name} [${parts.join(" | ")}]`;
@@ -3117,6 +3133,9 @@ function makePages(h) {
             if ((action === "save" || action === "cancel") && !/closes the page/.test(what)) what = what.replace(/^(save|cancel)/, "$1, stays on the page");
             await templateAll(b, "caption", caption, ctx, node.where, s.caption === undefined);
             return `${b.name} (${what})`;
+        },
+        async dropDownButton(node, target, ctx) {
+            return uiFns().dropDownButton(node, target, ctx);
         },
         async tabContainer(node, target, ctx) {
             const tc = pages.TabContainer.create(model);
@@ -3686,7 +3705,8 @@ function makePages(h) {
         arg.parameter = lp;
         const parts = [];
         if (o.variables !== undefined) parts.push(await pageVariables(page, o.variables, qn, ctx));
-        if (o.design !== undefined) parts.push(`design ${design.apply(sdk, model, page, design.resolve(client.project.dir, page, o.design, `${qn}: design`))}`);
+        if (o.design !== undefined) parts.push(`design ${design.apply(sdk, model, page, design.resolve(client.project.dir, page, o.design, `${qn}: design`), client.warn)}`);
+        if (o.class !== undefined || o.style !== undefined) parts.push(uiFns().pageLook(page, o, qn));
         if (tpl) parts.push(await copyTemplate(tpl, call, arg, layoutDoc, ctx));
         for (const n of arranged) parts.push(await build(n, arg.widgets, ctx));
         for (const f of ctx.after) f(); // parameter mappings: every widget they name exists now
@@ -3984,7 +4004,11 @@ function makePages(h) {
     // the builders and lookups ops-page-edit.js uses on existing pages
     const internals = { scan, build, gridKind, entityOf, attributeOf, pathOf, attrRefOf, prepareAssocs, formatInto, pageVariables, dvSettings, inputExtras, onChange, selectPage, ACTION_DOC, names, textAll, templateAll, noPlaceholder, checkXPath, dg2Info,
         isGrid2, isPl, valueOf, humanize, condition, sameCondition, fill, languages, shown, listenTarget, classicColumn, dg2Column, typeOf, isA, list, unitNamed,
-        prepare, listEntity, resolveSources, sourceKind, makeAction, plDef, plApply, plScan, widgetType, widgetTypes };
+        prepare, listEntity, resolveSources, sourceKind, makeAction, plDef, plApply, plScan, widgetType, widgetTypes, exprCheck, ui: () => uiFns() };
+    let uiMade = null;
+    function uiFns() {
+        return uiMade || (uiMade = ui.makeUi(h, () => internals));
+    }
     return { createPage, addMenuItem, setHomePage, checks, internals };
 }
 

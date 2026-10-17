@@ -8,6 +8,7 @@
 const sdk = require("mendixmodelsdk");
 const { fail, bool, setIfAvailable, enumValue, validName } = require("./ops-util");
 const design = require("./design");
+const ui = require("./ui");
 
 const { pages, domainmodels: dm, customwidgets: cw, datatypes, texts } = sdk;
 
@@ -19,11 +20,11 @@ const PLACE = {
 };
 const PAGE_EDIT_OPS = {
     addWidgets: {
-        doc: "Add widgets to an existing page or snippet: the createPage widget kinds (ops createPage), into a container, data view (body or footer), list view, group box, tab page, layout grid column or the placeholder. Inputs and {Attribute} texts use the entity of the data view or list view around them. Names and places: widgets Module.Page.",
-        fields: { page: "R Module.Page or Module.Snippet", ...PLACE, widgets: "R [ { \"widget\": \"<kind>\", ...fields } ] as in createPage; new names like Studio Pro (text3, actionButton2, ...)", entity: "optional default Module.Entity of new grids, list views and data views (default: the entity of the page's only object parameter)" }
+        doc: "Add widgets to an existing page, snippet or layout (a layout's own header, sidebar, menu bar: page = Module.Layout): the createPage widget kinds (ops createPage), into a container, data view (body or footer), list view, group box, tab page, layout grid column or the placeholder. Inputs and {Attribute} texts use the entity of the data view or list view around them. Names and places: widgets Module.Page.",
+        fields: { page: "R Module.Page, Module.Snippet or Module.Layout", ...PLACE, widgets: "R [ { \"widget\": \"<kind>\", ...fields } ] as in createPage; new names like Studio Pro (text3, actionButton2, ...)", entity: "optional default Module.Entity of new grids, list views and data views (default: the entity of the page's only object parameter)" }
     },
     changeWidget: {
-        doc: "Change one widget of a page or snippet: caption, text, label, placeholder, editable, visible, class, style, text/button style, grid columns, XPath, name, a button's action, on click (Data grid 2, gallery), on change (inputs). Give only what changes. Names: widgets Module.Page.",
+        doc: "Change one widget of a page, snippet or layout (or a layout grid row / column: \"layoutGrid1/row 1\", \"layoutGrid1/row 1/column 2\"): caption, text, label, placeholder, editable, visible, class, style, text/button style, grid columns, XPath, name, a button's action, on click (Data grid 2, gallery, container), on change (inputs), dynamic class, icon, tooltip, accessibility (aria label, role, tab index, alt text), container render mode, row / column alignment. Give only what changes. Names: widgets Module.Page.",
         fields: {
             page: "R Module.Page or Module.Snippet", widget: "R widget name (see: widgets Module.Page)",
             caption: "button, tab page, group box, grid button or classic grid column caption; inside a data view or list view {Attribute} shows a value",
@@ -49,11 +50,12 @@ const PAGE_EDIT_OPS = {
             format: "text box, date picker or classic grid column: { \"decimals\": 2, \"groupDigits\": true } | { \"date\": \"date\" | \"time\" | \"dateTime\" | \"dd-MM-yyyy\" }",
             readOnlyStyle: "input: inherit | control | text; data view: control | text", inputMask: "text box: a mask, e.g. \"99-99-9999\"", maxLength: "text box / text area: \"attribute\" | \"unlimited\" | a number",
             orientation: "data view: horizontal | vertical", labelWidth: "data view: label width 1-11 (horizontal form)", showFooter: "data view: true/false",
-            selectPage: "reference (set) selector: Module.Page that lists the objects to pick (Studio Pro: Select using Page)"
+            selectPage: "reference (set) selector: Module.Page that lists the objects to pick (Studio Pro: Select using Page)",
+            ...ui.CHANGE_UI
         }
     },
     changePage: {
-        doc: "Change page settings: title, URL, pop-up size, and its parameters (add / remove / rename). A parameter change that would break a caller (button, menu item, microflow that opens the page) is refused with the callers listed; remove deletes callers' mappings of it, rename keeps them.",
+        doc: "Change page settings: title, URL, pop-up size, class / style, layout, and its parameters (add / remove / rename). A parameter change that would break a caller (button, menu item, microflow that opens the page) is refused with the callers listed; remove deletes callers' mappings of it, rename keeps them.",
         fields: {
             page: "R Module.Page",
             title: "optional page title",
@@ -63,21 +65,24 @@ const PAGE_EDIT_OPS = {
             removeParameter: "optional parameter name (refused while a widget of the page uses it; callers' mappings of it are removed)",
             renameParameter: "optional { \"from\": \"Order\", \"to\": \"SalesOrder\" } (widgets and callers follow)",
             variables: "optional page variables to add (or change: same name): [ { \"name\": \"Search\", \"type\": \"String\", \"default\": \"''\" } ] (Mendix 10+; see createPage)",
-            design: "optional design properties of the page, e.g. { \"Form orientation\": \"Horizontal\" } (where the theme has them for pages)"
+            design: "optional design properties of the page, e.g. { \"Form orientation\": \"Horizontal\" } (where the theme has them for pages)",
+            class: "optional CSS class(es) of the page (\"\" = none)", style: "optional inline CSS of the page (\"\" = none)",
+            layout: "optional Module.Layout: switch the page to another layout; its content moves to the placeholders of the same name (refused, with the list, when a placeholder with content has no counterpart)"
         }
     },
     deleteWidget: {
-        doc: "Delete a widget and everything inside it from a page or snippet (also a classic grid column, grid button or tab page). Refuses while a data view listens to it, and the placeholder itself.",
+        doc: "Delete a widget and everything inside it from a page, snippet or layout (also a classic grid column, grid button or tab page). Refuses while a data view listens to it, the page's placeholder, and a layout placeholder that pages fill.",
         fields: { page: "R Module.Page or Module.Snippet", widget: "R widget name (see: widgets Module.Page)" }
     },
     moveWidget: {
-        doc: "Move a widget with its contents to another place on the same page or snippet (into / after / before as in addWidgets), e.g. a button into the data view footer. Widgets that show attributes stay inside the same data view or list view.",
+        doc: "Move a widget with its contents to another place on the same page, snippet or layout (into / after / before as in addWidgets), e.g. a button into the data view footer. Widgets that show attributes stay inside the same data view or list view.",
         fields: { page: "R Module.Page or Module.Snippet", widget: "R widget name", ...PLACE }
     }
 };
 const INPUT_FIELDS = ["required", "requiredMessage", "validation", "format", "readOnlyStyle", "inputMask", "maxLength"];
 const CHANGE_FIELDS = ["caption", "text", "label", "placeholder", "editable", "visible", "class", "design", "style", "textStyle", "buttonStyle", "columns", "xpath", "name", "action", "onClick", "onChange",
-    "onEnter", "onLeave", "onEnterKeyPress", ...INPUT_FIELDS, "orientation", "labelWidth", "showFooter", "selectPage"];
+    "onEnter", "onLeave", "onEnterKeyPress", ...INPUT_FIELDS, "orientation", "labelWidth", "showFooter", "selectPage", ...Object.keys(ui.CHANGE_UI)];
+const UI_FIELDS = Object.keys(ui.CHANGE_UI);
 // fields a weak model takes from elsewhere -> what to write instead (checked before the generic "unknown field")
 const FIELD_SYNONYMS = {
     addWidgets: { in: "use \"into\"", inside: "use \"into\"", target: "use \"into\"", container: "use \"into\"", parent: "use \"into\"", widget: "use \"widgets\": [ { \"widget\": ... } ] (a list)", footer: "use \"into\": \"<data view>\", \"slot\": \"footer\"", position: "use \"after\" or \"before\" (a widget name)" },
@@ -85,9 +90,9 @@ const FIELD_SYNONYMS = {
     deleteWidget: { widgets: "one widget per deleteWidget op: \"widget\": \"<name>\"", name: "use \"widget\"" },
     changeWidget: {
         readOnly: "use \"editable\": false", readonly: "use \"editable\": false", hidden: "use \"visible\": false (or a condition)", hide: "use \"visible\": false", visibility: "use \"visible\"",
-        title: "use \"caption\" (button, tab page, column) or \"text\" (a text)", header: "use \"caption\"", value: "use \"text\"", content: "use \"text\"", cssClass: "use \"class\"", className: "use \"class\"",
+        title: "use \"caption\" (button, tab page, column), \"text\" (a text) or \"tooltip\" (a button)", helpText: ui.INPUT_TOOLTIP, hint: ui.INPUT_TOOLTIP, ariaDescription: "use \"ariaLabel\" (inputs) or \"tooltip\" (buttons)", alternativeText: "use \"alt\"", offset: ui.NOT_STORED.offset, order: ui.NOT_STORED.order, header: "use \"caption\"", value: "use \"text\"", content: "use \"text\"", cssClass: "use \"class\"", className: "use \"class\"",
         newName: "use \"name\"", rename: "use \"name\"", addColumns: "use \"columns\": { \"add\": [...] }", removeColumns: "use \"columns\": { \"remove\": [...] }", column: "use \"columns\": { \"add\": [...], \"remove\": [...] }",
-        renderMode: "use \"textStyle\"", heading: "use \"textStyle\": \"H2\"", color: "use \"buttonStyle\" (a button) or \"style\" (CSS)", into: "moving is moveWidget", after: "moving is moveWidget", before: "moving is moveWidget"
+        heading: "use \"textStyle\": \"H2\"", color: "use \"buttonStyle\" (a button) or \"style\" (CSS)", into: "moving is moveWidget", after: "moving is moveWidget", before: "moving is moveWidget"
     }
 };
 
@@ -202,11 +207,9 @@ function makePageEdit(h, I) {
     // A page or snippet, loaded, with its tree. Layouts and other documents are refused.
     async function open(qn, where) {
         const doc = await h.get(qn);
-        if (!(doc instanceof pages.Page) && !(doc instanceof pages.Snippet)) {
-            const what = doc instanceof pages.Layout ? "a layout (change layouts in Studio Pro)" : `a ${doc.structureTypeName.split("$")[1]}`;
-            throw new Error(`${where}: '${qn}' is ${what}, not a page or snippet`);
-        }
-        const P = { doc, qn: doc.qualifiedName, snippet: doc instanceof pages.Snippet, ...buildTree(doc) };
+        if (!(doc instanceof pages.Page) && !(doc instanceof pages.Snippet) && !(doc instanceof pages.Layout)) throw new Error(`${where}: '${qn}' is a ${doc.structureTypeName.split("$")[1]}, not a page, snippet or layout`);
+        if (doc instanceof pages.Layout && !(doc.content instanceof pages.WebLayoutContent)) throw new Error(`${where}: '${qn}' is a native layout; change it in Studio Pro`);
+        const P = { doc, qn: doc.qualifiedName, snippet: doc instanceof pages.Snippet, layout: doc instanceof pages.Layout, ...buildTree(doc) };
         P.where = where;
         return P;
     }
@@ -354,6 +357,13 @@ function makePageEdit(h, I) {
             return slotOf(P, footer ? el.footerWidgets : el.widgets, node, footer ? `${node.name} footer` : node.name);
         } else if (el instanceof pages.DivContainer || el instanceof pages.GroupBox || el instanceof pages.TabPage || el instanceof pages.ListView) out = slotOf(P, el.widgets, node, node.name);
         else if (el instanceof pages.TemplateGrid) out = slotOf(P, el.contents.widgets, node, node.name);
+        else if (pages.ScrollContainer && el instanceof pages.ScrollContainer) {
+            // a layout's scroll container: its regions (center by default)
+            const regions = ["center", "left", "right", "top", "bottom"].filter(r => el[r]);
+            const r = slot === undefined ? "center" : String(slot).toLowerCase();
+            if (!regions.includes(r)) fail(`${where}: ${node.name} has no region '${slot}' (regions: ${regions.join(", ")})`, String(slot), regions);
+            return slotOf(P, el[r].widgets, node, `${node.name} ${r}`);
+        }
         else if (el instanceof pages.LayoutGrid) {
             const cols = columnPaths(node);
             if (cols.length !== 1) throw new Error(`${where}: into '${s}': a layout grid holds widgets in its columns; name one: ${cols.join(", ")}`);
@@ -419,7 +429,7 @@ function makePageEdit(h, I) {
         const list = holder && holder[node.prop];
         if (!list || typeof list.indexOf !== "function") throw new Error(`${where}: ${node.label} is not in a list of widgets`);
         const owner = node.parent && !node.parent.root ? node.parent : null;
-        let label = owner ? owner.label : P.snippet ? P.qn : "?";
+        let label = owner ? owner.label : P.snippet || P.layout ? P.qn : "?";
         if (owner && owner.el instanceof pages.DataView && node.prop === "footerWidgets") label = `${owner.name} footer`;
         if (!owner && !P.snippet) label = (placeholders(P).find(p => p.el === holder) || {}).label || label;
         const ph = placeholders(P).find(p => p.el === holder);
@@ -428,6 +438,7 @@ function makePageEdit(h, I) {
 
     function defaultContainer(P, where) {
         if (P.snippet) return slotOf(P, P.doc.widgets, null, P.qn);
+        if (P.layout && !P.doc.content.layoutCall) return slotOf(P, P.doc.content.widgets, null, P.qn);
         const ph = placeholders(P);
         if (ph.length === 1) return slotOf(P, ph[0].el.widgets, null, ph[0].label);
         throw new Error(`${where}: say where: "into" one of the placeholders ${ph.map(p => p.label).join(", ")}, a widget name, or "after"/"before" a widget (see: widgets ${P.qn})`);
@@ -614,7 +625,7 @@ function makePageEdit(h, I) {
         async design(P, node, v, dc, ctx, where) {
             const ap = prop(node.el, "appearance");
             if (!ap) throw new Error(`${where}: a ${kindOf(node.el)} has no design properties`);
-            return `design ${design.apply(sdk, model, node.el, design.resolve(client.project.dir, node.el, v, `${where}: design`)) || "unchanged"}`;
+            return `design ${design.apply(sdk, model, node.el, design.resolve(client.project.dir, node.el, v, `${where}: design`), client.warn) || "unchanged"}`;
         },
         async style(P, node, v, dc, ctx, where) {
             const ap = prop(node.el, "appearance");
@@ -666,10 +677,12 @@ function makePageEdit(h, I) {
             if (!(w instanceof pages.ActionButton)) throw new Error(`${where}: action is for a button; a ${kindOf(w)} has ${w instanceof cw.CustomWidget ? `"onClick"` : isInput(w) ? `"onChange"` : "none"}`);
             return I.makeAction(v, { container: dc, name: node.name }, ctx, where, a => (w.action = a));
         },
+        ...Object.fromEntries(UI_FIELDS.map(f => [f, (P, node, v, dc, ctx, where) => uiOf().change(f, node.el, v, { dc, ctx, where, caption: ctx.op && ctx.op.caption, at: { container: dc, name: node.name } })])),
         async onClick(P, node, v, dc, ctx, where) {
             const w = node.el;
+            if (w instanceof pages.DivContainer) return uiOf().change("onClick", w, v, { dc, ctx, where, at: { container: dc, name: node.name } });
             const p = w instanceof cw.CustomWidget && w.object ? w.object.properties.find(x => x.type && x.type.key === "onClick") : null;
-            if (!p) throw new Error(`${where}: onClick is for a Data grid 2 or gallery${w instanceof pages.ActionButton ? `; a button takes "action"` : ""}`);
+            if (!p) throw new Error(`${where}: onClick is for a container, Data grid 2 or gallery${w instanceof pages.ActionButton ? `; a button takes "action"` : ""}`);
             const { qn } = await containerEntity(P, node);
             const ent = qn ? await I.entityOf(qn, where) : null;
             const row = { kind: "pluggable", ent, widget: w, name: node.name, existing: true, container: dc };
@@ -718,6 +731,7 @@ function makePageEdit(h, I) {
             const old = node.name;
             if (n === old) return `name ${n}`;
             if (P.names.includes(n)) throw new Error(`${where}: the name '${n}' is already used on ${P.qn}`);
+            if (node.el instanceof pages.Placeholder && placeholderUsers(P.qn, old).length) throw new Error(`${where}: placeholder ${old} is filled by ${placeholderUsers(P.qn, old).slice(0, 5).join(", ")}${placeholderUsers(P.qn, old).length > 5 ? ", ..." : ""}; renaming it would empty those pages (rename it in Studio Pro, which moves their content)`);
             node.el.name = n; // the Model SDK renames by-name references (page variables) itself
             const listeners = listenersOf(P, [old]);
             for (const l of listeners) l.src.listenTarget = n;
@@ -864,6 +878,8 @@ function makePageEdit(h, I) {
     // ------------------------------------------------ operations
 
     // new widgets in the op's ctx, names given and Studio Pro style
+    const uiOf = () => I.ui();
+
     function newCtx(P) {
         const vars = new Map((prop(P.doc, "variables") || []).map(v => [v.name, v]));
         return { qn: P.qn, names: I.names(P.names), params: new Map(), vars, count: { inputs: 0 }, untranslated: 0, ents: new Set(), page: P.doc, existing: true, scope: [], after: [] };
@@ -926,7 +942,7 @@ function makePageEdit(h, I) {
         if (!top.length) throw new Error(`${where}: 'widgets' is empty`);
         const ctx = newCtx(P);
         // default entity: the op's, else the page's only object parameter
-        const params = P.doc.parameters.filter(p => p.parameterType instanceof datatypes.ObjectType); // also snippet parameters (createSnippet)
+        const params = (prop(P.doc, "parameters") || []).filter(p => p.parameterType instanceof datatypes.ObjectType); // also snippet parameters (createSnippet)
         for (const p of params) if (!ctx.params.has(p.parameterType.entityQualifiedName)) ctx.params.set(p.parameterType.entityQualifiedName, p);
         const dflt = o.entity || (params.length === 1 ? params[0].parameterType.entityQualifiedName : undefined);
         I.prepare(nodes);
@@ -961,12 +977,17 @@ function makePageEdit(h, I) {
         const where = `changeWidget ${o.page} ${o.widget}`;
         const P = await open(o.page, where);
         await I.prepareAssocs(null);
+        const part = uiOf().gridPart(P, o.widget, where);
+        if (part) {
+            const gdc = part.grid.ctx && (o.visible !== undefined || o.dynamicClass !== undefined) ? await builderContext(P, part.grid.ctx, where).catch(() => null) : null;
+            return `${P.qn}: ${await uiOf().changePart(part, o, gdc, where)}`;
+        }
         const node = find(P, o.widget, where);
         const fields = CHANGE_FIELDS.filter(k => o[k] !== undefined);
         if (!fields.length) throw new Error(`${where}: give what to change: ${CHANGE_FIELDS.join(", ")}`);
         const ctx = { ...newCtx(P), lang: await defaultLanguage(), op: o };
         // {Attribute} and conditions use the data view or list view around the widget (for a column: around its grid)
-        const needs = ["caption", "text", "label", "placeholder", "visible", "editable", "xpath", "action", "onClick", "onChange", "onEnter", "onLeave", "onEnterKeyPress", "validation", "selectPage"].some(k => o[k] !== undefined);
+        const needs = ["caption", "text", "label", "placeholder", "visible", "editable", "dynamicClass", "ariaLabel", "xpath", "action", "onClick", "onChange", "onEnter", "onLeave", "onEnterKeyPress", "validation", "selectPage"].some(k => o[k] !== undefined);
         if (["action", "onClick", "onChange", "onEnter", "onLeave", "onEnterKeyPress"].some(k => o[k] !== undefined)) ctx.scope = await scopeOf(P, where);
         const dc = needs && node.ctx ? await builderContext(P, node.ctx, where).catch(e => (/\{[A-Za-z_]|currentObject|"attribute"/.test(JSON.stringify(o)) ? Promise.reject(e) : null)) : null;
         const done = [];
@@ -1011,7 +1032,13 @@ function makePageEdit(h, I) {
         const P = await open(o.page, where);
         const node = find(P, o.widget, where);
         const el = node.el;
-        if (el instanceof pages.Placeholder) throw new Error(`${where}: ${node.label} is a layout placeholder; it cannot be deleted from a page`);
+        const phs = [];
+        el.traverse(x => x instanceof pages.Placeholder && phs.push(x.name));
+        if (phs.length && !P.layout) throw new Error(`${where}: ${node.label} is a layout placeholder; it cannot be deleted from a page`);
+        for (const ph of phs) {
+            const users = placeholderUsers(P.qn, ph);
+            if (users.length) throw new Error(`${where}: ${ph === node.name ? `placeholder ${ph}` : `${node.label} holds placeholder ${ph}, which`} is filled by ${users.length} page(s)/layout(s): ${users.slice(0, 5).join(", ")}${users.length > 5 ? ", ..." : ""}; move their content first or switch them to another layout (changePage "layout")`);
+        }
         if (!(el instanceof pages.Widget || el instanceof pages.GridColumn || el instanceof pages.ControlBarItem || el instanceof pages.TabPage)) throw new Error(`${where}: a ${kindOf(el)} cannot be deleted by name`);
         if (el instanceof pages.TabPage && el.container.tabPages.length < 2) throw new Error(`${where}: ${node.label} is the only tab page of ${el.container.name}; delete the tab container instead`);
         const { names, els } = subtree(node);
@@ -1048,6 +1075,20 @@ function makePageEdit(h, I) {
         };
         walk(node.el);
         return uses;
+    }
+
+    // Pages and layouts whose layout call fills placeholder name of layout qn (an argument for it): ["Module.Page"]
+    function placeholderUsers(qn, name) {
+        const out = [];
+        const want = `${qn}.${name}`;
+        for (const id of client.project.units.keys()) {
+            const info = client.unitInfo(id);
+            if (!/^Forms\$(Page|Layout|PageTemplate)$/.test(info.type)) continue;
+            const u = client.project.read(id);
+            const call = u.FormCall || (u.Content && u.Content.LayoutCall);
+            if (call && (call.Arguments || []).some(a => a.Parameter === want)) out.push(client.label(id));
+        }
+        return out;
     }
 
     async function moveWidget(o) {
@@ -1166,14 +1207,15 @@ function makePageEdit(h, I) {
         if (v instanceof pages.CustomDesignPropertyValue) return `${d.key}: ${v.value}`;
         return d.key;
     };
-    const INTO = el => el instanceof pages.TemplateGrid || el instanceof pages.LayoutCallArgument || el instanceof pages.LayoutGridColumn || el instanceof pages.DivContainer || el instanceof pages.GroupBox || el instanceof pages.TabPage || el instanceof pages.ListView || el instanceof pages.DataView;
+    const INTO = el => (pages.ScrollContainer && el instanceof pages.ScrollContainer) || el instanceof pages.TemplateGrid || el instanceof pages.LayoutCallArgument || el instanceof pages.LayoutGridColumn || el instanceof pages.DivContainer || el instanceof pages.GroupBox || el instanceof pages.TabPage || el instanceof pages.ListView || el instanceof pages.DataView;
 
     async function widgets(qn) {
         const P = await open(qn, "widgets").catch(e => {
             throw new Error(/^widgets: /.test(e.message) ? e.message : `widgets: ${e.message}`);
         });
         const head = [];
-        if (P.snippet) head.push(`${P.qn} (snippet${P.doc.parameters.length ? `; parameters: ${P.doc.parameters.map(p => `${p.name} (${p.parameterType && p.parameterType.entityQualifiedName ? p.parameterType.entityQualifiedName : "?"})`).join(", ")}` : ""})`);
+        if (P.layout) head.push(`${P.qn} (layout; placeholders: ${P.nodes.filter(n => n.el instanceof pages.Placeholder).map(n => `${n.name}${placeholderUsers(P.qn, n.name).length ? ` (filled by ${placeholderUsers(P.qn, n.name).length} page(s))` : ""}`).join(", ") || "none"}${P.doc.content.layoutCall ? `; based on ${P.doc.content.layoutCall.layoutQualifiedName}` : ""})`);
+        else if (P.snippet) head.push(`${P.qn} (snippet${P.doc.parameters.length ? `; parameters: ${P.doc.parameters.map(p => `${p.name} (${p.parameterType && p.parameterType.entityQualifiedName ? p.parameterType.entityQualifiedName : "?"})`).join(", ")}` : ""})`);
         else head.push(`${P.qn} (page; layout ${P.doc.layoutCall ? P.doc.layoutCall.layoutQualifiedName : "?"}; ${P.doc.parameters.length ? `parameters: ${P.doc.parameters.map(p => `${p.name} (${p.parameterType instanceof datatypes.ObjectType ? p.parameterType.entityQualifiedName : p.parameterType.structureTypeName.split("$")[1].replace("Type", "")})`).join(", ")}` : "no parameters"})`);
         head.push(`"widget", "after" and "before" take a name below; "into" takes one marked [into] or a column path; {Entity} = what inputs and {Attribute} texts inside use.`);
         const lines = [];
@@ -1250,10 +1292,32 @@ function makePageEdit(h, I) {
         async changeWidget(o) {
             const P = await open(o.page, "check");
             const name = o.name !== undefined ? String(o.name) : String(o.widget);
-            const node = P.byName.get(name);
+            const part = uiOf().gridPart(P, name, "check");
+            const node = part ? { el: part.el } : P.byName.get(name);
             if (!node) return [`${P.qn} has no widget ${name}`];
             const w = node.el, r = [];
             const say = (ok, what) => ok || r.push(`${P.qn} ${name}: ${what}`);
+            const al = v => ({ none: "None", start: "Start", top: "Start", left: "Start", center: "Center", middle: "Center", end: "End", bottom: "End", right: "End" })[String(v).toLowerCase()];
+            if (o.dynamicClass !== undefined) say(w.appearance.dynamicClasses === String(o.dynamicClass).trim(), `dynamic class is "${w.appearance.dynamicClasses}"`);
+            if (o.verticalAlignment !== undefined) say(w.verticalAlignment.name === al(o.verticalAlignment), `vertical alignment is ${w.verticalAlignment.name}`);
+            if (o.horizontalAlignment !== undefined) say(w.horizontalAlignment.name === al(o.horizontalAlignment), `horizontal alignment is ${w.horizontalAlignment.name}`);
+            if (o.spacing !== undefined) say(w.spacingBetweenColumns === bool(o.spacing, true), `spacing is ${w.spacingBetweenColumns}`);
+            if (part) {
+                for (const k of ["class", "style"]) if (o[k] !== undefined) say(w.appearance[k] === String(o[k]), `${k} is "${w.appearance[k]}"`);
+                if (o.weight !== undefined) say(w.weight === (/^auto$/i.test(String(o.weight)) ? -1 : Number(o.weight)), `weight is ${w.weight}`);
+                return r;
+            }
+            if (o.tabIndex !== undefined) say(w.tabIndex === Number(o.tabIndex), `tab index is ${w.tabIndex}`);
+            if (o.icon !== undefined) say(/^none$/i.test(String(o.icon)) || o.icon === null || o.icon === "" ? !w.icon : !!w.icon, `icon is ${w.icon ? w.icon.structureTypeName : "none"}`);
+            if (o.renderType !== undefined) say(w.renderType.name.toLowerCase() === String(o.renderType).toLowerCase(), `render type is ${w.renderType.name}`);
+            if (o.ariaRole !== undefined) say(w.ariaRole.name.toLowerCase() === String(o.ariaRole).toLowerCase(), `aria role is ${w.ariaRole.name}`);
+            if (o.renderMode !== undefined) say(w.renderMode.name.toLowerCase() === String(o.renderMode).toLowerCase(), `render mode is ${w.renderMode.name}`);
+            if (o.screenReaderHidden !== undefined) say(w.screenReaderHidden === bool(o.screenReaderHidden, true), `screenReaderHidden is ${w.screenReaderHidden}`);
+            if (o.ariaRequired !== undefined) say(w.ariaRequired === bool(o.ariaRequired, true), `ariaRequired is ${w.ariaRequired}`);
+            if (typeof o.tooltip === "string") say(await textIs(w.tooltip, o.tooltip), `tooltip is not "${o.tooltip}"`);
+            if (typeof o.ariaLabel === "string") say(o.ariaLabel === "" ? !w.screenReaderLabel : w.screenReaderLabel && (await textIs(w.screenReaderLabel.template, o.ariaLabel)), `screen reader text is not "${o.ariaLabel}"`);
+            if (typeof o.alt === "string") say(await textIs(w.alternativeText.template, o.alt), `alt text is not "${o.alt}"`);
+            if (o.iconOnly === true) say(w.caption.template.translations.every(x => !x.text), "the caption is not empty");
             if (o.name !== undefined && o.name !== o.widget && P.byName.has(String(o.widget))) r.push(`${P.qn} still has ${o.widget}`);
             if (o.caption !== undefined) {
                 const c = w instanceof pages.Label ? w.caption : prop(w, "caption");
@@ -1283,6 +1347,10 @@ function makePageEdit(h, I) {
             }
             for (const k of ["action", "onClick", "onChange"]) {
                 if (o[k] === undefined) continue;
+                if (k === "onClick" && w instanceof pages.DivContainer) {
+                    say(w.onClickAction && !(w.onClickAction instanceof pages.NoClientAction) === !(o[k] === null || o[k] === "" || /^none$/i.test(String(o[k]))), "on click differs");
+                    continue;
+                }
                 const a = k === "action" ? w.action : k === "onChange" && !(w instanceof cw.CustomWidget) ? w.onChangeAction : ((w.object.properties.find(p => p.type && p.type.key === (k === "onClick" ? "onClick" : "onChangeEvent")) || {}).value || {}).action;
                 const spec = typeof o[k] === "string" ? { action: o[k] } : o[k] || {};
                 const target = spec.page || spec.microflow || spec.nanoflow;
@@ -1372,7 +1440,9 @@ function makePageEdit(h, I) {
         }
         if (o.url !== undefined) out.push(await pageUrl(page, o.url, where));
         if (o.variables !== undefined) out.push(await I.pageVariables(page, o.variables, where, { qn: page.qualifiedName }));
-        if (o.design !== undefined) out.push(`design ${design.apply(sdk, model, page, design.resolve(client.project.dir, page, o.design, `${where}: design`)) || "unchanged"}`);
+        if (o.design !== undefined) out.push(`design ${design.apply(sdk, model, page, design.resolve(client.project.dir, page, o.design, `${where}: design`), client.warn) || "unchanged"}`);
+        if (o.class !== undefined || o.style !== undefined) out.push(uiOf().pageLook(page, o, where));
+        if (o.layout !== undefined) out.push(await switchLayout(page, String(o.layout), where));
         for (const [k, prop] of [["popupWidth", "popupWidth"], ["popupHeight", "popupHeight"]]) {
             if (o[k] === undefined) continue;
             const n = Number(o[k]);
@@ -1453,6 +1523,45 @@ function makePageEdit(h, I) {
         return `${page.qualifiedName}: ${out.join(", ")}`;
     }
 
+    // Switches page to layout qn: each placeholder argument goes to the placeholder of the same name; refused when one
+    // with content has none there (Studio Pro would drop that content).
+    async function switchLayout(page, qn, where) {
+        const all = model.allLayouts().map(l => l.qualifiedName);
+        if (!all.includes(qn)) fail(`${where}: no layout '${qn}'`, qn, all);
+        const lay = await h.get(qn);
+        const call = page.layoutCall;
+        if (!call) throw new Error(`${where}: ${page.qualifiedName} has no layout call`);
+        const was = call.layoutQualifiedName;
+        if (was === qn) return `layout ${qn} (unchanged)`;
+        if (!(lay.content instanceof pages.WebLayoutContent)) throw new Error(`${where}: ${qn} is a native layout; a web page keeps a web layout`);
+        const phs = new Map();
+        lay.traverse(el => el instanceof pages.Placeholder && !phs.has(el.name) && phs.set(el.name, el));
+        const lost = [], moved = [], dropped = [];
+        for (const a of call.arguments) {
+            const name = String(a.parameterQualifiedName || "").split(".").pop();
+            if (phs.has(name)) continue;
+            if (a.widgets.length) lost.push(`${name} (${a.widgets.length} widget(s): ${a.widgets.slice(0, 4).map(w => w.name || w.structureTypeName.split("$")[1]).join(", ")})`);
+        }
+        if (lost.length) throw new Error(`${where}: ${qn} has no placeholder for ${lost.join("; ")}; its placeholders are ${[...phs.keys()].join(", ") || "none"}. Move that content into one of them first (moveWidget into "${[...phs.keys()][0] || "Main"}"), or delete it`);
+        for (const a of [...call.arguments]) {
+            const name = String(a.parameterQualifiedName || "").split(".").pop();
+            if (phs.has(name)) {
+                a.parameter = phs.get(name);
+                moved.push(name);
+            } else {
+                a.delete();
+                dropped.push(name);
+            }
+        }
+        call.layout = lay;
+        const popup = t => /Popup/.test(t);
+        const oldLay = model.allLayouts().find(l => l.qualifiedName === was);
+        const oldType = oldLay && oldLay.isLoaded && oldLay.content ? oldLay.content.layoutType.name : "";
+        const newType = lay.content.layoutType.name;
+        if (oldType && popup(oldType) !== popup(newType)) client.warn(`${where}: ${was} is a ${oldType} layout and ${qn} a ${newType} one; check how callers open ${page.qualifiedName} (pop-up or full page) in Studio Pro`);
+        return `layout ${was} -> ${qn} (placeholders ${moved.join(", ") || "none"} kept${dropped.length ? `; empty ${dropped.join(", ")} dropped` : ""})`;
+    }
+
     // URL of a page ("" = none): no leading slash, {Param/Attribute} parts name a parameter, unique among the pages
     async function pageUrl(page, v, where) {
         const url = String(v).trim().replace(/^\/+/, "");
@@ -1481,6 +1590,8 @@ function makePageEdit(h, I) {
             if (o.addParameter && !page.parameters.some(p => p.name === String(o.addParameter.name))) r.push(`no parameter ${o.addParameter.name}`);
             if (o.removeParameter !== undefined && page.parameters.some(p => p.name === String(o.removeParameter))) r.push(`parameter ${o.removeParameter} still there`);
             if (o.renameParameter && !page.parameters.some(p => p.name === String(o.renameParameter.to))) r.push(`no parameter ${o.renameParameter.to}`);
+            for (const k of ["class", "style"]) if (o[k] !== undefined && page.appearance[k] !== String(o[k])) r.push(`page ${k} is "${page.appearance[k]}"`);
+            if (o.layout !== undefined && page.layoutCall.layoutQualifiedName !== String(o.layout)) r.push(`layout is ${page.layoutCall.layoutQualifiedName}`);
             return r;
         }
     });

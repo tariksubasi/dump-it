@@ -806,6 +806,7 @@ class Linter {
         // properties of this widget, in the enclosing data container's context
         if (node.ConditionalVisibilitySettings) this.expr(node.ConditionalVisibilitySettings, "Expression", ctx, T.bool, label("visible"));
         if (node.ConditionalEditabilitySettings) this.expr(node.ConditionalEditabilitySettings, "Expression", ctx, T.bool, label("editable"));
+        if (node.Appearance && node.Appearance.DynamicClasses) this.expr(node.Appearance, "DynamicClasses", ctx, T.str, label("dynamic classes"));
         if (node.Validation && node.Validation.$Type === "Forms$WidgetValidation") {
             const attr = node.AttributeRef && node.AttributeRef.Attribute;
             let vt = T.any;
@@ -892,6 +893,7 @@ class Linter {
         const outer = this.ctx(st.vars, st.strict, st.current);
         if (cw.ConditionalVisibilitySettings) this.expr(cw.ConditionalVisibilitySettings, "Expression", outer, T.bool, label("visible"));
         if (cw.ConditionalEditabilitySettings) this.expr(cw.ConditionalEditabilitySettings, "Expression", outer, T.bool, label("editable"));
+        if (cw.Appearance && cw.Appearance.DynamicClasses) this.expr(cw.Appearance, "DynamicClasses", outer, T.str, label("dynamic classes"));
         // an object (the widget, or one item of an object list such as a data grid 2 column), with its parent objects
         const object = (obj, parents) => {
             const props = new Map(); // property key -> { prop, ptype }
