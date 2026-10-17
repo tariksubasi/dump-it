@@ -69,12 +69,12 @@ Run all of these from the export folder.
 | `python mx.py texts [Module\|Module.Doc\|menu] [--missing <lang>]` | Lists translatable texts (page titles, widget captions/texts/labels/placeholders, enumeration captions, show-message and validation feedback texts, validation messages, menu captions) as `where [part]` with their text in every project language; `--missing tr_TR`: only those without Turkish. For `setTranslations` | no |
 | `python mx.py ops [name]` | One line per operation; with a name (`ops createPage`, `ops retrieve`): its fields. `ops all`: everything | no |
 | `python mx.py api <Type> [word]` | SDK type reference for this Mendix version (for `.js` files only) | no |
-| `python mx.py dryrun <file>` | Computes a change from `edits/<file>`. Writes nothing. Prints an approval code | no |
+| `python mx.py dryrun <file> [--check]` | Computes a change from `edits/<file>`. Writes nothing. Prints an approval code. `--check`: also runs the STUDIO PRO CHECK on a temporary copy with the change (about a minute; errors the change would add are `NEW`) | no |
 | `python mx.py rerun [file]` | Dry run a change file again (after an undo). A file gone from `edits/` comes back from the backup | no |
 | `python mx.py gap "<what>"` | Records a change no operation can do yet (`edits/gaps.jsonl`). Then give the user Studio Pro steps | no |
-| `python mx.py apply <CODE>` | Writes the last dry run, re-exports, lists changed files, runs `mx check` when installed | **yes** |
+| `python mx.py apply <CODE>` | Writes the last dry run, re-exports, lists changed files, runs the STUDIO PRO CHECK (`mx check` on a copy) when Studio Pro / MxBuild is found | **yes** |
 | `python mx.py undo [--force]` | Restores the model from before the last apply, then re-exports. Refuses when the model changed after that apply; `--force` only when the user accepts losing the listed changes | **yes** |
-| `python mx.py check` | Runs Studio Pro's `mx check` (only when `mx.exe` is installed) | no |
+| `python mx.py check` | STUDIO PRO CHECK: Mendix's own consistency check (`mx check`, the same as Studio Pro's Errors pane) on a temporary copy of the saved model. Read-only. Lists errors with document names (section 9). Without Studio Pro of the project's version: one line saying how to set `MX_PATH` | no |
 | `python mx.py ok "<summary>"` | Saves the current export as the checked state (git commit) | no |
 | `python mx.py clean [--move]` | Lists files outside `edits/` that the export did not write (helper scripts, notes, edited export files); `--move` moves them to `edits/stray/<time>/`, nothing is deleted. Every dry run warns when there are such files | no (`--move`: asks) |
 | `python mx.py selftest` | Runs every operation on a temporary copy of the project and checks the result | no |
@@ -82,7 +82,8 @@ Run all of these from the export folder.
 | `python mx.py mergefix [--pick "<id or Module.Doc>=ours\|theirs,..."] [--all ours\|theirs]` | Dry run of the merge fix: writes nothing, prints the merged documents and an approval code. Every true conflict needs a side (the other side's change to that document is lost; tell the user to redo it in Studio Pro). Then `python mx.py apply <CODE>` writes the merged unit files and rebuilds the unit table; the user finishes with `git add <app>.mpr mprcontents` and `git commit` | no (apply: **yes**) |
 
 The same lookups also exist as tools of the `mendix` MCP server (in OpenCode: `mendix_find`, in Claude Code:
-`mcp__mendix__find`): `find`, `usages`, `unused`, `steps`, `widgets`, `texts`, `ops`, `api`, `dryrun`, `gap`, `mergecheck` and **`plan`**. `plan` takes a short name and the
+`mcp__mendix__find`): `find`, `usages`, `unused`, `steps`, `widgets`, `texts`, `ops`, `api`, `dryrun`, `check`, `gap`, `mergecheck` and **`plan`**
+(`plan` and `dryrun` take `"check": "yes"` for the STUDIO PRO CHECK of the change). `plan` takes a short name and the
 ops list, saves `edits/<name>.json` and dry-runs it in one call; the server keeps the model loaded, so this takes a
 fraction of a second. Use the tool or the command; the result is the same. `apply` and `undo` exist only as commands,
 so OpenCode (and Claude Code) asks the user before they run. Commands are lowercase. (Folders exported with
@@ -175,9 +176,12 @@ python mx.py apply <CODE>
 
 If it says `does not match the last dry run` or `model changed since the dry run`, go back to step 3.
 
-**Step 6: Report.** Report the `Checked:` (or `CHECK FAILED`) line, the changed export files, and the `mx check`
-result (or that it did not run). Fix `OLD NAME` / `STILL USED BY` lines with a new change (back to step 2). Tell
-the user to open Studio Pro, look at the Errors pane, run the app and then commit. If the result is wrong: the user
+**Step 6: Report.** Report the `Checked:` (or `CHECK FAILED`) line, the changed export files, and the `STUDIO PRO
+CHECK` block (or its one `not run` line). `NEW` errors there are errors this change added: show them, suggest
+`python mx.py undo`, fix the change file and dry run again (with `--check`). Fix `OLD NAME` / `STILL USED BY` lines
+with a new change (back to step 2). When the check ran without new errors, the "first use" warnings are settled: say
+so. Tell the user to open Studio Pro, run the app and then commit (when the check did not run: look at the Errors pane
+first). If the result is wrong: the user
 closes Studio Pro, you run `python mx.py undo`, fix the change file and run `python mx.py rerun <file>`. If undo
 says `The model changed after this apply`, show the user the listed changes and use `undo --force` only if they agree.
 
@@ -196,6 +200,8 @@ MISSING: <what is still needed, or "nothing">
 UNEXPECTED: <changes nobody asked for, or "none">
 IMPACT: <callers, pages, roles, scheduled events affected>
 ```
+
+Then run `python mx.py check` (read-only) and add `ERRORS: <the errors it lists, or "none", or "check not available">`.
 
 4. Only when MISSING is "nothing" and the user agrees: `python mx.py ok "<short summary>"`. Otherwise do not save, so
    the next check sees the whole change.
@@ -1363,7 +1369,8 @@ PREVIEW: 1 flow(s) drawn in .../edits/preview              <- only with --previe
 Warnings:
   > Module.Doc -> Module/Folder                              <- a document moved to another folder
   ! Module.Page: grid1 is a classic Data grid (...)         <- createPage: the grid kind used (always the first line)
-  ! ... first use in this project ...                      <- first element of this type: ask the user to check it in Studio Pro
+  ! ... first use in this project ...                      <- first element of this type: the STUDIO PRO CHECK settles it
+STUDIO PRO CHECK (...)                                     <- only with --check: see "STUDIO PRO CHECK" below
 Dry run: nothing written. Approval code: 7F3A              <- the code the user must confirm
 ```
 
@@ -1412,12 +1419,40 @@ Refused: 2 XPATH CHECK / EXPRESSION CHECK error(s) above ... no approval code.
 ```
 Saved 2 unit file(s), deleted 0. Backup: .mxlocal-backup/<time>   <- written, with a backup
 Checked: all 2 operation(s) are in the saved model.               <- verified by reading the model again
+STUDIO PRO CHECK (mx check 10.24.0.73019 on a copy of the saved model):   <- Studio Pro's own check, see below
+  1 error, 0 warnings, 0 deprecations (before the change: 1 error, ...)
+  No new errors: Studio Pro shows only the 1 error the project already had.
 Changed since the last checked state ...                          <- export files that changed
-mx check: NOT RUN (mx.exe not found) ...                          <- say this to the user; they check in Studio Pro
 ```
 
 `CHECK FAILED` instead of `Checked:` means the saved model does not show an operation. Tell the user, suggest
 `python mx.py undo`, then fix the change file and start again.
+
+### STUDIO PRO CHECK
+
+Mendix's own consistency check (`mx check`, the same rules as Studio Pro's Errors pane), run on a temporary copy of
+the project (mx writes into the project it checks, so never into the user's files). `apply` runs it after writing;
+`python mx.py check` runs it on the saved model; `python mx.py dryrun <file> --check` on a copy with the change.
+Errors the project already had before the change (the baseline, kept per saved model) are subtracted:
+
+```
+STUDIO PRO CHECK (mx check 10.24.0.73019 on a copy of the saved model):
+  3 errors, 1 warning, 0 deprecations (before the change: 1 error, 1 warning, 0 deprecations)
+  ! NEW [CE0117] Sales.ACT_Order_Close (Microflow) at Change object 'Order': Error(s) in expression.
+  ! NEW [CE1613] Sales.Order_Overview (Page) at Data grid 2 'grid1': The selected attribute 'Sales.Order.Total' no longer exists.
+  ! 2 NEW ERRORS in Studio Pro since this change. Undo with restore (python mx.py undo), fix the change, dry run again.
+```
+
+- `! NEW [code] <document> (<kind>) at <element>: <message>`: an error this change added. Tell the user, suggest
+  `python mx.py undo`, fix the change file (the document and element say where) and dry run again with `--check`.
+- `No new errors: ...`: Studio Pro shows no error the change added; the "first use" warnings of the dry run are
+  settled. Errors the project already had are not yours: mention their number only.
+- `mx check FAILED: ...` with raw lines: mx could not load or check the model. When it says "Before the change mx
+  check worked", the change broke the model: undo.
+- `STUDIO PRO CHECK: not run - mx not found ...` / `... converts the model or fails`: no Studio Pro (or MxBuild) of
+  the project's exact Mendix version. Tell the user once that they can set `MX_PATH` (section 11); until then they
+  check the Errors pane in Studio Pro.
+- Without `-j` support (older mx) the result comes from the text output; lines it cannot read are shown raw.
 
 ---
 
@@ -1477,6 +1512,14 @@ node C:\tools\dump-it\mxlocal\mxlocal.js selftest --project "C:\Projeler\App"   
 Also add `.mxlocal-backup/` to the project's `.gitignore`. Requirements: Python 3.8+, Git, and for model changes
 Node.js 22.13+ and an MPR v2 project (Mendix 10/11). Export options: `-o <folder>`, `--include-marketplace`,
 `--show-constant-values` (may expose secrets), `--no-opencode-tools`.
+
+STUDIO PRO CHECK (`mx check`): found by itself when Studio Pro of the project's exact version is installed
+(Windows `C:\Program Files\Mendix\<version>\modeler\mx.exe` or the per-user install under
+`%LOCALAPPDATA%\Programs\Mendix`, Mac `/Applications/Studio Pro <version>.app`, Linux MxBuild in
+`~/.mendix/mxbuild/<version>/modeler/mx`). Otherwise the user sets `MX_PATH` (a file or an install folder), or
+`"mx"` in `.mxlocal.json` in the project folder; `"check": "apply"` there runs it on every apply, `"all"` also on
+every dry run, `"checkTimeout": 900` (seconds) for big apps. Another major.minor version is refused (it would
+convert the model). Check the setup with `node C:\tools\dump-it\mxlocal\mxlocal.js check --project "C:\Projeler\App"`.
 
 ---
 

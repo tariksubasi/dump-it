@@ -45,7 +45,8 @@ curl -fsSL https://raw.githubusercontent.com/tariksubasi/dump-it/feature/local-s
 Script sırayla şunları yapar: eksik araçları Homebrew ile kurar (git, Python, Node 22.13+, OpenCode), repoyu
 `~/dump-it` içine alır, ev klasöründeki Mendix projelerini bulur ve sorar, `verify` ve `selftest`'i projenin bir
 kopyasında çalıştırır, `.gitignore`'a `.mxlocal-backup/` ekler ve export alır. Modele hiçbir şey yazmaz. Belirli bir
-proje için: `bash ~/dump-it/scripts/setup-mac.sh ~/Mendix/BenimProje`. Mac'te `mx check` (sadece Windows) çalışmaz.
+proje için: `bash ~/dump-it/scripts/setup-mac.sh ~/Mendix/BenimProje`. Mac'te projenin sürümündeki Studio Pro kuruluysa
+Studio Pro kontrolü (`mx check`) de çalışır (bkz. [Studio Pro kontrolü](#studio-pro-kontrolü-mx-check)).
 
 ---
 
@@ -188,8 +189,9 @@ attribute ve benzerleri) yazılır ama dry run "Studio Pro'da kontrol edin" der.
    projede yazdığı yapıyla aynı yapı**, yeni modül ve güvenlik (kullanıcı rolü, demo kullanıcı), dashboard sayfası ve
    menü, Data grid 2 kopyası, modül yeniden adlandırma, byte byte okuma/yazma, SDK ile yeniden açma.
    Bütün satırlar `OK` demeli. 2. veya 3. adımda `FAIL` varsa model değiştirmeyi **kullanma**, çıktıyı bana gönder.
-   `Note: first use` satırındaki tipler projende hiç yok; bunları Studio Pro'da görmek için `--keep` ekle, kopyayı
-   Studio Pro'da aç ve Errors paneline bak.
+   `Note: first use` satırındaki tipler projende hiç yok; bunları Studio Pro'nun kendi kontrolünden geçirmek için
+   `--mxcheck` ekle (Studio Pro kuruluysa kopya üzerinde `mx check` çalışır, yeni hataları doküman doküman listeler),
+   ya da `--keep` ekle, kopyayı Studio Pro'da aç ve Errors paneline bak.
 4. Projenin `.gitignore` dosyasına şu satırı ekle (yedek klasörü projenin git'ine girmesin):
    ```
    .mxlocal-backup/
@@ -211,8 +213,10 @@ attribute ve benzerleri) yazılır ama dry run "Studio Pro'da kontrol edin" der.
    evet 7F3A
    ```
    OpenCode ayrıca komut için izin ister: **izin ver**. mxlocal önce `.mxlocal-backup\<tarih>` altına yedek alır, sonra
-   yazar, her işlemin modelde olduğunu kontrol eder, export'u yeniler ve değişen dosyaları gösterir.
-6. **Studio Pro'yu aç**, Errors panelinde hata olmadığına bak, gerekirse uygulamayı çalıştır.
+   yazar, her işlemin modelde olduğunu kontrol eder, export'u yeniler ve değişen dosyaları gösterir. Studio Pro
+   kuruluysa bir de **STUDIO PRO CHECK** çalışır: Studio Pro'nun kendi kontrolü (`mx check`) modelin bir kopyasında;
+   değişikliğin eklediği hatalar `! NEW` satırlarıyla gelir, projede zaten olan hatalar düşülür.
+6. **Studio Pro'yu aç**, gerekirse uygulamayı çalıştır. STUDIO PRO CHECK çalışmadıysa önce Errors paneline bak.
 7. Sorun varsa Studio Pro'yu kapatıp `/geri-al` yaz. Model, son uygulamadan önceki haline byte byte geri döner.
 8. Her şey doğruysa projeyi her zamanki gibi commit et.
 
@@ -227,8 +231,8 @@ Bilinmesi gerekenler:
    - `OLD NAME STILL USED`: yeniden adlandırma; expression, XPath ve Java içindeki eski isimleri güncellemez.
    - `STILL USED BY`: silinen şeyi kullanan dokümanlar.
    - `NOT STORED`: script'in verdiği bir değer bu Mendix sürümünde saklanmıyor.
-   - `first use in this project` / `never occurs`: bu tip projende ilk kez kullanılıyor. Studio Pro'da özellikle
-     kontrol et.
+   - `first use in this project` / `never occurs`: bu tip projende ilk kez kullanılıyor. Uygulamadan sonraki
+     STUDIO PRO CHECK `No new errors` diyorsa sorun yok; kontrol çalışmadıysa Studio Pro'da özellikle bak.
    - `> Modül.Doküman -> Modül/Klasör`: doküman başka klasöre taşınıyor.
 3. Var olan bir microflow'un tek adımını değiştirmek için OpenCode önce adımların kimliklerini (id) listeler
    (`python mx.py steps Modül.Microflow`), sonra o id ile değiştirir ya da siler.
@@ -236,12 +240,44 @@ Bilinmesi gerekenler:
    sana Studio Pro adımlarını verir. Model SDK script'leri (`.js`) **varsayılan olarak kapalıdır**: bir script, onayından
    önce bilgisayarında her şeyi yapabilir. Güçlü bir modelle (ör. Claude) bilerek açmak için export'u
    `--allow-scripts` ile al.
-5. Son söz Studio Pro'nundur: Errors paneli temiz değilse `/geri-al`.
+5. Son söz Studio Pro'nundur: STUDIO PRO CHECK `NEW` hata gösteriyorsa ya da Errors paneli temiz değilse `/geri-al`.
 6. **Geri alma güvenlidir:** uygulamadan sonra Studio Pro'da kaydettiysen `/geri-al` bunu silmez; neyin kaybolacağını
    listeler ve durur. Kabul edersen `python mx.py undo --force`. Sonradan gelen dosyalar silinmez, yedeğe taşınır.
 7. **Değişiklik dosyaları kaybolmaz:** her uygulama değişikliğin kendisini de yedekler. Geri aldıktan sonra
    `python mx.py rerun` aynı değişikliği yeniden dener; dosya `edits/` içinden silinmişse yedekten geri getirir.
    Her dry run, uygulama ve geri alma `edits/journal.jsonl` içinde kayıtlıdır.
+
+### Studio Pro kontrolü (mx check)
+
+Studio Pro'nun Errors panelindeki kontrolün komut satırı hali (`mx check`). mxlocal bunu **projenin geçici bir
+kopyasında** çalıştırır (mx kontrol ettiği projeye dosya yazar; senin projene hiçbir şey yazılmaz) ve sonucu
+doküman adlarıyla `STUDIO PRO CHECK` bloğunda gösterir. Değişiklikten önceki hatalar (her kayıtlı model için bir kez
+hesaplanıp `.mxlocal-backup\mxcheck` içinde saklanır) düşülür, kalanlar `! NEW` satırlarıdır.
+
+- **Ne zaman çalışır:** her `apply`'dan sonra (OpenCode bunu kendisi yapar), `python mx.py check` ile (sadece okur),
+  dry run'da `python mx.py dryrun <dosya> --check` ile (değişiklik uygulanmış geçici kopyada).
+- **Windows:** projenin sürümündeki Studio Pro kuruluysa kendisi bulur
+  (`C:\Program Files\Mendix\<sürüm>\modeler\mx.exe` ya da kullanıcıya özel kurulum
+  `%LOCALAPPDATA%\Programs\Mendix\<sürüm>\...`). Başka bir yerdeyse:
+  ```
+  setx MX_PATH "D:\Mendix\10.24.0.73019\modeler\mx.exe"
+  ```
+  (yeni bir terminal aç; klasör de verilebilir: `D:\Mendix\10.24.0.73019` ya da bütün sürümlerin olduğu `D:\Mendix`).
+- **Mac:** `/Applications/Studio Pro <sürüm>.app` (ya da `~/Applications`) kendiliğinden bulunur. Başka yerdeyse
+  `~/.zshrc` içine:
+  ```
+  export MX_PATH="/Applications/Studio Pro 10.24.0.73019.app/Contents/modeler/mx"
+  ```
+- **Linux / CI:** MxBuild'i `~/.mendix/mxbuild/<sürüm>/` altına aç (`bash scripts/get-mxbuild.sh 10.24.0.73019`).
+- **Proje ayarı:** proje klasöründe `.mxlocal.json`:
+  `{ "mx": "D:\\Mendix\\10.24.0.73019\\modeler\\mx.exe", "check": "apply", "checkTimeout": 900 }`
+  (`"check": "apply"`: elle `apply --check` demeden her uygulamada; `"all"`: her dry run'da da; süre saniye).
+- **Sürüm:** mx, projenin Mendix sürümüyle aynı olmalı (tercihen build numarası da). Başka bir ana/ara sürümün
+  (ör. proje 10.24, mx 10.21) mx'i reddedilir: başka sürümün `mx check`'i modeli dönüştürür ya da hata verir. Aynı
+  10.24 içinde başka bir yama sürümü bir notla kullanılır.
+- **Bulunamazsa:** tek satır `STUDIO PRO CHECK: not run - mx not found ... set MX_PATH ...`; hata sayılmaz, kontrolü
+  Studio Pro'da Errors panelinde yaparsın.
+- **Denemek:** `node C:\tools\dump-it\mxlocal\mxlocal.js check --project "C:\Projeler\BenimProje"`.
 
 ### OpenCode'a öğretmek
 
@@ -421,10 +457,18 @@ Gerekli: `pip install pymongo`. İlk kurulum (Java action, JS action, `ClientLog
 
 ## Otomatik test (CI)
 
-Her push'ta GitHub Actions `scripts/ci.sh` çalıştırır: doküman örnekleri (`doccheck`), 16 herkese açık Mendix
-projesinin (10.22 – 11.14) export'u ve her birinde `mxlocal selftest`. Projeler sabit commit'lere bağlıdır; kırmızı bir
-çalışma her zaman dump-it'teki bir değişiklik demektir. Yerelde: `bash scripts/ci.sh` (projeleri `.ci-projects`
-klasörüne indirir, ~1 GB).
+Her push'ta GitHub Actions `scripts/ci.sh` çalıştırır: doküman örnekleri (`doccheck`), izin koruması, sahte bir mx ile
+STUDIO PRO CHECK testleri (`scripts/test-mxcheck.js`: bulma, sürüm eşleme, çıktı okuma, önceki hataları düşme,
+`check` / `run --check` / `apply --check`), 16 herkese açık Mendix projesinin (10.22 – 11.14) export'u ve her birinde
+`mxlocal selftest`. Her proje **ayrı ve paralel bir iş** (selftest proje başına ~5 dakika; liste
+`bash scripts/ci.sh --list`). Ayrıca `mxcheck` işi iki projede (bir 10.24, bir 11.x) projenin tam sürümündeki
+MxBuild'i Mendix CDN'den indirir (`scripts/get-mxbuild.sh`, önbellekli), `selftest --keep --mxcheck` çalıştırır ve
+selftest'in eklediği her Studio Pro hatasında kırmızı olur; diğer işleri beklemez, onları da durdurmaz. Projeler
+sabit commit'lere bağlıdır; kırmızı bir çalışma her zaman dump-it'teki bir değişiklik demektir.
+
+Yerelde: `bash scripts/ci.sh` (projeleri `.ci-projects` klasörüne indirir, ~1 GB). Tek proje:
+`CI_ONLY=Badge bash scripts/ci.sh`; sadece bazı aşamalar: `CI_STAGES=docs,mxcheck-fake bash scripts/ci.sh`; Studio Pro
+kontrolüyle: `MX_PATH=... CI_ONLY=Badge CI_STAGES=selftest CI_SELFTEST_ARGS=--mxcheck bash scripts/ci.sh`.
 
 ## Eval (doğal dil testleri)
 

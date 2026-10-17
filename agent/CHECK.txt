@@ -17,6 +17,9 @@ STEP 3 - COMPARE AND REPORT
     MISSING: <what the agreed change still needs, or "nothing">
     UNEXPECTED: <changes nobody asked for, or "none">
     IMPACT: <callers, pages, roles, scheduled events affected>
+  Then run (read-only, Studio Pro's own check on a copy):
+    @PY@ mx.py check
+  and add: ERRORS: <the errors it lists with their documents, or "none", or "check not available">.
 
 STEP 4 - SAVE THE CHECKED STATE
   Only when MISSING is "nothing" and the user agrees:

@@ -51,13 +51,19 @@ STEP 4 - SHOW AND ASK
 
 STEP 5 - APPLY (only after the user said yes with that code; Studio Pro closed)
     @PY@ mx.py apply <CODE>
-  It saves the model (with a backup), re-exports, shows the changed files and runs mx check when available.
+  It saves the model (with a backup), re-exports, shows the changed files and runs the STUDIO PRO CHECK (Studio
+  Pro's own mx check on a copy) when Studio Pro / MxBuild of the project's version is found.
   "does not match the last dry run" or "model changed since the dry run": go back to STEP 3, then STEP 4.
 
 STEP 6 - REPORT
-  Report from the apply output: the "Checked:" or "CHECK FAILED" line, the changed export files, the mx check result
-  (or that it did not run). Fix OLD NAME / STILL USED lines with a new change (back to STEP 2).
-  Tell the user: open the app in Studio Pro, look at the Errors pane, run the app, then commit as usual.
+  Report from the apply output: the "Checked:" or "CHECK FAILED" line, the changed export files, and the
+  STUDIO PRO CHECK block. "! NEW [CE....] <document> ...: <message>" lines are errors THIS change added: show them,
+  suggest "@PY@ mx.py undo", fix the change file and dry run again with "@PY@ mx.py dryrun <file> --check".
+  "No new errors" settles the "first use" warnings. "STUDIO PRO CHECK: not run - ..." (no Studio Pro of this
+  version): say it in one line; the user can set MX_PATH. Later checks (read-only): "@PY@ mx.py check".
+  Fix OLD NAME / STILL USED lines with a new change (back to STEP 2).
+  Tell the user: open the app in Studio Pro, run the app, then commit as usual (check not run: look at the Errors
+  pane first).
   Wrong result: ask the user to close Studio Pro, then run "@PY@ mx.py undo". It restores the model from before
   the apply. If undo says "The model changed after this apply", show the user the listed changes; use
   "@PY@ mx.py undo --force" only when the user says they may be lost.
