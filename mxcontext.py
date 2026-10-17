@@ -170,6 +170,9 @@ def parse_args():
                     help="do not register the mxlocal MCP server (OpenCode gets its slower custom tools instead)")
     ap.add_argument("--allow-scripts", action="store_true",
                     help="let the agent dry-run .js Model SDK scripts (they run with full rights before approval)")
+    ap.add_argument("--inside-project", action="store_true",
+                    help="allow an output folder inside the Mendix project folder (not recommended: agent files end up "
+                         "next to the app and in its version control)")
     return ap.parse_args()
 
 
@@ -211,7 +214,9 @@ class Exporter:
         self.project = Project(args.project)
         self.ctx = Context(self.project, self.warnings)
         self.index = Index()
-        self.out = os.path.abspath(args.out or self.project.root.rstrip("\\/") + "-context")
+        # default: a sibling folder <project folder>-context, never inside the project
+        self.default_out = os.path.abspath(self.project.root).rstrip("\\/") + "-context"
+        self.out = os.path.abspath(args.out or self.default_out)
         self.files = {}
         self.written = set()  # every file this export writes, for the file list in the marker (mx.py clean)
         self.paths = {}
@@ -221,7 +226,27 @@ class Exporter:
         self.marketplace_api = {}
         self.with_url = set()
 
+    def check_location(self):
+        """The export folder must not be the Mendix project folder, lie inside it or contain it: agents working there
+        would put their files into the app (and its version control), and a re-export would empty the app folder."""
+        real = lambda p: os.path.normcase(os.path.realpath(p))  # noqa: E731
+        out, root = real(self.out), real(self.project.root)
+        within = lambda a, b: a == b or a.startswith(b.rstrip(os.sep) + os.sep)  # noqa: E731
+        if within(root, out):
+            raise SystemExit("Refusing to export into %s: it contains the Mendix project (%s); a re-export empties the "
+                             "output folder. Use a sibling folder, e.g. the default: -o \"%s\"" % (
+                                 self.out, self.project.mpr, self.default_out))
+        if within(out, root):
+            if not self.args.inside_project:
+                raise SystemExit("Refusing to export into %s: it is inside the Mendix project folder %s, so agent files "
+                                 "would end up in the app and its version control.\nUse a folder next to the project, e.g. "
+                                 "the default: -o \"%s\" (or pass --inside-project if you really want this)." % (
+                                     self.out, self.project.root, self.default_out))
+            print("WARNING: exporting inside the Mendix project folder (--inside-project). Keep %s out of the app's "
+                  "version control and Studio Pro deployments." % self.out)
+
     def run(self):
+        self.check_location()
         prepare_output(self.out)
         units = [u for u in self.project.units.values() if u.type and u.type not in STRUCTURAL and u.type not in SKIPPED]
         units.sort(key=lambda u: (u.module.name if u.module else "", u.type, u.name or ""))
@@ -299,7 +324,8 @@ class Exporter:
                                        ("--show-constant-values", self.args.show_constant_values),
                                        ("--no-opencode-tools", self.args.no_opencode_tools),
                                        ("--no-mcp", self.args.no_mcp),
-                                       ("--allow-scripts", self.args.allow_scripts)) if on]
+                                       ("--allow-scripts", self.args.allow_scripts),
+                                       ("--inside-project", self.args.inside_project)) if on]
         config = {"mxcontext": os.path.abspath(__file__), "mpr": os.path.abspath(self.project.mpr),
                   "export_flags": flags, "mxlocal": mxlocal, "mx_exe": self._mx_exe(),
                   "allow_scripts": bool(self.args.allow_scripts)}
