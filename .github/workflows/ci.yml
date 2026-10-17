@@ -80,10 +80,9 @@ jobs:
         # one Mendix 10.24 (build number in the .mpr) and one Mendix 11 project of scripts/ci.sh
         project: [ImageViewer, Badge]
     name: mxcheck (${{ matrix.project }})
-    env:
-      TMPDIR: ${{ runner.temp }}
     steps:
       - uses: actions/checkout@v4
+      - run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
