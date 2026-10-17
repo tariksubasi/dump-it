@@ -118,12 +118,46 @@ AGENT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent")
 KEEP = {".git", "edits", ".opencode", ".claude"}  # survive re-exports: history, change files, agents' own files
 # mx.py commands an agent may run without asking: lookups, dry runs and the export's own history. apply/undo always ask.
 SAFE_MX_COMMANDS = ("help", "refresh", "find", "usages", "unused", "steps", "widgets", "widgettype", "texts", "ops", "api", "dryrun", "rerun", "gap", "check", "ok",
-                    "selftest", "mergecheck", "mergefix")
+                    "selftest", "mergecheck", "mergefix", "clean")
 # Tools of the mxlocal MCP server (mxlocal/serve.js) that may run without asking: none of them writes the model.
 MCP_TOOLS = ("find", "usages", "unused", "steps", "widgets", "widgettype", "texts", "ops", "api", "plan", "dryrun", "gap", "mergecheck")
 # git commands that could rewrite the export history, touch the Mendix project's repo (-C) or send data out.
 GIT_DENY = ("-C", "push", "remote", "reset", "clean", "checkout", "restore", "switch", "rebase", "stash", "rm",
             "filter-branch", "update-ref", "config", "gc", "reflog", "submodule", "worktree", "commit --amend")
+
+
+def quote(path):
+    path = path.replace("\\", "/")
+    return '"%s"' % path if " " in path else path
+
+
+# OpenCode bash rules. OpenCode (1.x, packages/core/src/permission.ts) takes the LAST rule in this order whose
+# wildcard matches ("*" = any text, newlines included), and matches each command of a pipeline/list separately against
+# its full text including its redirections and here-documents ("cat > a.js <<EOF ...", "python mx.py find x > a.txt").
+# Order here: ask for everything, allow read-only lookups, deny writers and interpreters, re-ask/allow mx.py, and last
+# deny every output redirection and the git commands that rewrite history, so nothing after can re-allow them.
+# Older OpenCode versions matched only the command words (no redirections): there the missing cat/head/tail/type
+# allows and the interpreter/writer denials are what keeps "cat > helper.js" from running unasked.
+READ_ONLY_BASH = ("git *", "grep *", "rg *", "ls *", "dir *")
+WRITER_BASH = ("node *", "nodejs *", "deno *", "bun *", "npx *", "tsx *", "ts-node *", "python *", "python3 *", "py *",
+               "python -c*", "python3 -c*", "py -c*", "perl *", "ruby *", "php *", "powershell*", "pwsh*", "cmd /c*",
+               "Set-Content*", "Add-Content*", "Out-File*", "New-Item*", "Copy-Item*", "Move-Item*", "tee *", "cp *",
+               "mv *", "copy *", "move *", "xcopy *", "robocopy *", "touch *", "dd *", "install *", "ln *", "sed -i*",
+               "echo * > *", "printf * > *")
+REDIRECT_BASH = ("* > *", "*>*", "* >> *", "*<<*")
+
+
+def opencode_bash_rules(py):
+    bash = {"*": "ask"}
+    bash.update({p: "allow" for p in READ_ONLY_BASH})
+    bash.update({p: "deny" for p in WRITER_BASH})
+    # python only through mx.py: the safe commands run unasked with the export's Python command, the rest asks
+    bash.update({"%s mx.py *" % name: "ask" for name in dict.fromkeys(("python", "python3", "py", py))})
+    bash.update({"%s mx.py %s*" % (py, c): "allow" for c in SAFE_MX_COMMANDS})
+    bash["%s mx.py clean*--move*" % py] = "ask"  # listing runs unasked, moving files away asks
+    bash.update({p: "deny" for p in REDIRECT_BASH})
+    bash.update({"git %s*" % c: "deny" for c in GIT_DENY})
+    return bash
 
 
 def parse_args():
@@ -282,13 +316,12 @@ class Exporter:
             self._write(".opencode/tools/mx.js", self._agent_template("tools", "mx.js").replace("@PYTHON_JSON@", json.dumps(exe)))
 
         edits = os.path.join(self.out, "edits")
-        # Allow-list: only the read-only and dry-run mx.py commands run without asking. Anything else, including
-        # apply/undo in any spelling, falls back to "*": ask. Later rules win, so the git denials come last.
-        bash = {"*": "ask", "git *": "allow", "grep *": "allow", "rg *": "allow", "ls *": "allow", "dir *": "allow",
-                "cat *": "allow", "type *": "allow", "head *": "allow", "tail *": "allow"}
-        bash.update({"%s mx.py %s*" % (py, c): "allow" for c in SAFE_MX_COMMANDS})
-        bash.update({"git %s*" % c: "deny" for c in GIT_DENY})
-        edit = {"*": "deny", "edits/*": "allow", edits + os.sep + "*": "allow", edits.replace("\\", "/") + "/*": "allow"}
+        bash = opencode_bash_rules(py)
+        # edit covers OpenCode's edit, write and patch tools; the path may come relative or absolute
+        edit = {"*": "deny"}
+        for folder in dict.fromkeys(("edits", edits, edits.replace("\\", "/"))):
+            for ext in ("json", "js")[:2 if self.args.allow_scripts else 1]:
+                edit["%s%s*.%s" % (folder, "\\" if "\\" in folder else "/", ext)] = "allow"
         settings = {"$schema": "https://opencode.ai/config.json",
                     "instructions": ["AI_GUIDE.txt"],
                     "permission": {"edit": edit, "bash": bash},
@@ -300,10 +333,18 @@ class Exporter:
 
         # Claude Code: same gate. apply/undo ask the user; the agent cannot loosen its own rules or rewrite history.
         mx = lambda c: "Bash(%s mx.py %s:*)" % (py, c)  # noqa: E731
-        claude = {"permissions": {
-            "allow": [mx(c) for c in SAFE_MX_COMMANDS] + ["Edit(edits/**)", "Write(edits/**)"] +
+        # The hook denies every file write outside edits/ (Write/Edit tools and shell redirections), even where the
+        # lists below would ask: a weak agent's helper script never gets a chance to be approved by a hurried click.
+        self._write(".claude/hooks/guard.py", self._agent_template("hooks", "guard.py").replace(
+            "ALLOW_SCRIPTS = False  # set by mxcontext.py", "ALLOW_SCRIPTS = %r  # written by mxcontext.py" % bool(self.args.allow_scripts)))
+        hook = "%s %s" % (quote(sys.executable), quote(os.path.join(self.out, ".claude", "hooks", "guard.py")))
+        claude = {"hooks": {"PreToolUse": [{"matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash|PowerShell",
+                                            "hooks": [{"type": "command", "command": hook, "timeout": 10}]}]},
+                  "permissions": {
+            "allow": [mx(c) for c in SAFE_MX_COMMANDS] + ["%s(edits/%s)" % (tool, f) for tool in ("Edit", "Write")
+                                                            for f in ("*.json", "*.js")[:2 if self.args.allow_scripts else 1]] +
                      (["mcp__mendix__%s" % t for t in MCP_TOOLS] if mcp else []),
-            "ask": [mx("apply"), mx("undo")],
+            "ask": [mx("apply"), mx("undo"), mx("clean --move")],
             "deny": ["Bash(git %s:*)" % c for c in GIT_DENY] +
                     ["%s(%s)" % (tool, f) for tool in ("Edit", "Write") for f in
                      (".claude/**", "opencode.json", ".opencode/**", ".mcp.json", "mx.py", "AI_GUIDE.txt", "CLAUDE.md", "guides/**")]}}
