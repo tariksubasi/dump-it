@@ -17,7 +17,7 @@ const sdk = require("mendixmodelsdk");
 const { fail, validName, setIfAvailable, enumValue, bool } = require("./ops-util");
 const design = require("./design");
 
-const { pages, navigation, menus } = sdk;
+const { pages, navigation, menus, customwidgets: cw } = sdk;
 
 const TEMPLATE_INFO = {
     displayName: "optional name in Studio Pro's toolbox (default: the name with spaces)",
@@ -52,6 +52,24 @@ const COMPOSITE_OPS = {
             entity: "optional Module.Entity: default entity of grids, list views and galleries that give none",
             class: "optional CSS class(es) of the page made from it", style: "optional inline CSS of the page made from it",
             ...TEMPLATE_INFO
+        }
+    },
+    applyStyle: {
+        doc: "Set a CSS class, design properties or inline style on every widget that matches (a widget type, a scope of pages / snippets / layouts / building blocks, a name pattern, a current class): the dry run lists every widget it changes. Without page, module or folder it is refused unless \"all\": true.",
+        fields: {
+            widget: "R widget kind: dataGrid2 | dataGrid | listView | gallery | dataView | actionButton | container | text | layoutGrid | groupBox | tabContainer | textBox | textArea | datePicker | checkBox | input (every input) | image | snippetCall | any (every widget)",
+            page: "optional scope: Module.Page (also a snippet, layout, building block or page template), or a list of them",
+            module: "optional scope: every page, snippet, layout, building block and page template of a module (or a list of modules); Marketplace modules are refused",
+            folder: "optional with module: only documents in this folder path (and below)",
+            all: "optional true: every non-Marketplace module (needed when page and module are left out)",
+            match: "optional widget name pattern: \"save*\", \"*Grid*\" (* = anything; default every name)",
+            hasClass: "optional only widgets whose class list has this class",
+            class: "optional the class(es) to set (replaces the current ones; \"\" = none)",
+            addClass: "optional class(es) to add (kept once)", removeClass: "optional class(es) to remove",
+            design: "optional design properties as in changeWidget: { \"Spacing\": { \"margin-top\": \"M\" }, \"Full width\": true } (null / false removes one)",
+            style: "optional inline CSS (replaces the current one; \"\" = none)",
+            buttonStyle: "optional with widget actionButton: Default | Primary | Success | Info | Warning | Danger | Inverse",
+            limit: "optional the most widgets it may change (default 200); more matches are refused with the count"
         }
     }
 };
@@ -522,7 +540,139 @@ function makeComposite(x) {
         }
     }
 
+    // ------------------------------------------------ applyStyle: one look on many widgets
+
+    const STYLE_KINDS = {
+        dataGrid2: el => el instanceof cw.CustomWidget && el.type && el.type.widgetId === "com.mendix.widget.web.datagrid.Datagrid",
+        gallery: el => el instanceof cw.CustomWidget && el.type && el.type.widgetId === "com.mendix.widget.web.gallery.Gallery",
+        dataGrid: el => el instanceof pages.DataGrid, listView: el => el instanceof pages.ListView, dataView: el => el instanceof pages.DataView,
+        templateGrid: el => el instanceof pages.TemplateGrid, actionButton: el => el instanceof pages.ActionButton, container: el => el instanceof pages.DivContainer,
+        text: el => el instanceof pages.DynamicText, layoutGrid: el => el instanceof pages.LayoutGrid, groupBox: el => el instanceof pages.GroupBox, tabContainer: el => el instanceof pages.TabContainer,
+        textBox: el => el instanceof pages.TextBox, textArea: el => el instanceof pages.TextArea, datePicker: el => el instanceof pages.DatePicker, checkBox: el => el instanceof pages.CheckBox,
+        radioButtons: el => el instanceof pages.RadioButtonGroup, referenceSelector: el => el instanceof pages.ReferenceSelector,
+        input: el => el instanceof pages.InputWidget || (el instanceof cw.CustomWidget && el.type && /combobox/i.test(el.type.widgetId)),
+        image: el => el instanceof pages.StaticImageViewer || el instanceof pages.DynamicImageViewer || (el instanceof cw.CustomWidget && el.type && /\.image\.Image$/.test(el.type.widgetId)),
+        snippetCall: el => el instanceof pages.SnippetCallWidget, pluggable: el => el instanceof cw.CustomWidget,
+        any: el => el instanceof pages.Widget && !(el instanceof pages.Placeholder)
+    };
+    const classList = v => String(v || "").split(/\s+/).filter(Boolean);
+    const globRe = g => new RegExp(`^${String(g).split("*").map(p => p.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*")}$`, "i");
+
+    // The documents of the scope (loaded): [{ doc, qn }]
+    async function styleScope(o, where) {
+        const own = model.allModules().filter(m => !m.fromAppStore).map(m => m.name);
+        const all = [...model.allPages(), ...model.allSnippets(), ...model.allLayouts(), ...model.allBuildingBlocks(), ...model.allPageTemplates()];
+        const store = m => model.allModules().some(x => x.name === m && x.fromAppStore);
+        let units;
+        if (o.page !== undefined) {
+            if (o.module !== undefined || o.all !== undefined) throw new Error(`${where}: give page, or module (with folder), or all: true; not several`);
+            units = [];
+            for (const qn of [].concat(o.page)) {
+                const u = all.find(d => d.qualifiedName === String(qn)) || fail(`${where}: no page, snippet, layout, building block or page template '${qn}'`, String(qn), all.map(d => d.qualifiedName));
+                if (store(u.qualifiedName.split(".")[0])) throw new Error(`${where}: ${u.qualifiedName} is in a Marketplace module (an update overwrites it); style your own pages, or copy it first (copyDocument)`);
+                units.push(u);
+            }
+        } else if (o.module !== undefined) {
+            if (o.all !== undefined) throw new Error(`${where}: give module or all: true, not both`);
+            const mods = [].concat(o.module).map(String);
+            for (const m of mods) {
+                if (!model.allModules().some(x => x.name === m)) fail(`${where}: no module '${m}'`, m, own);
+                if (store(m)) throw new Error(`${where}: ${m} is a Marketplace module (an update overwrites it); style your own modules (${own.join(", ")}) and override Atlas classes in the theme instead`);
+            }
+            const fold = o.folder !== undefined ? String(o.folder).split(/[/\\]/).filter(Boolean).join("/") : null;
+            const pathOf = d => {
+                const p = [];
+                for (let c = d.container; c && !(c instanceof sdk.projects.Module); c = c.container) p.unshift(c.name);
+                return p.join("/");
+            };
+            units = all.filter(d => mods.includes(d.qualifiedName.split(".")[0]) && (!fold || pathOf(d) === fold || pathOf(d).startsWith(fold + "/")));
+            if (fold && !units.length) throw new Error(`${where}: no page, snippet, layout or building block in ${mods.join(", ")} folder '${fold}'`);
+        } else {
+            if (o.folder !== undefined) throw new Error(`${where}: folder goes with module`);
+            if (o.all !== true) throw new Error(`${where}: say where: "page": "Module.Page" (or a list), "module": "Module" (with "folder"), or "all": true for every page of your own modules (${own.join(", ")}); applyStyle never changes the whole app by accident`);
+            units = all.filter(d => own.includes(d.qualifiedName.split(".")[0]));
+        }
+        const out = [];
+        for (const u of units) {
+            const doc = u.isLoaded ? u : await u.load();
+            if (doc instanceof pages.Layout && !(doc.content instanceof pages.WebLayoutContent)) continue;
+            if (doc instanceof pages.Page && doc.layoutCall && model.allLayouts().some(l => l.qualifiedName === doc.layoutCall.layoutQualifiedName && /^Native/.test(l.name))) continue;
+            out.push({ doc, qn: doc.qualifiedName });
+        }
+        return out;
+    }
+
+    // The widgets the op picks: [{ qn, el }] (hasClass applied when withClass).
+    async function styleTargets(o, where, withClass) {
+        const kind = Object.keys(STYLE_KINDS).find(k => k.toLowerCase() === String(o.widget).toLowerCase()) || fail(`${where}: widget '${o.widget}' is not a kind applyStyle knows (use ${Object.keys(STYLE_KINDS).join(" | ")})`, String(o.widget), Object.keys(STYLE_KINDS));
+        const docs = await styleScope(o, where);
+        const re = o.match !== undefined ? globRe(o.match) : null;
+        const out = [];
+        for (const { doc, qn } of docs) {
+            doc.traverse(el => {
+                if (!(el instanceof pages.Widget) || !STYLE_KINDS[kind](el)) return;
+                if (re && !re.test(el.name || "")) return;
+                if (withClass && o.hasClass !== undefined && !classList(el.appearance && el.appearance.class).includes(String(o.hasClass))) return;
+                out.push({ qn, el });
+            });
+        }
+        return { kind, docs, out };
+    }
+
+    async function applyStyle(o) {
+        const where = `applyStyle ${o.widget}`;
+        const sets = ["class", "addClass", "removeClass", "design", "style", "buttonStyle"].filter(k => o[k] !== undefined);
+        if (!sets.length) throw new Error(`${where}: give what to set: class, addClass, removeClass, design, style or buttonStyle`);
+        if (o.class !== undefined && (o.addClass !== undefined || o.removeClass !== undefined)) throw new Error(`${where}: class replaces all classes; give class, or addClass / removeClass`);
+        for (const k of ["class", "addClass", "removeClass", "hasClass"]) if (o[k] !== undefined && classList(o[k]).some(c => !/^-?[A-Za-z_][\w-]*$/.test(c))) throw new Error(`${where}: ${k} '${o[k]}' is not a CSS class list (letters, digits, - and _, separated by spaces)`);
+        const limit = o.limit === undefined ? 200 : Number(o.limit);
+        if (!Number.isInteger(limit) || limit < 1) throw new Error(`${where}: limit is a whole number >= 1`);
+        const { kind, docs, out } = await styleTargets(o, where, true);
+        if (o.buttonStyle !== undefined && kind !== "actionButton") throw new Error(`${where}: buttonStyle is for "widget": "actionButton"`);
+        const scopeText = o.page !== undefined ? [].concat(o.page).join(", ") : o.module !== undefined ? `${[].concat(o.module).join(", ")}${o.folder ? "/" + o.folder : ""}` : "all own modules";
+        if (!out.length) throw new Error(`${where}: no ${kind} widget${o.match !== undefined ? ` named like '${o.match}'` : ""}${o.hasClass !== undefined ? ` with class '${o.hasClass}'` : ""} in ${scopeText} (${docs.length} document(s) searched; see: widgets Module.Page)`);
+        if (out.length > limit) throw new Error(`${where}: ${out.length} widgets match (limit ${limit}); narrow it with page / module / folder / match / hasClass, or give "limit": ${out.length}`);
+        const bs = o.buttonStyle !== undefined ? enumValue(pages.ButtonStyle, o.buttonStyle, "buttonStyle") : null;
+        const dir = client.project.dir;
+        const byDoc = new Map();
+        for (const { qn, el } of out) {
+            const at = `${where}: ${qn} ${el.name}`;
+            const ap = el.appearance;
+            if (!ap) throw new Error(`${at}: a ${el.structureTypeName.split("$")[1]} has no class or style`);
+            const done = [];
+            if (o.class !== undefined && ap.class !== String(o.class)) ap.class = String(o.class);
+            if (o.addClass !== undefined || o.removeClass !== undefined) {
+                const drop = classList(o.removeClass);
+                const list = classList(ap.class).filter(c => !drop.includes(c));
+                for (const c of classList(o.addClass)) if (!list.includes(c)) list.push(c);
+                if (ap.class !== list.join(" ")) ap.class = list.join(" ");
+            }
+            if (o.style !== undefined && ap.style !== String(o.style)) ap.style = String(o.style);
+            if (o.design !== undefined) done.push(design.apply(sdk, model, el, design.resolve(dir, el, o.design, `${at}: design`), client.warn) || "design unchanged");
+            if (bs && el.buttonStyle !== bs) el.buttonStyle = bs;
+            if (!byDoc.has(qn)) byDoc.set(qn, []);
+            byDoc.get(qn).push(el.name || "?");
+        }
+        const what = [o.class !== undefined && `class "${o.class}"`, o.addClass !== undefined && `+${classList(o.addClass).join(" +")}`, o.removeClass !== undefined && `-${classList(o.removeClass).join(" -")}`,
+            o.design !== undefined && `design ${Object.keys(o.design || {}).join(", ")}`, o.style !== undefined && `style "${o.style}"`, bs && `button style ${bs.name}`].filter(Boolean).join(", ");
+        return `${out.length} ${kind} widget(s) in ${byDoc.size} document(s): ${what}` + [...byDoc.entries()].map(([qn, ns]) => `\n      ${qn}: ${ns.join(", ")}`).join("");
+    }
+
     const checks = {
+        async applyStyle(o) {
+            const replaced = o.class !== undefined || classList(o.removeClass).includes(String(o.hasClass));
+            const { out: all } = await styleTargets(o, "check", !replaced);
+            // hasClass replaced away: the widgets it picked are the ones with the new state (at least one)
+            const out = o.hasClass !== undefined && replaced ? all.filter(t => (o.class !== undefined ? t.el.appearance.class === String(o.class) : !classList(t.el.appearance.class).includes(String(o.hasClass)))) : all;
+            if (!out.length) return [`no ${o.widget} widget has the new classes`];
+            const r = [];
+            for (const { qn, el } of out) {
+                const cl = classList(el.appearance.class);
+                const bad = (o.class !== undefined && el.appearance.class !== String(o.class)) || classList(o.addClass).some(c => !cl.includes(c)) || classList(o.removeClass).some(c => cl.includes(c)) || (o.style !== undefined && el.appearance.style !== String(o.style));
+                if (bad) r.push(`${qn} ${el.name}: class "${el.appearance.class}" style "${el.appearance.style}"`);
+            }
+            return r.slice(0, 5);
+        },
         async createBuildingBlock(o) {
             const qn = `${o.module}.${o.name}`;
             const bb = await x.get(qn);
@@ -553,7 +703,7 @@ function makeComposite(x) {
         }
     };
 
-    return { impl: { createBuildingBlock, changeBuildingBlock, createPageTemplate }, createLayoutFresh, LAYOUT_FROM_ONLY, checks, internals: { unbound, swap, fill, newState, givenNames, usualLayout, templateInfo } };
+    return { impl: { createBuildingBlock, changeBuildingBlock, createPageTemplate, applyStyle }, createLayoutFresh, LAYOUT_FROM_ONLY, checks, internals: { unbound, swap, fill, newState, givenNames, usualLayout, templateInfo } };
 }
 
 module.exports = { makeComposite, COMPOSITE_OPS, COMPOSITE_SYNONYMS };

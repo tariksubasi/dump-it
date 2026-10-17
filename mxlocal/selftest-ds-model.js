@@ -28,6 +28,8 @@ function dsTargets(s) {
         if (u.$Type === "Navigation$NavigationDocument" && (u.Profiles || []).some(p => p.$Type === "Navigation$NavigationProfile" && p.Name === "Responsive")) x.nav = true;
     }
     for (const l of s.model.allLayouts()) mains.add(l.qualifiedName);
+    const store = s.model.allModules().find(m => m.fromAppStore);
+    x.store = store ? store.name : null;
     const byUse = [...used.entries()].filter(([l]) => mains.has(l)).sort((a, b) => b[1] - a[1]);
     if (byUse.length) x.layout = byUse[0][0];
     return x;
@@ -68,6 +70,18 @@ function dsPlan(mod, T, x) {
         { op: "changeWidget", page: q("LayShell"), widget: "zzVersion", class: "zz-version" },
         { op: "createPage", module: mod, name: `${T}_DsShell`, folder: "ZzDs", layout: q("LayShell"), widgets: [{ widget: "buildingBlock", from: q("BbCard") }, { widget: "buildingBlock", name: "zzCopy2", from: q("BbCard") }] }
     );
+    ops.push(
+        { op: "applyStyle", widget: "container", page: `${mod}.${T}_DsShell`, hasClass: "zz-card", removeClass: "card", addClass: "zz-styled" },
+        { op: "applyStyle", widget: "actionButton", module: mod, folder: "ZzDs", match: "zz*", style: "margin: 2px;", buttonStyle: "Primary" }
+    );
+    refuse.push(
+        [{ op: "applyStyle", widget: "container", addClass: "x" }, /say where/],
+        [{ op: "applyStyle", widget: "container", module: mod, folder: "ZzDs", limit: 1, addClass: "x" }, /widgets match \(limit 1\)/],
+        [{ op: "applyStyle", widget: "datagird", module: mod, addClass: "x" }, /Did you mean: dataGrid/],
+        [{ op: "applyStyle", widget: "container", module: mod, class: "a", addClass: "x" }, /class replaces all classes/],
+        [{ op: "applyStyle", widget: "text", page: `${mod}.${T}_DsShell`, match: "nothingLikeThis*", addClass: "x" }, /no text widget named like/]
+    );
+    if (x.store) refuse.push([{ op: "applyStyle", widget: "container", module: x.store, addClass: "x" }, /is a Marketplace module/]);
     if (x.layout) {
         ops.push(
             { op: "createPageTemplate", module: mod, name: `${T}TplList`, folder: "ZzDs", layout: x.layout, category: "Zz kit", widgets: [{ widget: "text", text: "Zz list", style: "H2" }, { widget: "listView", name: "zzTplList", widgets: [{ widget: "text", text: "Row" }] }] },
@@ -128,6 +142,11 @@ function dsProblems(project, mod, T, x) {
     say(units[`${T}LayPopup`] && units[`${T}LayPopup`].Content.LayoutType === "ModalPopup", "modal pop-up layout not stored");
     const page = units[`${T}_DsShell`];
     say(page && page.FormCall.Form === `${mod}.${T}LayShell` && named(page, "zzCopy2") && named(page, "zzCard"), "page on the new layout / building block copies not stored");
+    const copies = [];
+    walk(page || {}, o => o.$Type === "Forms$DivContainer" && /zz-card/.test(o.Appearance.Class) && copies.push(o.Appearance.Class));
+    say(copies.length === 2 && copies.every(c => c === "zz-card zz-styled"), `applyStyle hasClass / removeClass / addClass not stored (${copies.join(" | ")})`);
+    const more = named(card, "zzCardMore"), out = named(shell, "zzSignOut");
+    say(more && more.Appearance.Style === "margin: 2px;" && more.ButtonStyle === "Primary" && out && out.Appearance.Style === "margin: 2px;", "applyStyle in a module folder (building block + layout buttons) not stored");
     if (x.layout) {
         const tl = units[`${T}TplList`], te = units[`${T}TplEdit`];
         say(tl && tl.$Type === "Forms$PageTemplate" && tl.TemplateType.$Type === "Forms$RegularPageTemplateType" && tl.LayoutCall.Form === x.layout && tl.TemplateCategory === "Zz kit", "regular page template not stored");
@@ -179,7 +198,7 @@ async function dsModelPhase({ s2, reopen, copy, mod, T, layout, layoutProblems, 
     if (!x.layout) results.push("SKIP ds-model: page templates: this project has no page with a layout placeholder Main");
     if (!x.nav) results.push("SKIP ds-model: layout menus: no Responsive navigation profile (layouts built with menu false)");
     const what = ["building blocks (toolbox details, unconfigured data view with 5 inputs + Save / Cancel, unconfigured list view, bound list view)", "addWidgets / changeWidget / changeBuildingBlock on a building block",
-        "buildingBlock widget on a page", x.layout && "page templates (regular, edit) + createPage from them", "createLayout sidebar / topbar / modal pop-up with header, side bar, footer, menu", `${plan.refuse.length} refusals`].filter(Boolean);
+        "buildingBlock widget on a page", x.layout && "page templates (regular, edit) + createPage from them", "createLayout sidebar / topbar / modal pop-up with header, side bar, footer, menu", "applyStyle (page + hasClass, module folder + match + style + button style)", `${plan.refuse.length} refusals`].filter(Boolean);
     check(`ds-model: ${what.join("; ")}; stored with Studio Pro's keys, reopen 0 errors`, !problems.length, [...new Set(problems)].slice(0, 6).join("; "));
     if (firstUse.length) results.push(`NOTE ds-model: no Studio Pro sample in this project of ${firstUse.length} type(s) (SDK layout): ${firstUse.slice(0, 10).join(", ")}`);
     return reopen(copy);
