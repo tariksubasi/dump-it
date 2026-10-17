@@ -443,6 +443,8 @@ class PageRenderer:
                 out.append("%s: %s" % (key, action_text(act)))
             if isinstance(v.get("DataSource"), dict):
                 out.append("%s: data %s" % (key, self._source(v["DataSource"])))
+            if isinstance(v.get("EntityRef"), dict) and entity_ref(v["EntityRef"]):
+                out.append("%s: association %s" % (key, entity_ref(v["EntityRef"])))
             ref = v.get("AttributeRef")
             if isinstance(ref, dict) and ref.get("Attribute"):
                 out.append("%s: attr %s" % (key, attr_path(ref)))
@@ -962,6 +964,11 @@ def navigation_lines(doc, index):
             index.entry("HOME PAGES", "%s role %s -> %s" % (profile.get("Name"), item.get("UserRole"), target))
         for item in profile.get("BottomBarItems") or []:
             out.append("    bottom bar \"%s\" -> open page %s" % (text(item.get("Caption")), item.get("Page")))
+        # offline sync settings per entity (setOfflineSync)
+        for cfg in profile.get("OfflineEntityConfigs") or []:
+            mode = cfg.get("SyncMode") or cfg.get("DownloadMode") or ""
+            xp = clean(cfg.get("Constraint"))
+            out.append("    SYNC %s: %s%s" % (cfg.get("Entity"), mode, (" WHERE " + xp) if xp else ""))
         login = (profile.get("LoginPageSettings") or {}).get("Form")
         if login:
             out.append("    login page: " + login)

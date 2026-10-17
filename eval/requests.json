@@ -757,6 +757,30 @@
           "ACT_Order_Note\\.txt$": "Note[^\\n]*Toplam"
         }
       }
+    },
+    {
+      "id": "gridcustomerfilter",
+      "text": "Order_ByCustomer sayfası yap: siparişleri (Number, Total ve müşterinin adı) Data grid 2 ile listele; müşteri kolonunun başında müşterileri gösteren açılır liste filtresi olsun ve birden çok müşteri seçilebilsin. Total sağa hizalı olsun.",
+      "checks": {
+        "find": [
+          "MyFirstModule.Order_ByCustomer"
+        ],
+        "files": {
+          "Order_ByCustomer\\.txt$": "(?s)^(?=.*Data grid 2)(?=.*refEntity: association MyFirstModule\\.Order_Customer)(?=.*multiSelect: true)(?=.*alignment: right)"
+        }
+      }
+    },
+    {
+      "id": "gridsearchbox",
+      "text": "Order_Search2 sayfası yap: siparişleri (Number, Total, Note) Data grid 2 ile listele; tablonun üstünde Note'ta arama yapan bir arama kutusu olsun (yer tutucu yazısı 'Ara').",
+      "checks": {
+        "find": [
+          "MyFirstModule.Order_Search2"
+        ],
+        "files": {
+          "Order_Search2\\.txt$": "(?s)^(?=.*Data grid 2)(?=.*attrChoice: linked)(?=.*'Ara')"
+        }
+      }
     }
   ]
 }
