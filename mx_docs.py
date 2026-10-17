@@ -1,4 +1,5 @@
 """Renderers for non-flow documents: domain model, pages, code actions, integrations, project settings."""
+import json
 import os
 import re
 
@@ -147,6 +148,82 @@ CUSTOM = "CustomWidgets$CustomWidget"
 PAGE_HEADINGS = {"Forms$Page": "PAGE", "Forms$Snippet": "SNIPPET", "Forms$Layout": "LAYOUT"}
 
 
+def _glyphs():
+    """Bootstrap glyphicon code -> name (mxlocal/glyphicons.json, as Studio Pro's icon picker names them)."""
+    if not _GLYPHS:
+        try:
+            with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "mxlocal", "glyphicons.json"), encoding="utf-8") as f:
+                _GLYPHS.update({v: k for k, v in json.load(f).items()})
+        except (OSError, ValueError):
+            _GLYPHS[-1] = ""
+    return _GLYPHS
+
+
+_GLYPHS = {}
+
+
+def icon_text(icon):
+    """A button / menu icon: glyphicon-pencil, an icon collection icon or an image."""
+    t = (icon or {}).get("$Type", "")
+    if t.endswith("GlyphIcon"):
+        name = _glyphs().get(icon.get("Code"))
+        return "glyphicon-" + name if name else "glyph %s" % icon.get("Code")
+    if t.endswith("IconCollectionIcon"):
+        return str(icon.get("Image"))
+    if t.endswith("ImageIcon"):
+        return "image %s" % icon.get("Image")
+    return ""
+
+
+def _ui_facts(w):
+    """Look and accessibility of a widget: icon, tooltip, render type / mode, aria, tab index, alt text."""
+    out = []
+    t = w.get("$Type", "")
+    if isinstance(w.get("Icon"), dict) and icon_text(w["Icon"]):
+        out.append("icon " + icon_text(w["Icon"]))
+        cap = w.get("CaptionTemplate") or {}
+        if isinstance(cap, dict) and not template(cap).strip("'"):
+            out.append("icon only")
+    if isinstance(w.get("Tooltip"), dict) and text(w["Tooltip"]):
+        out.append("tooltip \"%s\"" % text(w["Tooltip"]))
+    if w.get("RenderType") == "Link" and t != "Forms$SidebarToggleButton":
+        out.append("as link")
+    if w.get("AriaRole") not in (None, "Button"):
+        out.append("aria role " + w["AriaRole"])
+    if t == "Forms$DynamicText" and w.get("RenderMode") not in (None, "Text"):
+        out.append("style " + w["RenderMode"])
+    if t == "Forms$DivContainer":
+        if w.get("RenderMode") not in (None, "Div"):
+            out.append("renders as <%s>" % w["RenderMode"].lower())
+        if w.get("ScreenReaderHidden"):
+            out.append("hidden from screen readers")
+    if isinstance(w.get("ScreenReaderLabel"), dict) and template(w["ScreenReaderLabel"]).strip("'"):
+        out.append("screen reader text \"%s\"" % template(w["ScreenReaderLabel"]).strip("'"))
+    if w.get("AriaRequired"):
+        out.append("aria-required")
+    if isinstance(w.get("AlternativeText"), dict) and template(w["AlternativeText"]).strip("'"):
+        out.append("alt \"%s\"" % template(w["AlternativeText"]).strip("'"))
+    if isinstance(w.get("TabIndex"), int) and w["TabIndex"] != 0 and t != "Forms$SidebarToggleButton":
+        out.append("tab index %d" % w["TabIndex"])
+    if t == "Forms$DropDownButton":
+        for it in w.get("Items") or []:
+            act = it.get("Action") or {}
+            out.append("item \"%s\": %s" % (text(it.get("Caption")), action_text(act) if act and not act.get("$Type", "").endswith("NoAction") else "nothing"))
+    return out
+
+
+def _look(a):
+    """class, style and dynamic class of an Appearance."""
+    out = []
+    if clean(a.get("Class")):
+        out.append("class " + clean(a["Class"]))
+    if clean(a.get("Style")):
+        out.append("style " + clean(a["Style"]))
+    if clean(a.get("DynamicClasses")):
+        out.append("dynamic class " + clean(a["DynamicClasses"]))
+    return out
+
+
 def _inline_template(value):
     """'Total: {1}' with {1}=Total -> 'Total: {Total}' when every parameter is a plain attribute (as in Studio Pro)."""
     raw = value.get("Text", value.get("Template"))
@@ -233,6 +310,9 @@ class PageRenderer:
             out.append("VARIABLE $%s: %s = %s" % (v.get("Name"), dtype(v.get("VariableType")), clean(v.get("DefaultValue"))))
         if clean(d.get("Documentation")):
             out.append("DOC: " + clean(d["Documentation"]))
+        look = _look(d.get("Appearance") or {})
+        if look:
+            out.append("PAGE LOOK: " + ", ".join(look))
         roots = []
         for k, v in d.items():
             if k not in ("Parameters", "Variables", "Title"):
@@ -298,15 +378,36 @@ class PageRenderer:
         self.lines.append("%s- LayoutGrid %s%s" % (pad, grid.get("Name"), "".join(" | " + f for f in facts)))
         for i, row in enumerate(grid.get("Rows") or [], 1):
             cols = row.get("Columns") or []
-            self.lines.append("%s  - row %d: %s" % (pad, i, " | ".join(_width(c) for c in cols) or "(empty)"))
+            rf = self._grid_part(row)
+            self.lines.append("%s  - row %d: %s%s" % (pad, i, " | ".join(_width(c) for c in cols) or "(empty)", "".join(" | " + f for f in rf)))
             for j, col in enumerate(cols, 1):
                 kids = []
                 self._collect_widgets(col.get("Widgets"), kids)
-                if len(cols) > 1:
-                    self.lines.append("%s    - column %d (%s):%s" % (pad, j, _width(col), "" if kids else " (empty)"))
+                cf = self._grid_part(col)
+                if len(cols) > 1 or cf:
+                    self.lines.append("%s    - column %d (%s)%s:%s" % (pad, j, _width(col), "".join(" | " + f for f in cf), "" if kids else " (empty)"))
                     self._widgets(kids, indent + 3)
                 else:
                     self._widgets(kids, indent + 2)
+
+    def _grid_part(self, part):
+        """Alignment, look, design and visibility of a layout grid row or column."""
+        out = []
+        if part.get("VerticalAlignment") not in (None, "None"):
+            out.append("vertical " + part["VerticalAlignment"].lower())
+        if part.get("HorizontalAlignment") not in (None, "None"):
+            out.append("horizontal " + part["HorizontalAlignment"].lower())
+        if part.get("SpacingBetweenColumns") is False:
+            out.append("no spacing between columns")
+        out.extend(_look(part.get("Appearance") or {}))
+        design = [_design(d) for d in (part.get("Appearance") or {}).get("DesignProperties") or []]
+        if design:
+            out.append("design " + "; ".join(design))
+        if part.get("ConditionalVisibilitySettings"):
+            cond = self._condition(part["ConditionalVisibilitySettings"])
+            if cond:
+                out.append("visible if " + cond)
+        return out
 
     def _caption(self, w):
         for key in ("CaptionTemplate", "LabelTemplate", "Content"):
@@ -325,6 +426,7 @@ class PageRenderer:
             self._widget_object(w.get("Object"), keys, "", out)
             for k in ("ConditionalVisibilitySettings", "ConditionalEditabilitySettings", "Appearance"):
                 self._scan(w.get(k), k, out)
+            out.extend(_look(w.get("Appearance") or {}))
             return out
         if w.get("Image"):
             out.append("image " + w["Image"])
@@ -359,9 +461,11 @@ class PageRenderer:
             ph = _inline_template(w["PlaceholderTemplate"]) or template(w["PlaceholderTemplate"])
             if ph and ph != "''":
                 out.append("placeholder " + ph)
+        out.extend(_ui_facts(w))
         for k, v in w.items():
-            if k not in ("CaptionTemplate", "LabelTemplate", "Caption", "Content"):
+            if k not in ("CaptionTemplate", "LabelTemplate", "Caption", "Content", "Items" if w["$Type"] == "Forms$DropDownButton" else ""):
                 self._scan(v, k, out)
+        out.extend(_look(w.get("Appearance") or {}))
         for k in ("Content", "CaptionTemplate"):
             for prm in (w.get(k) or {}).get("Parameters") or [] if isinstance(w.get(k), dict) else []:
                 self._scan(prm, "Parameters", out)
