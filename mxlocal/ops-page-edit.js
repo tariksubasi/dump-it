@@ -8,6 +8,7 @@
 const sdk = require("mendixmodelsdk");
 const { fail, bool, setIfAvailable, enumValue, validName } = require("./ops-util");
 const design = require("./design");
+const { COLUMN_SETTINGS } = require("./grid-extras");
 
 const { pages, domainmodels: dm, customwidgets: cw, datatypes, texts } = sdk;
 
@@ -37,7 +38,8 @@ const PAGE_EDIT_OPS = {
             style: "inline CSS, e.g. \"font-weight: bold;\" (\"\" = none)",
             textStyle: "Text | Paragraph | H1 | H2 | H3 | H4 | H5 | H6 (a text)",
             buttonStyle: "Default | Primary | Success | Info | Warning | Danger | Inverse (a button)",
-            columns: "{ \"add\": [ \"Attr\" or { \"attribute\": ..., \"caption\": ..., \"width\": 20 } ], \"remove\": [ \"Attr\" or a column caption ] } of a classic data grid or Data grid 2 (width: classic only); added at the end",
+            columns: "{ \"add\": [ \"Attr\" or { \"attribute\": ..., \"caption\": ..., \"width\": 20 } ], \"remove\": [ \"Attr\" or a column caption ], \"change\": [ { \"column\": \"Attr\" or a caption, ...settings } ] } of a classic data grid or Data grid 2; added at the end. Classic: width (a weight), class; Data grid 2: the column settings of createPage dataGrid (width autoFill | autoFit | manual or a number, size, minWidth, alignment, hidable, resizable, draggable, sortable, visible, tooltip, wrapText, class, columnClass, rowEvents) and \"filter\" (on add, and on change when the column has none)",
+            headerFilters: "Data grid 2 / gallery: filters to add above it, as createPage dataGrid headerFilters",
             xpath: "XPath constraint of a grid, list view or Data grid 2 with a database source, e.g. [Active = true()] (\"\" = all objects)",
             name: "new name; data views listening to it follow",
             action: "a button's action (also a classic grid button): { \"action\": \"showPage\" | \"callMicroflow\" | \"callNanoflow\" | \"save\" | \"cancel\" | \"close\" | \"delete\", \"page\" / \"microflow\" / \"nanoflow\", \"params\" } (replaces the old one)",
@@ -76,7 +78,7 @@ const PAGE_EDIT_OPS = {
     }
 };
 const INPUT_FIELDS = ["required", "requiredMessage", "validation", "format", "readOnlyStyle", "inputMask", "maxLength"];
-const CHANGE_FIELDS = ["caption", "text", "label", "placeholder", "editable", "visible", "class", "design", "style", "textStyle", "buttonStyle", "columns", "xpath", "name", "action", "onClick", "onChange",
+const CHANGE_FIELDS = ["caption", "text", "label", "placeholder", "editable", "visible", "class", "design", "style", "textStyle", "buttonStyle", "columns", "headerFilters", "xpath", "name", "action", "onClick", "onChange",
     "onEnter", "onLeave", "onEnterKeyPress", ...INPUT_FIELDS, "orientation", "labelWidth", "showFooter", "selectPage"];
 // fields a weak model takes from elsewhere -> what to write instead (checked before the generic "unknown field")
 const FIELD_SYNONYMS = {
@@ -639,7 +641,17 @@ function makePageEdit(h, I) {
             return `button style ${m.name}`;
         },
         async columns(P, node, v, dc, ctx, where) {
-            return gridColumns(P, node, v, ctx, where);
+            return gridColumns(P, node, v, ctx, where, dc);
+        },
+        async headerFilters(P, node, v, dc, ctx, where) {
+            const w = node.el;
+            if (!(w instanceof cw.CustomWidget) || !w.object || !w.object.properties.some(p => p.type && p.type.key === "filtersPlaceholder")) throw new Error(`${where}: headerFilters is for a Data grid 2 or gallery; ${node.label} is a ${kindOf(w)}`);
+            const src = cwSource(w);
+            const qn = src && refEntity(prop(src, "entityRef"));
+            if (!qn) throw new Error(`${where}: the entity of ${node.label} is not known here; add its filters in Studio Pro`);
+            const ent = await I.entityOf(qn, where);
+            const out = await I.gridExtras().headerFilters(w, ent, v, { container: dc || null, where, name: node.name, spec: {} }, ctx, where);
+            return out.join("; ");
         },
         async xpath(P, node, v, dc, ctx, where) {
             const w = node.el;
@@ -648,6 +660,7 @@ function makePageEdit(h, I) {
             if (xp === undefined || xp === null) throw new Error(`${where}: a ${kindOf(w)}${src ? ` with a ${src.structureTypeName.split("$")[1]}` : ""} has no XPath; xpath is for a grid, list view or Data grid 2 over the database`);
             const qn = refEntity(src.entityRef);
             if (String(v).trim()) I.checkXPath({ spec: { xpath: v }, where, kind: kindOf(w), container: dc }, await I.entityOf(qn, where));
+            if (String(v).trim()) I.gridExtras().xpathVariables(String(v), ctx, where);
             if (src.xPathConstraint !== String(v)) src.xPathConstraint = String(v);
             return String(v) ? `XPath ${v}` : "XPath removed (all objects)";
         },
@@ -791,12 +804,12 @@ function makePageEdit(h, I) {
     }
 
     // columns: { add, remove } for a classic data grid or Data grid 2
-    async function gridColumns(P, node, v, ctx, where) {
+    async function gridColumns(P, node, v, ctx, where, dc) {
         const w = node.el;
-        if (!v || typeof v !== "object" || Array.isArray(v)) throw new Error(`${where}: columns is { "add": [ "Attr", ... ], "remove": [ "Attr", ... ] }`);
-        for (const k of Object.keys(v)) if (!["add", "remove"].includes(k)) fail(`${where}: unknown field '${k}' in columns`, k, ["add", "remove"]);
-        const add = I.list(v.add, `${where}: columns.add`), remove = I.list(v.remove, `${where}: columns.remove`);
-        if (!add.length && !remove.length) throw new Error(`${where}: columns needs "add" and/or "remove"`);
+        if (!v || typeof v !== "object" || Array.isArray(v)) throw new Error(`${where}: columns is { "add": [ "Attr", ... ], "remove": [ "Attr", ... ], "change": [ { "column": "Attr", ... } ] }`);
+        for (const k of Object.keys(v)) if (!["add", "remove", "change"].includes(k)) fail(`${where}: unknown field '${k}' in columns`, k, ["add", "remove", "change"]);
+        const add = I.list(v.add, `${where}: columns.add`), remove = I.list(v.remove, `${where}: columns.remove`), change = I.list(v.change, `${where}: columns.change`);
+        if (!add.length && !remove.length && !change.length) throw new Error(`${where}: columns needs "add", "remove" and/or "change"`);
         const classic = w instanceof pages.DataGrid;
         if (!classic && !I.isGrid2(w)) throw new Error(`${where}: columns is for a classic data grid or Data grid 2; ${node.label} is a ${kindOf(w)}`);
         const src = classic ? w.dataSource : cwSource(w);
@@ -836,8 +849,10 @@ function makePageEdit(h, I) {
             const s = typeof a === "string" ? { attribute: a } : a;
             const at = `${where}: columns.add ${i + 1}`;
             if (!s || typeof s !== "object" || !s.attribute) throw new Error(`${at}: use "Attr" or { "attribute": ..., "caption": ...${classic ? `, "width": ...` : ""} }`);
-            const keys = classic ? ["attribute", "caption", "width", "format"] : ["attribute", "caption"];
-            for (const k of Object.keys(s)) if (!keys.includes(k)) fail(`${at}: unknown field '${k}'${k === "width" ? " (a Data grid 2 column has no weight width here)" : ""}`, k, keys);
+            const keys = classic ? ["attribute", "caption", "width", "format", "class"] : ["attribute", "caption", "filter", ...Object.keys(COLUMN_SETTINGS)];
+            if (classic) for (const k of Object.keys(s)) if (!keys.includes(k) && COLUMN_SETTINGS[k]) throw new Error(`${at}: ${k} is a Data grid 2 column setting; a classic grid column has caption, width (a weight), format and class`);
+            if (classic) for (const k of Object.keys(s)) if (!keys.includes(k)) fail(`${at}: unknown field '${k}'`, k, keys);
+            if (!classic) I.gridExtras().checkColumnFields(s, keys, at);
             const path = I.pathOf(ent, String(s.attribute), at), attr = path.attr;
             if (cur().some(c => c.attr === attr.qualifiedName)) client.warn(`${where}: ${node.label} already has a column for ${attr.name}; added a second one`);
             const caption = s.caption !== undefined ? String(s.caption) : I.humanize(attr.name);
@@ -848,18 +863,78 @@ function makePageEdit(h, I) {
                 if (!(Number.isInteger(width) && width > 0)) throw new Error(`${at}: width must be a whole number > 0 (a weight)`);
                 const col = await I.classicColumn(w, path, caption, width, ctx);
                 if (s.format !== undefined) I.formatInto(col, attr, s.format, `${at}: format`);
+                if (s.class !== undefined) col.appearance.class = classList(s.class, at);
             } else {
                 if (allowed.length && !allowed.includes(I.typeOf(attr))) throw new Error(`${at}: a Data grid 2 column cannot show '${attr.name}' (${I.typeOf(attr)}); it shows ${allowed.join(", ")}`);
                 const objs = colsProp.value.objects;
                 const pattern = objs.find(o => (I.valueOf(o, "showContentAs") || {}).primitiveValue === "attribute") || objs[0] || null;
                 const col = await I.dg2Column(colsProp.type.valueType.objectType, pattern, path, caption, ctx, at);
                 objs.push(col);
+                const set = await I.gridExtras().columnSettings(col, s, { grid: w, ent, dc }, ctx, at);
+                const f = s.filter !== undefined ? await I.gridExtras().columnFilter(col, { attr, path, filter: s.filter }, { container: dc || null, spec: {}, name: node.name, widget: w }, ctx, at) : null;
+                if (set.length || f) done.push(`+${path.text} (${[...set, ...(f ? [f] : [])].join(", ")})`);
+                else done.push(`+${path.text}`);
+                continue;
             }
             done.push(`+${path.text}`);
+        }
+        // change: settings of existing columns
+        for (const [i, c] of change.entries()) {
+            const at = `${where}: columns.change ${i + 1}`;
+            if (!c || typeof c !== "object" || Array.isArray(c) || c.column === undefined) throw new Error(`${at}: use { "column": "Attr" or a caption, ...settings }`);
+            const key = String(c.column);
+            const all = cur();
+            const hits = [];
+            for (const x of all) if ((x.attr && x.attr.split(".").pop() === key) || x.name === key || (x.caption && (await textOf(x.caption)) === key)) hits.push(x);
+            if (hits.length > 1) throw new Error(`${at}: '${key}' matches ${hits.length} columns; give a column caption or name`);
+            if (!hits.length) {
+                const opts = [];
+                for (const x of all) opts.push(...[x.attr && x.attr.split(".").pop(), x.name, x.caption ? await textOf(x.caption) : ""].filter(Boolean));
+                fail(`${at}: ${node.label} has no column '${key}'`, key, [...new Set(opts)]);
+            }
+            const col = hits[0].el;
+            const s = { ...c };
+            delete s.column;
+            if (classic) {
+                for (const k of Object.keys(s)) if (!["width", "class"].includes(k)) {
+                    if (COLUMN_SETTINGS[k]) throw new Error(`${at}: ${k} is a Data grid 2 column setting; a classic grid column changes width (a weight) and class here (caption: changeWidget on the column by name)`);
+                    fail(`${at}: unknown field '${k}'`, k, ["width", "class"]);
+                }
+                const bits = [];
+                if (s.width !== undefined) {
+                    const n = Number(s.width);
+                    if (!(Number.isInteger(n) && n > 0)) throw new Error(`${at}: width must be a whole number > 0 (a weight)`);
+                    col.width = n;
+                    bits.push(`width ${n}`);
+                }
+                if (s.class !== undefined) {
+                    col.appearance.class = classList(s.class, at);
+                    bits.push(`class ${s.class}`);
+                }
+                done.push(`~${key} (${bits.join(", ") || "unchanged"})`);
+                continue;
+            }
+            I.gridExtras().checkColumnFields(s, ["filter", ...Object.keys(COLUMN_SETTINGS)], at);
+            const set = await I.gridExtras().columnSettings(col, s, { grid: w, ent, dc }, ctx, at);
+            if (s.filter !== undefined) {
+                const fv = I.valueOf(col, "filter");
+                if (fv && fv.widgets.length) throw new Error(`${at}: column ${key} has a filter (${fv.widgets.map(x => x.name).join(", ")}); delete it with deleteWidget first`);
+                const ar = (I.valueOf(col, "attribute") || {}).attributeRef;
+                if (!ar) throw new Error(`${at}: column ${key} shows no attribute; a filter goes on an attribute column`);
+                const steps = ar.entityRef && ar.entityRef.steps ? ar.entityRef.steps.map(st => st.associationQualifiedName.split(".").pop()).join("/") : "";
+                const path = I.pathOf(ent, `${steps ? steps + "/" : ""}${ar.attributeQualifiedName.split(".").pop()}`, at);
+                set.push(await I.gridExtras().columnFilter(col, { attr: path.attr, path, filter: s.filter }, { container: dc || null, spec: {}, name: node.name, widget: w }, ctx, at));
+            }
+            done.push(`~${key} (${set.join(", ") || "unchanged"})`);
         }
         if (classic && !w.columns.length) client.warn(`${where}: ${node.label} has no columns left`);
         return `columns ${done.join(", ")}`;
     }
+
+    const classList = (v, at) => {
+        if (!/^[\w\s-]*$/.test(String(v))) throw new Error(`${at}: class '${v}' is not a CSS class list`);
+        return String(v);
+    };
 
     // ------------------------------------------------ operations
 
@@ -966,7 +1041,7 @@ function makePageEdit(h, I) {
         if (!fields.length) throw new Error(`${where}: give what to change: ${CHANGE_FIELDS.join(", ")}`);
         const ctx = { ...newCtx(P), lang: await defaultLanguage(), op: o };
         // {Attribute} and conditions use the data view or list view around the widget (for a column: around its grid)
-        const needs = ["caption", "text", "label", "placeholder", "visible", "editable", "xpath", "action", "onClick", "onChange", "onEnter", "onLeave", "onEnterKeyPress", "validation", "selectPage"].some(k => o[k] !== undefined);
+        const needs = ["caption", "text", "label", "placeholder", "visible", "editable", "xpath", "columns", "headerFilters", "action", "onClick", "onChange", "onEnter", "onLeave", "onEnterKeyPress", "validation", "selectPage"].some(k => o[k] !== undefined);
         if (["action", "onClick", "onChange", "onEnter", "onLeave", "onEnterKeyPress"].some(k => o[k] !== undefined)) ctx.scope = await scopeOf(P, where);
         const dc = needs && node.ctx ? await builderContext(P, node.ctx, where).catch(e => (/\{[A-Za-z_]|currentObject|"attribute"/.test(JSON.stringify(o)) ? Promise.reject(e) : null)) : null;
         const done = [];

@@ -10,12 +10,14 @@ const { toSdk } = require("./convert");
 const pluggable = require("./pluggable");
 const design = require("./design");
 const { userRoleNamed } = require("./ops-security");
+const gridExtras = require("./grid-extras");
 
 const { pages, domainmodels: dm, datatypes, menus, navigation, microflows: mf, customwidgets: cw, enumerations } = sdk;
 
 const PARAMS = "optional { \"<Parameter>\": \"$currentObject\" | \"$<dataView>\" (one around it, or one that listens) | \"$<grid>.selection\" (a List parameter gets a Multi selection) | \"$<PageParameter>\" | an expression for other parameters } (default: the objects around it, as Studio Pro passes them)";
 const ACTION = "{ \"action\": ..., ... } as on actionButton (showPage, callMicroflow, callNanoflow, create, openLink, save, cancel, close, delete, signOut, sync, callWorkflow; with confirm, progress, pageTitle, ...)";
 const ASSOC_ONE = "with source association: Module.Assoc (or a path A/B) from the object around it to one object: a reference it owns (Order_Customer in a data view of Order)";
+const HEADER_FILTERS = "optional, Data grid 2 / gallery: filters above it (its header) [ { \"filter\": \"text\", \"attributes\": [\"Name\", \"Email\"], \"placeholder\": \"Search\" } (one search box over several attributes; also number / date) | { \"filter\": \"dropdown\", \"attribute\": \"Status\" } | { \"filter\": \"association\", \"association\": \"Module.Order_Customer\", \"caption\": \"Name\", \"multiSelect\": true, \"options\": \"[XPath]\" } ]; a filter is linked to the grid or gallery it sits in, so a filter elsewhere on the page cannot filter it";
 // source fields of the list kinds (dataGrid, listView, gallery)
 const LIST_SOURCE = {
     source: "optional database | association | microflow | nanoflow (default database; association / microflow / nanoflow when that field is given)",
@@ -74,14 +76,15 @@ const WIDGETS = {
         fields: {
             entity: "optional Module.Entity (default: the page entity; with association / microflow: what it gives)",
             ...LIST_SOURCE,
-            columns: "optional [ \"Attribute\" or { \"attribute\": ..., \"caption\": ..., \"width\": 25, \"format\": { \"decimals\": 2 } } ] (default: all attributes; width, format: classic only); the attribute is " + PATH + "; Data grid 2 also { \"dynamicText\": \"{Name} ({Order_Customer/Name})\", \"caption\": ..., \"format\": { \"<Attribute>\": { ... } } } and { \"widgets\": [ widgets per row ], \"caption\": ... } (custom content)",
+            columns: "optional [ \"Attribute\" or { \"attribute\": ..., \"caption\": ..., \"width\": 25, \"format\": { \"decimals\": 2 } } ] (default: all attributes; width as a weight, format: classic only; a classic column also takes \"class\"); the attribute is " + PATH + "; Data grid 2 column settings: " + Object.entries(gridExtras.COLUMN_SETTINGS).map(([k, d]) => `${k} (${d})`).join(", ") + ", and \"filter\": true | \"text\" | \"number\" | \"date\" | \"dropdown\" | \"association\" | { \"filter\": ..., \"multiSelect\": true, \"caption\": \"Name\", \"options\": \"[XPath]\", \"placeholder\": ..., \"default\": ..., \"operator\": ... } (a column over a reference \"Order_Customer/Name\" with true: a drop-down of the customers); Data grid 2 also { \"dynamicText\": \"{Name} ({Order_Customer/Name})\", \"caption\": ..., \"format\": { \"<Attribute>\": { ... } } } and { \"widgets\": [ widgets per row ], \"caption\": ... } (custom content)",
             buttons: "optional, classic only: control bar buttons [ { \"action\": \"new\" | \"edit\", \"page\": \"Module.Page\" } | { \"action\": \"delete\" } | { \"action\": \"callMicroflow\" | \"callNanoflow\", \"microflow\" / \"nanoflow\": ..., \"params\": ... } | any other actionButton action ], each with optional caption, style, name and the action options (confirm, progress, pageTitle, \"maintainSelection\": true keeps the selection after a flow); a flow gets the selected row (a List parameter: the selected rows with selection Multi)",
             onClick: "optional, Data grid 2 only: on a row click " + ACTION + "; the row is passed",
             xpath: "optional XPath constraint (source database), e.g. [Active = true()]; inside a data view [Module.Assoc = '[%CurrentObject%]'] shows the committed objects linked to its object (source association also shows new ones)",
             search: "optional true/false or [ \"Attribute\" ]: classic only, source database: Search button + search fields for text, number and enumeration columns, or for the listed attributes (default true)",
             sort: "optional default sort order (source database): [ \"Attribute\" | { \"attribute\": \"Name\", \"direction\": \"desc\" } ] (default direction asc; also paths \"Order_Customer/Name\")",
             export: "optional, Data grid 2: true or { \"caption\": \"Export to Excel\", \"fileName\": \"Orders\", \"sheetName\": \"Orders\", \"headers\": true }: an Export to Excel button above the grid and a nanoflow <Page>_<grid>_Export calling DataWidgets.Export_To_Excel (the Data Widgets module must be in the project)",
-            filters: "optional, Data grid 2: true = a filter in every attribute column header (text, number, date or drop-down filter by attribute type, from widgets/*.mpk); per column { \"attribute\": ..., \"filter\": true / false }",
+            filters: "optional, Data grid 2: true = a filter in every attribute column header (text, number, date or drop-down filter by attribute type, from widgets/*.mpk; a column over a reference: a drop-down of the objects it refers to); per column { \"attribute\": ..., \"filter\": true / false / ... }",
+            headerFilters: HEADER_FILTERS,
             paging: "optional, Data grid 2: buttons | virtualScrolling | loadMore (default buttons)",
             selectionMethod: "optional, Data grid 2: rowClick | checkbox (default rowClick for Single, checkbox for Multi)",
             rowClass: "optional, Data grid 2: expression for a CSS class per row, e.g. \"if $currentObject/Active then 'row-active' else ''\"",
@@ -163,7 +166,7 @@ const WIDGETS = {
     },
     gallery: {
         doc: "Gallery (pluggable, built from widgets/*.mpk like Data grid 2): objects (database, association or microflow/nanoflow, as listView) as tiles, each item with its own widgets; a data view can listen to it. Without the .mpk it is refused: use listView",
-        fields: { entity: "optional Module.Entity (default: the page entity)", ...LIST_SOURCE, xpath: "optional XPath constraint", widgets: "optional [ widgets ] per item (default: one text per attribute)", selection: "optional Single | Multi | None (default Single)", pageSize: "optional (default 20)", columns: "optional desktop columns 1-12 (default 1)", onClick: "optional: on an item click " + ACTION + "; the item is passed", sort: "optional default sort order (source database): [ \"Attribute\" | { \"attribute\": \"Name\", \"direction\": \"desc\" } ] (default direction asc)" }
+        fields: { entity: "optional Module.Entity (default: the page entity)", ...LIST_SOURCE, xpath: "optional XPath constraint", widgets: "optional [ widgets ] per item (default: one text per attribute)", selection: "optional Single | Multi | None (default Single)", pageSize: "optional (default 20)", columns: "optional desktop columns 1-12 (default 1)", headerFilters: HEADER_FILTERS, onClick: "optional: on an item click " + ACTION + "; the item is passed", sort: "optional default sort order (source database): [ \"Attribute\" | { \"attribute\": \"Name\", \"direction\": \"desc\" } ] (default direction asc)" }
     }
 };
 // Fields every widget kind takes (style: inline CSS, but for text and actionButton it is the text / button style
@@ -1249,6 +1252,7 @@ function makePages(h) {
             dm.DirectEntityRef.createInEntityPathSourceUnderEntityRef(src).entity = ent;
             if (s.xpath) {
                 checkXPath(node, ent);
+                GX().xpathVariables(String(s.xpath), ctx, node.where);
                 src.xPathConstraint = String(s.xpath);
             }
             return `${ent.qualifiedName}${s.xpath ? ", XPath " + s.xpath : ""}`;
@@ -1309,9 +1313,13 @@ function makePages(h) {
         const asked = { classic: "classic", datagrid: "classic", datagrid1: "classic", datagrid2: "datagrid2", dg2: "datagrid2", auto: "auto" }[raw.toLowerCase().replace(/[\s_-]/g, "")];
         if (!asked) fail(`${node.where}: kind '${raw}' is not known (use classic | datagrid2 | auto)`, raw, ["classic", "datagrid2", "auto"]);
         const cols = Array.isArray(s.columns) ? s.columns : [];
+        const numWidth = c => c && typeof c === "object" && c.width !== undefined && /^\d+$/.test(String(c.width));
+        const dg2Set = Object.keys(gridExtras.COLUMN_SETTINGS).filter(k => k !== "class" && k !== "width");
         const dg2Only = [cols.some(c => c && typeof c === "object" && (c.widgets !== undefined || c.dynamicText !== undefined)) && "dynamic text / custom content columns", s.onClick !== undefined && "onClick",
-            ...["filters", "paging", "selectionMethod", "rowClass", "configAttribute", "export"].filter(k => s[k] !== undefined), cols.some(c => c && typeof c === "object" && c.filter !== undefined) && "column filter"].filter(Boolean);
-        const classicOnly = [(Array.isArray(s.search) || bool(s.search, false)) && "search", cols.some(c => c && typeof c === "object" && c.width !== undefined) && "column width", s.buttons !== undefined && "control bar buttons",
+            ...["filters", "headerFilters", "paging", "selectionMethod", "rowClass", "configAttribute", "export"].filter(k => s[k] !== undefined), cols.some(c => c && typeof c === "object" && c.filter !== undefined) && "column filter",
+            ...dg2Set.filter(k => cols.some(c => c && typeof c === "object" && c[k] !== undefined)).map(k => `column ${k}`), cols.some(c => c && typeof c === "object" && c.width !== undefined && !numWidth(c)) && "column width autoFill / autoFit / manual"].filter(Boolean);
+        const dg2Asked = /^(datagrid2|dg2)$/i.test(String(s.kind !== undefined ? s.kind : s.widget !== undefined ? s.widget : s.type).replace(/[\s_-]/g, ""));
+        const classicOnly = [(Array.isArray(s.search) || bool(s.search, false)) && "search", !dg2Asked && cols.some(numWidth) && "column width", s.buttons !== undefined && "control bar buttons",
             s.selection !== undefined && !/^(single|multi|none)$/i.test(String(s.selection)) && `selection ${s.selection}`].filter(Boolean);
         node.kindAsked = asked;
         node.gridKind = "classic";
@@ -1873,15 +1881,15 @@ function makePages(h) {
             const at = `${node.where} column ${i + 1}`;
             const shape = s && typeof s === "object" ? ["attribute", "dynamicText", "widgets"].filter(k => s[k] !== undefined) : [];
             if (shape.length !== 1) throw new Error(`${at}: use "Attribute", { "attribute": ..., "caption": ... }, { "dynamicText": "{Name}", "caption": ... } or { "widgets": [...], "caption": ... }`);
-            const own = [shape[0], "caption", ...(shape[0] === "attribute" ? ["filter", "format"] : shape[0] === "dynamicText" ? ["format"] : [])];
+            const own = [shape[0], "caption", ...(shape[0] === "attribute" ? ["filter", "format"] : shape[0] === "dynamicText" ? ["format"] : []), ...Object.keys(gridExtras.COLUMN_SETTINGS)];
             if (shape[0] === "attribute" && s.format !== undefined) throw new Error(`${at}: a Data grid 2 attribute column shows the attribute with its own format; for a format use { "dynamicText": "{${s.attribute}}", "format": { "${s.attribute}": { ... } } }`);
-            for (const k of Object.keys(s)) if (!own.includes(k)) fail(`${at}: unknown field '${k}' for a Data grid 2 column`, k, own);
-            if (shape[0] === "dynamicText") return { kind: "dynamicText", text: s.dynamicText, caption: s.caption !== undefined ? String(s.caption) : "", format: s.format };
-            if (shape[0] === "widgets") return { kind: "customContent", nodes: (node.colNodes || [])[i] || [], caption: s.caption !== undefined ? String(s.caption) : "" };
+            GX().checkColumnFields(s, own, at);
+            if (shape[0] === "dynamicText") return { kind: "dynamicText", text: s.dynamicText, caption: s.caption !== undefined ? String(s.caption) : "", format: s.format, spec: s };
+            if (shape[0] === "widgets") return { kind: "customContent", nodes: (node.colNodes || [])[i] || [], caption: s.caption !== undefined ? String(s.caption) : "", spec: s };
             const path = pathOf(ent, s.attribute, node.where);
             const attr = path.attr;
             if (!ok(attr)) throw new Error(`${node.where}: a Data grid 2 column cannot show '${attr.name}' (${typeOf(attr)}); it shows ${allowed.join(", ")}`);
-            return { kind: "attribute", attr, path, caption: s.caption !== undefined ? String(s.caption) : humanize(attr.name), filter: s.filter };
+            return { kind: "attribute", attr, path, caption: s.caption !== undefined ? String(s.caption) : humanize(attr.name), filter: s.filter, spec: s };
         });
         return { cols, dropped: [] };
     }
@@ -2123,11 +2131,19 @@ function makePages(h) {
                 extra.push(`custom content [${inner.join(", ")}]`);
             }
         }
+        // column settings (width, alignment, ...), then the filters (by type, or over the column's association)
+        const g = { grid, ent, dc: node.container && node.container.ent ? node.container : null };
+        for (const [i, c] of cols.entries()) {
+            const set = c.spec ? await GX().columnSettings(made[i], c.spec, g, ctx, `${node.where} column ${i + 1}`) : [];
+            if (set.length) extra.push(`column ${i + 1}: ${set.join(", ")}`);
+        }
         for (const [i, c] of cols.entries()) {
             if (c.kind !== "attribute") continue;
-            const want = c.filter !== undefined ? bool(c.filter, false) : bool(node.spec.filters, false);
-            if (want) extra.push(`column ${i + 1}: ${await dg2Filter(made[i], c.attr, node, ctx, `${node.where} column ${i + 1}`)}`);
+            const f = c.filter !== undefined ? c.filter : bool(node.spec.filters, false) ? true : undefined;
+            const made1 = f !== undefined ? await GX().columnFilter(made[i], { ...c, filter: f }, node, ctx, `${node.where} column ${i + 1}`) : null;
+            if (made1) extra.push(`column ${i + 1}: ${made1}`);
         }
+        if (node.spec.headerFilters !== undefined) extra.push(...(await GX().headerFilters(grid, ent, node.spec.headerFilters, node, ctx, `${node.where}`)));
         if (node.spec.onClick !== undefined) extra.push("on click: " + (await pluggableClick(node, props, ctx)));
         if (node.spec.export !== undefined && node.spec.export !== false) extra.push(await dg2Export(node, grid, props, target, ctx));
         extra.push(...more);
@@ -2567,7 +2583,7 @@ function makePages(h) {
         // the first top-level data source with a value is the node's source
         for (const pt of t.ObjectType.PropertyTypes) {
             if (pt.ValueType.Type !== "DataSource" || props[pt.PropertyKey] === undefined) continue;
-            if (pt.ValueType.IsLinked) throw new Error(`${node.where}: ${pt.PropertyKey} links to the data source of another widget; inside a Data grid 2 / gallery header a filter needs none, elsewhere set it in Studio Pro`);
+            if (pt.ValueType.IsLinked) throw new Error(gridExtras.FILTER_IDS.includes(t.WidgetId) ? gridExtras.outsideFilterMessage(t.WidgetId, node.where, node.pl.version) : `${node.where}: ${pt.PropertyKey} links to the data source of another widget; inside a Data grid 2 / gallery header a filter needs none, elsewhere set it in Studio Pro`);
             const v = props[pt.PropertyKey];
             const ds = typeof v === "string" ? { entity: v } : v;
             if (!ds || typeof ds !== "object" || Array.isArray(ds)) throw new Error(`${node.where}: ${pt.PropertyKey} is "Module.Entity" or { "entity": ..., "xpath": ... } (or "association" / "microflow" / "nanoflow")`);
@@ -2894,7 +2910,7 @@ function makePages(h) {
             if (s.label !== undefined) await textAll(w.labelTemplate.template, String(s.label), ctx);
             const set = await plApply(node, w.object, s.properties || {}, [], ctx, `${node.where}.properties`);
             const miss = plMissing(w.object);
-            if (miss.length) client.warn(`${ctx.qn}: ${name} (${d.type.WidgetName}) leaves required ${miss.join(", ")} empty; Studio Pro reports the ones it shows (widgettype ${d.id.split(".").pop()})`);
+            if (miss.length && !node.quiet) client.warn(`${ctx.qn}: ${name} (${d.type.WidgetName}) leaves required ${miss.join(", ")} empty; Studio Pro reports the ones it shows (widgettype ${d.id.split(".").pop()})`);
             if (!pluggable.exemplars(client.project, d.id).exemplars.length) client.warnFirst(`${ctx.qn}: ${name} is the first ${d.type.WidgetName} ${d.version} in this project (built from widgets/${d.file}): check it in Studio Pro`);
             return `${name} (${d.type.WidgetName} ${d.version}${set.length ? `: ${set.join(", ")}` : ""})`;
         },
@@ -3024,11 +3040,15 @@ function makePages(h) {
             const cols = specs.map((c, i) => {
                 const s = typeof c === "string" ? { attribute: c } : c;
                 if (!s || typeof s !== "object" || !s.attribute) throw new Error(`${node.where} column ${i + 1}: use "Attribute" or { "attribute": ..., "caption": ..., "width": ... }`);
-                for (const k of Object.keys(s)) if (!["attribute", "caption", "width", "format"].includes(k)) fail(`${node.where} column ${i + 1}: unknown field '${k}'`, k, ["attribute", "caption", "width", "format"]);
+                for (const k of Object.keys(s)) if (!["attribute", "caption", "width", "format", "class"].includes(k)) {
+                    if (gridExtras.COLUMN_SETTINGS[k]) throw new Error(`${node.where} column ${i + 1}: ${k} is a Data grid 2 column setting; a classic grid column has caption, width (a weight), format and class (e.g. a theme class for the alignment). Use "kind": "datagrid2" for ${k}`);
+                    fail(`${node.where} column ${i + 1}: unknown field '${k}'`, k, ["attribute", "caption", "width", "format", "class"]);
+                }
                 const path = pathOf(ent, s.attribute, node.where), attr = path.attr;
                 if (attr.type instanceof dm.BinaryAttributeType) throw new Error(`${node.where}: '${attr.name}' is binary; a grid column cannot show it`);
                 if (s.width !== undefined && !(Number.isInteger(Number(s.width)) && Number(s.width) > 0)) throw new Error(`${node.where} column ${i + 1}: width must be a whole number > 0 (a weight; all columns add up to 100)`);
-                return { attr, path, caption: s.caption !== undefined ? String(s.caption) : humanize(attr.name), width: s.width, format: s.format };
+                if (s.class !== undefined && !/^[\w\s-]*$/.test(String(s.class))) throw new Error(`${node.where} column ${i + 1}: class '${s.class}' is not a CSS class list`);
+                return { attr, path, caption: s.caption !== undefined ? String(s.caption) : humanize(attr.name), width: s.width, format: s.format, cls: s.class };
             });
             // widths are weights (Studio Pro: WidthUnit Weight, 100 in total)
             const given = cols.filter(c => c.width !== undefined).reduce((s, c) => s + Number(c.width), 0);
@@ -3041,6 +3061,7 @@ function makePages(h) {
                 if (!(width > 0)) throw new Error(`${node.where} column ${i + 1}: width must be a number > 0`);
                 const col = await classicColumn(grid, c.path, c.caption, width, ctx);
                 if (c.format !== undefined) colFormats.push(`${c.path.text}: ${formatInto(col, c.attr, c.format, `${node.where} column ${i + 1}: format`)}`);
+                if (c.cls !== undefined) col.appearance.class = String(c.cls);
             }
             // search: Studio Pro's generated grids have a Search button and one search field per text/number/enum column
             const asked = node.spec.search;
@@ -3386,8 +3407,9 @@ function makePages(h) {
             for (const f of fields) inner.push(await build({ kind: "text", spec: { text: `{${f}}` }, where: node.where, container: node }, content, ctx));
             for (const ch of node.widgets) inner.push(await build(ch, content, ctx));
             const click = s.onClick !== undefined ? `, on click: ${await pluggableClick(node, props, ctx)}` : "";
+            const hf = s.headerFilters !== undefined ? await GX().headerFilters(w, ent, s.headerFilters, node, ctx, node.where) : [];
             client.warnFirst(`${ctx.qn}: ${w.name} is a Gallery ${info.def.version}, ${base.from}`);
-            return `${w.name} (Gallery ${info.def.version}, ${shows}, selection ${selName}${click}) [${inner.join(", ")}]`;
+            return `${w.name} (Gallery ${info.def.version}, ${shows}, selection ${selName}${click}${hf.length ? "; " + hf.join("; ") : ""}) [${inner.join(", ")}]`;
         },
         async input(node, target, ctx) {
             const s = node.spec;
@@ -3981,10 +4003,16 @@ function makePages(h) {
         }
     };
 
+    // Data grid 2 / gallery column settings, filters and header filters (grid-extras.js)
+    let gx = null;
+    function GX() {
+        return gx || (gx = gridExtras.makeGridExtras(internals, h));
+    }
     // the builders and lookups ops-page-edit.js uses on existing pages
     const internals = { scan, build, gridKind, entityOf, attributeOf, pathOf, attrRefOf, prepareAssocs, formatInto, pageVariables, dvSettings, inputExtras, onChange, selectPage, ACTION_DOC, names, textAll, templateAll, noPlaceholder, checkXPath, dg2Info,
         isGrid2, isPl, valueOf, humanize, condition, sameCondition, fill, languages, shown, listenTarget, classicColumn, dg2Column, typeOf, isA, list, unitNamed,
-        prepare, listEntity, resolveSources, sourceKind, makeAction, plDef, plApply, plScan, widgetType, widgetTypes };
+        prepare, listEntity, resolveSources, sourceKind, makeAction, plDef, plApply, plScan, widgetType, widgetTypes,
+        blankObject, exprCheck, textTemplate, buildPluggable: (n, t, c) => BUILD.pluggable(n, t, c), associations: () => ASSOCS || [], gridExtras: () => GX() };
     return { createPage, addMenuItem, setHomePage, checks, internals };
 }
 

@@ -108,7 +108,7 @@ const REFUSED = {
 // Actions defined next to their documents (consumed REST, workflows): { doc, fields, only: "micro" | "nano", creates,
 // type: () => SDK action class, build(c, act, spec, where) -> action, info(a, c) -> { entity, list }, vars(a) -> [names],
 // describe(a) -> text }. c: { f, h, model, expr, variableInfo, needVariable, fillTemplate }.
-const EXTRA_ACTIONS = { ...require("./ops-rest").REST_ACTIONS, ...require("./ops-workflows").WORKFLOW_ACTIONS };
+const EXTRA_ACTIONS = { ...require("./ops-rest").REST_ACTIONS, ...require("./ops-workflows").WORKFLOW_ACTIONS, ...require("./ops-offline").SYNC_ACTION };
 const { SYSTEM_ASSOCIATIONS } = require("./ops-workflows");
 Object.assign(ACTIONS, EXTRA_ACTIONS);
 // Which field of an action names the variable it creates.

@@ -31,11 +31,13 @@ const { makeEntity, ENTITY_OPS } = require("./ops-entity");
 const { makeWorkflows, WORKFLOW_OPS, USER_TASK_PAGE_FIELDS, SYSTEM_ENTITIES, STEP_FIELDS, STEP_COMMON } = require("./ops-workflows");
 const { makeScaffold, SCAFFOLD_OPS, SCAFFOLD_SYNONYMS } = require("./ops-scaffold");
 const { makeSmall, smallChangedLater, SMALL_OPS, SMALL_SYNONYMS } = require("./ops-small");
+const { makeOffline, OFFLINE_OPS } = require("./ops-offline");
+const { makeDmLayout, DMLAYOUT_OPS } = require("./ops-dmlayout");
 
 const OPS = {
     createEntity: {
         doc: "Create an entity in a module's domain model.",
-        fields: { module: "R module name", name: "R entity name", persistable: "optional true/false (default true)", generalization: "optional Module.ParentEntity (also System.FileDocument, System.Image, System.User)", attributes: "optional [ { \"name\": ..., \"type\": ..., \"default\": ..., \"calculated\": ... } ]" }
+        fields: { module: "R module name", name: "R entity name", persistable: "optional true/false (default true)", generalization: "optional Module.ParentEntity (also System.FileDocument, System.Image, System.User)", attributes: "optional [ { \"name\": ..., \"type\": ..., \"default\": ..., \"calculated\": ... } ]", documentation: "optional text" }
     },
     addAttribute: { doc: "Add an attribute to an entity (stored, or calculated by a microflow).", fields: { entity: "R Module.Entity", name: "R attribute name", type: "R " + ATTRIBUTE_TYPES, default: "optional default value (as Studio Pro shows it)", calculated: "optional Module.Microflow that computes the value (not stored): no parameter or one of the entity, returns the attribute type" } },
     changeAttribute: { doc: "Change the type, default, or stored/calculated of an attribute.", fields: { attribute: "R Module.Entity.Attribute", type: "optional new type", default: "optional new default value", calculated: "optional Module.Microflow: make it calculated (its column is dropped)", stored: "optional true: make a calculated attribute stored again" } },
@@ -126,6 +128,8 @@ const OPS = {
     ...WORKFLOW_OPS,
     ...SCAFFOLD_OPS,
     ...SMALL_OPS,
+    ...OFFLINE_OPS,
+    ...DMLAYOUT_OPS,
     moveDocument: { doc: "Move a document to another folder of the same module.", fields: { document: "R Module.Document", folder: "optional folder path, e.g. Orders/Actions (missing or \"\" = the module root)" } },
     rename: { doc: "Rename a module, document, entity, attribute, association or enumeration value. Updates references, reports names left in expressions/XPath/Java.", fields: { target: "R qualified name, e.g. Module.Entity.Attribute", newName: "R new short name" } },
     delete: { doc: "Delete a document, entity, attribute, association, enumeration value or module role. Lists what still uses it. (Validation rules, event handlers, indexes: deleteValidationRule, deleteEventHandler, deleteIndex; access rules: deleteAccessRule; widgets: deleteWidget; flow steps: deleteAction.)", fields: { target: "R qualified name" } }
@@ -471,6 +475,8 @@ function bind(model, client) {
     const workflowOps = makeWorkflows({ model, client, get, exists, entity, folder, version, persistable, attributeChain, loadParents, grantAccess: o => impl.grantAccess(o), impl: () => impl,
         textAll: (owner, prop, value) => pageOps.internals.templateAll(owner, prop, value, null, "", true) });
     const smallOps = makeSmall({ model, client, get, exists, entity, text, dataType });
+    const offlineOps = makeOffline({ model, client, entity, persistable });
+    const dmLayout = makeDmLayout({ model, client, domainModel, isFresh: qn => isFresh(qn) });
     const scaffoldOps = makeScaffold({ model, client, get, exists, entity, folder, impl: () => impl, pageOps, pageEdit });
 
     // ------------------------------------------------ operations
@@ -529,7 +535,11 @@ function bind(model, client) {
                 validate("-", "attribute", attrSpec, a || {}, `${o.module}.${o.name} attribute ${i + 1}`);
                 await impl.addAttribute({ entity: `${o.module}.${o.name}`, ...a }, e);
             }
-            return `${o.module}.${o.name}`;
+            if (o.documentation !== undefined) e.documentation = String(o.documentation).replace(/\r?\n/g, "\r\n");
+            // a free spot in the diagram (next to its parent in the same module)
+            const parent = o.generalization && e.generalization instanceof dm.Generalization ? d.entities.find(x => x.qualifiedName === o.generalization) : null;
+            const at = dmLayout.place(d, e, parent);
+            return `${o.module}.${o.name} (at ${at.x};${at.y}${parent ? `, next to ${parent.name}` : ""})`;
         },
         async addAttribute(o, loaded) {
             fresh.add(`${o.entity}.${o.name}`);
@@ -541,6 +551,7 @@ function bind(model, client) {
             if (o.calculated !== undefined && o.default !== undefined) throw new Error(`${o.entity}.${o.name}: a calculated attribute has no default`);
             const a = dm.Attribute.createIn(e);
             a.name = o.name;
+            dmLayout.touch(e); // its box grows: the dry run lists new overlaps
             const dflt = await attributeType(a, o.type);
             setDefault(a, o.default !== undefined ? o.default : dflt);
             if (o.calculated !== undefined) await domainOps.calculate(a, o.calculated);
@@ -589,10 +600,12 @@ function bind(model, client) {
             a.type = enumValue(dm.AssociationType, o.type || "Reference", "association type");
             a.owner = enumValue(dm.AssociationOwner, o.owner || "Default", "association owner");
             fresh.add(`${o.from.split(".")[0]}.${name}`);
+            const near = dmLayout.associated(from, to);
             const { notes } = await domainOps.associationSettings(a, o, true);
             await domainOps.addMemberToRules(from, a);
             if (a.owner === dm.AssociationOwner.Both && to !== from) await domainOps.addMemberToRules(to, a);
             const extra = [a.storageFormat && a.storageFormat !== dm.AssociationStorage.Table ? `stored in a ${a.storageFormat.name.toLowerCase()}` : "", ...notes.filter(n => n.startsWith("deleting"))].filter(Boolean);
+            if (near) extra.push(near);
             return `${o.from.split(".")[0]}.${name}: ${o.from} -> ${o.to}` + (extra.length ? ` (${extra.join("; ")})` : "");
         },
         async createEnumeration(o) {
@@ -902,7 +915,9 @@ function bind(model, client) {
         ...xmlOps.impl,
         ...workflowOps.impl,
         ...scaffoldOps.impl,
-        ...smallOps.impl
+        ...smallOps.impl,
+        ...offlineOps.impl,
+        ...dmLayout.impl
     };
 
     // ------------------------------------------------ checks (run after apply on a freshly loaded model)
@@ -1066,6 +1081,8 @@ function bind(model, client) {
         ...xmlOps.checks,
         ...scaffoldOps.checks,
         ...smallOps.checks,
+        ...offlineOps.checks,
+        ...dmLayout.checks,
         createWorkflow: o => workflowOps.checks.createWorkflow(o),
         createPage: o => (o.kind === "userTaskPage" ? workflowOps.checks.userTaskPage(o) : pageOps.checks.createPage(o))
     };
@@ -1093,6 +1110,7 @@ function bind(model, client) {
                 throw e;
             }
         }
+        for (const l of dmLayout.lint()) client.warn(`DOMAIN LAYOUT: ${l}`);
         return lintChanged();
     }
 
