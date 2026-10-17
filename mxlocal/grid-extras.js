@@ -420,7 +420,27 @@ function makeGridExtras(I, h) {
         return { assoc: a, to };
     }
 
-    return { columnSettings, checkColumnFields, columnFilter, headerFilters, filterSpec, kindOfAttr };
+    // ------------------------------------------------ page variables in a data source XPath ($Search)
+
+    // $Name in an XPath: a page variable or parameter of this page (the dry run's XPATH CHECK then checks the types)
+    function xpathVariables(xp, ctx, where) {
+        const body = String(xp).replace(/'(?:[^']|'')*'/g, "''");
+        const used = [...new Set([...body.matchAll(/\$([A-Za-z_]\w*)/g)].map(m => m[1]))];
+        if (!used.length || !ctx) return [];
+        const vars = ctx.vars ? [...ctx.vars.keys()] : [];
+        const params = [...(ctx.params ? [...ctx.params.values()].map(p => p.name) : []), ...(ctx.page && ctx.page.parameters ? ctx.page.parameters.map(p => p.name) : [])];
+        const builtin = ["currentObject", "currentUser", "currentSession"];
+        for (const n of used) {
+            if (vars.includes(n) || params.includes(n) || builtin.some(b => b.toLowerCase() === n.toLowerCase())) continue;
+            const known = [...vars, ...params];
+            fail(`${where}: xpath: $${n} is no page variable or parameter of this page${known.length ? ` (here: ${known.map(x => "$" + x).join(", ")})` : `; give the page "variables": [ { "name": "${n}", "type": "String" } ]`}`, n, known);
+        }
+        const own = used.filter(n => vars.includes(n));
+        if (own.length) client.warnFirst(`${ctx.qn}: data source XPaths use page variables ($Name): no Studio Pro sample in the test projects has one; check them in Studio Pro (the XPATH CHECK of the dry run checks the types)`);
+        return own;
+    }
+
+    return { columnSettings, checkColumnFields, columnFilter, headerFilters, filterSpec, kindOfAttr, xpathVariables };
 }
 
 // a filter widget placed outside a Data grid 2 / gallery cannot reach it

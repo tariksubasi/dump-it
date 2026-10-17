@@ -1252,6 +1252,7 @@ function makePages(h) {
             dm.DirectEntityRef.createInEntityPathSourceUnderEntityRef(src).entity = ent;
             if (s.xpath) {
                 checkXPath(node, ent);
+                GX().xpathVariables(String(s.xpath), ctx, node.where);
                 src.xPathConstraint = String(s.xpath);
             }
             return `${ent.qualifiedName}${s.xpath ? ", XPath " + s.xpath : ""}`;

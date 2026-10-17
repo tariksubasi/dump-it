@@ -660,6 +660,7 @@ function makePageEdit(h, I) {
             if (xp === undefined || xp === null) throw new Error(`${where}: a ${kindOf(w)}${src ? ` with a ${src.structureTypeName.split("$")[1]}` : ""} has no XPath; xpath is for a grid, list view or Data grid 2 over the database`);
             const qn = refEntity(src.entityRef);
             if (String(v).trim()) I.checkXPath({ spec: { xpath: v }, where, kind: kindOf(w), container: dc }, await I.entityOf(qn, where));
+            if (String(v).trim()) I.gridExtras().xpathVariables(String(v), ctx, where);
             if (src.xPathConstraint !== String(v)) src.xPathConstraint = String(v);
             return String(v) ? `XPath ${v}` : "XPath removed (all objects)";
         },
