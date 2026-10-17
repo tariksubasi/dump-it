@@ -65,6 +65,9 @@ for p in $MXCLI_PROJECTS; do PROJECTS+=("$WORK/mxcli/testdata/$p"); done
 say "== docs"
 node "$MXLOCAL" doccheck || fail=1
 
+say "== guard (permissions, Claude Code hook, mx.py clean, export location)"
+bash "$ROOT/scripts/test-guard.sh" "$WORK/mxcli/testdata/expr-checker/minimal.mpr" || fail=1
+
 say "== export (mxcontext.py)"
 OUT="$(mktemp -d)"
 for mpr in "${PROJECTS[@]}"; do
