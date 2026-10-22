@@ -86,7 +86,7 @@ function dsPlan(mod, T, x) {
         [{ op: "applyStyle", widget: "container", module: mod, class: "a", addClass: "x" }, /class replaces all classes/],
         [{ op: "applyStyle", widget: "text", page: `${mod}.${T}_DsShell`, match: "nothingLikeThis*", addClass: "x" }, /no text widget named like/]
     );
-    const dataKit = ["toolbar", "listCards", "masterDetail", ...(x.gallery ? ["gallery"] : [])];
+    const dataKit = ["toolbar", "listCards", "listColumns", "masterDetail", ...(x.gallery ? ["gallery"] : [])];
     ops.push(
         { op: "createComponentKit", module: mod, prefix: "zzk", folder: "ZzDs", withStyles: true },
         { op: "createComponentKit", module: mod, prefix: "zzd", folder: "ZzDs", entity: `${mod}.${T}DsE`, kit: dataKit }
@@ -188,9 +188,9 @@ function dsProblems(project, mod, T, x) {
     say(copies.length === 2 && copies.every(c => c === "zz-card zz-styled"), `applyStyle hasClass / removeClass / addClass not stored (${copies.join(" | ")})`);
     const more = named(card, "zzCardMore"), out = named(shell, "zzSignOut");
     say(more && more.Appearance.Style === "margin: 2px;" && more.ButtonStyle === "Primary" && out && out.Appearance.Style === "margin: 2px;", "applyStyle in a module folder (building block + layout buttons) not stored");
-    const kitNames = ["Card", "KpiTile", "PageHeader", "Toolbar", "FormSection", "ListCards", "EmptyState", "MasterDetail"];
+    const kitNames = ["Card", "KpiTile", "PageHeader", "Toolbar", "FormSection", "ListCards", "ListColumns", "CardLayout", "EmptyState", "MasterDetail"];
     const kitUnits = kitNames.map(n => units[`Zzk_${n}`] || project.read([...project.units.keys()].find(id => project.read(id).Name === `Zzk_${n}`) || ""));
-    say(kitUnits.every(u => u && u.$Type === "Forms$BuildingBlock" && u.TemplateCategory === "Zzk kit") && kitUnits.map(u => u.TemplateCategoryWeight).join() === "10,20,30,40,50,60,70,80", "component kit building blocks / category / order not stored");
+    say(kitUnits.every(u => u && u.$Type === "Forms$BuildingBlock" && u.TemplateCategory === "Zzk kit") && kitUnits.map(u => u.TemplateCategoryWeight).join() === "10,20,30,40,50,60,70,80,90,100", "component kit building blocks / category / order not stored");
     const kcard = kitUnits[0] && kitUnits[0].Widgets[0];
     say(kcard && kcard.Appearance.Class === "card zzk-card", "kit card classes not stored");
     const fs = require("fs"), path = require("path");
@@ -205,7 +205,7 @@ function dsProblems(project, mod, T, x) {
         const sg = units[`${T}_DsStyleGuide`];
         const secs = [], copies2 = [];
         walk(sg || {}, o => (o.$Type === "Forms$DynamicText" && o.Appearance.Class === "styleguide-section" && secs.push(words(o.Content.Template)), o.$Type === "Forms$DivContainer" && /zzk-card$/.test(o.Appearance.Class) && copies2.push(o)));
-        say(["Typography", "Buttons", "Cards", "Alerts", "Data grid", "List view", "Components"].every(t => secs.includes(t)) && copies2.length === 1, `style guide sections / kit components not stored (${secs.join(", ")})`);
+        say(["Typography", "Buttons", "Cards", "Alerts", "Data grid", "List view", "Components"].every(t => secs.includes(t)) && copies2.length >= 1, `style guide sections / kit components not stored (${secs.join(", ")})`);
         let btns = 0;
         walk(sg || {}, o => o.$Type === "Forms$ActionButton" && btns++);
         say(btns >= 9, "style guide buttons missing");
@@ -272,7 +272,7 @@ async function dsModelPhase({ s2, reopen, copy, mod, T, layout, layoutProblems, 
     if (x.layout && x.presets.length < 11) results.push(`SKIP ds-model: pluggable presets without their .mpk here: ${Object.keys(require("./pl-presets").PRESETS).filter(k => !x.presets.includes(k)).join(", ")} (refused, tested)`);
     if (!x.nav) results.push("SKIP ds-model: layout menus: no Responsive navigation profile (layouts built with menu false)");
     const what = ["building blocks (toolbox details, unconfigured data view with 5 inputs + Save / Cancel, unconfigured list view, bound list view)", "addWidgets / changeWidget / changeBuildingBlock on a building block",
-        "buildingBlock widget on a page", x.layout && "page templates (regular, edit) + createPage from them", "createLayout sidebar / topbar / modal pop-up with header, side bar, footer, menu", "applyStyle (page + hasClass, module folder + match + style + button style)", `component kits (8 recipes + SCSS, ${3 + Number(x.gallery)} bound to an entity)`, x.layout && "style guide (typography, buttons, inputs, cards, alerts, grid, list, kit)", x.layout && x.presets.length && `pluggable presets ${x.presets.join(", ")}`, `${plan.refuse.length} refusals`].filter(Boolean);
+        "buildingBlock widget on a page", x.layout && "page templates (regular, edit) + createPage from them", "createLayout sidebar / topbar / modal pop-up with header, side bar, footer, menu", "applyStyle (page + hasClass, module folder + match + style + button style)", `component kits (10 recipes + SCSS, ${4 + Number(x.gallery)} bound to an entity)`, x.layout && "style guide (typography, buttons, inputs, cards, alerts, grid, list, kit)", x.layout && x.presets.length && `pluggable presets ${x.presets.join(", ")}`, `${plan.refuse.length} refusals`].filter(Boolean);
     check(`ds-model: ${what.join("; ")}; stored with Studio Pro's keys, reopen 0 errors`, !problems.length, [...new Set(problems)].slice(0, 6).join("; "));
     if (firstUse.length) results.push(`NOTE ds-model: no Studio Pro sample in this project of ${firstUse.length} type(s) (SDK layout): ${firstUse.slice(0, 10).join(", ")}`);
     return reopen(copy);

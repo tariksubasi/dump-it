@@ -14,12 +14,14 @@ const RECIPES = {
     pageHeader: { doc: "a page header: title and subtitle left, action buttons right (one column on phones)", options: ["title", "subtitle", "actions"] },
     toolbar: { doc: "a toolbar above a Data grid 2: title and buttons; with entity a Data grid 2 under it with a search filter over its text attributes in the grid header", options: ["title", "actions", "entity", "columns"] },
     formSection: { doc: "a form section: an unconfigured data view with a heading and inputs in two columns on desktop and tablet, one on phones; labels on top (or beside them: labels side), Save / Cancel", options: ["title", "fields", "labels"] },
+    listColumns: { doc: "a list view as columns: a header row of captions (hidden on phones) and per item a layout grid row with one column per field (stacked on phones); unconfigured, or of entity with its first attributes", options: ["entity", "fields", "captions"] },
+    cardLayout: { doc: "a card layout: cards in a layout grid, 3 per row on desktop, 2 on tablet, 1 on phone", options: ["cards", "title", "text"] },
     listCards: { doc: "a list view whose items are cards (unconfigured, or of entity with its first attributes)", options: ["entity", "fields"] },
     gallery: { doc: "a Gallery of entity with item cards and columns per device (desktop / tablet / phone, default 3 / 2 / 1); needs the Gallery widget (widgets/*.mpk)", options: ["entity", "fields", "columns", "tabletColumns", "phoneColumns"] },
     emptyState: { doc: "an empty state: heading, help text and a primary button", options: ["title", "text", "action"] },
     masterDetail: { doc: "master-detail: a list (4 of 12) and a data view (8 of 12) side by side, stacked on phones; with entity the data view listens to the list", options: ["entity", "fields"] }
 };
-const DEFAULT_KIT = ["card", "kpiTile", "pageHeader", "toolbar", "formSection", "listCards", "emptyState", "masterDetail"];
+const DEFAULT_KIT = ["card", "kpiTile", "pageHeader", "toolbar", "formSection", "listCards", "listColumns", "cardLayout", "emptyState", "masterDetail"];
 const NEEDS_ENTITY = ["gallery"];
 
 const pascal = p => p.split(/[^A-Za-z0-9]+/).filter(Boolean).map(w => w[0].toUpperCase() + w.slice(1)).join("");
@@ -69,6 +71,21 @@ function build(item, p, ent, can) {
                 { widget: "text", text: "Title", style: "H4", class: c("list-card__title") }, { widget: "text", text: "Detail", class: c("list-card__detail") }];
             return [{ widget: "listView", class: c("list-cards"), ...(ent ? { entity: ent.qn, pageSize: 10 } : { pageSize: 10 }), widgets: [{ widget: "container", class: `card ${c("list-card")}`, widgets: inner }] }];
         }
+        case "listColumns": {
+            const fields = ent ? pick(4) : (item.fields || ["Name", "Status", "Date", "Amount"]);
+            if (!fields.length) throw new Error(`${item.at}: listColumns needs fields`);
+            const caps = item.captions || fields.map(f => String(f).split("/").pop());
+            const w = Math.max(1, Math.floor(12 / fields.length));
+            const cols = (mk) => fields.map((f, i) => ({ weight: w, tablet: w, phone: 12, widgets: [mk(f, i)] }));
+            return [{ widget: "layoutGrid", class: c("list-columns__header"), rows: [{ columns: cols((f, i) => ({ widget: "text", text: String(caps[i] || f), class: c("list-columns__caption") })) }] },
+                { widget: "listView", class: c("list-columns"), pageSize: 20, ...(ent ? { entity: ent.qn } : {}), widgets: [{ widget: "layoutGrid", class: c("list-columns__row"), rows: [{ verticalAlignment: "center", columns: cols((f, i) => ({ widget: "text", text: ent ? `{${f}}` : String(f), class: c("list-columns__cell"), ...(i ? {} : { style: "H5" }) })) }] }] }];
+        }
+        case "cardLayout": {
+            const n = item.cards === undefined ? 3 : Number(item.cards);
+            if (!Number.isInteger(n) || n < 1 || n > 12) throw new Error(`${item.at}: cards is a number 1-12`);
+            return [{ widget: "layoutGrid", class: c("card-layout"), rows: [{ columns: Array.from({ length: n }, (_, i) => ({ weight: 4, tablet: 6, phone: 12, widgets: [{ widget: "container", class: `card ${c("card")}`, widgets: [
+                { widget: "text", text: `${item.title || "Card"} ${i + 1}`, style: "H4", class: `card-title ${c("card__title")}` }, { widget: "text", text: item.text || "Card content.", class: c("card__body") }] }] })) }] }];
+        }
         case "gallery":
             return [{ widget: "gallery", entity: ent.qn, class: c("gallery"), columns: item.columns || 3, tabletColumns: item.tabletColumns || 2, phoneColumns: item.phoneColumns || 1, pageSize: 12, widgets: [
                 { widget: "container", class: `card ${c("gallery__item")}`, widgets: pick(2).map((f, i) => ({ widget: "text", text: `{${f}}`, ...(i ? {} : { style: "H4" }) })) }] }];
@@ -98,6 +115,33 @@ function scss(p, recipes) {
         toolbar: `.${p}-toolbar {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    justify-content: space-between;\n    gap: ${v("space-s", "8px")};\n    margin-bottom: ${v("space-m", "16px")};\n}\n.${p}-toolbar__title {\n    margin: 0;\n}\n.${p}-toolbar__actions {\n    display: flex;\n    flex-wrap: wrap;\n    gap: ${v("space-s", "8px")};\n}\n.${p}-grid {\n    ${surface}\n}\n`,
         formSection: `.${p}-form-section {\n    ${surface}\n    padding: ${v("space-l", "24px")};\n    margin-bottom: ${v("space-m", "16px")};\n}\n.${p}-form-section__title {\n    margin: 0 0 ${v("space-m", "16px")};\n}\n`,
         listCards: `.${p}-list-cards .mx-listview-item {\n    border: 0;\n    padding: 0 0 ${v("space-s", "8px")};\n    background: transparent;\n}\n.${p}-list-card {\n    ${surface}\n    padding: ${v("space-m", "16px")};\n}\n.${p}-list-card__title {\n    margin: 0 0 4px;\n}\n.${p}-list-card__detail {\n    color: ${v("text-muted", "#475467")};\n}\n`,
+        listColumns: `.${p}-list-columns__header {
+    padding: 0 ${v("space-m", "16px")};
+    color: ${v("text-muted", "#475467")};
+    font-size: 0.875rem;
+    font-weight: 600;
+}
+@media (max-width: 575px) {
+    .${p}-list-columns__header {
+        display: none;
+    }
+}
+.${p}-list-columns .mx-listview-item {
+    padding: 0;
+    border-color: ${v("border-soft", "rgba(16, 24, 40, 0.08)")};
+}
+.${p}-list-columns__row {
+    padding: ${v("space-s", "8px")} ${v("space-m", "16px")};
+}
+.${p}-list-columns__cell {
+    overflow-wrap: anywhere;
+}
+`,
+        cardLayout: `.${p}-card-layout .${p}-card {
+    height: 100%;
+    margin-bottom: ${v("space-m", "16px")};
+}
+`,
         gallery: `.${p}-gallery__item {\n    ${surface}\n    height: 100%;\n    padding: ${v("space-m", "16px")};\n}\n.${p}-gallery__item:hover {\n    box-shadow: ${v("elevation-2", "0 4px 8px -2px rgba(16, 24, 40, 0.1), 0 2px 4px -2px rgba(16, 24, 40, 0.06)")};\n}\n`,
         emptyState: `.${p}-empty-state {\n    display: flex;\n    flex-direction: column;\n    align-items: center;\n    gap: ${v("space-s", "8px")};\n    padding: ${v("space-l", "24px")};\n    text-align: center;\n    background-color: ${v("surface-0", "#f9fafb")};\n    border: 1px dashed ${v("border-soft", "rgba(16, 24, 40, 0.16)")};\n    border-radius: ${v("radius-m", "8px")};\n}\n.${p}-empty-state__text {\n    color: ${v("text-muted", "#475467")};\n}\n`,
         masterDetail: `.${p}-master .mx-listview {\n    ${surface}\n}\n.${p}-master__item {\n    padding: ${v("space-s", "8px")} 0;\n}\n.${p}-detail__view {\n    ${surface}\n    padding: ${v("space-l", "24px")};\n}\n@media (max-width: 575px) {\n    .${p}-detail {\n        margin-top: ${v("space-m", "16px")};\n    }\n}\n`
