@@ -320,6 +320,8 @@ async function run(file, mpr, allowJs, ctx, opts = {}) {
     layoutCheck(ops, change, file, say, opts);
     const a11y = require("./ui").a11yLint(client);
     if (a11y.length) say("A11Y CHECK (accessibility of the new or changed widgets; warnings, nothing refused):\n" + a11y.map(w => "  ! " + w).join("\n"));
+    const fc = require("./flow-errors").flowCheckChanges(client);
+    if (fc.length) say("FLOW CHECK (error handling of the new or changed steps; warnings and notes, nothing refused):\n" + fc.map(w => "  ! " + w).join("\n"));
     if (lost.length) say("NOT STORED (the script set these, but this Mendix version does not keep them; use api <Type>):\n" + lost.map(w => "  ! " + w).join("\n"));
     if (s.leftovers.length) say("OLD NAME STILL USED (rename does not update expressions, XPath, Java; fix these too):\n" + s.leftovers.map(w => "  ! " + w).join("\n"));
     if (warnings.length) say("Warnings:\n" + warnings.map(w => "  ! " + w).join("\n"));

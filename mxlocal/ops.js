@@ -69,7 +69,7 @@ const OPS = {
     },
     addActions: {
         doc: "Insert actions into an existing microflow or nanoflow. Default: just before the end event (needs exactly one end event).",
-        fields: { microflow: "R Module.Microflow or Module.Nanoflow", after: "optional \"start\", the variable name an existing step creates, or a step id (see: steps)", branch: "with after = a decision: which outgoing flow, e.g. \"true\" or an enumeration value", actions: "R [ actions ]" }
+        fields: { microflow: "R Module.Microflow or Module.Nanoflow", after: "optional \"start\", the variable name an existing step creates, or a step id (see: steps)", branch: "with after = a decision: which outgoing flow, e.g. \"true\" or an enumeration value", handlerOf: "optional step id: put the actions at the start of that step's custom error handler (instead of after; later in a handler: after = a step id inside it)", actions: "R [ actions ]" }
     },
     changeAction: {
         doc: "Change one existing step. Get its id with: steps Module.Flow. Give only the fields to change.",
@@ -89,10 +89,11 @@ const OPS = {
             showInBrowser: "downloadFile: true/false", url: "callRest: location text", urlArgs: "callRest: [\"expression\"]", method: "callRest: Get | Post | ...",
             headers: "callRest: { \"Name\": \"expression\" } (replaces all)", timeout: "callRest: seconds", body: "callRest: body text", bodyArgs: "callRest: [\"expression\"]",
             auth: "callRest: { \"user\": \"expression\", \"password\": \"expression\" } or \"none\"", proxy: "callRest: default | none | { host, port, user, password }", errorBody: "callRest: true/false",
-            initial: "aggregateList reduce: initial value expression"
+            initial: "aggregateList reduce: initial value expression",
+            onError: "action or loop: \"continue\" | \"rollback\" / \"abort\" (default; removes a custom handler) | \"logAndShow\" | \"rethrow\" | { \"pattern\": ..., ... } | { \"rollback\": true/false, \"actions\": [ ... ] }: replaces the error handling (the old custom handler and its steps go)"
         }
     },
-    deleteAction: { doc: "Delete one action or loop from a flow and reconnect the line. Get its id with: steps Module.Flow.", fields: { microflow: "R Module.Microflow or Module.Nanoflow", id: "R step id from 'steps'" } },
+    deleteAction: { doc: "Delete one action or loop from a flow and reconnect the line (also inside an error handler; its own custom error handler goes with it). Get its id with: steps Module.Flow.", fields: { microflow: "R Module.Microflow or Module.Nanoflow", id: "R step id from 'steps'" } },
     ...FLOW_EDIT_OPS,
     ...REF_OPS,
     ...COPY_OPS,
@@ -494,14 +495,22 @@ function bind(model, client) {
     const nested = sp => [sp.then, sp.else, sp.actions, ...(sp.cases && typeof sp.cases === "object" ? Object.values(sp.cases) : []), sp.other, sp.empty, sp.onError && sp.onError.actions].filter(Array.isArray);
 
     // Activities (boxes) a list of action specs creates, including nested branches, loops and error handlers.
-    function countActivities(specs) {
-        let n = 0;
+    // An onError recipe (flow-errors.js) adds at least the boxes in RECIPE_MIN (more with logging): then the count is
+    // a minimum (exact: false).
+    const RECIPE_MIN = { logandshow: 1, rethrow: 0, storeerror: 1, retry: 2 };
+    function countActivities(specs, acc = { n: 0, exact: true }) {
         for (const sp of specs || []) {
             if (!sp || typeof sp !== "object") continue;
-            if (ACTIONS[sp.action]) n++;
-            for (const list of nested(sp)) n += countActivities(list);
+            if (ACTIONS[sp.action]) acc.n++;
+            if (sp.action === "error" && sp.message !== undefined) acc.n++;
+            const recipe = String(typeof sp.onError === "string" ? sp.onError : sp.onError && typeof sp.onError === "object" ? sp.onError.pattern || "" : "").toLowerCase();
+            if (RECIPE_MIN[recipe] !== undefined) {
+                acc.n += RECIPE_MIN[recipe];
+                acc.exact = false;
+            }
+            for (const list of nested(sp)) countActivities(list, acc);
         }
-        return n;
+        return acc;
     }
 
     function createdVariables(specs, out = []) {
@@ -991,7 +1000,7 @@ function bind(model, client) {
             });
             const r = [];
             const want = countActivities(o.actions);
-            if (acts !== want) r.push(`${o.module}.${o.name} has ${acts} actions, expected ${want}`);
+            if (want.exact ? acts !== want.n : acts < want.n) r.push(`${o.module}.${o.name} has ${acts} actions, expected ${want.exact ? "" : "at least "}${want.n}`);
             if (params !== (o.parameters || []).length) r.push(`${o.module}.${o.name} has ${params} parameters, expected ${(o.parameters || []).length}`);
             return r;
         },
@@ -1007,7 +1016,18 @@ function bind(model, client) {
         },
         async changeAction(o) {
             const m = await get(o.microflow);
-            return flows.findStep(m, o.id, true) ? [] : [`${o.microflow}: step ${o.id} is missing`];
+            const step = flows.findStep(m, o.id, true);
+            if (!step) return [`${o.microflow}: step ${o.id} is missing`];
+            if (o.onError === undefined) return [];
+            // the error handling it got, and an error flow exactly when it is custom
+            const t = (step instanceof mf.LoopedActivity ? step : step.action).errorHandlingType.name;
+            const word = typeof o.onError === "string" ? o.onError.toLowerCase() : "";
+            const want = word === "continue" ? ["Continue"] : ["rollback", "abort", "default", "none"].includes(word) ? ["Rollback", "Abort"] : ["Custom", "CustomWithoutRollBack"];
+            const hasFlow = [...m.flows].some(x => x instanceof mf.SequenceFlow && x.isErrorHandler && x.origin === step);
+            const r = [];
+            if (!want.includes(t)) r.push(`${o.microflow} [${o.id}]: error handling is ${t}, expected ${want.join(" or ")}`);
+            if (hasFlow !== /^Custom/.test(t)) r.push(`${o.microflow} [${o.id}]: error handling ${t} ${hasFlow ? "still has" : "has no"} error handler flow`);
+            return r;
         },
         async deleteAction(o) {
             const m = await get(o.microflow);

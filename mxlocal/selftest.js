@@ -1250,6 +1250,13 @@ async function selftest(mpr, keep, { out, relevant, mxcheck, mx, timeout }) {
             check(`Java/JavaScript actions with Studio Pro's source files (existing user code kept, restore removes them), rules + rule decisions, enumeration switch, reduce, metrics, REST auth/proxy/form data/file response${targets.file ? "/binary body" : ""}, notes, moveAction, extractMicroflow (${fp.ops} ops): stored like Studio Pro, reopen 0 errors`, !fp.problems.length, fp.problems.slice(0, 6).join("; "));
             s2 = await reopen(copy);
         }
+        // phase E: error handling (handlers on actions and loops, recipes, changeAction onError, addActions into a
+        // handler, deleteAction with handlers, $latestError scope, FLOW CHECK, refusals)
+        {
+            const ep = await require("./selftest-flows").errorsPhase({ copy, mod, T, reopen, layout, layoutProblems });
+            check(`error handling (${ep.ops} ops): handlers on actions and a loop, recipes logAndShow/retry/storeError/rethrow (microflow + nanoflow), error with message, changeAction onError replace/remove, addActions handlerOf/after in a handler, deleteAction with handler, steps tree + FLOW CHECK, 11 refusals; reopen 0 errors`, !ep.problems.length, ep.problems.slice(0, 6).join("; "));
+            s2 = await reopen(copy);
+        }
         if (pageable) {
             const dash = dashboardProblems(s2.ctx.project, mod, T, web ? userRole : null);
             check("dashboard stored like Studio Pro (listen target, inputs, menu, home pages)", !dash.length, dash.join("; "));
