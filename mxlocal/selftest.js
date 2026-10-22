@@ -490,7 +490,6 @@ function actionPlans(mod, T, t) {
         { action: "listOperation", variable: "Both", operation: "union", list: "All", other: "Picked" },
         { action: "listOperation", variable: "Common", operation: "intersect", list: "All", other: "Picked" },
         { action: "listOperation", variable: "Others", operation: "subtract", list: "All", other: "Picked" },
-        { action: "listOperation", variable: "Same", operation: "equals", list: "All", other: "Picked" },
         { action: "listOperation", variable: "Has", operation: "contains", list: "All", other: "Item" },
         { action: "listOperation", variable: "First", operation: "head", list: "All" },
         { action: "listOperation", variable: "Rest", operation: "tail", list: "All" },
@@ -1198,7 +1197,7 @@ async function selftest(mpr, keep, { out, relevant, mxcheck, mx, timeout }) {
         phase1.ops.push(...actionPlans(mod, T, targets));
         phase1.ops.push(...mappingPlans(mod, T));
         const plannedActions = ["AggregateAction", "ListOperationsAction", "CreateListAction", "ChangeListAction", "ValidationFeedbackAction", "RollbackAction", "CastAction", "InheritanceSplit", "ShowHomePageAction", "RestCallAction", "CustomRequestHandling",
-            "Union", "Intersect", "Subtract", "ListEquals", "Contains", "Head", "Tail", "Find", "FindByExpression", "Filter", "FilterByExpression", "Sort", "ListRange",
+            "Union", "Intersect", "Subtract", "Contains", "Head", "Tail", "Find", "FindByExpression", "Filter", "FilterByExpression", "Sort", "ListRange",
             ...(targets.importMapping ? ["ImportXmlAction", "ImportMappingCall"] : []), ...(targets.exportMapping ? ["MappingRequestHandling"] : []), ...(targets.java ? ["JavaActionCallAction"] : []),
             ...(targets.js ? ["JavaScriptActionCallAction"] : []), ...(targets.file ? ["DownloadFileAction"] : [])].map(x => "Microflows$" + x);
         const layout = ownLayout(s1.ctx.catalog);

@@ -57,8 +57,8 @@ const ACTIONS = {
     listOperation: {
         doc: "Combine, search, filter, sort or cut a list.",
         fields: {
-            variable: "R result variable name", operation: "R union | intersect | subtract | contains | equals | head | tail | find | filter | sort | range", list: "R list variable (no $)",
-            other: "union/intersect/subtract/equals: second list variable; contains: object variable", attribute: "find/filter: attribute name or Module.Association", value: "find/filter: expression the attribute must equal",
+            variable: "R result variable name", operation: "R union | intersect | subtract | contains | head | tail | find | filter | sort | range", list: "R list variable (no $)",
+            other: "union/intersect/subtract: second list variable; contains: object variable", attribute: "find/filter: attribute name or Module.Association", value: "find/filter: expression the attribute must equal",
             expression: "find/filter instead of attribute + value: condition on $currentObject", sort: "sort: [ \"Attribute\" or { \"attribute\": \"Attribute\", \"descending\": true } ]",
             offset: "range: index of the first item, expression (default 0)", limit: "range: number of items, expression"
         }
@@ -661,7 +661,8 @@ function makeFlows(h) {
     };
     const CHANGE_LIST = { add: "Add", remove: "Remove", replace: "Set", set: "Set", clear: "Clear" };
     // Known to Mendix, but not written by ops: refused with the way out.
-    const NOT_STORED = {};
+    // equals: the SDK writes Microflows$ListEquals, which mx check of Studio Pro 10.24 and 11.12 cannot load (unknown type)
+    const NOT_STORED = { equals: "list operation 'equals' is not written: Studio Pro 10.24 / 11.12 cannot load the type this tool would store; compare with aggregateList count of 'subtract' both ways (0 and 0 = equal), or add the operation in Studio Pro" };
 
     // An attribute the aggregate function works on: numbers for sum/average, numbers or dates for minimum/maximum,
     // Booleans for all/any.
