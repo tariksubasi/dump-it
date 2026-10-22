@@ -44,6 +44,9 @@ const USAGE = `mxlocal - Mendix Model SDK offline on a local .mpr (v2)
   node mxlocal.js restore --project <app.mpr|folder> [--backup <name>] [--force]
         Undoes the last (or the given) apply. Refuses when the model changed after that apply (it would erase
         that work) unless --force.
+  node mxlocal.js undo [<backup>] [--op 2,5] [--out <file>] --project <app.mpr|folder>
+        Selective undo: the inverse ops of the last (or the given) applied change, or of some of its ops, as a dry run
+        (approval code, apply as usual). Later work stays. Ops that cannot be inverted are listed (use restore).
   node mxlocal.js api <Type> [word] --project <app.mpr|folder>
                                         SDK type for the project's Mendix version: properties, enum values,
                                         createIn functions, what replaced removed types/properties
@@ -503,6 +506,26 @@ function restoreCmd(mpr, name, force) {
         (orphans.length ? ` ${orphans.length} unit file(s) of later changes moved to ${path.relative(dir, backup)}.restored/orphans.` : ""));
 }
 
+// Selective undo: the inverse plan of an applied change (or of its ops --op 2,5), written next to the edits and dry
+// run like any change (approval code; apply as usual). Ops without an inverse are listed.
+async function undoCmd(mpr, name, pick, outFile, opts) {
+    const u = await require("./undo").undoPlan(mpr, name, pick);
+    out(`UNDO ${u.name} (${u.count} op(s)${pick && pick !== true ? `, chosen: ${pick}` : ""}): the inverse ops, last op first:`);
+    if (u.lines.length) out(u.lines.join("\n"));
+    if (u.left.length) out(`NOT INVERTIBLE (only restore --backup ${u.name} undoes these, and it undoes the whole change):\n` + u.left.join("\n"));
+    if (!u.plan.ops.length) {
+        out("Nothing to undo with ops. Nothing written, no approval code.");
+        process.exitCode = 1;
+        return;
+    }
+    const edits = path.resolve("edits");
+    const file = outFile && outFile !== true ? path.resolve(outFile) : path.join(fs.existsSync(edits) ? edits : path.join(path.dirname(mpr), BACKUP_DIR), `undo-${u.name}.json`);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(u.plan, null, 1) + "\n");
+    out(`Inverse plan: ${file}`);
+    await run(file, mpr, false, null, opts);
+}
+
 async function main() {
     const started = Date.now();
     const a = args(process.argv.slice(2));
@@ -536,6 +559,7 @@ async function main() {
         await run(a._[1], mpr, a["allow-js"] === true, null, { preview: !!a.preview, check: wantCheck(a, mpr, "run"), mx: a.mx, timeout: a["check-timeout"] });
     } else if (cmd === "apply") await apply(mpr, a.code, { check: wantCheck(a, mpr, "apply"), mx: a.mx, timeout: a["check-timeout"] });
     else if (cmd === "restore") restoreCmd(mpr, a.backup, a.force);
+    else if (cmd === "undo") await undoCmd(mpr, a._[1] || a.backup, a.op, a.out, { preview: false, check: wantCheck(a, mpr, "run"), mx: a.mx, timeout: a["check-timeout"] });
     else if (cmd === "mergecheck") out(require("./merge").mergecheck(mpr));
     else if (cmd === "mergefix") out(require("./merge").mergefix(mpr, a.pick, a.all).text);
     else if (cmd === "steps") {
@@ -622,7 +646,7 @@ function report(e, file) {
     return lines.join("\n") + "\n";
 }
 
-module.exports = { run, apply, restoreCmd, checkCmd, report, setOutput, findMpr, loadChange, USAGE };
+module.exports = { run, apply, restoreCmd, undoCmd, checkCmd, report, setOutput, findMpr, loadChange, USAGE };
 
 if (require.main === module) main()
     .catch(e => {
