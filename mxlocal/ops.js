@@ -856,6 +856,7 @@ function bind(model, client) {
         deleteWidget: o => pageEdit.deleteWidget(o),
         moveWidget: o => pageEdit.moveWidget(o),
         changePage: o => pageEdit.changePage(o),
+        convertGrid: o => pageEdit.convertGrid(o),
         addMenuItem: o => (extendedMenuItem(o) ? navOps.addMenuItem(o) : pageOps.addMenuItem(o)),
         ...navOps.impl,
         ...themeOps.impl,
@@ -1091,6 +1092,9 @@ function bind(model, client) {
         const where = `Op ${i + 1}`;
         if (!o || typeof o !== "object") throw new Error(`${where}: each op must be an object { "op": ... }`);
         const name = Object.keys(OPS).find(k => k.toLowerCase() === String(o.op).toLowerCase());
+        const OP_HINTS = { moveColumn: "use changeWidget \"columns\": { \"move\": [ { \"column\": \"Note\", \"before\": \"Number\" } ] }", convertDataGrid: "use convertGrid", convertToDataGrid2: "use convertGrid", changeDataSource: "use changeWidget \"source\"" };
+        const hint = Object.keys(OP_HINTS).find(k => k.toLowerCase() === String(o.op).toLowerCase());
+        if (!name && hint) throw new Error(`${where}: unknown op '${o.op}': ${OP_HINTS[hint]}`);
         if (!name) fail(`${where}: unknown op '${o.op}'`, o.op, Object.keys(OPS));
         if (name === "addMenuItem" && o.roles !== undefined) throw new Error(`${where} (addMenuItem): ${NO_MENU_ROLES(o.page)}`);
         for (const [k, hint] of Object.entries({ ...(DOMAIN_SYNONYMS[name] || {}), ...(FIELD_SYNONYMS[name] || {}), ...(SCAFFOLD_SYNONYMS[name] || {}), ...(SMALL_SYNONYMS[name] || {}) })) if (o[k] !== undefined && !OPS[name].fields[k]) throw new Error(`${where} (${name}): unknown field '${k}': ${hint}`);

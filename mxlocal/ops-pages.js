@@ -4058,7 +4058,7 @@ function makePages(h) {
     const internals = { scan, build, gridKind, entityOf, attributeOf, pathOf, attrRefOf, prepareAssocs, formatInto, pageVariables, dvSettings, inputExtras, onChange, selectPage, ACTION_DOC, names, textAll, templateAll, noPlaceholder, checkXPath, dg2Info,
         isGrid2, isPl, valueOf, humanize, condition, sameCondition, fill, languages, shown, listenTarget, classicColumn, dg2Column, typeOf, isA, list, unitNamed,
         prepare, listEntity, resolveSources, sourceKind, makeAction, plDef, plApply, plScan, widgetType, widgetTypes,
-        blankObject, exprCheck, textTemplate, sortOrder, dg2Export, buildPluggable: (n, t, c) => BUILD.pluggable(n, t, c), associations: () => ASSOCS || [], gridExtras: () => GX(), ui: () => uiFns() };
+        blankObject, exprCheck, textTemplate, sortOrder, dg2Export, listSource, dg2Types: () => dg2Types(dg2Live()), buildPluggable: (n, t, c) => BUILD.pluggable(n, t, c), associations: () => ASSOCS || [], gridExtras: () => GX(), ui: () => uiFns() };
     let uiMade = null;
     function uiFns() {
         return uiMade || (uiMade = ui.makeUi(h, () => internals));

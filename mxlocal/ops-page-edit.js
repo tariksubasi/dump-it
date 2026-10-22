@@ -34,19 +34,27 @@ const PAGE_EDIT_OPS = {
             text: "text of a text (or label) widget; {Attribute} shows a value inside a data view or list view",
             label: "label of an input (\"\" = no label)",
             placeholder: "placeholder of a text box, text area or date picker",
-            editable: "true | false (input or data view); an input also takes an expression \"$currentObject/Open\" or { \"attribute\": \"Status\", \"values\": [\"Open\"] } (editable only then)",
+            editable: "true | false (input, data view or list view: an editable list); an input also takes an expression \"$currentObject/Open\" or { \"attribute\": \"Status\", \"values\": [\"Open\"] } (editable only then)",
             visible: "true (always) | false (never) | an expression \"$currentObject/Active\" | { \"attribute\": \"Active\" } (Boolean: visible when true) | { \"attribute\": \"Status\", \"values\": [\"Open\", \"Paid\"] }; the attribute is of the data view or list view around the widget; { \"roles\": [\"Module.Role\"] } only for users with one of these module roles",
             class: "CSS class(es); replaces the current ones (\"\" = none)",
             design: "Atlas design properties of the theme: { \"Spacing\": { \"margin-top\": \"M\" }, \"Spacing top\": \"Large\", \"Full width\": true, \"Style\": \"Primary\" }; given keys change, null / false removes one, others stay",
             style: "inline CSS, e.g. \"font-weight: bold;\" (\"\" = none)",
             textStyle: "Text | Paragraph | H1 | H2 | H3 | H4 | H5 | H6 (a text)",
             buttonStyle: "Default | Primary | Success | Info | Warning | Danger | Inverse (a button)",
-            columns: "{ \"add\": [ \"Attr\" or { \"attribute\": ..., \"caption\": ..., \"width\": 20 } ], \"remove\": [ \"Attr\" or a column caption ], \"change\": [ { \"column\": \"Attr\" or a caption, ...settings } ] } of a classic data grid or Data grid 2; added at the end. Classic: width (a weight), class; Data grid 2: the column settings of createPage dataGrid (width autoFill | autoFit | manual or a number, size, minWidth, alignment, hidable, resizable, draggable, sortable, visible, tooltip, wrapText, class, columnClass, rowEvents) and \"filter\" (on add, and on change when the column has none)",
+            columns: "{ \"add\": [ \"Attr\" or { \"attribute\": ..., \"caption\": ..., \"width\": 20 } (Data grid 2 also { \"type\": \"dynamicText\", \"text\": \"{1} - {2}\", \"params\": [\"Number\", \"Note\"] } and { \"type\": \"customContent\", \"widgets\": [...] }) ], \"remove\": [ \"Attr\" or a column caption ], \"change\": [ { \"column\": \"Attr\" or a caption, ...settings } ], \"move\": [ { \"column\": \"Note\", \"before\": \"Number\" } | { \"column\": ..., \"after\": ... } | { \"column\": ..., \"position\": 1 } ] } of a classic data grid or Data grid 2 (a gallery: { \"desktop\": 3, \"tablet\": 2, \"phone\": 1 }); added at the end. Classic: width (a weight), class; Data grid 2: the column settings of createPage dataGrid (width autoFill | autoFit | manual or a number, size, minWidth, alignment, hidable, resizable, draggable, sortable, visible, tooltip, wrapText, class, columnClass, rowEvents, exportValue, exportType, exportNumberFormat, exportDateFormat), caption (on change) and \"filter\" (on add, and on change when the column has none)",
             headerFilters: "Data grid 2 / gallery: filters to add above it, as createPage dataGrid headerFilters",
+            paging: "Data grid 2 / gallery: \"buttons\" | \"virtualScrolling\" | \"loadMore\" or { \"mode\", \"pageSize\", \"showButtons\": \"always\" | \"auto\", \"position\": \"bottom\" | \"top\" | \"both\", \"showTotal\", \"loadMoreCaption\", \"pageSizeAttribute\" }; list view / classic grid: { \"pageSize\": 20 }",
+            selection: "Data grid 2 / gallery: Single | Multi | None; classic data grid / template grid: None | Single | SingleAndMaintain | Multi | SimpleMulti",
+            emptyMessage: "Data grid 2 / gallery: text shown when there are no rows (\"\" = none)",
+            onClickTrigger: "Data grid 2 / gallery: single | double",
+            sort: "sort order of a database source (grid, list view, Data grid 2, gallery): [ \"Attr\" | { \"attribute\": \"Name\", \"direction\": \"desc\" } ] (replaces it; [] = none)",
+            template: "list view, gallery or template grid: the new item widgets [ widgets ] (replace the old ones; inputs make an editable list)",
+            source: "data source of a grid, list view, Data grid 2, gallery or template grid: { \"source\": \"database\" | \"microflow\" | \"nanoflow\" | \"association\", \"entity\", \"xpath\", \"microflow\", \"nanoflow\", \"association\", \"params\" }; columns and item widgets stay when the entity stays (or is a specialization); another entity is refused while widgets use the old one",
+            export: "Data grid 2: true or { \"caption\", \"fileName\", \"sheetName\", \"headers\" }: an Export to Excel button in its header and a new nanoflow (as createPage dataGrid export)",
             xpath: "XPath constraint of a grid, list view or Data grid 2 with a database source, e.g. [Active = true()] (\"\" = all objects)",
             name: "new name; data views listening to it follow",
             action: "a button's action (also a classic grid button): { \"action\": \"showPage\" | \"callMicroflow\" | \"callNanoflow\" | \"save\" | \"cancel\" | \"close\" | \"delete\", \"page\" / \"microflow\" / \"nanoflow\", \"params\" } (replaces the old one)",
-            onClick: "on click of a Data grid 2 or gallery: an action as in \"action\" (the row is passed)",
+            onClick: "on click of a Data grid 2, gallery or list view: an action as in \"action\" (the row / item is passed)",
             onChange: "on change of an input, reference (set) selector or combo box: an action as in \"action\" (the object around it is passed)",
             onEnter: "input: action when it gets the focus", onLeave: "input: action when it loses the focus", onEnterKeyPress: "text box: action on the Enter key",
             required: "input / reference selector: true (validation Required, $value != empty) | false (no validation)", requiredMessage: "with required true: the message",
@@ -84,7 +92,8 @@ const PAGE_EDIT_OPS = {
     }
 };
 const INPUT_FIELDS = ["required", "requiredMessage", "validation", "format", "readOnlyStyle", "inputMask", "maxLength"];
-const CHANGE_FIELDS = ["caption", "text", "label", "placeholder", "editable", "visible", "class", "design", "style", "textStyle", "buttonStyle", "columns", "headerFilters", "xpath", "name", "action", "onClick", "onChange",
+const LIST_FIELDS = ["source", "paging", "selection", "emptyMessage", "onClickTrigger", "sort", "template", "export"];
+const CHANGE_FIELDS = ["caption", "text", "label", "placeholder", "editable", "visible", "class", "design", "style", "textStyle", "buttonStyle", ...LIST_FIELDS.slice(0, 1), "columns", "headerFilters", ...LIST_FIELDS.slice(1), "xpath", "name", "action", "onClick", "onChange",
     "onEnter", "onLeave", "onEnterKeyPress", ...INPUT_FIELDS, "orientation", "labelWidth", "showFooter", "selectPage", ...Object.keys(ui.CHANGE_UI)];
 const UI_FIELDS = Object.keys(ui.CHANGE_UI);
 // fields a weak model takes from elsewhere -> what to write instead (checked before the generic "unknown field")
@@ -96,7 +105,8 @@ const FIELD_SYNONYMS = {
         readOnly: "use \"editable\": false", readonly: "use \"editable\": false", hidden: "use \"visible\": false (or a condition)", hide: "use \"visible\": false", visibility: "use \"visible\"",
         title: "use \"caption\" (button, tab page, column), \"text\" (a text) or \"tooltip\" (a button)", helpText: ui.INPUT_TOOLTIP, hint: ui.INPUT_TOOLTIP, ariaDescription: "use \"ariaLabel\" (inputs) or \"tooltip\" (buttons)", alternativeText: "use \"alt\"", offset: ui.NOT_STORED.offset, order: ui.NOT_STORED.order, header: "use \"caption\"", value: "use \"text\"", content: "use \"text\"", cssClass: "use \"class\"", className: "use \"class\"",
         newName: "use \"name\"", rename: "use \"name\"", addColumns: "use \"columns\": { \"add\": [...] }", removeColumns: "use \"columns\": { \"remove\": [...] }", column: "use \"columns\": { \"add\": [...], \"remove\": [...] }",
-        heading: "use \"textStyle\": \"H2\"", color: "use \"buttonStyle\" (a button) or \"style\" (CSS)", into: "moving is moveWidget", after: "moving is moveWidget", before: "moving is moveWidget"
+        heading: "use \"textStyle\": \"H2\"", pageSize: "use \"paging\": { \"pageSize\": 20 }", rows: "use \"paging\": { \"pageSize\": 20 }", pagination: "use \"paging\"", dataSource: "use \"source\"", datasource: "use \"source\"",
+        items: "use \"template\" (item widgets) or \"columns\" (gallery devices)", content: "use \"template\" (list view / gallery) or \"text\"", widgets: "use \"template\" (list view / gallery items) or addWidgets", sortOrder: "use \"sort\"", moveColumn: "use \"columns\": { \"move\": [ { \"column\": ..., \"before\": ... } ] }", color: "use \"buttonStyle\" (a button) or \"style\" (CSS)", into: "moving is moveWidget", after: "moving is moveWidget", before: "moving is moveWidget"
     }
 };
 
@@ -588,7 +598,13 @@ function makePageEdit(h, I) {
                 } else if (w.editable !== on) setIfAvailable(w, "editable", on);
                 return on ? "editable" : "read-only";
             }
-            if (!isInput(w)) throw new Error(`${where}: a ${kindOf(w)} is not an input or data view; editable is for inputs and data views`);
+            if (w instanceof pages.ListView) {
+                if (typeof v !== "boolean" && !/^(true|false)$/.test(String(v))) throw new Error(`${where}: a list view is editable true or false (conditional editability: set it on its inputs)`);
+                const on = bool(v, false);
+                if (w.editable !== on) w.editable = on;
+                return on ? "editable list" : "read-only list";
+            }
+            if (!isInput(w)) throw new Error(`${where}: a ${kindOf(w)} is not an input, data view or list view; editable is for those`);
             if (typeof v === "boolean" || /^(true|false)$/.test(String(v))) {
                 const want = bool(v, true) ? E.Always : E.Never;
                 if (w.editable !== want) w.editable = want;
@@ -656,6 +672,7 @@ function makePageEdit(h, I) {
         async columns(P, node, v, dc, ctx, where) {
             return gridColumns(P, node, v, ctx, where, dc);
         },
+        ...Object.fromEntries(LIST_FIELDS.map(f => [f, (...a) => GE().CHANGE[f](...a)])),
         async headerFilters(P, node, v, dc, ctx, where) {
             const w = node.el;
             if (!(w instanceof cw.CustomWidget) || !w.object || !w.object.properties.some(p => p.type && p.type.key === "filtersPlaceholder")) throw new Error(`${where}: headerFilters is for a Data grid 2 or gallery; ${node.label} is a ${kindOf(w)}`);
@@ -696,6 +713,11 @@ function makePageEdit(h, I) {
         async onClick(P, node, v, dc, ctx, where) {
             const w = node.el;
             if (w instanceof pages.DivContainer) return uiOf().change("onClick", w, v, { dc, ctx, where, at: { container: dc, name: node.name } });
+            if (w instanceof pages.ListView) {
+                const { qn } = await containerEntity(P, node);
+                const ent = qn ? await I.entityOf(qn, where) : null;
+                return I.makeAction(v, { container: { kind: "listView", ent, widget: w, name: node.name, existing: true, container: dc }, name: node.name }, ctx, where, a => (w.clickAction = a));
+            }
             const p = w instanceof cw.CustomWidget && w.object ? w.object.properties.find(x => x.type && x.type.key === "onClick") : null;
             if (!p) throw new Error(`${where}: onClick is for a container, Data grid 2 or gallery${w instanceof pages.ActionButton ? `; a button takes "action"` : ""}`);
             const { qn } = await containerEntity(P, node);
@@ -1028,6 +1050,9 @@ function makePageEdit(h, I) {
 
     // new widgets in the op's ctx, names given and Studio Pro style
     const uiOf = () => I.ui();
+    // list edits and convertGrid (grid-edit.js)
+    let ge = null;
+    const GE = () => ge || (ge = require("./grid-edit").makeGridEdit(h, I, { open, find, containerEntity, builderContext, cwSource, kindOf, listenersOf, subtree, variableUsers, mentions, textOf, slotOfNode, addWidgetsAt: (...a) => addWidgetsAt(...a), place, newCtx, defaultLanguage }));
 
     function newCtx(P) {
         const vars = new Map((prop(P.doc, "variables") || []).map(v => [v.name, v]));
@@ -1140,7 +1165,7 @@ function makePageEdit(h, I) {
         if (!fields.length) throw new Error(`${where}: give what to change: ${CHANGE_FIELDS.join(", ")}`);
         const ctx = { ...newCtx(P), lang: await defaultLanguage(), op: o };
         // {Attribute} and conditions use the data view or list view around the widget (for a column: around its grid)
-        const needs = ["caption", "text", "label", "placeholder", "visible", "editable", "dynamicClass", "ariaLabel", "xpath", "columns", "headerFilters", "action", "onClick", "onChange", "onEnter", "onLeave", "onEnterKeyPress", "validation", "selectPage"].some(k => o[k] !== undefined);
+        const needs = ["caption", "text", "label", "placeholder", "visible", "editable", "dynamicClass", "ariaLabel", "xpath", "columns", "headerFilters", "source", "paging", "emptyMessage", "sort", "export", "action", "onClick", "onChange", "onEnter", "onLeave", "onEnterKeyPress", "validation", "selectPage"].some(k => o[k] !== undefined);
         if (["action", "onClick", "onChange", "onEnter", "onLeave", "onEnterKeyPress"].some(k => o[k] !== undefined)) ctx.scope = await scopeOf(P, where);
         const dc = needs && node.ctx ? await builderContext(P, node.ctx, where).catch(e => (/\{[A-Za-z_]|currentObject|"attribute"/.test(JSON.stringify(o)) ? Promise.reject(e) : null)) : null;
         const done = [];
@@ -1521,12 +1546,36 @@ function makePageEdit(h, I) {
             if (o.showFooter !== undefined) say(w.showFooter === bool(o.showFooter, true), `showFooter is ${w.showFooter}`);
             if (o.readOnlyStyle !== undefined) say(String(w.readOnlyStyle.name).toLowerCase() === String(o.readOnlyStyle).toLowerCase(), `read-only style is ${w.readOnlyStyle.name}`);
             if (o.selectPage !== undefined) say(w.selectPageSettings && w.selectPageSettings.pageQualifiedName === String(o.selectPage), "select page differs");
+            if (o.editable !== undefined && w instanceof pages.ListView) say(w.editable === bool(o.editable, false), `editable is ${w.editable}`);
+            if (o.selection !== undefined) {
+                const sel = w instanceof cw.CustomWidget ? ((I.valueOf(w.object, "itemSelection") || {}).selection || { name: "?" }).name : w.selectionMode ? w.selectionMode.name : "?";
+                say(sel.toLowerCase() === String(o.selection).toLowerCase() || (sel === "Multi" && /^multiple$/i.test(String(o.selection))), `selection is ${sel}`);
+            }
+            if (o.emptyMessage !== undefined) {
+                const ph = I.valueOf(w.object, "emptyPlaceholder");
+                say(o.emptyMessage === "" || o.emptyMessage === null ? !ph.widgets.length : ph.widgets.length === 1, "empty message differs");
+            }
+            if (Array.isArray(o.template)) {
+                const list = w instanceof pages.ListView ? w.widgets : w instanceof pages.TemplateGrid ? w.contents.widgets : I.valueOf(w.object, "content").widgets;
+                say(list.length === o.template.length, `holds ${list.length} item widget(s), not ${o.template.length}`);
+            }
+            if (o.paging && typeof o.paging === "object" && o.paging.pageSize !== undefined) {
+                const n = w instanceof cw.CustomWidget ? Number(I.valueOf(w.object, "pageSize").primitiveValue) : w instanceof pages.ListView ? w.pageSize : w.numberOfRows;
+                say(n === Number(o.paging.pageSize), `page size is ${n}`);
+            }
+            if (o.source !== undefined) {
+                const src = w instanceof cw.CustomWidget ? cwSource(w) : w.dataSource;
+                const want = String(typeof o.source === "string" ? o.source : o.source.source || (o.source.microflow ? "microflow" : o.source.nanoflow ? "nanoflow" : o.source.association ? "association" : "database")).toLowerCase();
+                const is = src instanceof pages.MicroflowSource ? "microflow" : src instanceof pages.NanoflowSource ? "nanoflow" : src instanceof pages.AssociationSource ? "association" : src && prop(src, "xPathConstraint") !== undefined ? "database" : "?";
+                say(is === (want === "xpath" ? "database" : want), `source is ${is}`);
+            }
             if (o.columns && Array.isArray(o.columns.add)) {
                 const attrs = [];
                 if (w instanceof pages.DataGrid) for (const c of w.columns) attrs.push(c.attributeRef ? c.attributeRef.attributeQualifiedName.split(".").pop() : null);
                 else for (const c of (w.object.properties.find(p => p.type.key === "columns") || { value: { objects: [] } }).value.objects) attrs.push(((I.valueOf(c, "attribute") || {}).attributeRef || { attributeQualifiedName: "" }).attributeQualifiedName.split(".").pop());
                 for (const a of o.columns.add) {
                     const n = typeof a === "string" ? a : a && a.attribute;
+                    if (n === undefined) continue; // dynamic text / custom content
                     say(attrs.includes(String(n).split("/").pop()), `has no column for ${n}`);
                 }
             }
@@ -1752,9 +1801,12 @@ function makePageEdit(h, I) {
         }
     });
 
-    return { addWidgets, changeWidget, deleteWidget, moveWidget, changePage, pageUrl, widgets, checks, touched, open };
+    checks.convertGrid = o => GE().checks.convertGrid(o);
+    return { addWidgets, changeWidget, deleteWidget, moveWidget, changePage, convertGrid: o => GE().convertGrid(o), pageUrl, widgets, checks, touched, open };
 }
 
+Object.assign(PAGE_EDIT_OPS, require("./grid-edit").GRID_EDIT_OPS);
+Object.assign(FIELD_SYNONYMS, require("./grid-edit").CONVERT_SYNONYMS);
 const PAGE_EDIT_NAMES = Object.keys(PAGE_EDIT_OPS);
 
 module.exports = { makePageEdit, PAGE_EDIT_OPS, PAGE_EDIT_NAMES, CHANGE_FIELDS, FIELD_SYNONYMS };
