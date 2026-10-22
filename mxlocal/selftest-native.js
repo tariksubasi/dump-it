@@ -6,10 +6,12 @@
 // a native page whose widgets take those classes and the design property (createPage, then changeWidget), the NATIVE
 // STYLE CHECK (an unknown class, a list inside a clickable container), and the refusals (web CSS, px units, unknown
 // style keys and variables with "did you mean", a duplicate class, a dashed class name, a Marketplace module, a
-// ColorPicker, inline CSS on a native widget). The native theme files of the project are copied into the copy first;
-// a project without a native theme gets an empty theme/native/custom-variables.js there (NOTE line). Files are read
-// back (node --check, values), the page from the saved unit; the copy reopens with 0 errors and 0 deltas, new units
-// roundtrip byte for byte. The copy's theme/ folder is put back as it was afterwards.
+// ColorPicker, inline CSS on a native widget); every core native widget kind, page edits on a native page, a native
+// pluggable widget of widgets/*.mpk, and the refusals of web-only widgets, actions and native / web page mixes. The
+// native theme files of the project are copied into the copy first; a project without a native theme gets an empty
+// theme/native/custom-variables.js there (NOTE line). Files are read back (node --check, values), the page from the
+// saved unit; the copy reopens with 0 errors and 0 deltas, new units roundtrip byte for byte. The copy's theme/
+// folder is put back as it was afterwards.
 const fs = require("fs");
 const path = require("path");
 const bson = require("./bson");
@@ -71,13 +73,37 @@ function nativeTargets(s, mod) {
     const x = { nativeLayout: false, own: null, market: null };
     for (const id of project.units.keys()) {
         const u = project.read(id);
-        if (u.$Type === "Forms$Layout" && u.Content && u.Content.$Type === "Forms$NativeLayoutContent") x.nativeLayout = true;
+        if (u.$Type === "Forms$Layout" && u.Content && u.Content.$Type === "Forms$NativeLayoutContent") {
+            x.nativeLayout = true;
+            if (u.Content.LayoutType === "Popup") x.popup = u.Name;
+        }
     }
     const m = s.model.allModules();
     const me = m.find(z => z.name === mod);
     if (me && !me.fromAppStore) x.own = mod;
     const mk = m.find(z => z.fromAppStore);
     if (mk) x.market = mk.name;
+    // pluggable widgets of widgets/*.mpk: a native one (com.mendix.widget.native.*) and a web one
+    const pl = [...require("./pluggable").installed(project.dir).keys()];
+    x.nativePl = pl.find(id => /^com\.mendix\.widget\.native\./.test(id)) || null;
+    x.webPl = pl.find(id => !/\.native\./.test(id)) || null;
+    // a web page without parameters (showPage from a native page is refused)
+    const webLayouts = new Set();
+    const modName = id => {
+        for (let c = id; c; c = project.units.get(c) && project.units.get(c).containerId) {
+            const u = project.read(c);
+            if (/^Projects\$Module/.test(u.$Type)) return u.Name;
+        }
+        return null;
+    };
+    for (const id of project.units.keys()) {
+        const u = project.read(id);
+        if (u.$Type === "Forms$Layout" && u.Content && u.Content.$Type === "Forms$WebLayoutContent") webLayouts.add(`${modName(id)}.${u.Name}`);
+    }
+    for (const id of project.units.keys()) {
+        const u = project.read(id);
+        if (!x.webPage && u.$Type === "Forms$Page" && u.FormCall && webLayouts.has(u.FormCall.Form) && !(u.Parameters || []).length) x.webPage = `${modName(id)}.${u.Name}`;
+    }
     return x;
 }
 
@@ -131,7 +157,39 @@ function nativePlan(mod, T, x) {
             ] },
             ...(x.own ? [{ op: "changeWidget", page, widget: "zzNatCard", design: { [dp]: "Flat" } }, { op: "changeWidget", page, widget: "zzNatText", class: card }] : [])
         );
-        refuse.push([{ op: "changeWidget", page, widget: "zzNatText", style: "color: red;" }, /inline CSS does nothing on a native widget/]);
+        // every core native widget kind (N1), page edits on a native page (N4), a native pluggable widget (N2)
+        ops.push(
+            { op: "createEnumeration", module: mod, name: `${T}NatS`, values: ["Open", "Done"] },
+            { op: "createEntity", module: mod, name: `${T}NatO`, attributes: [{ name: "Note", type: "String(500)" }, { name: "State", type: `Enum(${mod}.${T}NatS)` }, { name: "When", type: "DateTime" }, { name: "Paid", type: "Boolean" }] },
+            { op: "addAssociation", from: `${mod}.${T}NatO`, to: `${mod}.${T}NatE`, name: `${T}NatO_NatE` },
+            { op: "createPage", module: mod, name: `${T}_Native3`, native: true, folder: "ZzNative", entity: `${mod}.${T}NatO`, widgets: [
+                { widget: "dataView", name: "zzNatDv", source: "parameter", fields: [], widgets: [
+                    { widget: "textArea", name: "zzNatNote", attribute: "Note" },
+                    { widget: "dropDown", name: "zzNatState", attribute: "State" },
+                    { widget: "radioButtons", name: "zzNatRadio", attribute: "State" },
+                    { widget: "datePicker", name: "zzNatWhen", attribute: "When" },
+                    { widget: "checkBox", name: "zzNatPaid", attribute: "Paid", visible: { attribute: "State", values: ["Done"] } },
+                    { widget: "referenceSelector", name: "zzNatRef", association: `${mod}.${T}NatO_NatE`, attribute: "Title" },
+                    { widget: "tabContainer", name: "zzNatTabs", tabs: [{ caption: "A", widgets: [{ widget: "text", text: "a" }] }, { caption: "B", widgets: [] }] },
+                    { widget: "layoutGrid", name: "zzNatGrid", columns: [{ weight: 6, widgets: [{ widget: "text", text: "L" }] }, 6] }
+                ], footer: [{ widget: "actionButton", name: "zzNatSave", action: "save", caption: "Save" }] }
+            ] },
+            { op: "addWidgets", page, into: "zzNatCard", widgets: [{ widget: "text", name: "zzNatAdd", text: "Added" }, { widget: "text", name: "zzNatTmp", text: "Tmp" },
+                ...(x.nativePl ? [{ widget: "pluggable", name: "zzNatPl", type: x.nativePl, properties: {} }] : [])] },
+            ...(x.popup ? [{ op: "createPage", module: mod, name: `${T}_NativePop`, native: "popup", folder: "ZzNative", entity: `${mod}.${T}NatE` }] : []),
+            { op: "moveWidget", page, widget: "zzNatAdd", before: "zzNatText" },
+            { op: "deleteWidget", page, widget: "zzNatTmp" }
+        );
+        refuse.push(
+            [{ op: "changeWidget", page, widget: "zzNatText", style: "color: red;" }, /inline CSS does nothing on a native widget/],
+            [{ op: "addWidgets", page, into: "zzNatCard", widgets: [{ widget: "dataGrid", entity: `${mod}.${T}NatE` }] }, /a native page has no dataGrid; use a listView/],
+            [{ op: "addWidgets", page, into: "zzNatCard", widgets: [{ widget: "gallery", entity: `${mod}.${T}NatE` }] }, /a native page has no gallery/],
+            [{ op: "addWidgets", page, into: "zzNatCard", widgets: [{ widget: "actionButton", caption: "W", action: "callWorkflow", workflow: `${mod}.Nope` }] }, /cannot start a workflow/]
+        );
+        if (x.webPage) refuse.push([{ op: "addWidgets", page, into: "zzNatCard", widgets: [{ widget: "actionButton", caption: "W", action: "showPage", page: x.webPage }] }, /is a web page; a native page opens only native pages/],
+            [{ op: "addWidgets", page: x.webPage, widgets: [{ widget: "actionButton", caption: "N", action: "showPage", page }] }, /is a native page; a web page cannot open it/]);
+        if (x.webPl) refuse.push([{ op: "addWidgets", page, into: "zzNatCard", widgets: [{ widget: "pluggable", type: x.webPl, properties: {} }] }, /is a web widget; a native page takes native pluggable widgets/]);
+        if (x.nativePl && x.webPage) refuse.push([{ op: "addWidgets", page: x.webPage, widgets: [{ widget: "pluggable", type: x.nativePl, properties: {} }] }, /is a native widget; it goes on a native page/]);
     }
     return { ops, refuse, page, card, btn, flat, dp };
 }
@@ -198,6 +256,29 @@ function nativeProblems(project, mod, T, x, plan) {
             say(b && b.Appearance.Class === `${plan.btn} zzNope`, "native button class not stored");
         }
         say(cardW && !cardW.Appearance.Style && b && !b.Appearance.Style, "a native widget got an inline style");
+        // page edits: zzNatAdd moved before zzNatText, zzNatTmp deleted, the native pluggable widget added
+        const kids = cardW ? (cardW.Widgets || []).map(w => w.Name || w.$Type) : [];
+        say(kids.indexOf("zzNatAdd") >= 0 && kids.indexOf("zzNatAdd") < kids.indexOf("zzNatText") && !kids.includes("zzNatTmp"), `addWidgets / moveWidget / deleteWidget on a native page: ${kids.join(", ")}`);
+        if (x.nativePl) say(named.zzNatPl && named.zzNatPl.$Type === "CustomWidgets$CustomWidget" && named.zzNatPl.Type && named.zzNatPl.Type.WidgetId === x.nativePl, `native pluggable widget ${x.nativePl} not stored`);
+        let u3 = null;
+        for (const id of project.units.keys()) {
+            const p = project.read(id);
+            if (p.$Type === "Forms$Page" && p.Name === `${T}_Native3`) u3 = p;
+        }
+        const types = {};
+        walk(u3 || {}, o => o.Name && (types[o.Name] = o));
+        const want = { zzNatNote: "Forms$TextArea", zzNatState: "Forms$DropDown", zzNatRadio: "Forms$RadioButtonGroup", zzNatWhen: "Forms$DatePicker", zzNatPaid: "Forms$CheckBox", zzNatRef: "Forms$ReferenceSelector", zzNatTabs: "Forms$TabControl", zzNatGrid: "Forms$LayoutGrid", zzNatSave: "Forms$ActionButton" };
+        const bad = Object.entries(want).filter(([n, t]) => !types[n] || types[n].$Type !== t).map(([n, t]) => `${n} (${types[n] ? types[n].$Type : "missing"}, want ${t})`);
+        say(!bad.length, `native page widget kinds not stored: ${bad.join(", ")}`);
+        say(types.zzNatPaid && types.zzNatPaid.ConditionalVisibilitySettings, "conditional visibility on a native check box not stored");
+        if (x.popup) {
+            let pop = null;
+            for (const id of project.units.keys()) {
+                const p = project.read(id);
+                if (p.$Type === "Forms$Page" && p.Name === `${T}_NativePop`) pop = p;
+            }
+            say(pop && pop.FormCall && pop.FormCall.Form.endsWith(`.${x.popup}`), `native pop-up page not on the Popup layout ${x.popup}: ${pop && pop.FormCall ? pop.FormCall.Form : "missing"}`);
+        }
     }
     return r;
 }
@@ -254,7 +335,10 @@ async function nativePhase({ s2, reopen, copy, src, mod, T, layout, layoutProble
     }
     const what = ["setNativeVariables (value, light/dark, reference)", "setNativeTokens (colour scales, spacing, radius, font sizes + line heights, elevation, dark mode)",
         x.own && "addNativeStyle (elevation level, theme variables, button)", x.own && "addNativeDesignProperty", plan.page && "native page with classes" + (x.own ? " + native design (createPage, changeWidget)" : ""),
-        plan.page && "NATIVE STYLE CHECK", `${plan.refuse.length} refusals`].filter(Boolean);
+        plan.page && "every core native widget kind (text area, drop-down, radio buttons, date picker, check box with visibility, reference selector, tab container, layout grid)",
+        plan.page && `addWidgets / moveWidget / deleteWidget on a native page${x.nativePl ? `, native pluggable ${x.nativePl.split(".").pop()}` : ""}${x.popup ? ", native pop-up page" : ""}`,
+        plan.page && "NATIVE STYLE CHECK", `${plan.refuse.length} refusals (web CSS, web-only widgets and actions, native / web page mix)`].filter(Boolean);
+    if (plan.page && !x.nativePl) results.push("SKIP native: native pluggable widget: no com.mendix.widget.native.* in widgets/");
     if (made) results.push("NOTE native: no native theme in this project; an empty theme/native/custom-variables.js was made in the copy");
     else if (!copied) results.push("NOTE native: no native theme files copied (already in the copy)");
     if (!x.nativeLayout) results.push("SKIP native: page styling: no native layout in this project");

@@ -1370,8 +1370,20 @@ Rules for native styles:
 | `addNativeStyle` | **name**, **style** `{"container": {...}, "caption": {...}}`, widgetType, module, replace | Adds `export const <name> = {...}` to `themesource/<module>/native/main.js` (made when missing) and imports the variables it uses. `"use": "$elevation.level2"` in an element includes an elevation level. Refused: web CSS (with the React Native way), units, unknown properties or elements (`Did you mean`), a class the module already has (`"replace": true`) |
 | `addNativeDesignProperty` | **widgetType**, **name**, **type** (`Toggle`, `Dropdown`, `ToggleButtonGroup`), options `[{"name", "class", "style"}]`, class + style (Toggle), multiSelect, description, category, module | A native design property in `themesource/<module>/native/design-properties.json`; an option with `"style"` also gets its class in `main.js`. Widgets on native pages then take it in `"design"` (later ops of the same change too). `ColorPicker` is refused (it needs CSS) |
 
-Native pages: `createPage` with `"native": true`, then `"class"` and `"design"` on its widgets (also with `addWidgets`
-and `changeWidget`). Design properties of a native page come from the `native/design-properties.json` files.
+Native pages:
+- `createPage` with `"native": true`. For another kind of native page give `"native": "popup"` (a pop-up page),
+  `"fullPage"`, `"topBarOnly"`, `"sideMenu"` or `"default"`: the project's native layout of that kind is used.
+- Widgets of a native page: `text`, `container`, `actionButton`, `dataView`, `listView`, `textBox`, `textArea`,
+  `checkBox`, `datePicker`, `radioButtons`, `dropDown`, `referenceSelector`, `image`, `tabContainer`, `layoutGrid`,
+  `snippetCall`, and native pluggable widgets (`"widget": "pluggable"` with a `com.mendix.widget.native.*` widget from
+  `widgets/*.mpk`; `widgettype` lists them).
+- Refused on a native page, with what to use instead: `dataGrid`, `templateGrid`, `gallery` (use `listView`),
+  `comboBox` (use `dropDown` or `referenceSelector`), `referenceSetSelector`, `fileManager`, `imageUploader`,
+  `groupBox`, `dropDownButton`, web pluggable widgets, the `callWorkflow` action.
+- `showPage` on a native page opens only native pages; a web page cannot open a native page.
+- `callMicroflow` on a native page gives a warning: it needs a connection. Prefer `callNanoflow`.
+- `addWidgets`, `changeWidget`, `moveWidget`, `deleteWidget` work on native pages as on web pages.
+- `"class"` and `"design"` on its widgets: design properties come from the `native/design-properties.json` files.
 
 The dry run shows **NATIVE STYLE CHECK** lines (warnings): a changed JS file that does not parse, a style key React
 Native does not know, a class on a native widget that no native `main.js` exports, a scrolling list inside another
@@ -1403,6 +1415,14 @@ A card class and a native page that uses it:
     "style": { "container": { "use": "$elevation.level2", "backgroundColor": "$background.primary", "borderRadius": 8, "padding": "$spacing.regular" } } },
   { "op": "createPage", "module": "Sales", "name": "Home_Native", "native": true,
     "widgets": [ { "widget": "container", "class": "cardRaised", "widgets": [ { "widget": "text", "text": "Orders" } ] } ] } ] }
+```
+
+A native pop-up page and a native pluggable widget:
+
+```json
+{ "ops": [
+  { "op": "createPage", "module": "Sales", "name": "Order_EditPopup", "native": "popup", "entity": "Sales.Order" },
+  { "op": "addWidgets", "page": "Sales.Home_Native", "widgets": [ { "widget": "pluggable", "type": "com.mendix.widget.native.feedback.Feedback", "properties": {} } ] } ] }
 ```
 
 A native design property with two looks:

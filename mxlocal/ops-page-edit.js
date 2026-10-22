@@ -1015,7 +1015,15 @@ function makePageEdit(h, I) {
             return null;
         });
         const nodes = [];
-        const top = I.scan(o.widgets, "widgets", dc, nodes);
+        const native = require("./theme-native").isNativeDoc(client, P.doc);
+        const wasPlatform = I.setPlatform(native ? "native" : "web");
+        let top;
+        try {
+            top = I.scan(o.widgets, "widgets", dc, nodes);
+        } finally {
+            I.setPlatform(wasPlatform);
+        }
+        if (native) require("./ops-native-ui").checkNativeNodes(nodes);
         if (!top.length) throw new Error(`${where}: 'widgets' is empty`);
         const ctx = newCtx(P);
         // default entity: the op's, else the page's only object parameter

@@ -269,7 +269,7 @@ const PAGE_FIELDS = {
     variables: "optional page variables (Mendix 10+): [ { \"name\": \"Search\", \"type\": \"String\" | \"Boolean\" | \"Integer\" | \"Decimal\" | \"DateTime\" | \"Enum(Module.E)\", \"default\": \"''\" (an expression) } ]; an input takes \"variable\": \"Search\" instead of an attribute, expressions, XPath and flow \"params\" use $Search",
     design: "optional design properties of the page (Atlas FormBase: { \"Form orientation\": \"Horizontal\", \"Label width\": \"3\" }) where the theme has them",
     ...ui.PAGE_UI,
-    native: "optional true: a native mobile page (a NativePhone layout of the project; widgets: text, container, actionButton, dataView, listView, input / textBox / checkBox / datePicker); refused when the project has no native layout"
+    native: "optional true: a native mobile page (a NativePhone layout of the project), or the kind of native page: popup (a pop-up page: NativePhone_PopOver), fullPage, topBarOnly, sideMenu, default; widgets: text, container, actionButton, dataView, listView, inputs (textBox, textArea, checkBox, datePicker, radioButtons, dropDown), referenceSelector, image, tabContainer, layoutGrid, snippetCall, native pluggable widgets; refused when the project has no native layout"
 };
 const MENU_FIELDS = {
     page: "Module.Page (without page parameters); a native page becomes a bottom bar item of the native profile",
@@ -348,6 +348,13 @@ function makePages(h) {
         return { native: !!(l.isLoaded && l.content instanceof pages.NativeLayoutContent), placeholders: phs };
     }
     const nativeLayouts = () => model.allLayouts().map(l => l.qualifiedName).filter(qn => layoutInfo(qn).native);
+    // the LayoutType of a saved layout (Default, Popup, ...), or null
+    const layoutTypeOf = qn => {
+        const l = model.allLayouts().find(x => x.qualifiedName === qn);
+        if (!l || !client.project.units.has(l.id)) return null;
+        const u = client.project.read(l.id);
+        return (u.Content && u.Content.LayoutType) || null;
+    };
 
     const humanize = s => s.replace(/_/g, " ").replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/^./, c => c.toUpperCase());
 
@@ -434,6 +441,13 @@ function makePages(h) {
         return n;
     }
 
+    // the platform of the page the widgets of a scan go on ("native": native pluggable widgets allowed, web ones refused)
+    let scanPlatform = "web";
+    function setPlatform(p) {
+        const was = scanPlatform;
+        scanPlatform = p;
+        return was;
+    }
     // Spec tree -> node tree. container: nearest data view / list view node around this one.
     function scan(specs, where, container, nodes) {
         return list(specs, where).map((spec, i) => {
@@ -803,6 +817,7 @@ function makePages(h) {
             if (FLOW_ONLY[k]) throw new Error(`${where}: ${k} goes with ${FLOW_ONLY[k]}, not ${action}${k === "confirm" && ["delete", "save", "create", "showPage"].includes(action) ? `; for a ${action} with a question call a microflow or nanoflow that does it ("action": "callMicroflow", "confirm": { ... })` : ""}`);
             throw new Error(`${where}: '${k}' does not go with action ${action} (it takes ${allowed.join(", ") || "nothing else"})`);
         }
+        require("./ops-native-ui").checkAction(client, model, ctx && ctx.page, action, spec, where);
         const need = { showPage: "page", callMicroflow: "microflow", callNanoflow: "nanoflow", callWorkflow: "workflow" }[action];
         if (need && !spec[need]) throw new Error(`${where}: action ${action} needs '${need}'`);
         if (spec.maintainSelection !== undefined && !opts.grid) throw new Error(`${where}: maintainSelection goes with a grid button (classic or template grid control bar) that calls a flow`);
@@ -2587,7 +2602,8 @@ function makePages(h) {
     function plScan(node, container, nodes) {
         const s = node.spec;
         node.pl = plDef(s.type, node.where);
-        if (node.pl.type.SupportedPlatform === "Native") throw new Error(`${node.where}: ${node.pl.type.WidgetName} is a native widget; it goes on a native page`);
+        if (node.pl.type.SupportedPlatform === "Native" && scanPlatform !== "native") throw new Error(`${node.where}: ${node.pl.type.WidgetName} is a native widget; it goes on a native page`);
+        if (node.pl.type.SupportedPlatform !== "Native" && scanPlatform === "native") throw new Error(`${node.where}: ${node.pl.type.WidgetName} is a web widget; a native page takes native pluggable widgets (widgets/*.mpk with platform Native: widgettype lists them)`);
         node.pspec = s;
         node.plWidgets = new Map();
         const t = node.pl.type, wname = t.WidgetName;
@@ -3663,13 +3679,23 @@ function makePages(h) {
         if (o.arrange !== undefined && !/^(auto|rows)$/i.test(String(o.arrange))) fail(`${qn}: arrange must be auto or rows`, o.arrange, ["auto", "rows"]);
         const specs = !form ? o.widgets || [] : !o.entity ? [] : [{ widget: "dataView", ...(o.fields !== undefined ? { fields: o.fields } : {}), ...(o.buttons !== undefined ? { buttons: o.buttons } : {}) }];
         const nodes = [];
-        const top = scan(specs, form ? "form" : "widgets", null, nodes);
+        // native pages: a native layout and the widgets native pages have (ops-native-ui.js)
+        // "native": true, or the kind of native layout: popup | fullPage | topBarOnly | sideMenu | default
+        const NATIVE_LAYOUTS = { popup: /NativePhone_PopOver$|PopOver$|Popup$/i, fullpage: /FullPage$/i, topbaronly: /TopBarOnly$/i, sidemenu: /SideMenu$/i, default: /NativePhone_Default$/i };
+        const nativeKind = typeof o.native === "string" && !/^(true|false)$/i.test(o.native) ? String(o.native).toLowerCase().replace(/[\s_-]/g, "") : null;
+        if (nativeKind && !NATIVE_LAYOUTS[nativeKind]) fail(`${qn}: native '${o.native}' is not a native page kind (true, popup, fullPage, topBarOnly, sideMenu, default)`, String(o.native), ["popup", "fullPage", "topBarOnly", "sideMenu", "default"]);
+        if (nativeKind && o.layout !== undefined) throw new Error(`${qn}: give "native": "${o.native}" or "layout", not both`);
+        const nativeAsked = !!nativeKind || bool(o.native, false) || (o.layout !== undefined && layoutInfo(String(o.layout)).native);
+        const wasPlatform = setPlatform(nativeAsked ? "native" : "web");
+        let top;
+        try {
+            top = scan(specs, form ? "form" : "widgets", null, nodes);
+        } finally {
+            setPlatform(wasPlatform);
+        }
         if (!top.length && !form && o.from === undefined) throw new Error(`${qn}: 'widgets' is empty; leave it out for an empty page`);
-        // native pages: a native layout and the widgets native pages have
-        const nativeAsked = bool(o.native, false) || (o.layout !== undefined && layoutInfo(String(o.layout)).native);
         if (nativeAsked) {
-            const ok = ["text", "container", "actionButton", "dataView", "listView", "input", "textBox", "checkBox", "datePicker"];
-            for (const n of nodes) if (!ok.includes(n.kind)) throw new Error(`${n.where}: a native page takes ${ok.join(", ")}; not ${n.kind}`);
+            require("./ops-native-ui").checkNativeNodes(nodes);
 
             if (o.from !== undefined) throw new Error(`${qn}: "from" makes web pages; leave it out for a native page`);
         }
@@ -3705,7 +3731,12 @@ function makePages(h) {
             const natives = nativeLayouts();
             if (!natives.length) throw new Error(`${qn}: this project has no native layout (Atlas NativePhone_*), so it has no native pages; add a native navigation profile and layout in Studio Pro`);
             const used = layoutUse().filter(u => natives.includes(u.layout)).map(u => u.layout);
-            wantLayout = used[0] || natives.find(l => /NativePhone_Default$/.test(l)) || natives[0];
+            if (nativeKind) {
+                // a pop-up: the native layout whose LayoutType is Popup (Atlas NativePhone_PopOver), else by name
+                const popup = nativeKind === "popup" ? natives.find(l => layoutTypeOf(l) === "Popup") : null;
+                wantLayout = popup || natives.find(l => NATIVE_LAYOUTS[nativeKind].test(l)) || null;
+                if (!wantLayout) throw new Error(`${qn}: this project has no ${o.native} native layout (native layouts: ${natives.join(", ")}); give "layout" with one of them`);
+            } else wantLayout = used[0] || natives.find(l => /NativePhone_Default$/.test(l)) || natives[0];
         }
         if (nativeAsked) {
             arranged = top; // no layout grids on native pages
@@ -4033,7 +4064,7 @@ function makePages(h) {
         return gx || (gx = gridExtras.makeGridExtras(internals, h));
     }
     // the builders and lookups ops-page-edit.js uses on existing pages
-    const internals = { scan, build, gridKind, entityOf, attributeOf, pathOf, attrRefOf, prepareAssocs, formatInto, pageVariables, dvSettings, inputExtras, onChange, selectPage, ACTION_DOC, names, textAll, templateAll, noPlaceholder, checkXPath, dg2Info,
+    const internals = { scan, setPlatform, build, gridKind, entityOf, attributeOf, pathOf, attrRefOf, prepareAssocs, formatInto, pageVariables, dvSettings, inputExtras, onChange, selectPage, ACTION_DOC, names, textAll, templateAll, noPlaceholder, checkXPath, dg2Info,
         isGrid2, isPl, valueOf, humanize, condition, sameCondition, fill, languages, shown, listenTarget, classicColumn, dg2Column, typeOf, isA, list, unitNamed,
         prepare, listEntity, resolveSources, sourceKind, makeAction, plDef, plApply, plScan, widgetType, widgetTypes,
         blankObject, exprCheck, textTemplate, buildPluggable: (n, t, c) => BUILD.pluggable(n, t, c), associations: () => ASSOCS || [], gridExtras: () => GX(), ui: () => uiFns() };
