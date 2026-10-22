@@ -40,8 +40,20 @@ async function runPhase(env, s, plan, verify) {
         }
         if (!/is not supported\. .*In Studio Pro/.test(msg)) problems.push(`${o.op} was not refused with the Studio Pro steps${msg ? `: ${msg}` : ""}`);
     }
-    const lint = await s.ops.runPlan(plan, () => {});
+    const lint = await s.ops.runPlan(plan, env.log || (() => {}));
     problems.push(...lint);
+    // ops that must be refused with a reason (they change nothing), then ops that run after them
+    for (const { op, expect } of plan.reject || []) {
+        let msg = "";
+        try {
+            await s.ops.runPlan({ ops: [op] }, () => {});
+        } catch (e) {
+            msg = e.message;
+        }
+        if (!expect.test(msg)) problems.push(`${op.op} was not refused as expected (${expect})${msg ? `: ${msg}` : ""}`);
+    }
+    if (plan.after) problems.push(...(await s.ops.runPlan({ ops: plan.after }, env.log || (() => {}))));
+    if (plan.probe) problems.push(...(await plan.probe(s.ops)));
     await s.model.flushChanges();
     const enc = s.client.encode();
     problems.push(...lostProperties(s.client, s.model, enc));
@@ -49,7 +61,7 @@ async function runPhase(env, s, plan, verify) {
     const firstUse = [...new Set(s.client.summary().warnings.filter(w => /first use|never occurs/.test(w)).map(w => w.split(" ")[0]))];
     s.client.project.writeEncoded(enc);
     let s2 = await reopen(copy);
-    problems.push(...(await s2.ops.checkPlan(plan)));
+    problems.push(...(await s2.ops.checkPlan({ ops: [...plan.ops, ...(plan.after || [])] })));
     for (const u of s2.model.allUnits().filter(u => u.isLoadable && !u.isLoaded)) await s2.model.loadUnitById(u.id, false).catch(e => problems.push(`reopen: ${e.message}`));
     await s2.model.flushChanges();
     if (s2.client.log.length) problems.push(`${s2.client.log.length} deltas on reopen`);
@@ -307,4 +319,95 @@ function odataProblems(project, T, version) {
     return r;
 }
 
-module.exports = { runPhase, restPlan, restProblems, workflowPlan, workflowProblems, odataPlan, odataProblems, unitsNamed, walk };
+// ---------------------------------------------------------------- change and delete of integration documents
+
+// A structure and mappings onto existing entities (attribute names matched loosely), then a new snippet: the mappings
+// follow it (new values, a new object with its entity, a removed and a retyped value), element settings (keys, find
+// with ignore, a custom microflow, a value transform, the root as the mapping parameter), an import step passing the
+// parameter, and the error-handler recipe (callRest whose handler parses $latestHttpResponse with an import mapping).
+function changePlan(mod, T) {
+    const E = `${mod}.${T}`;
+    const map = { entity: `${E}ChOrder`, entities: { lines: `${E}ChLine` } };
+    const snippet2 = "{ \"order_id\": 7, \"total\": \"2.50\", \"status\": \"open\", \"lines\": [ { \"sku\": \"A\", \"qty\": 1, \"price\": 1.5 } ], \"customer\": { \"name\": \"Ann\" } }";
+    return {
+        ops: [
+            { op: "createEntity", module: mod, name: `${T}ChOrder`, attributes: [{ name: "OrderID", type: "Long" }, { name: "Total", type: "Decimal" }, { name: "Note", type: "String(200)" }] },
+            { op: "createEntity", module: mod, name: `${T}ChLine`, attributes: [{ name: "SKU", type: "String(20)" }, { name: "Qty", type: "Integer" }] },
+            { op: "addAssociation", from: `${E}ChLine`, to: `${E}ChOrder` },
+            { op: "createJsonStructure", module: mod, name: `${T}_ChJson`, folder: "ZzChange", snippet: "{ \"order_id\": 7, \"total\": 2.5, \"note\": \"x\", \"lines\": [ { \"sku\": \"A\", \"qty\": 1 } ] }" },
+            { op: "createImportMapping", module: mod, name: `${T}_ChImm`, folder: "ZzChange", jsonStructure: `${E}_ChJson`, ...map, keys: ["order_id"] },
+            { op: "createImportMapping", module: mod, name: `${T}_ChImm2`, folder: "ZzChange", jsonStructure: `${E}_ChJson`, ...map },
+            { op: "createExportMapping", module: mod, name: `${T}_ChExm`, folder: "ZzChange", jsonStructure: `${E}_ChJson`, ...map },
+            { op: "changeJsonStructure", structure: `${E}_ChJson`, snippet: snippet2 },
+            { op: "updateImportMapping", mapping: `${E}_ChImm`, entities: { customer: `${E}ChCust` }, createAttributes: true, create: true, prune: true },
+            { op: "updateExportMapping", mapping: `${E}_ChExm`, createAttributes: true, skip: ["customer"], prune: true },
+            { op: "changeMapping", mapping: `${E}_ChImm`, element: "lines", keys: ["sku"], ifNotFound: "ignore" },
+            { op: "createMicroflow", module: mod, name: `${T}_ChConv`, folder: "ZzChange", parameters: [{ name: "Value", type: "String" }], returns: "Decimal", returnValue: "parseDecimal($Value)" },
+            { op: "changeMapping", mapping: `${E}_ChImm`, element: "total", transform: `${E}_ChConv` },
+            { op: "createMicroflow", module: mod, name: `${T}_ChFindCust`, folder: "ZzChange", parameters: [{ name: "Name", type: "String" }, { name: "Order", type: `${E}ChOrder` }], returns: `${E}ChCust`, returnValue: "empty" },
+            { op: "changeMapping", mapping: `${E}_ChImm`, element: "customer", objectHandling: "custom", microflow: `${E}_ChFindCust` },
+            { op: "changeMapping", mapping: `${E}_ChImm`, parameter: `${E}ChOrder` },
+            { op: "changeMapping", mapping: `${E}_ChImm`, element: "", objectHandling: "parameter" },
+            { op: "changeMapping", mapping: `${E}_ChExm`, element: "lines", association: `${E}ChLine_${T}ChOrder` },
+            { op: "createJsonStructure", module: mod, name: `${T}_ChErrJson`, folder: "ZzChange", snippet: "{ \"code\": \"E1\", \"message\": \"bad request\" }" },
+            { op: "createImportMapping", module: mod, name: `${T}_ChErrImm`, folder: "ZzChange", jsonStructure: `${E}_ChErrJson`, entity: `${E}ChApiError`, create: true, persistable: false },
+            { op: "createMicroflow", module: mod, name: `${T}_ChImport`, folder: "ZzChange", parameters: [{ name: "Json", type: "String" }, { name: "Order", type: `${E}ChOrder` }], returns: "Boolean", returnValue: "true", actions: [
+                { action: "importWithMapping", mapping: `${E}_ChImm`, source: "Json", parameter: "Order", variable: "Imported", commit: "no" },
+                { action: "callRest", url: "https://api.example.com/orders", variable: "Body", errorBody: true, onError: { rollback: false, returnValue: "false", actions: [
+                    { action: "variable", name: "ErrorBody", type: "String", value: "$latestHttpResponse/Content" },
+                    { action: "importWithMapping", mapping: `${E}_ChErrImm`, source: "ErrorBody", variable: "ApiError", commit: "no" },
+                    { action: "log", level: "Error", message: "API error {1}: {2}", args: ["toString($latestHttpResponse/StatusCode)", "$ApiError/Message"] }] } }] }
+        ],
+        reject: [
+            { op: { op: "updateImportMapping", mapping: `${E}_ChImm2` }, expect: /no longer in .*order_id|no longer in .*note.*"prune": true/ },
+            { op: { op: "updateImportMapping", mapping: `${E}_ChImm`, entities: { custmer: `${E}ChCust` } }, expect: /not in .*Did you mean: customer/ },
+            { op: { op: "changeMapping", mapping: `${E}_ChImm`, element: "total", keys: ["total"] }, expect: /'keys' is for an object/ },
+            { op: { op: "changeMapping", mapping: `${E}_ChExm`, element: "lines", objectHandling: "find" }, expect: /import mapping setting/ },
+            { op: { op: "changeMapping", mapping: `${E}_ChImm`, element: "total", transform: `${E}_ChFindCust` }, expect: /takes one value and returns one/ },
+            { op: { op: "changeMapping", mapping: `${E}_ChImm`, element: "lines", objectHandling: "find", keys: [] }, expect: /none of its values is a key/ },
+            { op: { op: "createImportMapping", module: mod, name: `${T}_ChBad`, jsonStructure: `${E}_ChJson`, entity: `${E}ChOrder` }, expect: /no entity .*Lines.*create/ },
+            { op: { op: "createMicroflow", module: mod, name: `${T}_ChBadFlow`, parameters: [{ name: "Json", type: "String" }], actions: [{ action: "importWithMapping", mapping: `${E}_ChImm`, source: "Json" }] }, expect: /takes a parameter .*give "parameter"/ }
+        ],
+        after: [{ op: "delete", target: `${E}_ChImm2` }],
+        async probe(ops) {
+            const out = await ops.mappingTest(`${E}_ChImm`, "{ \"order_id\": 7, \"total\": \"2.5\", \"status\": \"open\", \"extra\": 1, \"lines\": [ { \"sku\": \"A\", \"qty\": \"many\" }, { \"sku\": \"B\", \"qty\": 2 } ] }");
+            const want = [/ChOrder \(the mapping parameter\)/, /ChLine \(find by SKU = "A", if none: ignore\)/, /Total = "2.5" \(through .*_ChConv\)/, /qty: "many" is no whole number/, /extra: in the sample, not in the mapping/, /objects: 1 .*ChOrder, 2 .*ChLine/, /customer: not in the sample/];
+            return want.filter(w => !w.test(out)).map(w => `mapping-test output lacks ${w}: ${out.split("\n").slice(0, 12).join(" | ")}`);
+        }
+    };
+}
+
+function changeProblems(project, T) {
+    const r = [];
+    const u = unitsNamed(project, `${T}_Ch`);
+    const s = u[`${T}_ChJson`], imm = u[`${T}_ChImm`], exm = u[`${T}_ChExm`], flow = u[`${T}_ChImport`];
+    if (!s || !imm || !exm || !flow) return ["structure, mappings or import flow missing"];
+    if (u[`${T}_ChImm2`]) r.push("the deleted mapping is still there");
+    const sp = [];
+    walk(s.Elements, e => sp.push(e.Path));
+    if (!sp.includes("(Object)|status") || sp.includes("(Object)|note") || !sp.includes("(Object)|customer|name")) r.push(`structure paths ${sp.join(", ")}`);
+    const els = {};
+    walk(imm.Elements, e => /MappingElement$/.test(e.$Type) && (els[e.JsonPath] = e));
+    const want = { "(Object)|status": /ChOrder\.Status$/, "(Object)|lines|(Object)|price": /ChLine\.Price$/, "(Object)|order_id": /ChOrder\.OrderID$/, "(Object)|lines|(Object)|sku": /ChLine\.SKU$/ };
+    for (const [p, re] of Object.entries(want)) if (!els[p] || !re.test(els[p].Attribute)) r.push(`import ${p} -> ${els[p] && els[p].Attribute}`);
+    if (els["(Object)|note"]) r.push("import still maps note");
+    const root = imm.Elements[0];
+    if (root.ObjectHandling !== "Parameter" || imm.ParameterType.$Type !== "DataTypes$ObjectType" || !/ChOrder$/.test(imm.ParameterType.Entity)) r.push(`root ${root.ObjectHandling}, parameter ${JSON.stringify(imm.ParameterType)}`);
+    const line = els["(Object)|lines|(Object)"];
+    if (!line || line.ObjectHandling !== "Find" || line.ObjectHandlingBackup !== "Ignore" || !els["(Object)|lines|(Object)|sku"].IsKey) r.push("lines: not found by sku / ignore");
+    const cust = els["(Object)|customer"];
+    if (!cust || !/ChCust$/.test(cust.Entity) || cust.ObjectHandling !== "Custom" || !cust.CustomHandlerCall || cust.CustomHandlerCall.ParameterMappings.length !== 2) r.push("customer: custom handler with 2 parameters missing");
+    if (!els["(Object)|total"] || !/_ChConv$/.test(els["(Object)|total"].Converter) || els["(Object)|total"].XmlPrimitiveType !== "String") r.push("total: transform or retype missing");
+    const order = root.Children.map(c => c.JsonPath);
+    if (order.join() !== ["(Object)|order_id", "(Object)|total", "(Object)|status", "(Object)|lines|(Object)", "(Object)|customer"].join()) r.push(`import children order ${order.join(", ")}`);
+    const xp = [];
+    walk(exm.Elements, e => /MappingElement$/.test(e.$Type) && xp.push(e.JsonPath));
+    if (!xp.includes("(Object)|status") || xp.some(p => /customer|note/.test(p)) || !xp.includes("(Object)|lines|(Object)|price")) r.push(`export paths ${xp.join(", ")}`);
+    const calls = [];
+    walk(flow, o => o.$Type === "Microflows$ImportMappingCall" && calls.push(o));
+    if (!calls.some(c => c.ParameterVariableName === "Order")) r.push("importWithMapping does not pass the parameter");
+    if (calls.length !== 2) r.push(`${calls.length} import mapping calls, expected 2 (one in the error handler)`);
+    return r;
+}
+
+module.exports = { runPhase, restPlan, restProblems, workflowPlan, workflowProblems, odataPlan, odataProblems, changePlan, changeProblems, unitsNamed, walk };

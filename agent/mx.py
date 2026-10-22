@@ -13,6 +13,9 @@ Copied into the export folder by mxcontext.py with CONFIG filled in, so the agen
                                       (for addWidgets / changeWidget / deleteWidget / moveWidget)
     python mx.py widgettype [name]   pluggable widgets in widgets/*.mpk; with a name: its properties, types, defaults
                                       (for { "widget": "pluggable", "type": ..., "properties": ... })
+    python mx.py mapping-test <Module.ImportMapping> <sample.json>
+                                      what a sample JSON would make with an import mapping (objects, values, find or
+                                      create, type problems); static, read-only; the file may be in edits/
     python mx.py texts [Module[.Doc]] [--missing <lang>]
                                       translatable texts in every project language (for setTranslations)
     python mx.py ops [name]           the operations a change file can use; with a name: its fields
@@ -58,7 +61,7 @@ for stream in (sys.stdout, sys.stderr):
     except (AttributeError, ValueError):
         pass
 EDITS = os.path.join(HERE, "edits")
-COMMANDS = ("refresh", "find", "usages", "unused", "steps", "widgets", "widgettype", "texts", "ops", "api", "dryrun", "rerun", "gap", "apply", "undo", "check", "ok",
+COMMANDS = ("refresh", "find", "usages", "unused", "steps", "widgets", "widgettype", "mapping-test", "texts", "ops", "api", "dryrun", "rerun", "gap", "apply", "undo", "check", "ok",
             "selftest", "mergecheck", "mergefix", "clean")
 last_output = ""
 
@@ -272,6 +275,11 @@ def main(argv):
         return mxlocal("widgets", rest[0])
     if cmd == "widgettype":
         return mxlocal("widgettype", *([" ".join(rest)] if rest else []))
+    if cmd == "mapping-test":
+        if len(rest) < 2:
+            say("Usage: python mx.py mapping-test <Module.ImportMapping> <sample.json> (the file may be in edits/)")
+            return 1
+        return mxlocal("mapping-test", rest[0], "--json", change_file(rest[1]))
     if cmd == "texts":
         missing = rest[rest.index("--missing") + 1:rest.index("--missing") + 2] if "--missing" in rest else []
         scope = [a for i, a in enumerate(rest) if not a.startswith("--") and (i == 0 or rest[i - 1] != "--missing")][:1]

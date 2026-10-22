@@ -373,7 +373,7 @@ function makeXml(h) {
         createXmlImportMapping: o => mappingCheck(o, im.ImportMapping),
         createXmlExportMapping: o => mappingCheck(o, em.ExportMapping)
     };
-    return { impl, checks };
+    return { impl, checks, internals: { source, definitionTree } };
 }
 
 module.exports = { makeXml, XML_OPS, parseXml, xsdTree };

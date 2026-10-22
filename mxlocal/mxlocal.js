@@ -57,6 +57,9 @@ const USAGE = `mxlocal - Mendix Model SDK offline on a local .mpr (v2)
                                         (entry points excluded): "probably unused", never deleted automatically
   node mxlocal.js steps <Module.Flow> --project <app.mpr|folder>
                                         the steps of a microflow/nanoflow with ids (for changeAction/deleteAction)
+  node mxlocal.js mapping-test <Module.ImportMapping> --json <sample.json> --project <app.mpr|folder>
+                                        what a sample JSON would make with an import mapping (objects, attributes,
+                                        find/create, type problems, keys not mapped); a static simulation, read-only
   node mxlocal.js widgets <Module.Page> --project <app.mpr|folder>
                                         the widget tree of a page or snippet: names, kinds, entity, where new
                                         widgets can go (for addWidgets/changeWidget/deleteWidget/moveWidget)
@@ -544,6 +547,13 @@ async function main() {
         const client = new LocalClient(ctx);
         const model = await client.open();
         out(await require("./ops").bind(model, client).steps(a._[1]));
+    } else if (cmd === "mapping-test") {
+        if (!a._[1] || !a.json || a.json === true) throw new Error("mapping-test needs an import mapping and a sample file, e.g. mapping-test Sales.IMM_Order --json sample.json");
+        const text = fs.readFileSync(path.resolve(a.json), "utf8");
+        const ctx = await loadProject(mpr);
+        const client = new LocalClient(ctx);
+        const model = await client.open();
+        out(await require("./ops").bind(model, client).mappingTest(a._[1], text));
     } else if (cmd === "widgets") {
         if (!a._[1]) throw new Error("widgets needs a page or snippet, e.g. widgets Module.Customer_Edit");
         const ctx = await loadProject(mpr);
