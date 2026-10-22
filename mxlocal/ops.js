@@ -28,7 +28,7 @@ const { makeXml, XML_OPS } = require("./ops-xml");
 const { makeRefOps, REF_OPS } = require("./ops-refs");
 const { makeCopy, COPY_OPS } = require("./ops-copy");
 const { makeEntity, ENTITY_OPS } = require("./ops-entity");
-const { makeWorkflows, WORKFLOW_OPS, USER_TASK_PAGE_FIELDS, SYSTEM_ENTITIES, STEP_FIELDS, STEP_COMMON } = require("./ops-workflows");
+const { makeWorkflows, workflowChangedLater, WORKFLOW_OPS, USER_TASK_PAGE_FIELDS, SYSTEM_ENTITIES, STEP_FIELDS, STEP_COMMON } = require("./ops-workflows");
 const { makeScaffold, SCAFFOLD_OPS, SCAFFOLD_SYNONYMS } = require("./ops-scaffold");
 const { makeSmall, smallChangedLater, SMALL_OPS, SMALL_SYNONYMS } = require("./ops-small");
 const { makeOffline, OFFLINE_OPS } = require("./ops-offline");
@@ -1084,6 +1084,8 @@ function bind(model, client) {
         ...offlineOps.checks,
         ...dmLayout.checks,
         createWorkflow: o => workflowOps.checks.createWorkflow(o),
+        changeWorkflow: o => workflowOps.checks.changeWorkflow(o),
+        deleteWorkflowActivity: o => workflowOps.checks.deleteWorkflowActivity(o),
         createPage: o => (o.kind === "userTaskPage" ? workflowOps.checks.userTaskPage(o) : pageOps.checks.createPage(o))
     };
 
@@ -1136,7 +1138,7 @@ function bind(model, client) {
             const mine = PAGE_EDIT_NAMES.includes(name) ? pageEdit.touched(o) : [];
             const undoes = x => ["deleteWidget", "moveWidget"].includes(x.op) || (x.op === "changeWidget" && (x.name !== undefined || name === "changeWidget"));
             const reworked = mine.length && rest.some(x => x.page === o.page && undoes(x) && pageEdit.touched(x).some(n => mine.includes(n)));
-            if ((later && name !== "rename" && name !== "delete") || edited || undone || reworked || changedLater(name, o, rest) || smallChangedLater(name, o, rest)) continue;
+            if ((later && name !== "rename" && name !== "delete") || edited || undone || reworked || changedLater(name, o, rest) || smallChangedLater(name, o, rest) || workflowChangedLater(name, o, rest)) continue;
             try {
                 failed.push(...(await checks[name](name === "setTranslations" ? o : await textOps.prepare(o, false))).map(f => `${i + 1}. ${name}: ${f}`));
             } catch (e) {
