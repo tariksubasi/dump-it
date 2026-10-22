@@ -1383,6 +1383,8 @@ Native pages:
 - `showPage` on a native page opens only native pages; a web page cannot open a native page.
 - `callMicroflow` on a native page gives a warning: it needs a connection. Prefer `callNanoflow`.
 - `addWidgets`, `changeWidget`, `moveWidget`, `deleteWidget` work on native pages as on web pages.
+- Native snippets: `createSnippet` with `"native": true`. A native page shows only native snippets (`snippetCall`),
+  a web page only web snippets.
 - `"class"` and `"design"` on its widgets: design properties come from the `native/design-properties.json` files.
 
 The dry run shows **NATIVE STYLE CHECK** lines (warnings): a changed JS file that does not parse, a style key React

@@ -3221,6 +3221,9 @@ function makePages(h) {
             if (!(sn instanceof pages.Snippet)) return fail(`${node.where}: '${qn}' is a ${sn.structureTypeName.split("$")[1]}, not a snippet`, qn, snippets());
             if (ctx.page === sn) throw new Error(`${node.where}: a snippet cannot show itself`);
             const full = sn.isLoaded ? sn : await sn.load();
+            // native pages show native snippets, web pages web ones
+            const tn = require("./theme-native");
+            if (ctx.page && tn.isNativeDoc(client, ctx.page) !== tn.isNativeDoc(client, full)) throw new Error(`${node.where}: ${qn} is a ${tn.isNativeDoc(client, full) ? "native" : "web"} snippet; a ${tn.isNativeDoc(client, ctx.page) ? "native" : "web"} ${ctx.page instanceof pages.Snippet ? "snippet" : "page"} shows only ${tn.isNativeDoc(client, ctx.page) ? "native snippets (createSnippet \"native\": true)" : "web snippets"}`);
             const params = pageParams(full);
             if (params.some(p => !p.entity) && node.spec.params === undefined) throw new Error(`${node.where}: ${qn} has parameter(s) ${params.map(p => `${p.name} (${p.type})`).join(", ")}; give "params"`);
             const mapped = await mapParams(node.spec.params, params, node, ctx, qn, "snippet");

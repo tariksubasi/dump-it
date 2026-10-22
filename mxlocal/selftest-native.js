@@ -177,6 +177,9 @@ function nativePlan(mod, T, x) {
             { op: "addWidgets", page, into: "zzNatCard", widgets: [{ widget: "text", name: "zzNatAdd", text: "Added" }, { widget: "text", name: "zzNatTmp", text: "Tmp" },
                 ...(x.nativePl ? [{ widget: "pluggable", name: "zzNatPl", type: x.nativePl, properties: {} }] : [])] },
             ...(x.popup ? [{ op: "createPage", module: mod, name: `${T}_NativePop`, native: "popup", folder: "ZzNative", entity: `${mod}.${T}NatE` }] : []),
+            // a native snippet shown on the native page (N5)
+            { op: "createSnippet", module: mod, name: `${T}_NatSnippet`, native: true, folder: "ZzNative", widgets: [{ widget: "text", name: "zzNatSnText", text: "In a snippet" }] },
+            { op: "addWidgets", page, into: "zzNatCard", widgets: [{ widget: "snippetCall", name: "zzNatSnCall", snippet: `${mod}.${T}_NatSnippet` }] },
             { op: "moveWidget", page, widget: "zzNatAdd", before: "zzNatText" },
             { op: "deleteWidget", page, widget: "zzNatTmp" }
         );
@@ -188,6 +191,7 @@ function nativePlan(mod, T, x) {
         );
         if (x.webPage) refuse.push([{ op: "addWidgets", page, into: "zzNatCard", widgets: [{ widget: "actionButton", caption: "W", action: "showPage", page: x.webPage }] }, /is a web page; a native page opens only native pages/],
             [{ op: "addWidgets", page: x.webPage, widgets: [{ widget: "actionButton", caption: "N", action: "showPage", page }] }, /is a native page; a web page cannot open it/]);
+        if (x.webPage) refuse.push([{ op: "addWidgets", page: x.webPage, widgets: [{ widget: "snippetCall", snippet: `${mod}.${T}_NatSnippet` }] }, /is a native snippet; a web page shows only web snippets/]);
         if (x.webPl) refuse.push([{ op: "addWidgets", page, into: "zzNatCard", widgets: [{ widget: "pluggable", type: x.webPl, properties: {} }] }, /is a web widget; a native page takes native pluggable widgets/]);
         if (x.nativePl && x.webPage) refuse.push([{ op: "addWidgets", page: x.webPage, widgets: [{ widget: "pluggable", type: x.nativePl, properties: {} }] }, /is a native widget; it goes on a native page/]);
     }
@@ -271,6 +275,12 @@ function nativeProblems(project, mod, T, x, plan) {
         const bad = Object.entries(want).filter(([n, t]) => !types[n] || types[n].$Type !== t).map(([n, t]) => `${n} (${types[n] ? types[n].$Type : "missing"}, want ${t})`);
         say(!bad.length, `native page widget kinds not stored: ${bad.join(", ")}`);
         say(types.zzNatPaid && types.zzNatPaid.ConditionalVisibilitySettings, "conditional visibility on a native check box not stored");
+        let sn = null;
+        for (const id of project.units.keys()) {
+            const p = project.read(id);
+            if (p.$Type === "Forms$Snippet" && p.Name === `${T}_NatSnippet`) sn = p;
+        }
+        say(sn && sn.Type === "Native" && named.zzNatSnCall && named.zzNatSnCall.$Type === "Forms$SnippetCallWidget", `native snippet / snippet call not stored: ${sn ? sn.Type : "missing"}`);
         if (x.popup) {
             let pop = null;
             for (const id of project.units.keys()) {
@@ -336,7 +346,7 @@ async function nativePhase({ s2, reopen, copy, src, mod, T, layout, layoutProble
     const what = ["setNativeVariables (value, light/dark, reference)", "setNativeTokens (colour scales, spacing, radius, font sizes + line heights, elevation, dark mode)",
         x.own && "addNativeStyle (elevation level, theme variables, button)", x.own && "addNativeDesignProperty", plan.page && "native page with classes" + (x.own ? " + native design (createPage, changeWidget)" : ""),
         plan.page && "every core native widget kind (text area, drop-down, radio buttons, date picker, check box with visibility, reference selector, tab container, layout grid)",
-        plan.page && `addWidgets / moveWidget / deleteWidget on a native page${x.nativePl ? `, native pluggable ${x.nativePl.split(".").pop()}` : ""}${x.popup ? ", native pop-up page" : ""}`,
+        plan.page && `addWidgets / moveWidget / deleteWidget on a native page${x.nativePl ? `, native pluggable ${x.nativePl.split(".").pop()}` : ""}${x.popup ? ", native pop-up page" : ""}, native snippet + snippet call`,
         plan.page && "NATIVE STYLE CHECK", `${plan.refuse.length} refusals (web CSS, web-only widgets and actions, native / web page mix)`].filter(Boolean);
     if (plan.page && !x.nativePl) results.push("SKIP native: native pluggable widget: no com.mendix.widget.native.* in widgets/");
     if (made) results.push("NOTE native: no native theme in this project; an empty theme/native/custom-variables.js was made in the copy");
