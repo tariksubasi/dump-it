@@ -26,6 +26,9 @@ Copied into the export folder by mxcontext.py with CONFIG filled in, so the agen
                                       (STUDIO PRO CHECK: mx check on a copy, errors the change added are NEW)
     python mx.py undo [--force]       restore the model from before the last apply (Studio Pro closed), re-export;
                                       --force only when the user agrees to lose later changes it lists
+    python mx.py undoplan [backup] [--op 2,5]
+                                      selective undo: the inverse ops of the last (or given) apply, or of some of its
+                                      ops, as edits/undo-<backup>.json and a dry run (approval code); later work stays
     python mx.py check                STUDIO PRO CHECK: Studio Pro's own consistency check (mx check, the Errors pane)
                                       on a temporary copy of the saved model; read-only (needs Studio Pro / MX_PATH)
     python mx.py ok "<summary>"       mark the current export as the checked state (git commit)
@@ -58,7 +61,7 @@ for stream in (sys.stdout, sys.stderr):
     except (AttributeError, ValueError):
         pass
 EDITS = os.path.join(HERE, "edits")
-COMMANDS = ("refresh", "find", "usages", "unused", "steps", "widgets", "widgettype", "texts", "ops", "api", "dryrun", "rerun", "gap", "apply", "undo", "check", "ok",
+COMMANDS = ("refresh", "find", "usages", "unused", "steps", "widgets", "widgettype", "texts", "ops", "api", "dryrun", "rerun", "gap", "apply", "undo", "undoplan", "check", "ok",
             "selftest", "mergecheck", "mergefix", "clean")
 last_output = ""
 
@@ -315,6 +318,15 @@ def main(argv):
         if code:
             return code
         return refresh()
+    if cmd == "undoplan":
+        names = [a for a in rest if not a.startswith("--")]
+        op = rest[rest.index("--op") + 1] if "--op" in rest and rest.index("--op") + 1 < len(rest) else None
+        if op in names:
+            names.remove(op)
+        code = mxlocal("undo", *names[:1], *(["--op", op] if op else []), "--out", os.path.join(EDITS, "undo-%s.json" % (names[0] if names else "last")))
+        m = re.search(r"Approval code: (\w+)", last_output)
+        journal(cmd="undoplan", backup=names[0] if names else None, ops=op, code=m.group(1) if m else None, ok=code == 0)
+        return code
     if cmd == "check":
         return mx_check()
     if cmd == "ok":
