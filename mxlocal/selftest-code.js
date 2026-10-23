@@ -546,7 +546,9 @@ async function codePhase(x) {
         const native = profiles.find(p => p.$Type === "Navigation$NativeNavigationProfile");
         await refuse({ ops: [{ op: "deleteNavigationProfile", profile: "Responsive" }] }, /REFUSED: the Responsive profile/, "deleting the Responsive profile");
         await refuse({ ops: [{ op: "changeNavigationProfile", profile: "Responsive", ota: true }] }, /option of the native profile/, "a native option on a web profile");
-        const kind = ["Phone", "Tablet", "PhoneOffline", "TabletOffline"].find(k => !profiles.some(p => p.Kind === k));
+        // one profile per device type (Phone and PhoneOffline are the same device)
+        const kind = ["Phone", "Tablet"].find(k => !profiles.some(p => String(p.Kind || "").startsWith(k)));
+        if (!kind) results.push("SKIP M12 deleteNavigationProfile: this project has a phone and a tablet profile");
         if (kind) await block(`M12 setup: a ${kind} profile`, { ops: [{ op: "createNavigationProfile", kind }] }, () => []);
         await block(`M12 navigation profiles: createNavigationProfile + deleteNavigationProfile (${kind || "none free"})${native ? ", changeNavigationProfile native options (OTA, logging, timeout, transition)" : ""}`, { ops: [
             ...(kind ? [{ op: "deleteNavigationProfile", profile: kind }] : []),
