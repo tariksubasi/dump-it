@@ -1,5 +1,5 @@
 {
-  "note": "Natural-language requests for scripts/../eval/run.js. setup: ops applied before the agent starts. checks: find = names that must exist after apply, absent = names that must not, files = { path regex in the export : text regex that must appear }, gap = the agent must record a gap instead of a change.",
+  "note": "Natural-language requests for scripts/../eval/run.js. setup: ops applied before the agent starts. checks: find = names that must exist after apply, absent = names that must not, files = { path regex in the export : text regex that must appear }, gap = the agent must record a gap instead of a change. ops = the operations a good answer uses (eval/run.js --coverage lists ops no request uses); families = extra op families the request tests (error handling, native, ...).",
   "baseSetup": [
     {
       "op": "createEntity",
@@ -73,7 +73,10 @@
         "find": [
           "MyFirstModule.Order.CreatedOn"
         ]
-      }
+      },
+      "ops": [
+        "addAttribute"
+      ]
     },
     {
       "id": "entity",
@@ -87,7 +90,11 @@
         "files": {
           "domain-model\\.txt$": "Order_Product|Product_Order"
         }
-      }
+      },
+      "ops": [
+        "createEntity",
+        "addAssociation"
+      ]
     },
     {
       "id": "enum",
@@ -99,7 +106,11 @@
         "files": {
           "_module\\.txt$": "Open.*Paid.*Cancelled"
         }
-      }
+      },
+      "ops": [
+        "createEnumeration",
+        "addAttribute"
+      ]
     },
     {
       "id": "microflow",
@@ -111,7 +122,11 @@
         "files": {
           "ACT_Order_Pay\\.txt$": "(?s)^(?=.*COMMIT)(?=.*Paid = true).*Ödeme alındı"
         }
-      }
+      },
+      "ops": [
+        "createMicroflow",
+        "grantAccess"
+      ]
     },
     {
       "id": "dashboard",
@@ -121,7 +136,14 @@
           "pages/.*\\.txt$": "(?s)(DataGrid|Datagrid).*DataView",
           "overview\\.txt$": "menu \""
         }
-      }
+      },
+      "ops": [
+        "createPage",
+        "addMenuItem"
+      ],
+      "families": [
+        "data widgets"
+      ]
     },
     {
       "id": "security",
@@ -133,7 +155,13 @@
         "files": {
           "overview\\.txt$": "HRManager"
         }
-      }
+      },
+      "ops": [
+        "createModuleRole",
+        "createUserRole",
+        "addModuleRoles",
+        "createDemoUser"
+      ]
     },
     {
       "id": "module",
@@ -145,7 +173,13 @@
         "files": {
           "EmployeeOnboarding/pages/.*\\.txt$": "(?s)(DataGrid|Datagrid).*DataView"
         }
-      }
+      },
+      "ops": [
+        "createModule",
+        "createEntity",
+        "createPage",
+        "addMenuItem"
+      ]
     },
     {
       "id": "rename",
@@ -157,7 +191,10 @@
         "absent": [
           "MyFirstModule.Order.Total"
         ]
-      }
+      },
+      "ops": [
+        "rename"
+      ]
     },
     {
       "id": "validation",
@@ -166,7 +203,10 @@
         "files": {
           "domain-model\\.txt$": "E-posta gerekli"
         }
-      }
+      },
+      "ops": [
+        "addValidationRule"
+      ]
     },
     {
       "id": "form",
@@ -176,7 +216,11 @@
           "MyFirstModule.Customer_Edit",
           "MyFirstModule.NF_Customer_Open"
         ]
-      }
+      },
+      "ops": [
+        "createPage",
+        "createNanoflow"
+      ]
     },
     {
       "id": "pageedit",
@@ -193,7 +237,11 @@
         "files": {
           "Customer_Edit\\.txt$": "(?s)^(?=.*Bilgileri kontrol edin)(?=.*Email\"[^\\n]*read-only)"
         }
-      }
+      },
+      "ops": [
+        "changeWidget",
+        "addWidgets"
+      ]
     },
     {
       "id": "listflow",
@@ -205,7 +253,10 @@
         "files": {
           "ACT_Order_OpenBalance\\.txt$": "(?s)^(?=.*(Sum|sum|SUM))(?=.*Açık bakiye)"
         }
-      }
+      },
+      "ops": [
+        "createMicroflow"
+      ]
     },
     {
       "id": "tabs",
@@ -217,7 +268,10 @@
         "files": {
           "Customer_Detail\\.txt$": "(?s)^(?=.*TabContainer)(?=.*Genel)(?=.*Siparişler)"
         }
-      }
+      },
+      "ops": [
+        "createPage"
+      ]
     },
     {
       "id": "json",
@@ -226,7 +280,14 @@
         "files": {
           ".*\\.txt$": "(?s)^(?=.*import mapping|.*ImportMapping)(?=.*customer)"
         }
-      }
+      },
+      "ops": [
+        "createJsonStructure",
+        "createImportMapping"
+      ],
+      "families": [
+        "mapping"
+      ]
     },
     {
       "id": "translate",
@@ -243,7 +304,11 @@
         "files": {
           "Customer_Edit\\.txt$": "Müşteri Düzenle"
         }
-      }
+      },
+      "ops": [
+        "addLanguage",
+        "setTranslations"
+      ]
     },
     {
       "id": "masterlines",
@@ -287,7 +352,10 @@
         "files": {
           "Order_Lines\\.txt$": "(?s)^(?=.*data: association MyFirstModule\\.OrderLine_Order)(?=.*TextBox[^\\n]*attr Quantity)(?=.*save changes)"
         }
-      }
+      },
+      "ops": [
+        "createPage"
+      ]
     },
     {
       "id": "gridselection",
@@ -318,7 +386,10 @@
         "files": {
           "Order_Overview\\.txt$": "(?s)^(?=.*Multi)(?=.*Ödendi işaretle[^\\n]*ACT_Orders_MarkPaid)"
         }
-      }
+      },
+      "ops": [
+        "createPage"
+      ]
     },
     {
       "id": "dsmicroflow",
@@ -354,7 +425,10 @@
         "files": {
           "Customer_Summary\\.txt$": "(?s)^(?=.*data: microflow MyFirstModule\\.DS_Customer_LastOrder)(?=.*attr Total)"
         }
-      }
+      },
+      "ops": [
+        "createPage"
+      ]
     },
     {
       "id": "enumswitch",
@@ -385,7 +459,11 @@
         "files": {
           "ACT_Order_Route\\.txt$": "(?s)^(?=.*RUL_Order_IsLarge)(?=.*açık)(?=.*kapalı)(?=.*durum yok)"
         }
-      }
+      },
+      "ops": [
+        "createRule",
+        "createMicroflow"
+      ]
     },
     {
       "id": "javaaction",
@@ -394,7 +472,10 @@
         "find": [
           "MyFirstModule.JA_Order_Hash"
         ]
-      }
+      },
+      "ops": [
+        "createJavaAction"
+      ]
     },
     {
       "id": "calcdelete",
@@ -406,7 +487,11 @@
         "files": {
           "domain-model\\.txt$": "(?s)^(?=.*TotalVat: Decimal \\(calculated by MyFirstModule\\.)(?=.*deleting a Customer is refused while it has a Order \\(\"Bu müşterinin siparişleri var\"\\))"
         }
-      }
+      },
+      "ops": [
+        "addAttribute",
+        "changeAssociation"
+      ]
     },
     {
       "id": "accesssettings",
@@ -419,7 +504,12 @@
           "domain-model\\.txt$": "ACCESS \\[MyFirstModule\\.User\\] (create )?default=ReadOnly\\n    ReadWrite: Note\\n",
           "overview\\.txt$": "(?s)^(?=.*AFTER STARTUP MICROFLOW: MyFirstModule\\.ASU_Startup)(?=.*first day of week=Monday)"
         }
-      }
+      },
+      "ops": [
+        "changeAccessRule",
+        "createMicroflow",
+        "setProjectSettings"
+      ]
     },
     {
       "id": "workflow",
@@ -428,7 +518,11 @@
         "files": {
           "workflows\\.txt$": "(?s)WORKFLOW MyFirstModule\\.\\w+.*context: MyFirstModule\\.Order.*user task.*user task"
         }
-      }
+      },
+      "ops": [
+        "createWorkflow",
+        "createPage"
+      ]
     },
     {
       "id": "restclient",
@@ -441,7 +535,11 @@
           "integrations/.*\\.txt$": "CONSUMED REST SERVICE",
           "ACT_Order_FetchRemote\\.txt$": "SEND REST REQUEST"
         }
-      }
+      },
+      "ops": [
+        "createConsumedRestService",
+        "createMicroflow"
+      ]
     },
     {
       "id": "restpublish",
@@ -451,7 +549,16 @@
           "integrations/.*\\.txt$": "PUBLISHED REST SERVICE",
           "entry-points\\.txt$": "GET /rest/\\S+/orders/\\{Number\\}"
         }
-      }
+      },
+      "ops": [
+        "publishRest",
+        "createJsonStructure",
+        "createExportMapping",
+        "createMicroflow"
+      ],
+      "families": [
+        "mapping"
+      ]
     },
     {
       "id": "dg2filters",
@@ -463,7 +570,13 @@
         "files": {
           "Order_Grid\\.txt$": "(?s)^(?=.*Data grid 2)(?=.*SORT BY Number desc)(?=.*Number filter)(?=.*loadMore)"
         }
-      }
+      },
+      "ops": [
+        "createPage"
+      ],
+      "families": [
+        "data widgets"
+      ]
     },
     {
       "id": "designroles",
@@ -482,7 +595,13 @@
         "files": {
           "Order_Admin\\.txt$": "(?s)^(?=.*Yönetim[^\\n]*design Spacing: margin-top L)(?=.*visible if user has role MyFirstModule\\.Manager)"
         }
-      }
+      },
+      "ops": [
+        "createPage"
+      ],
+      "families": [
+        "design system"
+      ]
     },
     {
       "id": "menureorder",
@@ -521,7 +640,11 @@
         "files": {
           "overview\\.txt$": "(?s)menu \"Müşteriler\" -> open page MyFirstModule\\.Customer_List\\(\\).*\"Orders\" -> open page MyFirstModule\\.Order_List"
         }
-      }
+      },
+      "ops": [
+        "changeMenuItem",
+        "moveMenuItem"
+      ]
     },
     {
       "id": "menudoc",
@@ -543,7 +666,10 @@
         "find": [
           "MyFirstModule.Admin_Menu"
         ]
-      }
+      },
+      "ops": [
+        "createMenu"
+      ]
     },
     {
       "id": "gridpath",
@@ -565,7 +691,10 @@
           "Order_List\\.txt$": "attr MyFirstModule\\.Order_Customer/MyFirstModule\\.Customer/Name",
           "Customer_Detail\\.txt$": "create MyFirstModule\\.Order linked to the object around it over MyFirstModule\\.Order_Customer, open page MyFirstModule\\.Order_NewEdit"
         }
-      }
+      },
+      "ops": [
+        "createPage"
+      ]
     },
     {
       "id": "formvalidation",
@@ -577,7 +706,10 @@
         "files": {
           "Order_Form\\.txt$": "(?s)^(?=.*attr Note[^\\n]*required \\(\"Not gerekli\"\\))(?=.*attr Total[^\\n]*group digits)(?=.*attr Total[^\\n]*validation [^\\n]*\\$value[^\\n]*Toplam negatif olamaz)"
         }
-      }
+      },
+      "ops": [
+        "createPage"
+      ]
     },
     {
       "id": "deleteconfirm",
@@ -589,7 +721,10 @@
         "files": {
           "Order_Cleanup\\.txt$": "microflow MyFirstModule\\.\\w+\\([^)]*\\) \\(asks \"Bu sipariş silinsin mi\\?\"; (blocking|non-blocking) progress"
         }
-      }
+      },
+      "ops": [
+        "createPage"
+      ]
     },
     {
       "id": "topten",
@@ -601,7 +736,10 @@
         "files": {
           "ACT_TopOrders\\.txt$": "RETRIEVE limit 10 offset 0 MyFirstModule\\.Order FROM DATABASE[^\\n]*SORT BY Total DESC"
         }
-      }
+      },
+      "ops": [
+        "createMicroflow"
+      ]
     },
     {
       "id": "crud",
@@ -614,7 +752,10 @@
         "files": {
           "Customer_Overview\\.txt$": "MyFirstModule\\.Customer_NewEdit"
         }
-      }
+      },
+      "ops": [
+        "createCrud"
+      ]
     },
     {
       "id": "addparam",
@@ -689,7 +830,10 @@
           "ACT_Order_Batch\\.txt$": "Reason",
           "Order_Process\\.txt$": "Reason"
         }
-      }
+      },
+      "ops": [
+        "changeMicroflow"
+      ]
     },
     {
       "id": "copypage",
@@ -732,7 +876,10 @@
         "files": {
           "Invoice_NewEdit\\.txt$": "MyFirstModule\\.Invoice"
         }
-      }
+      },
+      "ops": [
+        "copyDocument"
+      ]
     },
     {
       "id": "xpathtypo",
@@ -744,7 +891,10 @@
         "files": {
           "ACT_Order_Unpaid\\.txt$": "MyFirstModule\\.Order_Customer/MyFirstModule\\.Customer/Name = 'ACME'[^\\n]*Total > 100|Total > 100[^\\n]*MyFirstModule\\.Order_Customer/MyFirstModule\\.Customer/Name = 'ACME'"
         }
-      }
+      },
+      "ops": [
+        "createMicroflow"
+      ]
     },
     {
       "id": "exprtype",
@@ -756,7 +906,10 @@
         "files": {
           "ACT_Order_Note\\.txt$": "Note[^\\n]*Toplam"
         }
-      }
+      },
+      "ops": [
+        "createMicroflow"
+      ]
     },
     {
       "id": "gridcustomerfilter",
@@ -768,7 +921,13 @@
         "files": {
           "Order_ByCustomer\\.txt$": "(?s)^(?=.*Data grid 2)(?=.*refEntity: association MyFirstModule\\.Order_Customer)(?=.*multiSelect: true)(?=.*alignment: right)"
         }
-      }
+      },
+      "ops": [
+        "createPage"
+      ],
+      "families": [
+        "data widgets"
+      ]
     },
     {
       "id": "gridsearchbox",
@@ -780,7 +939,10 @@
         "files": {
           "Order_Search2\\.txt$": "(?s)^(?=.*Data grid 2)(?=.*attrChoice: linked)(?=.*'Ara')"
         }
-      }
+      },
+      "ops": [
+        "createPage"
+      ]
     },
     {
       "id": "uilook",
@@ -800,7 +962,10 @@
         "files": {
           "Order_Card\\.txt$": "(?s)^(?=.*icon glyphicon-pencil[^\\n]*icon only[^\\n]*tooltip \"Düzenle\")(?=.*Hide on: Phone)(?=.*screen reader text \"Sipariş notu\")(?=.*dynamic class [^\\n]*Paid[^\\n]*paid)"
         }
-      }
+      },
+      "ops": [
+        "createPage"
+      ]
     },
     {
       "id": "uitheme",
@@ -821,6 +986,463 @@
       "checks": {
         "files": {
           "Order_List\\.txt$": "(?s)Kart stili: Yükseltilmiş.*Siparişler|Siparişler.*Kart stili: Yükseltilmiş"
+        }
+      },
+      "ops": [
+        "setThemeVariable",
+        "addDesignProperty",
+        "addWidgets"
+      ],
+      "families": [
+        "design system"
+      ]
+    },
+    {
+      "id": "genwfstep",
+      "setup": [
+        {
+          "op": "createPage",
+          "kind": "userTaskPage",
+          "module": "MyFirstModule",
+          "name": "Order_Review_Task",
+          "outcomes": [
+            "Approve",
+            "Reject"
+          ]
+        },
+        {
+          "op": "createWorkflow",
+          "module": "MyFirstModule",
+          "name": "WF_Order",
+          "context": "MyFirstModule.Order",
+          "steps": [
+            {
+              "step": "userTask",
+              "name": "review",
+              "caption": "Review order",
+              "page": "MyFirstModule.Order_Review_Task",
+              "outcomes": [
+                "Approve",
+                "Reject"
+              ]
+            },
+            {
+              "step": "waitForNotification",
+              "name": "waitDocs"
+            }
+          ]
+        }
+      ],
+      "text": "WF_Order workflow'unda 'review' görevinden sonra siparişi bildiren ACT_Order_Notify microflow'unu çağıran bir adım ekle (microflow Order parametresi alsın ve log yazsın; yoksa oluştur).",
+      "ops": [
+        "changeWorkflow",
+        "createMicroflow"
+      ],
+      "checks": {
+        "find": [
+          "MyFirstModule.ACT_Order_Notify"
+        ],
+        "files": {
+          "workflows\\.txt$": "(?s)WF_Order.*review.*ACT_Order_Notify"
+        }
+      }
+    },
+    {
+      "id": "genwftimeout",
+      "setup": [
+        {
+          "op": "createPage",
+          "kind": "userTaskPage",
+          "module": "MyFirstModule",
+          "name": "Order_Review_Task",
+          "outcomes": [
+            "Approve",
+            "Reject"
+          ]
+        },
+        {
+          "op": "createWorkflow",
+          "module": "MyFirstModule",
+          "name": "WF_Order",
+          "context": "MyFirstModule.Order",
+          "steps": [
+            {
+              "step": "userTask",
+              "name": "review",
+              "caption": "Review order",
+              "page": "MyFirstModule.Order_Review_Task",
+              "outcomes": [
+                "Approve",
+                "Reject"
+              ]
+            },
+            {
+              "step": "waitForNotification",
+              "name": "waitDocs"
+            }
+          ]
+        }
+      ],
+      "text": "WF_Order workflow'undaki 'review' görevine zaman aşımı ekle: 3 gün içinde tamamlanmazsa görev iptal olsun ve workflow bitsin.",
+      "ops": [
+        "changeWorkflow"
+      ],
+      "families": [
+        "error handling"
+      ],
+      "checks": {
+        "files": {
+          "workflows\\.txt$": "(?s)WF_Order.*timer addDays.*interrupting boundary event"
+        }
+      }
+    },
+    {
+      "id": "genwfoutcome",
+      "setup": [
+        {
+          "op": "createPage",
+          "kind": "userTaskPage",
+          "module": "MyFirstModule",
+          "name": "Order_Review_Task",
+          "outcomes": [
+            "Approve",
+            "Reject"
+          ]
+        },
+        {
+          "op": "createWorkflow",
+          "module": "MyFirstModule",
+          "name": "WF_Order",
+          "context": "MyFirstModule.Order",
+          "steps": [
+            {
+              "step": "userTask",
+              "name": "review",
+              "caption": "Review order",
+              "page": "MyFirstModule.Order_Review_Task",
+              "outcomes": [
+                "Approve",
+                "Reject"
+              ]
+            },
+            {
+              "step": "waitForNotification",
+              "name": "waitDocs"
+            }
+          ]
+        }
+      ],
+      "text": "WF_Order'daki review görevinde 'Approve' sonucunun adını 'Accept' yap ve 'Escalate' adında üçüncü bir sonuç ekle; görev sayfasındaki butonlar da buna uysun.",
+      "ops": [
+        "changeWorkflow"
+      ],
+      "checks": {
+        "files": {
+          "workflows\\.txt$": "(?s)WF_Order.*Accept.*Escalate",
+          "Order_Review_Task\\.txt$": "(?s)Accept.*Escalate|Escalate.*Accept"
+        }
+      }
+    },
+    {
+      "id": "genwfdelete",
+      "setup": [
+        {
+          "op": "createPage",
+          "kind": "userTaskPage",
+          "module": "MyFirstModule",
+          "name": "Order_Review_Task",
+          "outcomes": [
+            "Approve",
+            "Reject"
+          ]
+        },
+        {
+          "op": "createWorkflow",
+          "module": "MyFirstModule",
+          "name": "WF_Order",
+          "context": "MyFirstModule.Order",
+          "steps": [
+            {
+              "step": "userTask",
+              "name": "review",
+              "caption": "Review order",
+              "page": "MyFirstModule.Order_Review_Task",
+              "outcomes": [
+                "Approve",
+                "Reject"
+              ]
+            },
+            {
+              "step": "waitForNotification",
+              "name": "waitDocs"
+            }
+          ]
+        }
+      ],
+      "text": "WF_Order workflow'undaki bildirim bekleme adımını (waitDocs) kaldır.",
+      "ops": [
+        "deleteWorkflowActivity"
+      ],
+      "checks": {
+        "files": {
+          "workflows\\.txt$": "(?s)^(?=.*WF_Order)(?!.*waitDocs)"
+        }
+      }
+    },
+    {
+      "id": "genunittestgap",
+      "text": "Order oluşturulunca Total'in 0 olduğunu doğrulayan bir unit test yaz (UnitTesting modülüyle çalışacak şekilde).",
+      "ops": [
+        "createUnitTest"
+      ],
+      "checks": {
+        "gap": true
+      },
+      "note": "the project has no UnitTesting module: createUnitTest refuses with the import hint; the agent records a gap or tells the user to import it"
+    },
+    {
+      "id": "genunittest",
+      "setup": [
+        {
+          "op": "createModule",
+          "name": "UnitTesting"
+        },
+        {
+          "op": "createJavaAction",
+          "module": "UnitTesting",
+          "name": "AssertTrue2",
+          "parameters": [
+            {
+              "name": "valueToAssert",
+              "type": "Boolean"
+            },
+            {
+              "name": "message",
+              "type": "String"
+            }
+          ],
+          "code": "return valueToAssert;",
+          "compile": false
+        }
+      ],
+      "text": "MyFirstModule'e bir unit test ekle: yeni bir Order oluşturup Total'ini 50 yapsın ve Total'in 50 olduğunu 'Toplam 50 olmalı' mesajıyla doğrulasın.",
+      "ops": [
+        "createUnitTest"
+      ],
+      "families": [
+        "tests"
+      ],
+      "checks": {
+        "files": {
+          "Test_\\w+\\.txt$": "(?s)AssertTrue2.*Toplam 50 olmal"
+        }
+      }
+    },
+    {
+      "id": "genmoveattr",
+      "setup": [
+        {
+          "op": "createEntity",
+          "module": "MyFirstModule",
+          "name": "Party",
+          "attributes": [
+            {
+              "name": "Name",
+              "type": "String(200)"
+            }
+          ]
+        },
+        {
+          "op": "createEntity",
+          "module": "MyFirstModule",
+          "name": "Person",
+          "generalization": "MyFirstModule.Party",
+          "attributes": [
+            {
+              "name": "Phone",
+              "type": "String(50)"
+            }
+          ]
+        }
+      ],
+      "text": "Person entity'sindeki Phone alanını üst entity'si Party'ye taşı (bütün Party'lerde olsun). Mevcut telefon verileri önemli değil, silinebilir.",
+      "ops": [
+        "moveAttribute"
+      ],
+      "checks": {
+        "find": [
+          "MyFirstModule.Party.Phone"
+        ],
+        "absent": [
+          "MyFirstModule.Person.Phone"
+        ]
+      }
+    },
+    {
+      "id": "genjavacode",
+      "setup": [
+        {
+          "op": "createJavaAction",
+          "module": "MyFirstModule",
+          "name": "JA_Text_Upper",
+          "parameters": [
+            {
+              "name": "Input",
+              "type": "String"
+            }
+          ],
+          "returns": "String"
+        }
+      ],
+      "text": "JA_Text_Upper Java action'ının kodunu yaz: Input'u büyük harfe çevirip döndürsün, Input boşsa boş metin döndürsün.",
+      "ops": [
+        "setJavaActionCode"
+      ],
+      "families": [
+        "code"
+      ],
+      "checks": {
+        "find": [
+          "MyFirstModule.JA_Text_Upper"
+        ]
+      }
+    },
+    {
+      "id": "genchain",
+      "text": "Ödeme hatırlatmaları için PaymentReminder entity'si yap (DueDate tarih, Sent evet/hayır, Order ile ilişkili). Hatırlatmaları listeleyen PaymentReminder_Overview sayfası ve menü öğesi olsun; her gün 08:00'de çalışıp gönderilmemişleri log'layan ACT_SendReminders microflow'u ve zamanlanmış olayı ekle.",
+      "ops": [
+        "createEntity",
+        "addAssociation",
+        "createPage",
+        "addMenuItem",
+        "createMicroflow",
+        "createScheduledEvent"
+      ],
+      "checks": {
+        "find": [
+          "MyFirstModule.PaymentReminder.DueDate",
+          "MyFirstModule.PaymentReminder_Overview",
+          "MyFirstModule.ACT_SendReminders"
+        ]
+      }
+    },
+    {
+      "id": "generrflow",
+      "text": "ACT_Order_SafeCommit microflow'unu yaz: Order parametresi alsın ve commit etsin; commit hata verirse geri almadan 'Kayıt başarısız' diye Error seviyesinde log yazıp false döndürsün, başarılıysa true döndürsün.",
+      "ops": [
+        "createMicroflow"
+      ],
+      "families": [
+        "error handling"
+      ],
+      "checks": {
+        "find": [
+          "MyFirstModule.ACT_Order_SafeCommit"
+        ],
+        "files": {
+          "ACT_Order_SafeCommit\\.txt$": "(?s)COMMIT.*(on error|ON ERROR|error handler).*Kay[ıi]t ba[şs]ar[ıi]s[ıi]z"
+        }
+      }
+    },
+    {
+      "id": "gennativesync",
+      "text": "Native (offline) uygulamada Order'lar sadece giriş yapan kullanıcının kendi siparişleri olarak senkronize edilsin (Owner = current user).",
+      "ops": [
+        "setOfflineSync"
+      ],
+      "families": [
+        "native"
+      ],
+      "checks": {
+        "files": {
+          "overview\\.txt$": "(?s)(sync|Sync).*MyFirstModule\\.Order"
+        }
+      },
+      "note": "a project without an offline/native profile: the op refuses and the agent records a gap"
+    },
+    {
+      "id": "gennativepage",
+      "text": "Telefon uygulaması (native) için siparişleri Number ve Total ile listeleyen Order_NativeList sayfası yap ve native alt menüye ekle.",
+      "ops": [
+        "createPage",
+        "addMenuItem"
+      ],
+      "families": [
+        "native"
+      ],
+      "checks": {
+        "find": [
+          "MyFirstModule.Order_NativeList"
+        ]
+      }
+    },
+    {
+      "id": "genexportmap",
+      "text": "Order'ı şu JSON'a çeviren bir export mapping oluştur (JSON structure dahil): {\"number\": 12, \"total\": 99.5, \"paid\": true}",
+      "ops": [
+        "createJsonStructure",
+        "createExportMapping"
+      ],
+      "families": [
+        "mapping"
+      ],
+      "checks": {
+        "files": {
+          ".*\\.txt$": "(?s)^(?=.*(export mapping|ExportMapping))(?=.*total)"
+        }
+      }
+    },
+    {
+      "id": "gencssclass",
+      "setup": [
+        {
+          "op": "createPage",
+          "module": "MyFirstModule",
+          "name": "Order_List",
+          "entity": "MyFirstModule.Order",
+          "widgets": [
+            {
+              "widget": "container",
+              "name": "listBox",
+              "widgets": [
+                {
+                  "widget": "text",
+                  "text": "Siparişler"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "text": "Temaya 'kart-golge' adında bir CSS sınıfı ekle (beyaz zemin, 8px köşe yuvarlaklığı, hafif gölge) ve Order_List sayfasındaki listBox container'ına bu sınıfı ver.",
+      "ops": [
+        "addCssClass",
+        "changeWidget"
+      ],
+      "families": [
+        "design system"
+      ],
+      "checks": {
+        "files": {
+          "Order_List\\.txt$": "kart-golge"
+        }
+      }
+    },
+    {
+      "id": "gendg2",
+      "text": "Order_Table sayfası yap: siparişleri Data grid 2 ile Number, Total ve Paid kolonlarıyla listele, sayfada 20 satır olsun; seçilen siparişin detayı yanında salt okunur görünsün.",
+      "ops": [
+        "createPage"
+      ],
+      "families": [
+        "data widgets"
+      ],
+      "checks": {
+        "find": [
+          "MyFirstModule.Order_Table"
+        ],
+        "files": {
+          "Order_Table\\.txt$": "(?s)Data grid 2.*DataView"
         }
       }
     }
