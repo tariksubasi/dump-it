@@ -189,4 +189,164 @@ async function flowsPhase({ copy, mod, T, reopen, layout, layoutProblems, file }
     return { problems: [...new Set(problems)], ops: p1.ops.length + p2.ops.length };
 }
 
-module.exports = { flowsPhase };
+// ------------------------------------------------ phase E: error handling (flow-errors.js)
+// Handlers on actions and loops, the recipes (logAndShow, retry, storeError, rethrow), 'error' with a message, then
+// changeAction onError (replace, remove), addActions into a handler (handlerOf, after a step in it), deleteAction of a
+// step with a handler and of a step inside one; refusals (nanoflow rollback, error outside a handler, $latestError
+// outside a handler, retry of a step that makes a variable, continue on a loop, handlerOf without handler); steps
+// shows the handler branches and FLOW CHECK; the dry run FLOW CHECK; stored, reopened with 0 errors and 0 deltas.
+function errorPlan(mod, T) {
+    const E = `${mod}.${T}`;
+    const rest = (extra = {}) => ({ action: "callRest", url: "https://api.example.com/err", ...extra });
+    return { ops: [
+        { op: "createEntity", module: mod, name: `${T}ErrLog`, attributes: [{ name: "Message", type: "String(2000)" }, { name: "Stacktrace", type: "String(unlimited)" }, { name: "ErrorType", type: "String" }, { name: "Microflow", type: "String" }, { name: "Date", type: "DateTime" }] },
+        { op: "createEntity", module: mod, name: `${T}ErrItem`, attributes: [{ name: "Name", type: "String" }] },
+        { op: "createMicroflow", module: mod, name: `${T}_ErrSub`, folder: "ZzErr", actions: [{ action: "log", message: "sub" }] },
+        { op: "createMicroflow", module: mod, name: `${T}_Err`, folder: "ZzErr", actions: [
+            { action: "retrieve", variable: "All", entity: `${E}ErrItem` },
+            rest({ onError: "logAndShow", caption: "Zz rest show" }),
+            { action: "loop", over: "All", item: "It", actions: [{ action: "commit", variable: "It" }], onError: { actions: [{ action: "log", message: "loop failed {1}", args: ["$latestError/Message"], level: "Error" }] } },
+            { action: "loop", over: "All", item: "It2", actions: [{ action: "commit", variable: "It2" }] },
+            rest({ onError: { pattern: "retry", times: 3, log: "zz gave up" }, caption: "Zz rest retry" }),
+            { action: "call", microflow: `${E}_ErrSub`, onError: { pattern: "storeError", entity: `${E}ErrLog` }, caption: "Zz call store" },
+            { action: "commit", variable: "All", onError: "rethrow", caption: "Zz commit rethrow" },
+            { action: "log", message: "zz main", caption: "Zz log custom", onError: { rollback: false, actions: [{ action: "log", message: "zz {1}", args: ["$latestError/Message"], stackTrace: true }, { action: "error", message: "zz custom fail {1}", args: ["$latestError/Stacktrace"] }] } },
+            rest({ caption: "Zz rest bare" })] },
+        { op: "createNanoflow", module: mod, name: `${T}_ErrNano`, folder: "ZzErr", actions: [
+            { action: "create", variable: "N", entity: `${E}ErrItem`, commit: true, onError: "logAndShow" },
+            { action: "call", microflow: `${E}_ErrSub`, onError: { pattern: "storeError", entity: `${E}ErrLog`, message: "Zz saved the error" } },
+            { action: "commit", variable: "N", onError: { actions: [{ action: "message", type: "Warning", text: "zz nano failed" }] } }] }
+    ] };
+}
+
+async function errorsPhase({ copy, mod, T, reopen, layout, layoutProblems }) {
+    const problems = [];
+    const E = `${mod}.${T}`;
+    const qn = `${E}_Err`;
+    let s = await reopen(copy);
+    const p1 = errorPlan(mod, T);
+    const lint1 = await s.ops.runPlan(p1, () => {});
+    // the steps of the new flow: ids by what they do
+    const idIn = (text, re, after = null) => {
+        const lines = text.split("\n");
+        const from = after ? lines.findIndex(l => after.test(l)) : 0;
+        const l = lines.slice(Math.max(0, from)).find(x => re.test(x));
+        if (!l) throw new Error(`selftest: no step ${re} in ${qn}:\n${text}`);
+        return [...l.matchAll(/\[([0-9a-f]{8})\]/g)].pop()[1];
+    };
+    const st1 = await s.ops.steps(qn);
+    for (const want of [/\[on error of [0-9a-f]{8}\] /, /\{on error: custom handler with rollback\}/, /\{on error: custom handler without rollback\}/, /WHILE \$RetryCount < 3/, /ERROR$/m])
+        if (!want.test(st1)) problems.push(`steps ${qn} lacks ${want}`);
+    const ids = {
+        restShow: idIn(st1, /REST GET .*\{on error/),
+        showMsg: idIn(st1, /MESSAGE Error/),
+        loop: idIn(st1, /LOOP \$It IN \$All/),
+        loopLog: idIn(st1, /LOG Error 'loop failed/),
+        call: idIn(st1, /CALL .*_ErrSub/),
+        commit: idIn(st1, /COMMIT \$All/),
+        logCustom: idIn(st1, /LOG Info 'zz main'/),
+        retrieve: idIn(st1, /RETRIEVE \$All/)
+    };
+    const p2 = { ops: [
+        { op: "changeAction", microflow: qn, id: ids.commit, onError: "continue" },
+        { op: "changeAction", microflow: qn, id: ids.logCustom, onError: { actions: [{ action: "message", type: "Warning", text: "zz replaced handler" }] } },
+        { op: "changeAction", microflow: qn, id: ids.retrieve, onError: "logAndShow" },
+        { op: "addActions", microflow: qn, handlerOf: ids.restShow, actions: [{ action: "log", message: "zz first in handler {1}", args: ["$latestError/Message"] }] },
+        { op: "addActions", microflow: qn, after: ids.showMsg, actions: [{ action: "log", message: "zz after message" }] },
+        { op: "deleteAction", microflow: qn, id: ids.call },
+        { op: "deleteAction", microflow: qn, id: ids.loopLog }
+    ] };
+    const lint2 = await s.ops.runPlan(p2, () => {});
+    await s.model.flushChanges();
+    const fc = require("./flow-errors").flowCheckChanges(s.client);
+    if (!fc.some(l => /REST call without a custom error handler/.test(l))) problems.push(`dry run FLOW CHECK misses the REST call without handler: ${fc.join(" / ").slice(0, 300)}`);
+    if (!fc.some(l => /commits inside a loop/.test(l))) problems.push(`dry run FLOW CHECK misses the commit in a loop: ${fc.join(" / ").slice(0, 300)}`);
+    if (!fc.some(l => /nanoflow error handlers never roll back/.test(l))) problems.push("dry run FLOW CHECK misses the nanoflow note");
+    const enc = s.client.encode();
+    const lay = layoutProblems(layout, enc);
+    const lost = lostProperties(s.client, s.model, enc);
+    problems.push(...[...lint1, ...lint2].map(l => "lint: " + l), ...lay.problems.slice(0, 5), ...lost);
+    s.client.project.writeEncoded(enc);
+    // stored
+    s = await reopen(copy);
+    problems.push(...(await s.ops.checkPlan({ ops: [...p1.ops, ...p2.ops] })));
+    const st2 = await s.ops.steps(qn);
+    if (/_ErrSub/.test(st2) || /ErrLog/.test(st2.split("FLOW CHECK")[0])) problems.push("deleteAction left the call or its storeError handler");
+    if (/loop failed/.test(st2)) problems.push("deleteAction of a step inside a loop handler left it");
+    if (!/zz first in handler[\s\S]*MESSAGE Error[\s\S]*zz after message/.test(st2)) problems.push(`addActions into the handler: wrong order or missing:\n${st2}`);
+    if (!/FLOW CHECK \(error handling\):/.test(st2)) problems.push("steps shows no FLOW CHECK");
+    const units = [...s.ctx.project.units.keys()].map(id => s.ctx.project.read(id)).filter(u => String(u.Name || "").startsWith(`${T}_Err`));
+    const main = units.find(u => u.Name === `${T}_Err`);
+    const nano = units.find(u => u.Name === `${T}_ErrNano`);
+    const seen = { stack: 0, errEv: 0, loopFlow: 0, create: 0 };
+    const mainText = JSON.stringify(main, (k, v) => (Buffer.isBuffer(v) ? undefined : v));
+    if (!mainText.includes("zz replaced handler") || mainText.includes("zz custom fail")) problems.push("changeAction onError did not replace the custom handler");
+    walk(main, o => {
+        if (o.$Type === "Microflows$LogMessageAction" && o.IncludeLatestStackTrace === true) seen.stack++;
+        if (o.$Type === "Microflows$ErrorEvent") seen.errEv++;
+    });
+    const loopObj = [];
+    walk(main, o => o.$Type === "Microflows$LoopedActivity" && o.LoopSource && o.LoopSource.$Type === "Microflows$IterableList" && loopObj.push(o));
+    if (!loopObj.length || loopObj[0].ErrorHandlingType !== "Custom" || !main.Flows.some(f => f.IsErrorHandler && f.OriginPointer === loopObj[0].$ID)) problems.push("the loop has no custom error handler with an error flow");
+    if (seen.stack < 2) problems.push(`${seen.stack} log actions with IncludeLatestStackTrace, expected 2+ (logAndShow, retry give-up, the custom log)`);
+    if (seen.errEv !== 1) problems.push(`${seen.errEv} error events, expected 1 (retry give-up; rethrow handler removed, custom error replaced)`);
+    let commitEH = null;
+    walk(main, o => o.$Type === "Microflows$CommitAction" && o.CommitVariableName === "All" && (commitEH = o.ErrorHandlingType));
+    if (commitEH !== "Continue") problems.push(`COMMIT $All error handling ${commitEH}, expected Continue`);
+    walk(nano || {}, o => o.$Type === "Microflows$CreateChangeAction" && o.Items && o.Items.some(i => /\$latestError\b/.test(i.Value || "") && !/\$latestError\//.test(i.Value)) && seen.create++);
+    if (!seen.create) problems.push("the nanoflow storeError does not write $latestError (the error text) into the log object");
+    walk(nano || {}, o => o.Action && /^Custom$|^Rollback$/.test(o.Action.ErrorHandlingType) && problems.push(`nanoflow action with error handling ${o.Action.ErrorHandlingType}`));
+    // refusals (dry run on a fresh copy, nothing saved)
+    const refused = async (what, plan, re) => {
+        const r = await reopen(copy);
+        try {
+            const lint = await r.ops.runPlan(plan, () => {});
+            if (lint.length && lint.some(l => re.test(l))) return;
+            problems.push(`${what} was not refused${lint.length ? `: ${lint.join("; ")}` : ""}`);
+        } catch (e) {
+            if (!re.test(e.message)) problems.push(`${what}: ${e.message}`);
+        }
+        await r.model.flushChanges().catch(() => {});
+    };
+    const flow = (name, actions, nanoflow = false) => ({ ops: [{ op: nanoflow ? "createNanoflow" : "createMicroflow", module: mod, name: `${T}_${name}`, actions }] });
+    await refused("nanoflow onError rollback", flow("ErrR1", [{ action: "variable", name: "X", type: "Integer", value: "1", onError: "rollback" }], true), /never rolls back/);
+    await refused("nanoflow rollback: true", flow("ErrR2", [{ action: "variable", name: "X", type: "Integer", value: "1", onError: { rollback: true, actions: [] } }], true), /never rolls back/);
+    await refused("error outside a handler", flow("ErrR3", [{ action: "error" }]), /only allowed inside an onError handler/);
+    await refused("$latestError outside a handler", flow("ErrR4", [{ action: "log", message: "x {1}", args: ["$latestError/Message"] }]), /\$latestError has no value here/);
+    await refused("$latestHttpResponse before a REST call", flow("ErrR5", [{ action: "log", message: "x {1}", args: ["toString($latestHttpResponse/StatusCode)"] }]), /\$latestHttpResponse has no value here/);
+    await refused("retry of a step that makes a variable", flow("ErrR6", [{ action: "callRest", url: "https://x.example.com", variable: "Txt", onError: "retry" }]), /would only exist inside the loop/);
+    await refused("continue on a loop", flow("ErrR7", [{ action: "createList", variable: "L", entity: `${E}ErrItem` }, { action: "loop", over: "L", actions: [{ action: "log", message: "x" }], onError: "continue" }]), /not "continue"/);
+    await refused("handlerOf without a handler", { ops: [{ op: "addActions", microflow: qn, handlerOf: ids.retrieve === ids.restShow ? "x" : idIn(st2, /REST GET .*Zz rest bare|REST GET https:\/\/api.example.com\/err$/m), actions: [{ action: "log", message: "x" }] }] }, /has no custom error handler/);
+    await refused("changeAction onError retry", { ops: [{ op: "changeAction", microflow: qn, id: ids.logCustom, onError: { pattern: "retry" } }] }, /cannot do; delete the step/);
+    await refused("unknown recipe", flow("ErrR8", [{ action: "log", message: "x", onError: "logAndShw" }]), /Did you mean: logAndShow/);
+    await refused("storeError without entity", flow("ErrR9", [{ action: "log", message: "x", onError: "storeError" }]), /needs 'entity'|entity/);
+    // offline sync recipe (nanoflow synchronize + logAndShow; dry run): only in an app with an offline profile
+    let sync = "skipped (no offline or native navigation profile)";
+    {
+        const r = await reopen(copy);
+        try {
+            const lint = await r.ops.runPlan(flow("ErrSync", [{ action: "synchronize", onError: "logAndShow" }], true), () => {});
+            const nf = await r.ops.get(`${E}_ErrSync`);
+            let eh = null, msg = 0;
+            for (const o of nf.objectCollection.objects) {
+                if (o.action && o.action.structureTypeName === "Microflows$SynchronizeAction") eh = o.action.errorHandlingType.name;
+                if (o.action && o.action.structureTypeName === "Microflows$ShowMessageAction") msg++;
+            }
+            if (lint.length || eh !== "CustomWithoutRollBack" || msg !== 1) problems.push(`synchronize + logAndShow: error handling ${eh}, ${msg} message(s)${lint.length ? `, lint ${lint.join("; ")}` : ""}`);
+            else sync = "synchronize + logAndShow";
+        } catch (e) {
+            if (!/offline-first app|offline or native navigation profile|navigation document/.test(e.message)) problems.push(`synchronize + logAndShow: ${e.message}`);
+        }
+        await r.model.flushChanges().catch(() => {});
+    }
+    // reopen: 0 errors, 0 deltas
+    s = await reopen(copy);
+    const errs = [];
+    for (const u of s.model.allUnits().filter(u => u.isLoadable && !u.isLoaded)) await s.model.loadUnitById(u.id, false).catch(e => errs.push(e.message));
+    await s.model.flushChanges();
+    if (s.client.log.length) errs.push(`${s.client.log.length} deltas on open`);
+    problems.push(...errs.slice(0, 3));
+    return { problems: [...new Set(problems)], ops: p1.ops.length + p2.ops.length, sync };
+}
+
+module.exports = { flowsPhase, errorsPhase };

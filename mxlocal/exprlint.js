@@ -9,6 +9,7 @@ const bson = require("./bson");
 const { toPlain } = require("./convert");
 const { T, show, fromStored, assignable, checkExpression } = require("./expr");
 const { checkXPath } = require("./xpath");
+const FE = require("./flow-errors");
 
 // ------------------------------------------------------------------------------------------------ System module
 // The System module is not stored in the project. Entities marked partial may have members this table lacks
@@ -490,6 +491,7 @@ class Linter {
         this.counts.expressions++;
         const r = checkExpression(src, ctx, target, opts);
         for (const p of r.problems) this.report("expression", p.level, where, src, p.msg);
+        this.latest(src, where);
         return r;
     }
 
@@ -517,10 +519,19 @@ class Linter {
     // ---- microflows, nanoflows, rules
     flow(u, qn, type) {
         const fc = flowContext(u, this.model);
-        const base = this.ctx(fc.vars, true);
-        const returns = fromStored(u.MicroflowReturnType || u.ReturnType);
         const nano = type === "Microflows$Nanoflow";
+        // in a nanoflow $latestError is the error text (String), in a microflow a System.Error object
+        const base = nano ? this.ctx(new Map([["latestError", T.str], ...fc.vars]), true) : this.ctx(fc.vars, true);
+        const returns = fromStored(u.MicroflowReturnType || u.ReturnType);
+        // where $latestError, $latestSoapFault and $latestHttpResponse have a value (flow-errors.js)
+        let scopes = null;
+        try {
+            scopes = FE.latestScopes(u);
+        } catch (e) {
+            scopes = null;
+        }
         for (const o of fc.objects) {
+            this.latestAt = scopes ? { scopes, id: o.$ID } : null;
             const w = what => `${qn} [${short(o.$ID)}] ${what}`;
             const a = o.Action;
             if (o.$Type === "Microflows$ExclusiveSplit" && o.SplitCondition && o.SplitCondition.$Type === "Microflows$ExpressionSplitCondition") {
@@ -536,6 +547,14 @@ class Linter {
             const where = w(desc);
             this.action(a, fc, base, where, nano);
         }
+        this.latestAt = null;
+    }
+
+    // $latestError / $latestSoapFault / $latestHttpResponse where they have no value (an error: Studio Pro rejects it)
+    latest(src, where) {
+        const at = this.latestAt;
+        if (!at) return;
+        for (const n of FE.latestUses(src)) if (!at.scopes[n].has(at.id)) this.report("expression", "error", where, src, `$${n} has no value here: it exists ${FE.LATEST_WHERE[n]}. Move this step into the error handler (addActions "handlerOf": "<step id>" or "after": a step in the handler), or use another value`);
     }
 
     action(a, fc, base, where, nano) {
@@ -675,6 +694,7 @@ class Linter {
         this.counts.expressions++;
         const r = checkExpression(src, ctx, null);
         for (const p of r.problems) this.report("expression", p.level, where, src, p.msg);
+        this.latest(src, where);
         if (!target.either.some(t => !assignable(r.type, t, this.model))) {
             const p = assignable(r.type, target.either[0], this.model);
             this.report("expression", p.level, where, src, `the expression gives ${show(r.type)}, but ${target.either.map(show).join(" or ")} is expected`);

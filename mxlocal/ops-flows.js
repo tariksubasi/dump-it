@@ -5,13 +5,14 @@ const sdk = require("mendixmodelsdk");
 const { DATA_TYPES, suggest, fail, validate, bool, noDollar, enumValue } = require("./ops-util");
 const { makeFlowExtras, RETRIEVE_FIELDS, MEMBER_FIELDS } = require("./ops-flow-extras");
 const L = require("./flow-layout");
+const FE = require("./flow-errors");
 
 const { microflows: mf, domainmodels: dm, datatypes, pages, codeactions, javaactions, javascriptactions, importmappings, exportmappings, services } = sdk;
 
 const X_STEP = 190; // horizontal distance between steps
 const LANE = 150; // vertical distance between branches
 
-const ON_ERROR = "optional \"continue\", or { \"rollback\": true/false, \"actions\": [ ... ], \"returnValue\": \"...\" } (custom error handler)";
+const ON_ERROR = FE.ON_ERROR_DOC;
 
 // Activities (one box each). They also accept 'caption' and 'onError'.
 const ACTIONS = {
@@ -24,7 +25,7 @@ const ACTIONS = {
     commit: { doc: "Commit an object or list.", fields: { variable: "R variable (no $)", events: "optional false = without events" } },
     delete: { doc: "Delete an object or list.", fields: { variable: "R variable (no $)" } },
     call: { doc: "Call a microflow. In a nanoflow: a nanoflow or a microflow.", fields: { microflow: "R Module.Microflow or Module.Nanoflow", args: "optional { \"ParamName\": \"expression\" }", variable: "optional result variable name" } },
-    log: { doc: "Write a log line (microflows only).", fields: { message: "R text; {1} {2} are filled from args", args: "optional [\"expression\", ...]", level: "optional Info | Warning | Error | Debug | Trace | Critical", node: "optional log node name (default the module name)" } },
+    log: { doc: "Write a log line (microflows only).", fields: { message: "R text; {1} {2} are filled from args", args: "optional [\"expression\", ...]", level: "optional Info | Warning | Error | Debug | Trace | Critical", node: "optional log node name (default the module name)", stackTrace: "optional true = add the stack trace of $latestError (in an error handler)" } },
     message: { doc: "Show a message to the user.", fields: { text: "R message text", type: "optional Information | Warning | Error", blocking: "optional true/false" } },
     variable: { doc: "Create a variable.", fields: { name: "R variable name", type: "R " + DATA_TYPES, value: "R initial value expression, e.g. 0 or 'text' or empty" } },
     set: { doc: "Change a variable.", fields: { name: "R variable name (no $)", value: "R expression" } },
@@ -131,11 +132,11 @@ const CONTROL = {
         doc: "Object type decision: runs the case of the object's specialization (start a case with 'cast' to use it as that entity), 'other' for any other type, 'empty' when there is no object.",
         fields: { variable: "R object variable (no $)", cases: "R { \"Module.Specialization\": [ actions ] }", other: "optional [ actions ]", empty: "optional [ actions ]", caption: "optional text in the diamond" }
     },
-    loop: { doc: "Loop over a list ('over' + 'item'), or while a condition is true ('while').", fields: { over: "list variable to loop over (no $)", item: "name of the current object (default: <list>Item)", while: "boolean expression (instead of 'over')", actions: "R [ actions inside the loop ]" } },
+    loop: { doc: "Loop over a list ('over' + 'item'), or while a condition is true ('while').", fields: { over: "list variable to loop over (no $)", item: "name of the current object (default: <list>Item)", while: "boolean expression (instead of 'over')", actions: "R [ actions inside the loop ]", onError: "optional \"rollback\" / \"abort\" (default), a recipe (logAndShow, rethrow, storeError) or { \"actions\": [ ... ] }: error handling of the whole loop" } },
     end: { doc: "End the flow here.", fields: { value: "return expression; required when the flow returns a value" } },
     break: { doc: "Leave the loop (only inside a loop).", fields: {} },
     continue: { doc: "Go to the next loop item (only inside a loop).", fields: {} },
-    error: { doc: "End with the error again (only inside an onError handler).", fields: {} }
+    error: { doc: "End with the error again (only inside an onError handler). With 'message': log that text first (microflow: Error level with the stack trace; nanoflow: with a JavaScript log action, jsLog).", fields: { message: "optional text to log before the error; {1} {2} are filled from args", args: "optional [\"expression\", ...], e.g. [\"$latestError/Message\"]", node: "optional log node (microflow)", jsLog: "nanoflow: optional Module.JavaScriptAction with a String parameter" } }
 };
 
 function makeFlows(h) {
@@ -963,6 +964,7 @@ function makeFlows(h) {
                 a.level = enumValue(mf.LogLevel, spec.level || "Info", "log level");
                 a.node = `'${String(spec.node || f.m.qualifiedName.split(".")[0]).replace(/'/g, "''")}'`;
                 a.messageTemplate.text = String(spec.message);
+                if (spec.stackTrace !== undefined) a.includeLatestStackTrace = bool(spec.stackTrace, false);
                 for (const e of spec.args || []) mf.TemplateArgument.createIn(a.messageTemplate).expression = expr(f.m, e, where);
                 break;
             case "message":
@@ -1416,8 +1418,10 @@ function makeFlows(h) {
                     point(loop, cursor - 60 + width / 2, y - 80 + loopHeight / 2);
                     link(loop);
                     tail = { obj: loop, originIndex: 1 };
+                    const loopLanes = Math.ceil(loopHeight / LANE);
+                    if (spec.onError !== undefined) height = Math.max(height, loopLanes + (await errorHandler(f, loop, spec.onError, cursor - 60 + width / 2, y + LANE * loopLanes, `${w} loop`)));
                     cursor += width + 70;
-                    height = Math.max(height, Math.ceil(loopHeight / LANE));
+                    height = Math.max(height, loopLanes);
                     break;
                 }
                 case "end": {
@@ -1446,7 +1450,15 @@ function makeFlows(h) {
                     break;
                 }
                 case "error": {
-                    if (!f.inHandler) throw new Error(`${w}: 'error' is only allowed inside an onError handler`);
+                    if (!f.inHandler) throw new Error(`${w}: 'error' is only allowed inside an onError handler (an error event re-raises the error the handler caught; to stop a flow on purpose, show a message and use 'end')`);
+                    if (spec.message !== undefined) {
+                        // H9: an error event has no text of its own: log the custom text first, then end with the error
+                        const logs = await errorLog(f, spec, w);
+                        const seg = await buildSeq(f, logs, cursor, y, tail, w);
+                        if (!first) first = seg.first;
+                        tail = seg.tail;
+                        cursor += seg.width;
+                    } else if (spec.args !== undefined || spec.node !== undefined || spec.jsLog !== undefined) throw new Error(`${w}: args, node and jsLog go with 'message' (the text to log before the error)`);
                     const ev = mf.ErrorEvent.createIn(f.coll);
                     point(ev, cursor, y);
                     size(ev, 20, 20);
@@ -1456,6 +1468,17 @@ function makeFlows(h) {
                     break;
                 }
                 default: {
+                    if (isRetry(spec.onError)) {
+                        // the retry recipe: a counter and a while loop around the action (flow-errors.js)
+                        const r = await FE.normalize(spec.onError, errorCtx(f, null, w), w);
+                        const specs2 = FE.retrySpecs(spec, r, uniqueVar(f.m, "RetryCount"), w, CREATES[kind] && spec[CREATES[kind]] ? noDollar(spec[CREATES[kind]]) : null);
+                        const seg = await buildSeq(f, specs2, cursor, y, tail, w);
+                        if (!first) first = seg.first;
+                        tail = seg.tail;
+                        cursor += seg.width;
+                        height = Math.max(height, seg.height);
+                        break;
+                    }
                     const act = await activity(f, spec, cursor, y, w);
                     link(act);
                     tail = { obj: act, originIndex: 1 };
@@ -1467,30 +1490,92 @@ function makeFlows(h) {
         return { first, tail: ended ? null : tail, width: cursor - x, height };
     }
 
-    // Returns the lanes it used.
-    async function errorHandler(f, act, onError, x, y, where) {
-        const a = act.action;
-        if (onError === "continue") {
-            a.errorHandlingType = mf.ErrorHandlingType.Continue;
+    const isRetry = v => String(typeof v === "string" ? v : v && typeof v === "object" ? v.pattern : "").toLowerCase() === "retry";
+
+    // A variable name no step of m uses yet: base, base2, base3, ...
+    function uniqueVar(m, base) {
+        const used = variablesOf(m);
+        for (let i = 1; ; i++) if (!used.has(i === 1 ? base : `${base}${i}`)) return i === 1 ? base : `${base}${i}`;
+    }
+
+    // A JavaScript action to log with in a nanoflow: { qn, param } (its first String parameter; no other required one)
+    async function jsLogOf(qn, where) {
+        const target = await h.get(qn);
+        if (!(target instanceof javascriptactions.JavaScriptAction)) throw new Error(`${where}: jsLog '${qn}' is not a JavaScript action`);
+        const params = [...target.actionParameters];
+        const p = params.find(x => x.actionParameterType instanceof codeactions.BasicParameterType && x.actionParameterType.type instanceof datatypes.StringType);
+        if (!p) throw new Error(`${where}: jsLog ${qn} has no String parameter to pass the text in`);
+        const other = params.filter(x => x !== p && required(x));
+        if (other.length) throw new Error(`${where}: jsLog ${qn} needs more parameters (${other.map(x => x.name).join(", ")}); use a JavaScript action with one String parameter`);
+        return { qn, param: p.name };
+    }
+    let defaultJs; // undefined: not looked for yet
+    async function defaultJsLog() {
+        if (defaultJs !== undefined) return defaultJs;
+        defaultJs = null;
+        for (const j of model.allJavaScriptActions().filter(x => /^(js_?)?(log|logmessage|logerror|writelog|consolelog|log_?message)$/i.test(x.name))) {
+            try {
+                defaultJs = await jsLogOf(j.qualifiedName, "jsLog");
+                break;
+            } catch (e) {
+                /* not usable: look further */
+            }
+        }
+        return defaultJs;
+    }
+    const ATTR_TYPE = t => t.structureTypeName.split("$")[1].replace(/AttributeType$/, "");
+    async function entityInfo(qn, where) {
+        const e = await h.entity(qn);
+        if (!e) throw new Error(`${where}: no entity ${qn}`);
+        return [...e.attributes].map(a => [a.name, ATTR_TYPE(a.type)]);
+    }
+    // What flow-errors.normalize needs to know about the place of a handler (owner: the activity or loop; null: retry)
+    function errorCtx(f, owner, where) {
+        const caption = !owner ? "step" : owner instanceof mf.ActionActivity && !owner.autoGenerateCaption && owner.caption ? owner.caption : describe(owner).replace(/[{}]/g, "").slice(0, 60);
+        return { nano: f.nano, inLoop: f.inLoop, qn: f.m.qualifiedName, caption, returns: f.returns, sync: !!(owner && owner.action instanceof mf.SynchronizeAction),
+            jsLog: (qn, w) => jsLogOf(qn, w || where), defaultJsLog, entityInfo, unique: base => uniqueVar(f.m, base), varBase: "Error" };
+    }
+    // The steps that log the text of an 'error' with 'message' (microflow: log action; nanoflow: JavaScript log action)
+    async function errorLog(f, spec, where) {
+        if (!f.nano) return [{ action: "log", level: "Error", message: String(spec.message), ...(spec.args !== undefined ? { args: spec.args } : {}), ...(spec.node !== undefined ? { node: spec.node } : {}), stackTrace: true }];
+        if (spec.node !== undefined) throw new Error(`${where}: 'node' is for microflows; a nanoflow logs with a JavaScript action (jsLog)`);
+        const js = spec.jsLog !== undefined ? await jsLogOf(spec.jsLog, where) : await defaultJsLog();
+        if (!js) throw new Error(`${where}: a nanoflow has no log action and this project has no JavaScript log action; give "jsLog": "Module.JS_Log" (a JavaScript action with a String parameter), or put { "action": "message", "type": "Error", "text": "..." } before { "action": "error" }`);
+        if (spec.args !== undefined) throw new Error(`${where}: in a nanoflow 'args' is not supported: write the whole text in 'message' (the error text is added after it)`);
+        return [{ action: "callJavaScript", jsAction: js.qn, args: { [js.param]: `'${String(spec.message).replace(/'/g, "''")}: ' + $latestError` } }];
+    }
+
+    // owner: an ActionActivity or a LoopedActivity. Returns the lanes it used.
+    async function errorHandler(f, owner, onError, x, y, where) {
+        const loop = owner instanceof mf.LoopedActivity;
+        const target = loop ? owner : owner.action;
+        if (f.rule) throw new Error(`${where}: a rule has no error handling (it only reads and computes); remove onError`);
+        const on = await FE.normalize(onError, errorCtx(f, owner, where), where);
+        if (on.kind === "retry") throw new Error(`${where}: onError retry wraps one action in a loop; ${loop ? "a loop cannot be retried: put the retry on the action inside it" : "add the action again with it (deleteAction, then addActions)"}`);
+        if (on.kind === "default") {
+            target.errorHandlingType = errorDefault(f);
             return 0;
         }
-        if (!onError || typeof onError !== "object" || Array.isArray(onError)) throw new Error(`${where}: onError must be "continue" or { "rollback": ..., "actions": [ ... ] }`);
-        validate("-", "onError", { fields: { rollback: "optional", actions: "optional", returnValue: "optional" } }, onError, where);
-        const rollback = f.nano ? false : bool(onError.rollback, true);
-        a.errorHandlingType = rollback ? mf.ErrorHandlingType.Custom : mf.ErrorHandlingType.CustomWithoutRollBack;
+        if (on.kind === "continue") {
+            if (loop) throw new Error(`${where}: a loop takes "rollback"/"abort" (default) or a custom handler { "actions": [ ... ] }, not "continue"; put "continue" on the actions inside the loop`);
+            target.errorHandlingType = mf.ErrorHandlingType.Continue;
+            return 0;
+        }
+        if (loop) h.client && h.client.warnFirst(`Microflows$LoopedActivity custom error handler first use (no Studio Pro sample of an error flow from a loop): check ${f.m.qualifiedName} in Studio Pro`);
+        target.errorHandlingType = on.rollback ? mf.ErrorHandlingType.Custom : mf.ErrorHandlingType.CustomWithoutRollBack;
         const hf = { ...f, inHandler: true };
-        const seg = await buildSeq(hf, onError.actions || [], x, y, { obj: act, originIndex: 2, errorHandler: true }, `${where} onError`);
+        const seg = await buildSeq(hf, on.actions, x, y, { obj: owner, originIndex: 2, errorHandler: true }, `${where} onError`);
         if (seg.tail) {
             if (f.inLoop) throw new Error(`${where}: an error handler inside a loop must end with 'break', 'continue' or 'error'`);
             const end = mf.EndEvent.createIn(f.coll);
             point(end, x + Math.max(seg.width, X_STEP / 2), y);
             size(end, 20, 20);
             if (f.returns) {
-                if (onError.returnValue === undefined) throw new Error(`${where}: this flow returns a value; onError needs 'returnValue'`);
-                end.returnValue = expr(f.m, onError.returnValue, where);
-            }
+                if (on.returnValue === undefined) throw new Error(`${where}: this flow returns a value; onError needs 'returnValue'${on.pattern ? ` ({ "pattern": "${on.pattern}", "returnValue": "..." })` : ""}`);
+                end.returnValue = expr(f.m, on.returnValue, where);
+            } else if (on.returnValue !== undefined) throw new Error(`${where}: this flow returns nothing; remove onError.returnValue`);
             connect(hf, seg.tail, end);
-        }
+        } else if (on.returnValue !== undefined) throw new Error(`${where}: the handler ends with ${on.actions.length ? "error/break/continue" : "nothing"}; returnValue is only for a handler that ends the flow`);
         return seg.height;
     }
 
@@ -1572,13 +1657,16 @@ function makeFlows(h) {
         const lay = L.begin(m);
         const geo = lay.prepare(lay.insertGeometry(anchor));
         const { from, to, coll } = geo;
-        const f = { m, coll, nano: m instanceof mf.Nanoflow, rule: m instanceof mf.Rule, inLoop: coll.container instanceof mf.LoopedActivity, inHandler: false, returns: returnsValue(m) };
+        // inside a custom error handler (also a loop in one): 'error' is allowed there
+        const sc = FE.sdkScopes(m);
+        const inHandler = anchor.isErrorHandler || sc.handlerOf.has(from.id);
+        const f = { m, coll, nano: m instanceof mf.Nanoflow, rule: m instanceof mf.Rule, inLoop: coll.container instanceof mf.LoopedActivity, inHandler, returns: returnsValue(m) };
         const tail = { obj: from, originIndex: anchor.originConnectionIndex, caseValue: caseOf(anchor), errorHandler: anchor.isErrorHandler };
         const objsBefore = new Set(coll.objects.map(x => x.id));
         const flowsBefore = new Set([...m.flows].map(x => x.id));
         const donor = L.sideOf(anchor, "dest");
         const seg = await build(f, geo, tail);
-        if (!seg.tail) throw new Error(`${where}: inserted actions must not end the flow (end/break/continue); the steps after them would be cut off`);
+        if (!seg.tail) throw new Error(`${where}: inserted actions must not end the flow (end/break/continue/error); the steps after them would be cut off`);
         const first = [...m.flows].find(x => !flowsBefore.has(x.id) && x.origin === from && x.destination === seg.first);
         lay.redirect(anchor, seg.first, first ? L.sideOf(first, "dest") : null);
         if (first) first.delete();
@@ -1591,9 +1679,84 @@ function makeFlows(h) {
     async function addActions(o) {
         const m = await flowDoc(o.microflow);
         if (!Array.isArray(o.actions) || !o.actions.length) throw new Error("addActions needs actions: [ ... ]");
-        const anchor = anchorOf(m, o.after, o.branch, o.microflow);
+        let anchor;
+        if (o.handlerOf !== undefined) {
+            // the start of a step's custom error handler: on its error flow
+            if (o.after !== undefined || o.branch !== undefined) throw new Error(`${o.microflow}: 'handlerOf' puts the actions at the start of that step's error handler and goes without 'after'/'branch'; to add later in the handler use "after": "<id of a step in the handler>" (see: steps ${o.microflow})`);
+            const step = findStep(m, o.handlerOf);
+            const efl = flowsOf(m).filter(x => x.isErrorHandler && x.origin === step);
+            if (!efl.length) {
+                const t = (step instanceof mf.ActionActivity ? step.action : step).errorHandlingType;
+                throw new Error(`${o.microflow}: [${o.handlerOf}] ${describe(step)} has no custom error handler (its error handling is ${t ? t.name : "none"}); give it one first: { "op": "changeAction", "microflow": "${o.microflow}", "id": "${o.handlerOf}", "onError": { "actions": [ ... ] } }`);
+            }
+            anchor = efl[0];
+        } else anchor = anchorOf(m, o.after, o.branch, o.microflow);
         await insertSteps(m, anchor, (f, geo, tail) => buildSeq(f, o.actions, geo.x0, geo.y0, tail, o.microflow), o.microflow);
-        return `${o.microflow}: ${o.actions.length} action(s) after ${o.after || "the last step"}${o.branch !== undefined ? ` [${o.branch}]` : ""}`;
+        return `${o.microflow}: ${o.actions.length} action(s) ${o.handlerOf !== undefined ? `at the start of the error handler of [${o.handlerOf}]` : `after ${o.after || "the last step"}${o.branch !== undefined ? ` [${o.branch}]` : ""}`}`;
+    }
+
+    // Removes the custom error handler of owner: its error flow and the steps only that handler reaches (with the
+    // handlers inside it); a handler path that joined the main flow again keeps the main flow (a merge left with one
+    // way in and one way out goes too). Returns the number of steps removed.
+    function removeHandler(m, owner, lay) {
+        const sc = FE.sdkScopes(m);
+        const doomed = new Set([...sc.handlerOf.keys()].filter(id => sc.handlerOf.get(id) === owner.id || sc.chain(id).includes(owner.id)));
+        const efl = flowsOf(m).filter(x => x.isErrorHandler && x.origin === owner);
+        if (!efl.length && !doomed.size) return 0;
+        // notes attached to removed steps go with them
+        for (const fl of [...m.flows]) if (fl instanceof mf.AnnotationFlow && fl.destination && doomed.has(fl.destination.id) && fl.origin instanceof mf.Annotation) doomed.add(fl.origin.id);
+        const joins = new Set();
+        for (const fl of [...m.flows]) {
+            const from = fl.origin && fl.origin.id;
+            const to = fl.destination && fl.destination.id;
+            if (efl.includes(fl) || doomed.has(from) || doomed.has(to)) {
+                if (fl instanceof mf.SequenceFlow && doomed.has(from) && !doomed.has(to) && fl.destination instanceof mf.ExclusiveMerge) joins.add(fl.destination);
+                fl.delete();
+            }
+        }
+        let n = 0;
+        for (const id of doomed) {
+            const node = sc.nodes.get(id);
+            if (!node || (node.loop && doomed.has(node.loop))) continue; // goes with its loop
+            if (node.obj instanceof mf.ActionActivity) n++;
+            node.obj.delete();
+        }
+        for (const mg of joins) {
+            const inc = flowsOf(m).filter(x => x.destination === mg);
+            const out = flowsOf(m).filter(x => x.origin === mg);
+            if (inc.length !== 1 || out.length !== 1) continue;
+            lay.redirect(inc[0], out[0].destination, L.sideOf(out[0], "dest"));
+            out[0].delete();
+            mg.delete();
+        }
+        lay.invalidate();
+        return n;
+    }
+
+    // changeAction onError: replaces the error handling of an action or loop (the old custom handler goes first).
+    async function setOnError(m, step, onError, where) {
+        if (!(step instanceof mf.ActionActivity || step instanceof mf.LoopedActivity) || (step instanceof mf.ActionActivity && !step.action)) throw new Error(`${where}: onError applies to an action or a loop, not to ${describe(step)} (the error handling of a decision: set it in Studio Pro)`);
+        if (m instanceof mf.Rule) throw new Error(`${where}: a rule has no error handling`);
+        if (isRetry(onError)) throw new Error(`${where}: onError retry wraps the action in a loop, which changeAction cannot do; delete the step (deleteAction) and add it again with "onError": { "pattern": "retry" } (addActions "after" the step before it)`);
+        const coll = step.container;
+        const sc = FE.sdkScopes(m);
+        const f = { m, coll, nano: m instanceof mf.Nanoflow, rule: false, inLoop: coll.container instanceof mf.LoopedActivity, inHandler: sc.handlerOf.has(step.id), returns: returnsValue(m) };
+        const lay = L.begin(m);
+        const removed = removeHandler(m, step, lay);
+        const before = new Set(coll.objects.map(x => x.id));
+        const p = step.relativeMiddlePoint;
+        await errorHandler(f, step, onError, p.x, p.y + step.size.height / 2 + LANE - 30, where);
+        const added = [...coll.objects].filter(x => !before.has(x.id));
+        if (added.length) {
+            // the first free lane below the step
+            const others = [...coll.objects].filter(x => before.has(x.id) && x !== step && !(x instanceof mf.Annotation));
+            const hit = () => added.some(a => others.some(o => L.overlaps(L.rect(a), L.rect(o))));
+            for (let k = 0; k < 30 && hit(); k++) lay.shift(coll, added, 0, LANE);
+            lay.mark(coll, added);
+        }
+        lay.finish();
+        const t = (step instanceof mf.ActionActivity ? step.action : step).errorHandlingType.name;
+        return `onError ${t}${removed ? ` (old handler removed: ${removed} action(s))` : ""}${added.length ? ` (handler: ${added.filter(x => x instanceof mf.ActionActivity).length} action(s))` : ""}`;
     }
 
     // ------------------------------------------------ steps (ids), change, delete
@@ -1685,21 +1848,30 @@ function makeFlows(h) {
             byOrigin.get(fl.origin.id).push(fl);
             incoming.add(fl.destination.id);
         }
-        const lines = [`${m instanceof mf.Nanoflow ? "NANOFLOW" : "MICROFLOW"} ${qn}   (ids are stable; use them in changeAction / deleteAction / addActions "after")`];
+        const lines = [`${m instanceof mf.Nanoflow ? "NANOFLOW" : "MICROFLOW"} ${qn}   (ids are stable; use them in changeAction / deleteAction / addActions "after"; addActions "handlerOf" adds at the start of an error handler)`];
         const seen = new Set();
-        const visit = (o, depth, label) => {
+        const sc = FE.sdkScopes(m);
+        // the error handling of a step, when it is not the default
+        const EH = { Continue: "continue", Custom: "custom handler with rollback", CustomWithoutRollBack: "custom handler without rollback" };
+        const ehOf = o => {
+            const t = o instanceof mf.ActionActivity ? o.action && o.action.errorHandlingType : o instanceof mf.LoopedActivity ? o.errorHandlingType : null;
+            return t && EH[t.name] ? `   {on error: ${EH[t.name]}}` : "";
+        };
+        // handler: id of the step whose error handler this branch is (a step on the main flow ends the branch there)
+        const visit = (o, depth, label, handler = null) => {
             const pad = "  ".repeat(depth);
+            if (handler && sc.main.has(o.id)) return lines.push(`${pad}${label}-> [${short(o)}] ${describe(o)} (back on the main flow)`);
             if (seen.has(o.id)) return lines.push(`${pad}${label}-> [${short(o)}] ${describe(o)} (above)`);
             seen.add(o.id);
-            lines.push(`${pad}${label}[${short(o)}] ${describe(o)}`);
+            lines.push(`${pad}${label}[${short(o)}] ${describe(o)}${ehOf(o)}`);
             if (o instanceof mf.LoopedActivity) {
-                for (const x of o.objectCollection.objects) if (!incoming.has(x.id) && !(x instanceof mf.Annotation)) visit(x, depth + 2, "");
+                for (const x of o.objectCollection.objects) if (!incoming.has(x.id) && !(x instanceof mf.Annotation)) visit(x, depth + 2, "", handler);
             }
             const outs = byOrigin.get(o.id) || [];
             const normal = outs.filter(x => !x.isErrorHandler);
-            for (const x of outs.filter(x => x.isErrorHandler)) visit(x.destination, depth + 1, "[on error] ");
-            if (normal.length === 1 && caseOf(normal[0]) === null) visit(normal[0].destination, depth, "");
-            else for (const x of normal) visit(x.destination, depth + 1, `[${caseLabel(x)}] `);
+            for (const x of outs.filter(x => x.isErrorHandler)) visit(x.destination, depth + 1, `[on error of ${short(o)}] `, o.id);
+            if (normal.length === 1 && caseOf(normal[0]) === null) visit(normal[0].destination, depth, "", handler);
+            else for (const x of normal) visit(x.destination, depth + 1, `[${caseLabel(x)}] `, handler);
         };
         for (const p of m.objectCollection.objects.filter(x => x instanceof mf.MicroflowParameterObject)) visit(p, 0, "");
         const start = m.objectCollection.objects.find(x => x instanceof mf.StartEvent);
@@ -1714,6 +1886,19 @@ function makeFlows(h) {
             lines.push("NOTES (annotations):");
             const to = new Map([...m.flows].filter(x => x instanceof mf.AnnotationFlow).map(x => [x.origin && x.origin.id, x.destination]));
             for (const n of notes) lines.push(`  [${short(n)}] "${n.caption.replace(/\r?\n/g, " ").slice(0, 80)}"${to.get(n.id) ? ` -> [${short(to.get(n.id))}]` : ""}`);
+        }
+        // FLOW CHECK on the stored flow (error handling advice; the dry run shows it for new steps)
+        if (h.client && h.client.project && (m instanceof mf.Microflow || m instanceof mf.Nanoflow)) {
+            let findings = [];
+            try {
+                findings = FE.flowCheck(h.client.project.read(m.id));
+            } catch (e) {
+                findings = [];
+            }
+            if (findings.length) {
+                lines.push("FLOW CHECK (error handling):");
+                for (const x of findings) lines.push(`  ${x.level === "note" ? "(note)" : "(warning)"} ${x.text}`);
+            }
         }
         return lines.join("\n");
     }
@@ -1978,15 +2163,23 @@ function makeFlows(h) {
         const step = findStep(m, o.id);
         const f = { m, nano: m instanceof mf.Nanoflow, rule: m instanceof mf.Rule, returns: returnsValue(m) };
         const { target, own, common } = changeTable(step);
+        const handles = step instanceof mf.ActionActivity || step instanceof mf.LoopedActivity;
+        const names = () => [...Object.keys(own), ...Object.keys(common), ...(handles ? ["onError"] : [])];
         const fields = Object.keys(o).filter(k => !["op", "microflow", "id"].includes(k));
-        if (!fields.length) throw new Error(`changeAction needs at least one field to change. For this step: ${[...Object.keys(own), ...Object.keys(common)].join(", ") || "(nothing can be changed)"}`);
+        if (!fields.length) throw new Error(`changeAction needs at least one field to change. For this step: ${names().join(", ") || "(nothing can be changed)"}`);
         const where = `${o.microflow} [${o.id}]`;
+        const done = [];
         for (const k of fields) {
+            if (k === "onError" && handles) {
+                done.push(await setOnError(m, step, o.onError, where));
+                continue;
+            }
             const fn = own[k] || common[k];
-            if (!fn) fail(`${where}: '${k}' cannot be changed on ${describe(step)}. Fields for this step: ${[...Object.keys(own), ...Object.keys(common)].join(", ") || "none"}`, k, [...Object.keys(own), ...Object.keys(common)]);
+            if (!fn) fail(`${where}: '${k}' cannot be changed on ${describe(step)}. Fields for this step: ${names().join(", ") || "none"}`, k, names());
             await fn(f, own[k] ? target : step, o[k], where, o);
+            done.push(k);
         }
-        return `${where} ${describe(step)}: ${fields.join(", ")}`;
+        return `${where} ${describe(step)}: ${done.join(", ")}`;
     }
 
     async function deleteAction(o) {
@@ -1996,14 +2189,16 @@ function makeFlows(h) {
         if (!(step instanceof mf.ActionActivity) && !(step instanceof mf.LoopedActivity)) throw new Error(`${where}: only actions and loops can be deleted; change decisions, merges and events in Studio Pro`);
         const doomed = new Set([step.id]);
         if (step instanceof mf.LoopedActivity) walkObjects(step.objectCollection, x => doomed.add(x.id));
+        const normalOut = flowsOf(m).filter(x => x.origin.id === step.id && !x.isErrorHandler);
+        if (normalOut.length > 1) throw new Error(`${where}: it has ${normalOut.length} outgoing flows`);
+        // its custom error handler goes with it (the steps only that handler reaches)
+        const lay = L.begin(m);
+        const removed = removeHandler(m, step, lay);
         const flows = flowsOf(m);
-        if (flows.some(x => x.isErrorHandler && x.origin.id === step.id)) throw new Error(`${where}: it has an error handler; remove that in Studio Pro first`);
         const incoming = flows.filter(x => x.destination.id === step.id);
         const outgoing = flows.filter(x => x.origin.id === step.id);
-        if (outgoing.length > 1) throw new Error(`${where}: it has ${outgoing.length} outgoing flows`);
         const next = outgoing[0];
         // close the gap for what follows (flow-layout.js): add + delete gives the old positions back
-        const lay = L.begin(m);
         const coll = step.container;
         const gap = next ? lay.gapOf(step) : null;
         for (const x of incoming) {
@@ -2017,11 +2212,11 @@ function makeFlows(h) {
         if (gap) lay.closeGap(gap);
         lay.mark(coll, []);
         lay.finish();
-        return where;
+        return where + (removed ? ` (with its error handler: ${removed} action(s))` : "");
     }
 
     // for ops-flow-edit.js (moveAction, extractMicroflow, addAnnotation)
-    const internals = { flowDoc, findStep, flowsOf, walkObjects, variablesOf, typeOfVariable, variableInfo, anchorOf, insertSteps, connect, flow, caseOf, caseLabel, activity, annotate, describe, point, size, returnsValue, errorDefault, X_STEP, LANE };
+    const internals = { flowDoc, findStep, flowsOf, walkObjects, variablesOf, typeOfVariable, variableInfo, anchorOf, insertSteps, connect, flow, caseOf, caseLabel, activity, annotate, describe, point, size, returnsValue, errorDefault, removeHandler, X_STEP, LANE };
     return { createFlow, addActions, changeAction, deleteAction, steps, describe, variablesOf, walkObjects, flowDoc, findStep, layoutReport, internals };
 }
 

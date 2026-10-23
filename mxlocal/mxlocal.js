@@ -327,6 +327,8 @@ async function run(file, mpr, allowJs, ctx, opts = {}) {
     const strict = !!(change.plan && (change.plan.styleCheck === "strict" || change.plan.ops.some(o => o && o.op === "setTokens" && o.strict === true)));
     const style = await require("./stylecheck").styleCheck(client, model, { strict, mode: change.plan && change.plan.styleCheck });
     if (style.lines.length) say("STYLE CHECK (web theme compiled with Dart Sass as Studio Pro builds it, classes, contrast; lines without (warning) / (info) refuse the change):\n" + style.lines.map(w => "  ! " + w).join("\n"));
+    const fc = require("./flow-errors").flowCheckChanges(client);
+    if (fc.length) say("FLOW CHECK (error handling of the new or changed steps; warnings and notes, nothing refused):\n" + fc.map(w => "  ! " + w).join("\n"));
     if (lost.length) say("NOT STORED (the script set these, but this Mendix version does not keep them; use api <Type>):\n" + lost.map(w => "  ! " + w).join("\n"));
     if (s.leftovers.length) say("OLD NAME STILL USED (rename does not update expressions, XPath, Java; fix these too):\n" + s.leftovers.map(w => "  ! " + w).join("\n"));
     if (warnings.length) say("Warnings:\n" + warnings.map(w => "  ! " + w).join("\n"));
