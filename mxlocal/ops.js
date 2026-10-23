@@ -114,7 +114,8 @@ const OPS = {
         doc: "Run a microflow (without parameters) on a schedule.",
         fields: { module: "R module name", name: "R event name", microflow: "R Module.Microflow", every: "R Minute | Hour | Day | Week", interval: "optional number for Minute/Hour (default 1)", at: "optional time HH:MM for Day/Week, minutes MM for Hour (default 00:00)", days: "Week: [ \"Monday\", ... ]", enabled: "optional true/false (default false)", timeZone: "optional UTC | Server (default UTC)", onOverlap: "optional DelayNext | SkipNext (default DelayNext)", folder: "optional folder path" }
     },
-    createLayout: { doc: "Create a layout as a copy of an existing one (its placeholders, header, sidebar and menu widgets), to change in Studio Pro or use in createPage \"layout\".", fields: { module: "R module name", name: "R layout name", from: "R Module.Layout to copy (e.g. Atlas_Core.Atlas_Default)", folder: "optional folder path" } },
+    createLayout: { doc: "Create a layout as a copy of an existing one (its placeholders, header, sidebar and menu widgets), to change in Studio Pro or use in createPage \"layout\". A copy of a native layout takes bottomBar, sidebar and popup.", fields: { module: "R module name", name: "R layout name", from: "R Module.Layout to copy (e.g. Atlas_Core.Atlas_Default, Atlas_Core.NativePhone_Default)", folder: "optional folder path",
+        bottomBar: "optional native layout: true/false shows the native bottom bar", sidebar: "optional native layout: true/false has a sidebar (side menu)", popup: "optional native layout: true = a pop-up layout (pages open as a modal), false = a normal one" } },
     createPage: { doc: "Create a page (or with kind userTaskPage a workflow user task page): an edit form for an entity (inputs by attribute type, Save/Cancel), an empty page, or a page from widgets (layout grids, containers, texts, data grids (classic, or a Data grid 2 built from widgets/*.mpk), data views that listen to a grid, list views, buttons, inputs), optionally with a menu item. Uses the layout the project's other pages use.", fields: { ...PAGE_FIELDS, ...USER_TASK_PAGE_FIELDS } },
     ...PAGE_EDIT_OPS,
     addMenuItem: { doc: "Add a menu item that opens a page, runs a microflow or another action (sign out, open a link, call a flow) to a navigation profile's menu or a menu document; a native page becomes a bottom bar item of the native profile.", fields: { ...MENU_FIELDS, ...MENU_EXTRA } },
@@ -876,6 +877,15 @@ function bind(model, client) {
             l.name = o.name;
             for (const k of ["canvasWidth", "canvasHeight"]) if (l[k] !== src[k]) l[k] = src[k];
             l.content = src.content.deepCopy(model);
+            // native layout options (G20 / N3)
+            const nat = ["bottomBar", "sidebar", "popup"].filter(k => o[k] !== undefined);
+            if (nat.length && !(l.content instanceof pages.NativeLayoutContent)) {
+                l.delete();
+                throw new Error(`createLayout ${qn}: ${nat.join(", ")} ${nat.length > 1 ? "go" : "goes"} with a native layout; ${src.qualifiedName} is a web layout (copy a NativePhone_* layout)`);
+            }
+            if (o.bottomBar !== undefined) l.content.showBottomBar = bool(o.bottomBar);
+            if (o.sidebar !== undefined) l.content.sidebar = bool(o.sidebar);
+            if (o.popup !== undefined) l.content.layoutType = bool(o.popup) ? pages.NativeLayoutType.Popup : pages.NativeLayoutType.Default;
             if (src.appearance) l.appearance = src.appearance.deepCopy(model);
             const phs = [];
             l.traverse(el => el instanceof pages.Placeholder && phs.push(el.name));

@@ -103,7 +103,9 @@ function nativeTargets(s, mod) {
     for (const id of project.units.keys()) {
         const u = project.read(id);
         if (u.$Type === "Forms$Layout" && u.Content && u.Content.$Type === "Forms$WebLayoutContent") webLayouts.add(`${modName(id)}.${u.Name}`);
+        if (u.$Type === "Forms$Layout" && u.Content && u.Content.$Type === "Forms$NativeLayoutContent" && u.Content.LayoutType === "Default" && !x.nativeDefault) x.nativeDefault = `${modName(id)}.${u.Name}`;
     }
+    x.webLayout = [...webLayouts][0] || null;
     for (const id of project.units.keys()) {
         const u = project.read(id);
         if (!x.webPage && u.$Type === "Forms$Page" && u.FormCall && webLayouts.has(u.FormCall.Form) && !(u.Parameters || []).length) x.webPage = `${modName(id)}.${u.Name}`;
@@ -191,7 +193,9 @@ function nativePlan(mod, T, x) {
             { op: "addMenuItem", page, caption: `${T} A`, icon: 57377 },
             { op: "addMenuItem", page: `${mod}.${T}_NativeB`, caption: `${T} B`, before: `${T} A`, icon: 57378 },
             { op: "setHomePage", page: `${mod}.${T}_NativeB`, profile: "Native" },
-            { op: "moveWidget", page, widget: "zzNatAdd", before: "zzNatText" },
+            // a native layout copy with its options (N3)
+            ...(x.nativeDefault ? [{ op: "createLayout", module: mod, name: `${T}_NatLayout`, from: x.nativeDefault, folder: "ZzNative", bottomBar: false, sidebar: true, popup: true }] : []),
+                        { op: "moveWidget", page, widget: "zzNatAdd", before: "zzNatText" },
             { op: "deleteWidget", page, widget: "zzNatTmp" }
         );
         refuse.push(
@@ -203,7 +207,8 @@ function nativePlan(mod, T, x) {
         if (x.webPage) refuse.push([{ op: "addWidgets", page, into: "zzNatCard", widgets: [{ widget: "actionButton", caption: "W", action: "showPage", page: x.webPage }] }, /is a web page; a native page opens only native pages/],
             [{ op: "addWidgets", page: x.webPage, widgets: [{ widget: "actionButton", caption: "N", action: "showPage", page }] }, /is a native page; a web page cannot open it/]);
         if (x.webPage) refuse.push([{ op: "addWidgets", page: x.webPage, widgets: [{ widget: "snippetCall", snippet: `${mod}.${T}_NatSnippet` }] }, /is a native snippet; a web page shows only web snippets/]);
-        if (x.webPl) refuse.push([{ op: "addWidgets", page, into: "zzNatCard", widgets: [{ widget: "pluggable", type: x.webPl, properties: {} }] }, /is a web widget; a native page takes native pluggable widgets/]);
+        if (x.webLayout) refuse.push([{ op: "createLayout", module: mod, name: `${T}_NatLayoutX`, from: x.webLayout, bottomBar: false }, /goes with a native layout/]);
+                if (x.webPl) refuse.push([{ op: "addWidgets", page, into: "zzNatCard", widgets: [{ widget: "pluggable", type: x.webPl, properties: {} }] }, /is a web widget; a native page takes native pluggable widgets/]);
         if (x.nativePl && x.webPage) refuse.push([{ op: "addWidgets", page: x.webPage, widgets: [{ widget: "pluggable", type: x.nativePl, properties: {} }] }, /is a native widget; it goes on a native page/]);
     }
     return { ops, refuse, page, card, btn, flat, dp };
@@ -304,7 +309,16 @@ function nativeProblems(project, mod, T, x, plan) {
         const ia = bb.findIndex(b => b.Page === plan.page), ib = bb.findIndex(b => b.Page === `${mod}.${T}_NativeB`);
         say(ia >= 0 && ib >= 0 && ib < ia && bb[ia].Icon && bb[ia].Icon.$Type === "Forms$GlyphIcon" && bb[ia].Icon.Code === 57377, `native bottom bar items (icon, before) not stored: ${JSON.stringify(bb.map(b => [b.Page, b.Icon && b.Icon.Code])).slice(0, 200)}`);
         say(np && JSON.stringify(np.NativeHomePage || {}).includes(`${T}_NativeB`), "native home page not stored");
-        let sn = null;
+        if (x.nativeDefault) {
+            let lay = null;
+            for (const id of project.units.keys()) {
+                const p = project.read(id);
+                if (p.$Type === "Forms$Layout" && p.Name === `${T}_NatLayout`) lay = p;
+            }
+            const c = lay && lay.Content;
+            say(c && c.$Type === "Forms$NativeLayoutContent" && c.ShowBottomBar === false && c.Sidebar === true && c.LayoutType === "Popup", `native layout copy options not stored: ${c ? `${c.ShowBottomBar} ${c.Sidebar} ${c.LayoutType}` : "missing"}`);
+        }
+                let sn = null;
         for (const id of project.units.keys()) {
             const p = project.read(id);
             if (p.$Type === "Forms$Snippet" && p.Name === `${T}_NatSnippet`) sn = p;
@@ -381,7 +395,7 @@ async function nativePhase({ s2, reopen, copy, src, mod, T, layout, layoutProble
     const what = ["setNativeVariables (value, light/dark, reference)", "setNativeTokens (colour scales, spacing, radius, font sizes + line heights, elevation, dark mode)",
         x.own && "addNativeStyle (elevation level, theme variables, button)", x.own && "addNativeDesignProperty", plan.page && "native page with classes" + (x.own ? " + native design (createPage, changeWidget)" : ""),
         plan.page && "every core native widget kind (text area, drop-down, radio buttons, date picker, check box with visibility, reference selector, tab container, layout grid)",
-        plan.page && `addWidgets / moveWidget / deleteWidget on a native page${x.nativePl ? `, native pluggable ${x.nativePl.split(".").pop()}` : ""}${x.popup ? ", native pop-up page" : ""}, native snippet + snippet call, native bottom bar (icon, place) + home page`,
+        plan.page && `addWidgets / moveWidget / deleteWidget on a native page${x.nativePl ? `, native pluggable ${x.nativePl.split(".").pop()}` : ""}${x.popup ? ", native pop-up page" : ""}, native snippet + snippet call, native bottom bar (icon, place) + home page${x.nativeDefault ? ", native layout copy (bottom bar, sidebar, pop-up)" : ""}`,
         x.getPlatform && "callJavaScript by action name (GetPlatform)", plan.page && "NATIVE STYLE CHECK", `${plan.refuse.length} refusals (web CSS, web-only widgets and actions, native / web page mix)`].filter(Boolean);
     if (plan.page && !x.nativePl) results.push("SKIP native: native pluggable widget: no com.mendix.widget.native.* in widgets/");
     if (made) results.push("NOTE native: no native theme in this project; an empty theme/native/custom-variables.js was made in the copy");
