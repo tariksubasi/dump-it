@@ -327,6 +327,7 @@ function odataProblems(project, T, version) {
 // parameter, and the error-handler recipe (callRest whose handler parses $latestHttpResponse with an import mapping).
 function changePlan(mod, T) {
     const E = `${mod}.${T}`;
+    const api = `${E}_OrderApi`, pub = `${E}_Pub`; // made by the REST phase
     const map = { entity: `${E}ChOrder`, entities: { lines: `${E}ChLine` } };
     const snippet2 = "{ \"order_id\": 7, \"total\": \"2.50\", \"status\": \"open\", \"lines\": [ { \"sku\": \"A\", \"qty\": 1, \"price\": 1.5 } ], \"customer\": { \"name\": \"Ann\" } }";
     return {
@@ -356,7 +357,17 @@ function changePlan(mod, T) {
                 { action: "callRest", url: "https://api.example.com/orders", variable: "Body", errorBody: true, onError: { rollback: false, returnValue: "false", actions: [
                     { action: "variable", name: "ErrorBody", type: "String", value: "$latestHttpResponse/Content" },
                     { action: "importWithMapping", mapping: `${E}_ChErrImm`, source: "ErrorBody", variable: "ApiError", commit: "no" },
-                    { action: "log", level: "Error", message: "API error {1}: {2}", args: ["toString($latestHttpResponse/StatusCode)", "$ApiError/Message"] }] } }] }
+                    { action: "log", level: "Error", message: "API error {1}: {2}", args: ["toString($latestHttpResponse/StatusCode)", "$ApiError/Message"] }] } }] },
+            // REST documents of the REST phase
+            { op: "changeRestService", service: api, baseUrl: "https://api.example.com/v2/", authentication: "none" },
+            { op: "changeRestOperation", operation: `${api}.GetOrder`, path: "/orders/{id}/details", headers: { "X-Trace": null, "X-Version": "2" }, timeout: 60 },
+            { op: "changeRestOperation", operation: `${api}.Ping`, method: "Patch", body: "{ \"code\": \"{code}\", \"at\": \"now\" }" },
+            { op: "deleteRestOperation", operation: `${api}.DeleteOrder` },
+            { op: "changePublishedRestService", service: pub, version: "2.1.0" },
+            { op: "changePublishedRestOperation", service: pub, resource: "orders", method: "Get", path: "{Id}", summary: "One order by id", deprecated: true },
+            { op: "deletePublishedRestOperation", service: pub, resource: "orders", method: "Post", path: "{Shop}" },
+            { op: "publishRest", module: mod, service: `${T}_Pub`, resource: "zztmp", method: "Get", microflow: `${E}_RestCall`, path: "{Id}", exportMapping: `${E}_RestExm` },
+            { op: "deletePublishedRestResource", service: pub, resource: "zztmp" }
         ],
         reject: [
             { op: { op: "updateImportMapping", mapping: `${E}_ChImm2` }, expect: /no longer in .*order_id|no longer in .*note.*"prune": true/ },
@@ -366,6 +377,10 @@ function changePlan(mod, T) {
             { op: { op: "changeMapping", mapping: `${E}_ChImm`, element: "total", transform: `${E}_ChFindCust` }, expect: /takes one value and returns one/ },
             { op: { op: "changeMapping", mapping: `${E}_ChImm`, element: "lines", objectHandling: "find", keys: [] }, expect: /none of its values is a key/ },
             { op: { op: "createImportMapping", module: mod, name: `${T}_ChBad`, jsonStructure: `${E}_ChJson`, entity: `${E}ChOrder` }, expect: /no entity .*Lines.*create/ },
+            { op: { op: "deleteRestOperation", operation: `${api}.GetOrdr` }, expect: /no operation 'GetOrdr'.*Did you mean: GetOrder/ },
+            { op: { op: "changeRestOperation", operation: `${api}.GetOrder`, headers: { Accept: null } }, expect: /keeps an Accept header/ },
+            { op: { op: "changeRestOperation", operation: `${api}.GetOrder` }, expect: /nothing to change/ },
+            { op: { op: "deletePublishedRestOperation", service: pub, resource: "orders", method: "Put" }, expect: /no Put operation .*its operations: Get '\{Id\}'/ },
             { op: { op: "createMicroflow", module: mod, name: `${T}_ChBadFlow`, parameters: [{ name: "Json", type: "String" }], actions: [{ action: "importWithMapping", mapping: `${E}_ChImm`, source: "Json" }] }, expect: /takes a parameter .*give "parameter"/ }
         ],
         after: [{ op: "delete", target: `${E}_ChImm2` }],
@@ -407,6 +422,19 @@ function changeProblems(project, T) {
     walk(flow, o => o.$Type === "Microflows$ImportMappingCall" && calls.push(o));
     if (!calls.some(c => c.ParameterVariableName === "Order")) r.push("importWithMapping does not pass the parameter");
     if (calls.length !== 2) r.push(`${calls.length} import mapping calls, expected 2 (one in the error handler)`);
+    const all = unitsNamed(project, `${T}_`);
+    const svc = all[`${T}_OrderApi`], pub = all[`${T}_Pub`], rc = all[`${T}_RestCall`];
+    if (!svc || !pub || !rc) return [...r, "REST documents of the REST phase missing"];
+    if (svc.BaseUrl.Value !== "https://api.example.com/v2" || svc.AuthenticationScheme) r.push(`service base URL ${svc.BaseUrl.Value}, authentication ${svc.AuthenticationScheme && svc.AuthenticationScheme.$Type}`);
+    const get = svc.Operations.find(x => x.Name === "GetOrder"), ping = svc.Operations.find(x => x.Name === "Ping");
+    if (svc.Operations.some(x => x.Name === "DeleteOrder")) r.push("DeleteOrder still there");
+    if (!get || get.Path.Value !== "/orders/{id}/details" || get.Headers.some(x => x.Name === "X-Trace") || !get.Headers.some(x => x.Name === "X-Version") || get.Parameters.map(x => x.Name).join() !== "id" || get.Timeout !== 60) r.push(`GetOrder ${get && get.Path.Value} params ${get && get.Parameters.map(x => x.Name)}`);
+    if (!ping || ping.Method.HttpMethod !== "Patch" || !/"at"/.test(ping.Method.Body.ValueTemplate.Value)) r.push("Ping not Patch with the new body");
+    walk(rc, o => o.$Type === "Microflows$RestOperationCallAction" && /GetOrder$/.test(o.Operation) && o.ParameterMappings.some(m => /trace$/.test(m.Parameter)) && r.push("the GetOrder call still passes trace"));
+    const ops = pub.Resources.flatMap(x => x.Operations);
+    if (pub.Version !== "2.1.0" || ops.some(o => o.HttpMethod === "Post") || pub.Resources.some(x => x.Name === "zztmp")) r.push(`published service version ${pub.Version}, ${ops.length} operations, resources ${pub.Resources.map(x => x.Name)}`);
+    const one = ops.find(o => o.HttpMethod === "Get");
+    if (!one || one.Summary !== "One order by id" || !one.Deprecated || !one.ExportMapping) r.push("published Get not changed (summary, deprecated, export mapping kept)");
     return r;
 }
 

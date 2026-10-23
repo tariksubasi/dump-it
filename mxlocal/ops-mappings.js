@@ -1197,6 +1197,12 @@ function integChangedLater(name, o, rest) {
     if (name === "changeJsonStructure" && rest.some(x => x.op === "changeJsonStructure" && x.structure === o.structure)) return true;
     if (/^create(Xml)?(Import|Export)Mapping$/.test(name) && rest.some(x => ["updateImportMapping", "updateExportMapping", "changeMapping"].includes(x.op) && x.mapping === qn)) return true;
     if (/^update(Import|Export)Mapping$|^changeMapping$/.test(name) && rest.some(x => ["updateImportMapping", "updateExportMapping", "changeMapping"].includes(x.op) && x.mapping === o.mapping)) return true;
+    // consumed and published REST: later changes and deletes of the same service
+    const svcQn = name === "createConsumedRestService" ? qn : name === "addRestOperation" ? o.service : null;
+    if (svcQn && rest.some(x => ["changeRestService", "changeRestOperation", "deleteRestOperation"].includes(x.op) && String(x.service || x.operation || "").startsWith(svcQn))) return true;
+    const pub = name === "publishRest" ? `${o.module}.${o.service}` : name === "changePublishedRestOperation" ? o.service : null;
+    if (pub && rest.some(x => ["changePublishedRestOperation", "deletePublishedRestOperation", "deletePublishedRestResource", "changePublishedRestService"].includes(x.op) && x.service === pub)) return true;
+    if (name === "changeRestOperation" && rest.some(x => ["changeRestOperation", "deleteRestOperation"].includes(x.op) && x.operation === o.operation)) return true;
     return false;
 }
 
