@@ -112,6 +112,10 @@ async function generalPhase({ s2, reopen, copy, mod, T, layout, layoutProblems, 
         chain.ops.splice(at, 1, ...(hasUT ? [] : [{ op: "createModule", name: "UnitTesting" },
             { op: "createJavaAction", module: "UnitTesting", name: "AssertTrue2", parameters: [{ name: "valueToAssert", type: "Boolean" }, { name: "message", type: "String" }], code: "return valueToAssert;", ...(stub ? {} : { compile: false }) }]));
         const families = new Set(chain.ops.map(o => require("./op-families").familyOf(o.op)));
+        // 10 families with pages; a project without a page with a layout cannot have the page-only ones (pages, menus)
+        const famOf = ops => new Set(ops.map(o => require("./op-families").familyOf(o.op)));
+        const pageOnly = pageable ? [] : [...famOf(chainPlan(mod, T, true, web, !!stub).ops)].filter(f => !families.has(f) && !famOf(chainPlan(mod, T, false, web, !!stub).ops).has(f));
+        const need = 10 - pageOnly.length;
         const r = await integ.runPhase(env, s2, chain, p => {
             const out = [];
             const u = integ.unitsNamed(p, "Test_NewItem")["Test_NewItem"];
@@ -121,7 +125,7 @@ async function generalPhase({ s2, reopen, copy, mod, T, layout, layoutProblems, 
             return out;
         });
         s2 = r.s;
-        check(`chained plan: ${chain.ops.length} ops of ${families.size} op families, each later op using names created earlier in the plan (no $prev); stored, reopen 0 errors, roundtrip`, !r.problems.length && families.size >= 10, r.problems.slice(0, 5).join("; ") || (families.size < 10 ? `only ${families.size} families` : ""));
+        check(`chained plan: ${chain.ops.length} ops of ${families.size} op families (${need}+ required${pageOnly.length ? `; no page with a layout: ${pageOnly.join(", ")} need pages` : ""}), each later op using names created earlier in the plan (no $prev); stored, reopen 0 errors, roundtrip`, !r.problems.length && families.size >= need, r.problems.slice(0, 5).join("; ") || (families.size < need ? `only ${families.size} families` : ""));
         // JAVA CHECK: bad code is refused (dry run only)
         if (stub) s2 = await refuse(s2, { ops: [{ op: "setJavaActionCode", javaAction: `${C}.JA_Check`, code: "retrun 1;" }] }, /JAVA CHECK: javac found/, "setJavaActionCode with bad Java");
         const jr = await integ.runPhase(env, s2, { ops: [{ op: "setJavaActionCode", javaAction: `${C}.JA_Check`, code: "int n = 2;\nreturn Limit != null && Limit > n;", imports: ["java.util.List"], extra: "// helper space", ...(stub ? {} : { compile: false }) }] }, () => {
