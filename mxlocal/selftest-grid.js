@@ -70,7 +70,7 @@ async function targets(s) {
     x.exportType = !!(x.grid2 && x.grid2.lines.some(l => l.startsWith("columns/exportType ")));
     // what the installed .mpk offers: Gallery 3.x has no loadMore paging (buttons | virtualScrolling), Data grid 2 2.x
     // without showNumberOfRows (or 3.x showTotalCount) has no total count setting (2.21.1)
-    const enumKeys = (w, key) => { const l = w && w.lines.find(z => z.startsWith(`${key} `)); const m = l && / enum=(\S*)/.exec(l); return m && m[1] ? m[1].split(",").map(e => e.split("=")[0]) : []; };
+    const enumKeys = (w, key) => { const l = w && w.lines.find(z => z.startsWith(`${key} `)); const m = l && / enum=(.*?) sel=/.exec(l); return m && m[1] ? m[1].split(",").map(e => e.split("=")[0]) : []; };
     x.galMode = ["loadMore", "virtualScrolling"].find(k => enumKeys(x.gallery, "pagination").includes(k)) || null;
     x.showTotal = !!(x.grid2 && x.grid2.lines.some(l => /^(showNumberOfRows|showTotalCount) /.test(l)));
     return x;
