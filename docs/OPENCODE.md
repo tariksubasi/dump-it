@@ -215,6 +215,9 @@ Run git commands one at a time (no `&&`). Never add a git remote and never push 
 
 A change file is JSON: `{ "ops": [ { "op": "<name>", ...fields } ] }`. **R** = required. Unknown fields are errors.
 The live list is `python mx.py ops`. If it differs from this table, trust the live list.
+Ops run in order. A later op can use any name an earlier op of the same file creates (a module, entity, page,
+microflow, workflow, ...): write the full name, there is no `$prev`. Example: `createPage` `Sales.Order_List`, then
+`addMenuItem` with `"page": "Sales.Order_List"` in the same file.
 
 ### Domain model
 
