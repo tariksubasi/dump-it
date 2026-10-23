@@ -34,7 +34,8 @@ const ACTIONS = {
     showHomePage: { doc: "Open the home page (microflows only).", fields: {} },
     callJava: {
         doc: "Call a Java action (microflows only).",
-        fields: { javaAction: "R Module.JavaAction", args: "optional { \"Param\": \"expression\" } (every required parameter needs one; an entity type parameter takes \"Module.Entity\")", variable: "optional result variable name (when the Java action returns something)" }
+        fields: { javaAction: "Module.JavaAction (required, unless preset)", args: "optional { \"Param\": \"expression\" } (every required parameter needs one; an entity type parameter takes \"Module.Entity\")", variable: "optional result variable name (when the Java action returns something)",
+            preset: "optional publishBusinessEvent: the publish Java action of the Marketplace Business Events module (no javaAction needed)", event: "with preset publishBusinessEvent: the object variable of the business event to publish (a specialization of BusinessEvents.PublishedBusinessEvent)" }
     },
     callJavaScript: {
         doc: "Call a JavaScript action (nanoflows only).",
@@ -99,7 +100,7 @@ const ACTIONS = {
 };
 // Mendix actions ops cannot write: refused with the way out (no Studio Pro sample, or the Model SDK cannot write them).
 const REFUSED = {
-    publishBusinessEvent: "publishing a business event is not supported: no Studio Pro sample in the test projects and the Model SDK 4.116 has no such action. Add it in Studio Pro (Toolbox > Business events > Publish business event)",
+    publishBusinessEvent: "publishing a business event is the Java action of the Business Events module: { \"action\": \"callJava\", \"preset\": \"publishBusinessEvent\", \"event\": \"MyEvent\" } (ops callJava)",
     callMLModel: "calling an ML model is not supported: it needs an ML mapping document that only Studio Pro creates. Add it in Studio Pro (Toolbox > Machine learning > Call ML model)",
     callML: "see callMLModel: add it in Studio Pro",
     reduce: "reduce is a function of aggregateList: { \"action\": \"aggregateList\", \"function\": \"reduce\", \"initial\": \"0\", \"expression\": \"$currentResult + $currentObject/Amount\", ... }",
@@ -109,7 +110,9 @@ const REFUSED = {
 // Actions defined next to their documents (consumed REST, workflows): { doc, fields, only: "micro" | "nano", creates,
 // type: () => SDK action class, build(c, act, spec, where) -> action, info(a, c) -> { entity, list }, vars(a) -> [names],
 // describe(a) -> text }. c: { f, h, model, expr, variableInfo, needVariable, fillTemplate }.
-const EXTRA_ACTIONS = { ...require("./ops-rest").REST_ACTIONS, ...require("./ops-workflows").WORKFLOW_ACTIONS, ...require("./ops-offline").SYNC_ACTION };
+const FA = require("./ops-flow-actions");
+const EXTRA_ACTIONS = { ...require("./ops-rest").REST_ACTIONS, ...require("./ops-workflows").WORKFLOW_ACTIONS, ...require("./ops-offline").SYNC_ACTION, ...FA.FLOW_ACTIONS };
+for (const [old, now] of Object.entries(FA.ALIASES)) REFUSED[old] = `the action is called ${now}: { "action": "${now}", ... } (ops ${now})`;
 const { SYSTEM_ASSOCIATIONS } = require("./ops-workflows");
 Object.assign(ACTIONS, EXTRA_ACTIONS);
 // Which field of an action names the variable it creates.
@@ -549,8 +552,30 @@ function makeFlows(h) {
     };
 
     // Java action (microflows) or JavaScript action (nanoflows) call: one mapping per parameter, in parameter order.
+    // N-8 callJava presets: a Java action of a Marketplace module, found by name, with its arguments filled in.
+    const PRESETS = ["publishBusinessEvent"];
+    async function javaPreset(f, spec, where) {
+        if (spec.javaAction !== undefined) throw new Error(`${where}: give preset or javaAction, not both`);
+        if (!PRESETS.includes(spec.preset)) fail(`${where}: preset '${spec.preset}' is not known`, String(spec.preset), PRESETS);
+        if (spec.event === undefined) throw new Error(`${where}: preset publishBusinessEvent needs "event": the object variable of the business event (e.g. "OrderShipped")`);
+        const actions = model.allJavaActions().filter(j => /^BusinessEvents\./.test(j.qualifiedName) && /^publish/i.test(j.name) && /event/i.test(j.name));
+        if (!actions.length) throw new Error(`${where}: this project has no Business Events module (Marketplace) with a publish Java action. Studio Pro: Marketplace > Business Events (import it, or importModulePackage with its .mpk), add a published business event service (Add other > Business event service) for the event entity, then use this preset`);
+        const target = actions.length > 1 ? actions.find(j => /^PublishBusinessEvent$/i.test(j.name)) || actions[0] : actions[0];
+        const ja = target.isLoaded ? target : await target.load();
+        const ent = await needVariable(f.m, spec.event, false, where);
+        const base = await h.entity("BusinessEvents.PublishedBusinessEvent").catch(() => null);
+        if (base && !(await isA(ent, base.qualifiedName))) throw new Error(`${where}: $${noDollar(spec.event)} is a ${ent}, which is no published business event (a specialization of ${base.qualifiedName}); create it from the event entity of your business event service`);
+        const objParams = [...ja.actionParameters].filter(p => p.actionParameterType instanceof codeactions.BasicParameterType && p.actionParameterType.type instanceof codeactions.EntityType);
+        if (!objParams.length) throw new Error(`${where}: ${ja.qualifiedName} has no object parameter for the event; call it with javaAction and args`);
+        const args = { ...(spec.args || {}), [objParams[0].name]: `$${noDollar(spec.event)}` };
+        if (h.client) h.client.warnFirst(`${where.split(" ")[0]}: callJava preset publishBusinessEvent calls ${ja.qualifiedName} (${objParams[0].name} = $${noDollar(spec.event)}); no Studio Pro sample of it in the test projects: check the call in Studio Pro`);
+        const { preset, event, ...rest } = spec;
+        return { ...rest, javaAction: ja.qualifiedName, args };
+    }
+
     async function codeCall(f, act, spec, where, js) {
         const qn = js ? spec.jsAction : spec.javaAction;
+        if (!qn) throw new Error(`${where}: ${js ? "callJavaScript needs jsAction" : "callJava needs javaAction (Module.JavaAction) or a preset (publishBusinessEvent)"}`);
         const target = await h.get(qn);
         const [want, other] = js ? [javascriptactions.JavaScriptAction, javaactions.JavaAction] : [javaactions.JavaAction, javascriptactions.JavaScriptAction];
         if (!(target instanceof want)) throw new Error(`${where}: '${qn}' is not a ${js ? "JavaScript" : "Java"} action` + (target instanceof other ? ` but a ${js ? "Java action: use callJava in a microflow" : "JavaScript action: use callJavaScript in a nanoflow"}` : ""));
@@ -903,7 +928,7 @@ function makeFlows(h) {
         const kind = spec.action;
         validate("action", kind, { fields: { ...ACTIONS[kind].fields, ...COMMON } }, spec, where);
         if (ONLY[kind] === "micro" && f.nano) throw new Error(`${where}: '${kind}' is not available in nanoflows${kind === "callJava" ? "; call a microflow that calls the Java action" : ""}`);
-        if (ONLY[kind] === "nano" && !f.nano) throw new Error(`${where}: '${kind}' only works in nanoflows (JavaScript runs in the browser); in a microflow use callJava`);
+        if (ONLY[kind] === "nano" && !f.nano) throw new Error(`${where}: '${kind}' only works in nanoflows${kind === "callJavaScript" ? " (JavaScript runs in the browser); in a microflow use callJava" : " (it acts on the device); call a nanoflow"}`);
         if (f.rule && !RULE_ACTIONS.includes(kind)) throw new Error(`${where}: '${kind}' is not allowed in a rule (a rule only reads and computes: ${RULE_ACTIONS.join(", ")}, if, switch, loop, end)`);
         const act = mf.ActionActivity.createIn(f.coll);
         point(act, x, y);
@@ -1002,7 +1027,7 @@ function makeFlows(h) {
                 break;
             case "callJava":
             case "callJavaScript":
-                a = await codeCall(f, act, spec, where, kind === "callJavaScript");
+                a = await codeCall(f, act, kind === "callJava" && spec.preset !== undefined ? await javaPreset(f, spec, where) : spec, where, kind === "callJavaScript");
                 break;
             case "validationFeedback": {
                 const ent = await needVariable(f.m, spec.variable, false, where);
@@ -2169,6 +2194,17 @@ function makeFlows(h) {
         if (!fields.length) throw new Error(`changeAction needs at least one field to change. For this step: ${names().join(", ") || "(nothing can be changed)"}`);
         const where = `${o.microflow} [${o.id}]`;
         const done = [];
+        // an action of EXTRA_ACTIONS with spec(): its own fields change by building it again from the stored fields
+        // plus the new ones, in one go (the action keeps its box, caption and error handling)
+        const x = step instanceof mf.ActionActivity && step.action && !Object.keys(own).length ? extraOf(step.action) : null;
+        if (x && x.spec) {
+            const mine = fields.filter(k => k in x.fields);
+            if (mine.length) {
+                done.push(await rebuildExtra(f, step, x, o, mine, where));
+                fields.splice(0, fields.length, ...fields.filter(k => !mine.includes(k)));
+            }
+            for (const k of fields) if (!(k in x.fields) && !common[k] && !(k === "onError" && handles)) fail(`${where}: '${k}' cannot be changed on ${describe(step)}. Fields for this step: ${[...Object.keys(x.fields), ...Object.keys(common), "onError"].join(", ")}`, k, [...Object.keys(x.fields), ...Object.keys(common)]);
+        }
         for (const k of fields) {
             if (k === "onError" && handles) {
                 done.push(await setOnError(m, step, o.onError, where));
@@ -2180,6 +2216,31 @@ function makeFlows(h) {
             done.push(k);
         }
         return `${where} ${describe(step)}: ${done.join(", ")}`;
+    }
+
+    // changeAction on an action of EXTRA_ACTIONS: the stored fields (x.spec) with the given ones on top; an object field
+    // ({ "param": ... }) merges, null removes a field; a new operation / service drops the old args and query.
+    async function rebuildExtra(f, step, x, o, keys, where) {
+        const a = step.action;
+        const kind = Object.keys(EXTRA_ACTIONS).find(n => EXTRA_ACTIONS[n] === x);
+        const old = x.spec(a);
+        const next = { ...old };
+        const plain = v => v && typeof v === "object" && !Array.isArray(v);
+        for (const k of keys) {
+            const v = o[k];
+            if (v === null) delete next[k];
+            else if (plain(v) && plain(old[k])) next[k] = Object.fromEntries(Object.entries({ ...old[k], ...v }).filter(([, y]) => y !== null));
+            else next[k] = v;
+        }
+        if (["operation", "service", "name"].some(k => keys.includes(k) && o[k] !== old[k])) for (const k of ["args", "query"]) if (!keys.includes(k)) delete next[k];
+        const errorType = a.errorHandlingType;
+        const c = { f, h, model, expr: (v, w) => expr(f.m, v, w), variableInfo: (n, w) => variableInfo(f.m, n, w), needVariable: (n, l, w) => needVariable(f.m, n, l, w), fillTemplate: (t, text, args, w) => fillTemplate(f, t, text, args, w) };
+        validate("action", kind, { fields: { ...x.fields, ...COMMON } }, { action: kind, ...next }, where);
+        const made = await x.build(c, step, { action: kind, ...next }, where);
+        made.errorHandlingType = errorType;
+        const was = old[CREATES[kind]];
+        if (CREATES[kind] && was && next[CREATES[kind]] !== was && h.client) h.client.warn(`${where}: the result is now ${next[CREATES[kind]] ? "$" + next[CREATES[kind]] : "not stored"} (was $${was}); check the steps that use $${was}`);
+        return keys.join(", ");
     }
 
     async function deleteAction(o) {

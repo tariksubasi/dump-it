@@ -149,6 +149,17 @@ const REST_ACTIONS = {
         },
         vars: a => (a.outputVariable && a.outputVariable.variableName ? [a.outputVariable.variableName] : []),
         info: a => responseOf(a.operation) || { entity: null, list: false },
+        // the stored fields, for changeAction (operation, args, query, body, variable)
+        spec(a) {
+            if (a.baseUrlParameterMapping) throw new Error(`SEND REST ${a.operationQualifiedName}: it maps the base URL parameter, which ops does not write; change it in Studio Pro`);
+            const name = (ref, qn) => (ref && ref.name) || String(qn || "").split(".").pop();
+            const out = { operation: a.operationQualifiedName, args: Object.fromEntries(a.parameterMappings.map(m => [name(m.parameter, m.parameterQualifiedName), m.value])) };
+            const q = a.queryParameterMappings.filter(m => m.included && m.included.name !== "No");
+            if (q.length) out.query = Object.fromEntries(q.map(m => [name(m.queryParameter, m.queryParameterQualifiedName), m.value]));
+            if (a.bodyVariable && a.bodyVariable.variableName) out.body = a.bodyVariable.variableName;
+            if (a.outputVariable && a.outputVariable.variableName) out.variable = a.outputVariable.variableName;
+            return out;
+        },
         describe: a => `SEND REST ${a.operationQualifiedName || "?"}${a.outputVariable ? " -> $" + a.outputVariable.variableName : ""}`
     }
 };

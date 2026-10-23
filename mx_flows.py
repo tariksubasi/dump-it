@@ -544,6 +544,45 @@ class FlowRenderer:
             line += " (timeout %ss)" % clean(a["TimeOutExpression"])
         return line, sub
 
+    def _a_SendEmailAction(self, a):
+        """Send email (Mendix 11.2+): subject/body are expressions before 11.12, templates after."""
+        m = a.get("EmailMessage") or {}
+        c = a.get("EmailConnectionConfig") or {}
+        subject = template(m.get("SubjectTemplate")) if isinstance(m.get("SubjectTemplate"), dict) else clean(m.get("Subject"))
+        line = "SEND EMAIL to %s subject %s via %s:%s" % (clean(m.get("To")), subject, clean(c.get("Host")), clean(c.get("Port")))
+        self.index.effect("EMAILS (Send email action)", "%s -> %s" % (self.qn, clean(m.get("To"))))
+        return line, []
+
+    def _a_CallWebServiceAction(self, a):
+        body = a.get("RequestBodyHandling") or {}
+        args = ", ".join("%s = %s" % (p.get("ParameterName"), clean(p.get("Argument"))) for p in body.get("ParameterMappings") or [])
+        res = a.get("ResultHandling") or {}
+        self.index.effect("WEB SERVICE CALLS (Call web service action)", "%s -> %s %s" % (self.qn, a.get("ImportedWebService"), a.get("OperationName")))
+        line = "CALL WEB SERVICE %s %s(%s)" % (a.get("ImportedWebService"), a.get("OperationName"), args)
+        return ("$%s = %s" % (res.get("ResultVariableName") or res.get("OutputVariableName"), line) if res.get("StoreInVariable") else line), []
+
+    def _a_CallExternalAction(self, a):
+        args = ", ".join("%s = %s" % (p.get("ParameterName"), clean(p.get("Argument"))) for p in a.get("ParameterMappings") or [])
+        self.index.effect("EXTERNAL ACTIONS (Call external action)", "%s -> %s.%s" % (self.qn, a.get("ConsumedODataService"), a.get("Name")))
+        line = "CALL EXTERNAL ACTION %s.%s(%s)" % (a.get("ConsumedODataService"), a.get("Name"), args)
+        return ("$%s = %s" % (a["VariableName"], line) if a.get("VariableName") else line), []
+
+    def _a_SendExternalObject(self, a):
+        return "SEND EXTERNAL OBJECT $%s" % a.get("VariableNameToBeSent"), []
+
+    def _a_DeleteExternalObject(self, a):
+        return "DELETE EXTERNAL OBJECT $%s" % a.get("DeleteVariableName"), []
+
+    def _a_PushToClientAction(self, a):
+        return "SYNCHRONIZE TO DEVICE $%s" % a.get("DataVariableName"), []
+
+    def _a_ClearFromClientAction(self, a):
+        what = a.get("Entity") or ", ".join("$" + v for v in a.get("VariableNames") or []) or "all objects"
+        return "CLEAR FROM DEVICE %s" % what, []
+
+    def _a_CancelSynchronizationAction(self, a):
+        return "CANCEL SYNCHRONIZATION", []
+
     def _a_RestOperationCallAction(self, a):
         """'Send REST request' (Mendix 10 consumed REST service). Unknown fields are kept as key=value."""
         operation = a.get("Operation") or a.get("RestOperation") or ""
