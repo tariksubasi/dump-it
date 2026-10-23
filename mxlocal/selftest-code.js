@@ -224,7 +224,7 @@ async function codePhase(x) {
         const usage = await dry({ ops: [
             { op: "createMicroflow", module: C, name: "Lines_Of", parameters: [{ name: "Order", type: `${C}.Order` }], actions: [{ action: "retrieve", variable: "Lines", from: "Order", association: `${C}.Line_Order` }] },
             { op: "changeAssociation", association: `${C}.Line_Order`, to: `${C}.Invoice` }] });
-        if (!/Line_Order -> Order became .*Line -> .*Invoice/.test(usage) || !/CHECK these places[^\n]*Lines_Of/.test(usage) || !/DATA LOSS: existing .*Line_Order links/.test(usage)) problems.push(`re-point summary lacks the ends, the usage of Lines_Of or DATA LOSS: ${usage.slice(200, 900)}`);
+        if (!/ends \S*Line -> \S*Order became \S*Line -> \S*Invoice/.test(usage) || !/CHECK these places[^\n]*Lines_Of/.test(usage) || !/DATA LOSS: existing .*Line_Order links/.test(usage)) problems.push(`re-point summary lacks the ends, the usage of Lines_Of or DATA LOSS: ${usage.slice(200, 900)}`);
         await refuse({ ops: [{ op: "changeAssociation", association: `${C}.Line_Order`, to: `${C}X.Far` }] }, /REFUSED: .*cross-module association/, "re-pointing to an entity of another module");
         await refuse({ ops: [{ op: "changeAssociation", association: `${C}.Line_Order`, from: `${C}X.Far` }] }, /REFUSED: .*would move it/, "a new owner in another module");
         await refuse({ ops: [{ op: "changeAssociation", association: `${C}.Line_Order`, parent: `${C}.Tag` }] }, /write it as "from"/, "parent synonym");

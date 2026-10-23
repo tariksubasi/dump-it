@@ -455,9 +455,10 @@ function makeMarket({ client, model }) {
             client.changes.deleted.add(id);
         }
         for (const [id, u] of newIds) {
-            const containerId = u === mod ? appMod.containerId : u.containerId === mod.id ? appMod.id : u.containerId;
-            const plain = u === mod ? { ...u.plain, $ID: id } : u.plain;
-            const bytes = u === mod ? bson.encode(require("./convert").fromPlain(plain)) : u.bytes;
+            if (u === mod) continue; // the app's module unit stays (its id, name and place)
+            const containerId = u.containerId === mod.id ? appMod.id : u.containerId;
+            const plain = u.plain;
+            const bytes = u.bytes;
             project.plain.set(id, plain);
             project.raw.set(id, bytes);
             if (oldIds.has(id)) {
