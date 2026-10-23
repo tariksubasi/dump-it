@@ -99,7 +99,9 @@ function expand(kind, spec, where, dir) {
             if (s.expanded === true) props.startExpanded = true;
             break;
         case "pieChart":
-            props = { seriesDataSource: s.xpath ? { entity: String(s.entity), xpath: String(s.xpath) } : String(s.entity), seriesName: String(s.caption), seriesValueAttribute: String(s.value), seriesItemSelection: "None" };
+            props = { seriesDataSource: s.xpath ? { entity: String(s.entity), xpath: String(s.xpath) } : String(s.entity), seriesName: String(s.caption), seriesValueAttribute: String(s.value) };
+            // item selection came with a later Charts .mpk: set only where the installed one has it
+            if (pluggable.installed(dir).get(p.id).lines.some(l => l.startsWith("seriesItemSelection "))) props.seriesItemSelection = "None";
             if (s.hole !== undefined) props.holeRadius = Math.round(num(s.hole, where, "hole"));
             break;
         default: {
