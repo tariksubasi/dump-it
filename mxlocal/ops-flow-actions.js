@@ -276,7 +276,7 @@ const FLOW_ACTIONS = {
             to: "R expression: address(es), e.g. \"$Customer/Email\"", cc: "optional expression", bcc: "optional expression",
             subject: "R text (11.12+: {1} from subjectArgs; before: an expression)", subjectArgs: "optional [\"expression\"] (11.12+)",
             body: "plain text body (body and/or html)", html: "HTML body", bodyArgs: "optional [\"expression\"] for {1} in body/html (11.12+)",
-            server: "R { \"host\": expr, \"port\": expr, \"from\": expr, \"security\": none|ssl|tls, \"user\": expr, \"password\": expr, \"checkIdentity\": true/false, \"timeout\": seconds } (constants keep secrets out of the model: \"@Module.SmtpPassword\")",
+            server: "required: { \"host\": expr, \"port\": expr, \"from\": expr, \"security\": none|ssl|tls, \"user\": expr, \"password\": expr, \"checkIdentity\": true/false, \"timeout\": seconds } (constants keep secrets out of the model: \"@Module.SmtpPassword\")",
             attachment: "optional FileDocument variable (11.3+)", headers: "optional { \"Name\": \"expression\" } (11.11+)"
         },
         only: "micro",
