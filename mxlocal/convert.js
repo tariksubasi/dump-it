@@ -98,8 +98,8 @@ function leafFromPlain(value, d, hint) {
     if (Buffer.isBuffer(value)) return { k: 0x05, s: d.s || 0, v: value };
     if (typeof value === "object") return fromPlain(value, hint);
     if (typeof value === "string") {
-        // a DateTime property: the SDK keeps an ISO text ("" = not set: today, as Studio Pro fills it in)
-        if (d.k === 0x09) return { k: 0x09, v: BigInt(value && !Number.isNaN(Date.parse(value)) ? Date.parse(value) : new Date().setUTCHours(0, 0, 0, 0)) };
+        // a DateTime property: the SDK keeps milliseconds or an ISO date as text ("" = not set: today, as Studio Pro fills it in)
+        if (d.k === 0x09) return { k: 0x09, v: BigInt(/^-?\d+$/.test(value) ? Number(value) : value && !Number.isNaN(Date.parse(value)) ? Date.parse(value) : new Date().setUTCHours(0, 0, 0, 0)) };
         if (d.k === 0x05 && GUID_RE.test(value)) return { k: 0x05, s: d.s || 0, v: guidToBytes(value) };
         const node = { k: 0x02, v: value };
         if (d.raw && d.raw.toString("utf8") === value) node.raw = d.raw;
