@@ -455,7 +455,7 @@ function makeWidgetEdit(h, I, E) {
             const ps = sec && (await sec.load());
             if (ps && ps.enableGuestAccess) {
                 const guest = ps.userRoles.find(r => r.name === ps.guestUserRoleName);
-                roles = guest ? guest.moduleRoles.map(r => r.qualifiedName).filter(r => r.startsWith(`${o.module}.`)) : [];
+                roles = guest ? guest.moduleRolesQualifiedNames.slice().filter(r => r.startsWith(`${o.module}.`)) : [];
                 if (guest && !roles.length) notes.push(`the anonymous user role ${guest.name} has no module role of ${o.module}: give one ("roles"), or the page opens for nobody`);
                 else notes.push(`open to anonymous users (${roles.join(", ")})`);
             } else {
