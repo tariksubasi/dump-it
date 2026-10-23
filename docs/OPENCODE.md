@@ -1208,6 +1208,35 @@ Pro (if a path does not match, Studio Pro shows an error on the mapping; right-c
 ] }
 ```
 
+### App documents (regular expressions, task queues, ...)
+
+These are documents of Studio Pro's "Add other" menu. The test projects have no Studio Pro sample of them, so the
+dry run says "check it in Studio Pro" (first use).
+
+| Op | Fields | Notes |
+|---|---|---|
+| `createRegularExpression` | **module**, **name**, **pattern**, examples `{ "valid": [..], "invalid": [..] }`, folder | Java regex syntax. The whole value must match (as in a validation rule). Examples are checked before anything is written. Use it: `addValidationRule` rule `regex`, `"regex": "Module.Name"` (a String attribute) |
+| `changeRegularExpression` | **regularExpression** (`Module.Name`), **pattern**, examples | The dry run lists the validation rules that use it |
+| `createTaskQueue` | **module**, **name**, threads (number or expression like `@Module.Constant`, default 1), scope (`node` default, or `cluster`), folder | A call runs in it with `"queue": "Module.Queue"` on a `call` or `callJava` action |
+| `changeTaskQueue` | **queue**, threads, scope | The dry run lists the calls in it |
+
+A call in a task queue (`call` or `callJava` in a microflow, field `queue`) runs later in the background: it has no
+`variable`, and a queued Java action must return nothing. `retry`: `{ "retries": 3, "interval": 10, "unit": "Seconds" }`
+(fixed) or `{ "retries": 3, "initialInterval": 10, "maximumInterval": 600, "unit": "Minutes" }` (exponential).
+Change it later with `changeAction` (`"queue": "Module.Queue"`, `"queue": "none"` runs it directly again, `retry`).
+
+```json
+{ "ops": [
+  { "op": "createRegularExpression", "module": "Sales", "name": "PostCode", "pattern": "^[0-9]{4} ?[A-Z]{2}$", "examples": { "valid": ["1234 AB"], "invalid": ["12345"] } },
+  { "op": "addValidationRule", "entity": "Sales.Customer", "attribute": "PostCode", "rule": "regex", "regex": "Sales.PostCode", "message": "Use a postcode like 1234 AB" },
+  { "op": "changeRegularExpression", "regularExpression": "Sales.PostCode", "pattern": "^[0-9]{4}[A-Z]{2}$" },
+  { "op": "createTaskQueue", "module": "Sales", "name": "InvoiceQueue", "threads": 2, "scope": "cluster" },
+  { "op": "changeTaskQueue", "queue": "Sales.InvoiceQueue", "threads": 4 },
+  { "op": "createMicroflow", "module": "Sales", "name": "ACT_SendInvoices", "parameters": [ { "name": "Order", "type": "Sales.Order" } ], "actions": [
+    { "action": "call", "microflow": "Sales.SUB_SendInvoice", "args": { "Order": "$Order" }, "queue": "Sales.InvoiceQueue", "retry": { "retries": 3, "interval": 30, "unit": "Seconds" } } ] }
+] }
+```
+
 ### Theme files (SCSS)
 
 A company design system (design module, tokens, components, fonts, dark mode): see "Design system" below.

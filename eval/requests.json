@@ -1710,6 +1710,43 @@
           "integrations/.*OrderApi.*\\.txt$": "(?s)^(?=.*/v2/orders)(?!.*DeleteOrder)"
         }
       }
+    },
+    {
+      "id": "docregex",
+      "text": "Posta kodu için PostCode adında bir regular expression oluştur (4 rakam, isteğe bağlı boşluk, 2 büyük harf; örn. 1234 AB) ve Order entity'sine PostCode adında String attribute ekleyip bu ifadeyle doğrulama kuralı koy: mesaj 'Geçerli bir posta kodu girin'.",
+      "checks": {
+        "find": [
+          "MyFirstModule.PostCode",
+          "MyFirstModule.Order.PostCode"
+        ]
+      },
+      "ops": [
+        "createRegularExpression",
+        "addAttribute",
+        "addValidationRule"
+      ],
+      "families": [
+        "app"
+      ]
+    },
+    {
+      "id": "docqueue",
+      "text": "InvoiceQueue adında, tüm cluster için 2 thread'li bir task queue oluştur; Order parametreli ACT_QueueInvoice microflow'u, Order'ı commit eden SUB_Invoice microflow'unu bu kuyrukta çağırsın (3 deneme, 30 saniye arayla).",
+      "checks": {
+        "find": [
+          "MyFirstModule.InvoiceQueue",
+          "MyFirstModule.ACT_QueueInvoice",
+          "MyFirstModule.SUB_Invoice"
+        ]
+      },
+      "ops": [
+        "createTaskQueue",
+        "createMicroflow"
+      ],
+      "families": [
+        "app",
+        "flows"
+      ]
     }
   ]
 }

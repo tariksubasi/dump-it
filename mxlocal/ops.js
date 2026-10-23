@@ -36,6 +36,7 @@ const { makeOffline, OFFLINE_OPS } = require("./ops-offline");
 const { makeDmLayout, DMLAYOUT_OPS } = require("./ops-dmlayout");
 const { makeComposite, COMPOSITE_OPS, COMPOSITE_SYNONYMS } = require("./ops-composite");
 const { makeGeneral, GENERAL_OPS } = require("./ops-general");
+const { makeDocs, DOCS_OPS, DOCS_SYNONYMS, docsChangedLater } = require("./ops-docs");
 
 const OPS = {
     createEntity: {
@@ -93,6 +94,7 @@ const OPS = {
             headers: "callRest: { \"Name\": \"expression\" } (replaces all)", timeout: "callRest: seconds", body: "callRest: body text", bodyArgs: "callRest: [\"expression\"]",
             auth: "callRest: { \"user\": \"expression\", \"password\": \"expression\" } or \"none\"", proxy: "callRest: default | none | { host, port, user, password }", errorBody: "callRest: true/false",
             initial: "aggregateList reduce: initial value expression",
+            queue: "call/callJava (microflows): Module.Queue to run it in a task queue, \"none\" to run it directly", retry: "call/callJava in a queue: { \"retries\": 3, \"interval\": 10, \"unit\": \"Seconds\" } or { \"retries\", \"initialInterval\", \"maximumInterval\", \"unit\" }, \"none\" = no retry",
             onError: "action or loop: \"continue\" | \"rollback\" / \"abort\" (default; removes a custom handler) | \"logAndShow\" | \"rethrow\" | { \"pattern\": ..., ... } | { \"rollback\": true/false, \"actions\": [ ... ] }: replaces the error handling (the old custom handler and its steps go)"
         }
     },
@@ -144,6 +146,7 @@ const OPS = {
     ...OFFLINE_OPS,
     ...DMLAYOUT_OPS,
     ...GENERAL_OPS,
+    ...DOCS_OPS,
     moveDocument: { doc: "Move a document to another folder of the same module.", fields: { document: "R Module.Document", folder: "optional folder path, e.g. Orders/Actions (missing or \"\" = the module root)" } },
     rename: { doc: "Rename a module, document, entity, attribute, association or enumeration value. Updates references, reports names left in expressions/XPath/Java.", fields: { target: "R qualified name, e.g. Module.Entity.Attribute", newName: "R new short name" } },
     delete: { doc: "Delete a document, entity, attribute, association, enumeration value or module role. Lists what still uses it. (Validation rules, event handlers, indexes: deleteValidationRule, deleteEventHandler, deleteIndex; access rules: deleteAccessRule; widgets: deleteWidget; flow steps: deleteAction.)", fields: { target: "R qualified name" } }
@@ -486,6 +489,7 @@ function bind(model, client) {
     const version = client.project.version;
     const restOps = makeRest({ model, client, get, exists, folder, version, mappingInternals: mappingOps.internals, impl: () => impl });
     const odataOps = makeOData({ model, client, get, exists, entity, folder, version, persistable, attributeChain, loadParents });
+    const docsOps = makeDocs({ model, client, get, exists, entity, folder, version });
     const xmlOps = makeXml({ model, client, get, exists, entity, folder, version, attributeChain, loadParents, mappingInternals: mappingOps.internals });
     const workflowOps = makeWorkflows({ model, client, get, exists, entity, folder, version, persistable, attributeChain, loadParents, grantAccess: o => impl.grantAccess(o), impl: () => impl,
         textAll: (owner, prop, value) => pageOps.internals.templateAll(owner, prop, value, null, "", true) });
@@ -748,9 +752,8 @@ function bind(model, client) {
                 info.typeOfRange = o.min !== undefined && o.max !== undefined ? dm.RangeType.Between : o.min !== undefined ? dm.RangeType.GreaterThanOrEqualTo : dm.RangeType.SmallerThanOrEqualTo;
             }
             if (kind === "regex") {
-                const re = await get(o.regex);
-                if (!(re instanceof sdk.regularexpressions.RegularExpression)) throw new Error(`'${o.regex}' is not a regular expression document`);
-                info.regularExpression = re;
+                if (!(attr.type instanceof dm.StringAttributeType)) throw new Error(`addValidationRule regex: ${o.entity}.${o.attribute} is not a String attribute`);
+                info.regularExpression = await docsOps.regexDoc(o.regex, `addValidationRule ${o.entity}.${o.attribute}`);
             }
             if (kind === "equals") {
                 info.useValue = true;
@@ -942,6 +945,7 @@ function bind(model, client) {
         ...restOps.impl,
         ...odataOps.impl,
         ...xmlOps.impl,
+        ...docsOps.impl,
         ...workflowOps.impl,
         ...scaffoldOps.impl,
         ...compositeOps.impl,
@@ -1128,6 +1132,7 @@ function bind(model, client) {
         ...restOps.checks,
         ...odataOps.checks,
         ...xmlOps.checks,
+        ...docsOps.checks,
         ...scaffoldOps.checks,
         ...compositeOps.checks,
         ...smallOps.checks,
@@ -1146,7 +1151,7 @@ function bind(model, client) {
         const name = Object.keys(OPS).find(k => k.toLowerCase() === String(o.op).toLowerCase());
         if (!name) fail(`${where}: unknown op '${o.op}'`, o.op, Object.keys(OPS));
         if (name === "addMenuItem" && o.roles !== undefined) throw new Error(`${where} (addMenuItem): ${NO_MENU_ROLES(o.page)}`);
-        for (const [k, hint] of Object.entries({ ...(DOMAIN_SYNONYMS[name] || {}), ...(FIELD_SYNONYMS[name] || {}), ...(SCAFFOLD_SYNONYMS[name] || {}), ...(SMALL_SYNONYMS[name] || {}), ...(COMPOSITE_SYNONYMS[name] || {}) })) if (o[k] !== undefined && !OPS[name].fields[k]) throw new Error(`${where} (${name}): unknown field '${k}': ${hint}`);
+        for (const [k, hint] of Object.entries({ ...(DOMAIN_SYNONYMS[name] || {}), ...(FIELD_SYNONYMS[name] || {}), ...(SCAFFOLD_SYNONYMS[name] || {}), ...(SMALL_SYNONYMS[name] || {}), ...(COMPOSITE_SYNONYMS[name] || {}), ...(DOCS_SYNONYMS[name] || {}) })) if (o[k] !== undefined && !OPS[name].fields[k]) throw new Error(`${where} (${name}): unknown field '${k}': ${hint}`);
         validate("op", name, OPS[name], o, where);
         return { name, where };
     }
@@ -1189,7 +1194,7 @@ function bind(model, client) {
             const mine = PAGE_EDIT_NAMES.includes(name) ? pageEdit.touched(o) : [];
             const undoes = x => ["deleteWidget", "moveWidget"].includes(x.op) || (x.op === "changeWidget" && (x.name !== undefined || name === "changeWidget"));
             const reworked = mine.length && rest.some(x => x.page === o.page && undoes(x) && pageEdit.touched(x).some(n => mine.includes(n)));
-            if ((later && name !== "rename" && name !== "delete") || edited || undone || reworked || changedLater(name, o, rest) || smallChangedLater(name, o, rest) || workflowChangedLater(name, o, rest) || integChangedLater(name, o, rest)) continue;
+            if ((later && name !== "rename" && name !== "delete") || edited || undone || reworked || changedLater(name, o, rest) || smallChangedLater(name, o, rest) || workflowChangedLater(name, o, rest) || integChangedLater(name, o, rest) || docsChangedLater(name, o, rest)) continue;
             try {
                 failed.push(...(await checks[name](name === "setTranslations" ? o : await textOps.prepare(o, false))).map(f => `${i + 1}. ${name}: ${f}`));
             } catch (e) {

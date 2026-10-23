@@ -1330,6 +1330,9 @@ async function selftest(mpr, keep, { out, relevant, mxcheck, mx, timeout }) {
                 ["integration changes", "changeJsonStructure (added, removed, retyped paths), updateImportMapping/updateExportMapping (new values and object with createAttributes/create, prune, skip), mappings onto existing entities (loose attribute names), changeMapping (keys, find + ignore, custom microflow, transform microflow, association, mapping parameter, root = parameter), importWithMapping passing the parameter, callRest error handler parsing $latestHttpResponse with an import mapping, mapping-test simulation, refusals; delete of a mapping",
                     () => integ.changePlan(mod, T, tmp, src.version), p => integ.changeProblems(p, T, src.version)]
             ];
+            // app documents of ops-docs.js (selftest-docs.js): regular expressions, task queues, ...
+            const docs = require("./selftest-docs");
+            for (const [name, [plan, verify]] of Object.entries(docs.PHASES)) phases.push([name, docs.WHAT[name], () => plan(mod, T, src.version, tmp), p => verify(p, T, src.version)]);
             if (!pageable) results.push("SKIP workflow user tasks and user task pages: this project has no page with a layout to copy (a user task needs a task page)");
             for (const [name, what, plan, verify] of phases) {
                 const r = await integ.runPhase(env, s2, plan(), verify);

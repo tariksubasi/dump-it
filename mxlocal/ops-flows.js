@@ -6,6 +6,7 @@ const { DATA_TYPES, suggest, fail, validate, bool, noDollar, enumValue } = requi
 const { makeFlowExtras, RETRIEVE_FIELDS, MEMBER_FIELDS } = require("./ops-flow-extras");
 const L = require("./flow-layout");
 const FE = require("./flow-errors");
+const { setQueue, queuedCallProblem } = require("./ops-docs");
 
 const { microflows: mf, domainmodels: dm, datatypes, pages, codeactions, javaactions, javascriptactions, importmappings, exportmappings, services } = sdk;
 
@@ -24,7 +25,7 @@ const ACTIONS = {
     change: { doc: "Change members of an object.", fields: { variable: "R variable to change (no $)", set: "{ \"Attribute\": \"expression\", \"Module.Assoc\": \"$Var\" } (set, add or remove is required)", ...MEMBER_FIELDS, commit: "optional true/false", refresh: "optional true/false" } },
     commit: { doc: "Commit an object or list.", fields: { variable: "R variable (no $)", events: "optional false = without events" } },
     delete: { doc: "Delete an object or list.", fields: { variable: "R variable (no $)" } },
-    call: { doc: "Call a microflow. In a nanoflow: a nanoflow or a microflow.", fields: { microflow: "R Module.Microflow or Module.Nanoflow", args: "optional { \"ParamName\": \"expression\" }", variable: "optional result variable name" } },
+    call: { doc: "Call a microflow. In a nanoflow: a nanoflow or a microflow.", fields: { microflow: "R Module.Microflow or Module.Nanoflow", args: "optional { \"ParamName\": \"expression\" }", variable: "optional result variable name", queue: "optional Module.Queue: run the call in the background in this task queue (microflows only; the call returns nothing; \"none\" in changeAction takes it out)", retry: "optional with queue: { \"retries\": 3, \"interval\": 10, \"unit\": \"Seconds\" } or exponential { \"retries\", \"initialInterval\", \"maximumInterval\", \"unit\": Seconds | Minutes | Hours }" } },
     log: { doc: "Write a log line (microflows only).", fields: { message: "R text; {1} {2} are filled from args", args: "optional [\"expression\", ...]", level: "optional Info | Warning | Error | Debug | Trace | Critical", node: "optional log node name (default the module name)", stackTrace: "optional true = add the stack trace of $latestError (in an error handler)" } },
     message: { doc: "Show a message to the user.", fields: { text: "R message text", type: "optional Information | Warning | Error", blocking: "optional true/false" } },
     variable: { doc: "Create a variable.", fields: { name: "R variable name", type: "R " + DATA_TYPES, value: "R initial value expression, e.g. 0 or 'text' or empty" } },
@@ -34,7 +35,7 @@ const ACTIONS = {
     showHomePage: { doc: "Open the home page (microflows only).", fields: {} },
     callJava: {
         doc: "Call a Java action (microflows only).",
-        fields: { javaAction: "R Module.JavaAction", args: "optional { \"Param\": \"expression\" } (every required parameter needs one; an entity type parameter takes \"Module.Entity\")", variable: "optional result variable name (when the Java action returns something)" }
+        fields: { javaAction: "R Module.JavaAction", args: "optional { \"Param\": \"expression\" } (every required parameter needs one; an entity type parameter takes \"Module.Entity\")", variable: "optional result variable name (when the Java action returns something)", queue: "optional Module.Queue: run the call in the background in this task queue (microflows only; the call returns nothing; \"none\" in changeAction takes it out)", retry: "optional with queue: { \"retries\": 3, \"interval\": 10, \"unit\": \"Seconds\" } or exponential { \"retries\", \"initialInterval\", \"maximumInterval\", \"unit\": Seconds | Minutes | Hours }" }
     },
     callJavaScript: {
         doc: "Call a JavaScript action (nanoflows only).",
@@ -455,6 +456,11 @@ function makeFlows(h) {
         if (missing.length) throw new Error(`${where}: ${spec.microflow} needs args for: ${missing.map(p => p.name).join(", ")}`);
         a.useReturnVariable = !!spec.variable;
         a.outputVariableName = spec.variable ? noDollar(spec.variable) : "";
+        if (spec.queue !== undefined || spec.retry !== undefined) {
+            if (f.nano || isNanoTarget) throw new Error(`${where}: only a microflow can call a microflow in a task queue`);
+            queuedCallProblem(spec, target, where);
+            await setQueue(h, call, spec, where);
+        }
         return a;
     }
 
@@ -586,6 +592,12 @@ function makeFlows(h) {
         if (spec.variable && isVoid) throw new Error(`${where}: ${qn} returns nothing; remove 'variable'`);
         a.useReturnVariable = isVoid || !!spec.variable; // Studio Pro keeps true for actions that return nothing
         a.outputVariableName = spec.variable ? noDollar(spec.variable) : "";
+        if (spec.queue !== undefined || spec.retry !== undefined) {
+            if (js) throw new Error(`${where}: a JavaScript action does not run in a task queue`);
+            queuedCallProblem(spec, target, where);
+            if (!isVoid && spec.queue && spec.queue !== "none") throw new Error(`${where}: a Java action in a task queue must return nothing (${qn} returns a value); call a microflow in the queue that calls it`);
+            await setQueue(h, a, spec, where);
+        }
         return a;
     }
 
@@ -1923,6 +1935,16 @@ function makeFlows(h) {
         throw new Error(`id '${id}' matches ${hits.length} steps in ${m.qualifiedName}; use more characters`);
     }
 
+    // changeAction queue / retry of a call (microflow) or callJava step
+    async function queueChange(f, a, spec, where) {
+        if (a instanceof mf.NanoflowCallAction || a instanceof mf.JavaScriptActionCallAction || f.nano) throw new Error(`${where}: only microflow and Java action calls in a microflow run in a task queue`);
+        const java = a instanceof mf.JavaActionCallAction;
+        const on = spec.queue === undefined ? !!(java ? a.queueSettings : a.microflowCall.queueSettings) : !(spec.queue === null || spec.queue === "" || spec.queue === "none");
+        if (on && a.useReturnVariable && a.outputVariableName) throw new Error(`${where}: the call stores its result in $${a.outputVariableName}; a call in a task queue returns nothing (remove the step and add it again without variable)`);
+        if (on && java && a.javaAction && !((await a.javaAction.load()).actionReturnType instanceof codeactions.VoidType)) throw new Error(`${where}: a Java action in a task queue must return nothing (${a.javaActionQualifiedName} returns a value)`);
+        await setQueue(h, java ? a : a.microflowCall, spec, where);
+    }
+
     // Field -> how to apply it, per kind of step. Each returns nothing; throws on bad input.
     const CHANGES = {
         activity: {
@@ -1972,6 +1994,8 @@ function makeFlows(h) {
         },
         CommitAction: { events: (f, a, v) => (a.withEvents = bool(v, true)), refresh: (f, a, v) => (a.refreshInClient = bool(v, false)) },
         call: {
+            queue: (f, a, v, where, o) => queueChange(f, a, { queue: v, retry: o.retry }, where),
+            retry: (f, a, v, where, o) => o.queue === undefined && queueChange(f, a, { retry: v }, where),
             args: (f, a, v, where) => {
                 const call = a.microflowCall || a.nanoflowCall;
                 for (const [name, value] of Object.entries(v || {})) {
@@ -1995,6 +2019,8 @@ function makeFlows(h) {
             blocking: (f, a, v) => (a.blocking = bool(v, true))
         },
         code: {
+            queue: (f, a, v, where, o) => queueChange(f, a, { queue: v, retry: o.retry }, where),
+            retry: (f, a, v, where, o) => o.queue === undefined && queueChange(f, a, { retry: v }, where),
             args: async (f, a, v, where) => {
                 for (const [name, value] of Object.entries(v || {})) {
                     const pm = [...a.parameterMappings].find(x => x.parameterQualifiedName.split(".").pop() === name);
