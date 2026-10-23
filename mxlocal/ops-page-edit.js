@@ -206,12 +206,14 @@ function makePageEdit(h, I) {
         return hit ? hit[1] : el.structureTypeName.split("$")[1];
     }
 
-    // A page or snippet, loaded, with its tree. Layouts and other documents are refused.
+    // A page, snippet, layout, building block or page template, loaded, with its tree. Other documents are refused.
     async function open(qn, where) {
         const doc = await h.get(qn);
-        if (!(doc instanceof pages.Page) && !(doc instanceof pages.Snippet) && !(doc instanceof pages.Layout)) throw new Error(`${where}: '${qn}' is a ${doc.structureTypeName.split("$")[1]}, not a page, snippet or layout`);
+        if (!(doc instanceof pages.Page) && !(doc instanceof pages.Snippet) && !(doc instanceof pages.Layout) && !(doc instanceof pages.BuildingBlock) && !(doc instanceof pages.PageTemplate)) throw new Error(`${where}: '${qn}' is a ${doc.structureTypeName.split("$")[1]}, not a page, snippet, layout, building block or page template`);
         if (doc instanceof pages.Layout && !(doc.content instanceof pages.WebLayoutContent)) throw new Error(`${where}: '${qn}' is a native layout; change it in Studio Pro`);
-        const P = { doc, qn: doc.qualifiedName, snippet: doc instanceof pages.Snippet, layout: doc instanceof pages.Layout, ...buildTree(doc) };
+        if (doc instanceof pages.BuildingBlock && doc.platform && doc.platform.name === "Native") throw new Error(`${where}: '${qn}' is a native building block; change it in Studio Pro`);
+        // block: a building block holds its widgets itself (as a snippet); template: a page template fills placeholders (as a page)
+        const P = { doc, qn: doc.qualifiedName, snippet: doc instanceof pages.Snippet, layout: doc instanceof pages.Layout, block: doc instanceof pages.BuildingBlock, template: doc instanceof pages.PageTemplate, ...buildTree(doc) };
         P.where = where;
         return P;
     }
@@ -431,15 +433,15 @@ function makePageEdit(h, I) {
         const list = holder && holder[node.prop];
         if (!list || typeof list.indexOf !== "function") throw new Error(`${where}: ${node.label} is not in a list of widgets`);
         const owner = node.parent && !node.parent.root ? node.parent : null;
-        let label = owner ? owner.label : P.snippet || P.layout ? P.qn : "?";
+        let label = owner ? owner.label : P.snippet || P.block || P.layout ? P.qn : "?";
         if (owner && owner.el instanceof pages.DataView && node.prop === "footerWidgets") label = `${owner.name} footer`;
-        if (!owner && !P.snippet) label = (placeholders(P).find(p => p.el === holder) || {}).label || label;
+        if (!owner && !P.snippet && !P.block) label = (placeholders(P).find(p => p.el === holder) || {}).label || label;
         const ph = placeholders(P).find(p => p.el === holder);
         return slotOf(P, list, ph ? null : owner, ph ? ph.label : label);
     }
 
     function defaultContainer(P, where) {
-        if (P.snippet) return slotOf(P, P.doc.widgets, null, P.qn);
+        if (P.snippet || P.block) return slotOf(P, P.doc.widgets, null, P.qn);
         if (P.layout && !P.doc.content.layoutCall) return slotOf(P, P.doc.content.widgets, null, P.qn);
         const ph = placeholders(P);
         if (ph.length === 1) return slotOf(P, ph[0].el.widgets, null, ph[0].label);
@@ -1037,7 +1039,7 @@ function makePageEdit(h, I) {
         // around them, an object over an association or from a flow
         const existing = await scopeOf(P, where);
         ctx.scope = [...nodes, ...existing.filter(e => !nodes.some(x => x.name === e.name))];
-        await I.resolveSources(nodes, { dflt, extra: existing.filter(e => e.kind !== "dataView"), snippet: P.snippet, ctx });
+        await I.resolveSources(nodes, { dflt, extra: existing.filter(e => e.kind !== "dataView"), snippet: P.snippet || (P.block ? "building block" : P.template ? "page template" : false), ctx });
         // insert at the place, in order
         let index = slot.index;
         const at = { push: w => slot.list.splice(index++, 0, w) };

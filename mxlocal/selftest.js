@@ -1371,6 +1371,8 @@ async function selftest(mpr, keep, { out, relevant, mxcheck, mx, timeout }) {
         // phase DS (selftest-ds.js): the design system web theme layer (design module, tokens, component styles, assets,
         // fonts, design property changes, theme module order, STYLE CHECK) on a copy of its own with the theme folders
         await require("./selftest-ds").dsPhase({ src, reopen, check, results, tmp, mod, layout, layoutProblems });
+        // phase DS-model (selftest-ds-model.js): building blocks, page templates, layouts from scratch, applyStyle, component kits, style guide
+        s2 = await require("./selftest-ds-model").dsModelPhase({ s2, reopen, copy, mod, T, layout, layoutProblems, check, results });
         // phase R (before phase S, which deletes the event handler it looks at): reference graph (usages, unused) and the ops built on it (selftest-refs.js)
         s2 = await require("./selftest-refs").refsPhase({ reopen, copy, mod, T, check, results, layout, layoutProblems, lostProperties, relevant, userRole });
         // phase S (selftest-smallops.js): retrieve sort/range, reference set add/remove, snippets, CRUD pages, changing
