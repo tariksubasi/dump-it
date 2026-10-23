@@ -67,6 +67,7 @@ async function targets(s) {
     x.refFilter = !!(ddXml && JSON.stringify(ddXml).includes("\"refEntity\""));
     x.colAssoc = !!(x.grid2 && x.grid2.lines.some(l => l.startsWith("columns/filterAssociation ")));
     x.alignment = !!(x.grid2 && x.grid2.lines.some(l => l.startsWith("columns/alignment ")));
+    x.exportType = !!(x.grid2 && x.grid2.lines.some(l => l.startsWith("columns/exportType ")));
     return x;
 }
 
@@ -108,6 +109,40 @@ function plans(mod, T, x) {
             [{ op: "createPage", module: mod, name: `${T}_GBad5`, variables: [{ name: "Q", type: "String" }], widgets: [{ widget: "dataGrid", kind: "datagrid2", entity: O, columns: [{ attribute: "Note", filter: { variable: "Q" } }] }] }, /cannot bind it to a page variable/]);
         if (x.filters && x.refFilter) refuse.push([{ op: "createPage", module: mod, name: `${T}_GBad6`, widgets: [{ widget: "pluggable", type: "DatagridTextFilter", properties: { linkedDs: O } }] }, /links to the Data grid 2 or gallery it is placed in.*headerFilters/]);
         if (x.filters) refuse.push([{ op: "createPage", module: mod, name: `${T}_GBad7`, widgets: [{ widget: "dataGrid", kind: "datagrid2", entity: O, columns: [{ attribute: "Number", filter: "text" }] }] }, /text filter does not fit Number/]);
+        // list edits (grid-edit.js): column types, export values, paging, empty message, move, template, source, convertGrid
+        const PE = pg("Edit2");
+        const expCols = x.exportType ? { exportType: "number", exportNumberFormat: "'#,##0'" } : {};
+        ops.push({ op: "createPage", module: mod, name: `${T}_GOrdForm`, folder: "ZzGrid", entity: O },
+            { op: "createMicroflow", module: mod, name: `${T}_GOrdList`, folder: "ZzGrid", returns: `List(${O})`, actions: [{ action: "retrieve", entity: O, variable: "L" }], returnValue: "$L" },
+            { op: "createMicroflow", module: mod, name: `${T}_GOrdAct`, folder: "ZzGrid", parameters: [{ name: "Ord", type: O }], actions: [] },
+            { op: "createPage", module: mod, name: `${T}_GEdit2`, folder: "ZzGrid", widgets: [
+                { widget: "dataGrid", kind: "classic", name: "zgeClassic", entity: O, xpath: "[Number > 0]", sort: ["Number"], columns: [{ attribute: "Number", width: 30 }, { attribute: "Note", width: 70, class: "note" }], search: ["Note"],
+                    buttons: [{ action: "new", page: pg("OrdForm") }, { action: "edit", page: pg("OrdForm") }, { action: "delete" }, { action: "callMicroflow", microflow: `${E}_GOrdAct`, caption: "Act" }] },
+                { widget: "dataView", name: "zgeDetail", listenTo: "zgeClassic", fields: ["Note"], editable: false },
+                { widget: "dataGrid", kind: "datagrid2", name: "zgeGrid", entity: O, columns: ["Number", { type: "dynamicText", text: "{1} / {2}", params: ["Number", "Note"], caption: "Both", exportValue: "{Note}" },
+                    { attribute: "Note", ...expCols }, { type: "customContent", caption: "Act", widgets: [{ widget: "actionButton", action: "delete", name: "zgeDel" }] }],
+                    paging: { mode: "buttons", pageSize: 15, showButtons: "auto", position: "both", showTotal: true }, emptyMessage: "No orders", onClickTrigger: "double" },
+                ...(x.gallery ? [{ widget: "gallery", name: "zgeGal", entity: O, columns: { desktop: 3, tablet: 2, phone: 1 }, paging: { mode: "loadMore", loadMoreCaption: "More" }, emptyMessage: "Nothing" }] : []),
+                { widget: "listView", name: "zgeList", entity: O, editable: true, onClick: { action: "showPage", page: pg("OrdForm") } }] },
+            { op: "convertGrid", page: PE, widget: "zgeClassic" },
+            { op: "changeWidget", page: PE, widget: "zgeGrid", columns: { add: [{ type: "customContent", caption: "More", widgets: [{ widget: "text", text: "{Note}", name: "zgeMore" }] }, { text: "#{Number}" }], change: [{ column: "Number", caption: "No." }], move: [{ column: "Note", position: 1 }] },
+                paging: { mode: "loadMore", pageSize: 5, loadMoreCaption: "Show more" }, selection: "Multi", emptyMessage: "None yet", sort: [{ attribute: "Note", direction: "desc" }] },
+            { op: "changeWidget", page: PE, widget: "zgeList", template: [{ widget: "textBox", attribute: "Note", name: "zgeListNote" }], paging: { pageSize: 7 }, source: { source: "microflow", microflow: `${E}_GOrdList` } });
+        if (x.gallery) ops.push({ op: "changeWidget", page: PE, widget: "zgeGal", template: [{ widget: "text", text: "{Number}: {Note}", name: "zgeGalText" }], selection: "None", columns: { phone: 2 }, source: { source: "database", xpath: "[Number > 1]" } });
+        refuse.push(
+            [{ op: "changeWidget", page: PE, widget: "zgeGrid", source: { source: "database", entity: C } }, /would break/],
+            [{ op: "changeWidget", page: PE, widget: "zgeGrid", paging: { pageSizeSelector: true } }, /no page size selector of its own/],
+            [{ op: "convertGrid", page: PE, widget: "zgeList" }, /turns a classic data grid/],
+            [{ op: "changeWidget", page: PE, widget: "zgeGrid", template: [{ widget: "text", text: "x" }] }, /has no item template/],
+            [{ op: "changeWidget", page: PE, widget: "zgeGrid", columns: { add: [{ type: "dynamicText", text: "{1}" }] } }, /needs "params"/],
+            [{ op: "moveColumn", page: PE }, /use changeWidget "columns"/],
+            [{ op: "changeWidget", page: PE, widget: "zgeGrid", columns: { move: [{ column: "Nott", position: 1 }] } }, /has no column 'Nott'.*Did you mean:.*Note/],
+            [{ op: "changeWidget", page: PE, widget: "zgeGrid", columns: { add: [{ type: "dynamic", text: "x" }] } }, /type 'dynamic' is not known.*dynamicText/],
+            [{ op: "changeWidget", page: PE, widget: "zgeList", paging: { mode: "loadMore" } }, /only "pageSize" changes here/],
+            [{ op: "changeWidget", page: PE, widget: "zgeClassic", selection: "Multi" }, /zgeDetail listens to zgeClassic, which needs selection Single/],
+            [{ op: "changeWidget", page: pg("Grid"), widget: "zzgClassic", columns: { add: [{ type: "dynamicText", text: "{Note}" }] } }, /classic data grid shows attributes only/],
+            [{ op: "convertGrid", page: pg("Grid"), widget: "zzgClassic", strict: true, name: "zzgList" }, /already used/]);
+        if (x.exportType) refuse.push([{ op: "changeWidget", page: PE, widget: "zgeGrid", columns: { change: [{ column: "Number", exportNumberFormat: "'0.0'" }] } }, /goes with "exportType": "number"/]);
     }
     if (x.pageable && !x.grid2) {
         // no Data grid 2: page variables in a list view XPath only
@@ -207,6 +242,7 @@ async function gridPhase({ s2, reopen, copy, mod, T, layout, layoutProblems, che
     const what = [x.pageable && x.grid2 && `Data grid 2 ${x.grid2.version} column settings (width, size, min width, ${x.alignment ? "alignment, " : ""}hide, resize, reorder, sort, visible, tooltip, wrap, class) + changeWidget columns.change`,
         x.pageable && x.grid2 && x.filters && `${x.refFilter ? "association drop-down filter (Data Widgets 3)" : x.colAssoc ? "association filter of the column (Data grid 2 2.x)" : "column filters"} and filters above the grid${x.gallery ? " and the gallery" : ""}`,
         x.pageable && (x.grid2 ? "page variables in grid / gallery / list view XPath" : "page variables in list view XPath"), x.offline ? `offline sync (${x.offline}) + nanoflow synchronize` : "offline refusals (no offline profile)",
+        x.pageable && x.grid2 && `list edits: column types + params, export values, paging, empty message, columns.move/caption, changeWidget source/template/sort/selection${x.gallery ? " (also a gallery)" : ""}, list view editable + onClick, convertGrid`,
         "entity placement, overlap lint, arrangeDomainModel compact + grid", `${plan.refuse.length} refusals`].filter(Boolean);
     if (!x.pageable) results.push("SKIP grid pages: this project has no page with a layout to copy");
     else if (!x.grid2) results.push("SKIP grid Data grid 2 column settings and filters: widgets/ has no Data grid 2 .mpk");
@@ -284,6 +320,7 @@ function storedProblems(s, mod, T, x, plan) {
             }
         }
     }
+    if (x.pageable && x.grid2) r.push(...editProblems(project, T, x));
     if (x.pageable && !x.grid2) {
         let xp = null;
         walk(page || {}, o => o.Name === "zzgList" && o.DataSource && (xp = o.DataSource.XPathConstraint));
@@ -302,6 +339,74 @@ function storedProblems(s, mod, T, x, plan) {
         const acts = [];
         walk(nf || {}, o => o.$Type === "Microflows$SynchronizeAction" && acts.push(`${o.Type}:${(o.VariableNames || []).join("+")}`));
         if (acts.sort().join() !== ["All:", "Specific:Ord", "Unsynchronized:"].join()) r.push(`synchronize actions: ${acts.join(", ") || "none"}`);
+    }
+    return r;
+}
+
+// the list edits of page _GEdit2: converted grid, column types / order / export, paging, empty message, gallery, list view
+function editProblems(project, T, x) {
+    const r = [];
+    let page = null;
+    for (const id of project.units.keys()) {
+        const u = project.read(id);
+        if (u.$Type === "Forms$Page" && u.Name === `${T}_GEdit2`) page = u;
+    }
+    if (!page) return ["page _GEdit2 missing"];
+    const named = {};
+    walk(page, o => o.Name && (named[o.Name] = named[o.Name] || o));
+    const val = (p, k) => (p.get(k) ? p.get(k).PrimitiveValue || p.get(k).Expression : undefined);
+    const tmpl = v => (v && v.TextTemplate && v.TextTemplate.Template.Items[0] ? v.TextTemplate.Template.Items[0].Text : "");
+    // convertGrid: a Data grid 2 with the old name, its columns, filter, actions column, onClick, sort, XPath
+    const c = named.zgeClassic;
+    if (!c || c.$Type !== "CustomWidgets$CustomWidget" || c.Type.WidgetId !== DG2) r.push("convertGrid: zgeClassic is not a Data grid 2");
+    else {
+        const p = props(c);
+        const cols = p.get("columns").Objects.map(o => props(c, o));
+        if (cols.length !== 3 || val(cols[0], "size") !== "30" || val(cols[1], "size") !== "70" || val(cols[1], "columnClass") !== "'note'") r.push(`convertGrid columns: ${cols.map(k => `${val(k, "showContentAs")} ${val(k, "size")}`).join(", ")}`);
+        if (cols[2] && (val(cols[2], "showContentAs") !== "customContent" || cols[2].get("content").Widgets.length !== 3)) r.push("convertGrid: no actions column with edit, delete and the microflow button");
+        if (x.filters && !(cols[1].get("filter").Widgets.length)) r.push("convertGrid: the search field on Note is no column filter");
+        if (!p.get("onClick").Action || p.get("onClick").Action.$Type !== "Forms$FormAction" || val(p, "onClickTrigger") !== "double") r.push("convertGrid: the default edit button is no double-click onClick");
+        const ds = p.get("datasource").DataSource;
+        if (!ds || ds.XPathConstraint !== "[Number > 0]" || !ds.SortBar || ds.SortBar.SortItems.length !== 1) r.push("convertGrid: XPath / sort order not carried over");
+        const box = Object.values(named).find(o => o.$Type === "Forms$DivContainer" && (o.Widgets || []).some(w => w.Action && w.Action.$Type === "Forms$CreateObjectClientAction"));
+        if (!box) r.push("convertGrid: no container with the new button above the grid");
+    }
+    // changeWidget on zgeGrid: order (Note first), caption, new columns, paging, selection, empty message, sort
+    const g = named.zgeGrid;
+    if (g) {
+        const p = props(g);
+        const cols = p.get("columns").Objects.map(o => props(g, o));
+        const kinds = cols.map(k => val(k, "showContentAs"));
+        if (kinds.join() !== "attribute,attribute,dynamicText,customContent,customContent,dynamicText") r.push(`zgeGrid column kinds ${kinds.join()}`);
+        if (cols[1] && tmpl(cols[1].get("header")) !== "No.") r.push("zgeGrid: caption No. not stored");
+        const dt = cols[2] && cols[2].get("dynamicText").TextTemplate;
+        if (!dt || dt.Template.Items[0].Text !== "{1} / {2}" || dt.Parameters.length !== 2) r.push("zgeGrid: dynamic text with params not stored as {1} / {2} with 2 parameters");
+        if (cols[2] && !cols[2].get("exportValue").TextTemplate) r.push("zgeGrid: export value not stored");
+        if (x.exportType && (val(cols[0], "exportType") !== "number" || val(cols[0], "exportNumberFormat") !== "'#,##0'")) r.push("zgeGrid: export type / number format not stored");
+        if (cols[4] && !cols[4].get("content").Widgets.some(w => w.Name === "zgeMore")) r.push("zgeGrid: new custom content column has no zgeMore");
+        const want = [["pagination", "loadMore"], ["pageSize", "5"], ["showPagingButtons", "auto"], ["pagingPosition", "both"], ["onClickTrigger", "double"], ["showEmptyPlaceholder", "custom"]];
+        for (const [k, v] of want) if (val(p, k) !== v) r.push(`zgeGrid ${k} is ${val(p, k)}, expected ${v}`);
+        if (p.get("itemSelection").Selection !== "Multi") r.push("zgeGrid: selection Multi not stored");
+        if (p.get("emptyPlaceholder").Widgets.length !== 1) r.push(`zgeGrid: empty placeholder holds ${p.get("emptyPlaceholder").Widgets.length} widgets`);
+        const ds = p.get("datasource").DataSource;
+        if (!ds.SortBar || ds.SortBar.SortItems.length !== 1 || ds.SortBar.SortItems[0].SortOrder !== "Descending") r.push("zgeGrid: sort order Note desc not stored");
+    } else r.push("zgeGrid missing");
+    const gal = named.zgeGal;
+    if (x.gallery) {
+        const p = gal && props(gal);
+        if (!p || val(p, "desktopItems") !== "3" || val(p, "tabletItems") !== "2" || val(p, "phoneItems") !== "2") r.push("zgeGal: columns per device not stored");
+        else {
+            if (val(p, "pagination") !== "loadMore" || tmpl(p.get("loadMoreButtonCaption")) !== "More") r.push("zgeGal: paging not stored");
+            if (p.get("content").Widgets.length !== 1 || p.get("content").Widgets[0].Name !== "zgeGalText") r.push("zgeGal: template not replaced");
+            if (p.get("itemSelection").Selection !== "None") r.push("zgeGal: selection None not stored");
+            if (!p.get("datasource").DataSource || p.get("datasource").DataSource.XPathConstraint !== "[Number > 1]") r.push("zgeGal: source XPath not stored");
+        }
+    }
+    const lv = named.zgeList;
+    if (!lv || lv.Editable !== true || !lv.ClickAction || lv.ClickAction.$Type === "Forms$NoAction" || lv.PageSize !== 7) r.push("zgeList: editable / on click / page size not stored");
+    else {
+        if (lv.Widgets.length !== 1 || lv.Widgets[0].Name !== "zgeListNote") r.push("zgeList: template not replaced");
+        if (!lv.DataSource || lv.DataSource.$Type !== "Forms$MicroflowSource") r.push(`zgeList: source is ${lv.DataSource && lv.DataSource.$Type}, not a microflow`);
     }
     return r;
 }

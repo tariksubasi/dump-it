@@ -211,8 +211,8 @@ function makeGridExtras(I, h) {
         if (!s || typeof s !== "object" || Array.isArray(s)) throw new Error(`${where}: paging is "buttons" | "virtualScrolling" | "loadMore", or { "mode": "loadMore", "pageSize": 20, "showButtons": "auto", "position": "both", "showTotal": true, "loadMoreCaption": "Show more", "pageSizeAttribute": "PageSize" }`);
         for (const k of Object.keys(s)) {
             if (PAGING_FIELDS[k]) continue;
-            if (PAGING_HINTS[k]) throw new Error(`${where}: paging: unknown field '${k}': ${PAGING_HINTS[k]}`);
-            fail(`${where}: paging: unknown field '${k}'`, k, Object.keys(PAGING_FIELDS));
+            if (PAGING_HINTS[k]) throw new Error(`${where}: unknown field '${k}': ${PAGING_HINTS[k]}`);
+            fail(`${where}: unknown field '${k}'`, k, Object.keys(PAGING_FIELDS));
         }
         const what = nameOf(w);
         const v = (key, field) => {
