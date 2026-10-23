@@ -3578,14 +3578,27 @@ function makePages(h) {
         if (!isNativePage(page)) throw new Error(`${where}: ${page.qualifiedName} is a web page; the native bottom bar opens native pages (createPage "native": true)`);
         if (o.parent !== undefined) throw new Error(`${where}: a native bottom bar has no sub-items; leave out parent`);
         if (profile.bottomBarItems.some(b => b.pageQualifiedName === page.qualifiedName)) throw new Error(`${where}: ${page.qualifiedName} is already in the ${profile.name} bottom bar`);
+        // the place: after / before the item with that caption (default: at the end)
+        const items = profile.bottomBarItems;
+        const capOf = b => captionOf(b.caption) || (b.pageQualifiedName || "").split(".").pop();
+        let at = items.length;
+        for (const k of ["after", "before"]) {
+            if (o[k] === undefined) continue;
+            if (o.after !== undefined && o.before !== undefined) throw new Error(`${where}: give after or before, not both`);
+            const i = items.findIndex(b => capOf(b).toLowerCase() === String(o[k]).toLowerCase());
+            if (i < 0) fail(`${where}: the ${profile.name} bottom bar has no item '${o[k]}'`, String(o[k]), items.map(capOf));
+            at = k === "after" ? i + 1 : i;
+        }
         const item = sdk.nativepages.BottomBarItem.create(model);
-        profile.bottomBarItems.push(item);
+        items.splice(at, 0, item);
         const caption = o.caption !== undefined ? String(o.caption) : captionOf(page.title) || humanize(page.name);
         await textAll(item.caption, caption, ctx);
         item.page = page;
+        const icon = o.icon !== undefined ? await require("./ops-native-ui").iconOf(h, model, o.icon, where) : null;
+        if (icon) item.icon = icon.icon;
         client.warnFirst(`NativePages$BottomBarItem first use by ops (no Studio Pro sample in the test projects): check the ${profile.name} profile in Studio Pro`);
         const seen = await menuRoleLint(where, page, caption);
-        return `${profile.name} bottom bar: "${caption}" -> ${page.qualifiedName} (${seen})`;
+        return `${profile.name} bottom bar: "${caption}" -> ${page.qualifiedName}${icon ? `, ${icon.text}` : ""}${at < items.length - 1 ? `, place ${at + 1} of ${items.length}` : ""} (${seen})`;
     }
 
     async function projectSecurity() {

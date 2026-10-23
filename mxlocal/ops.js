@@ -459,6 +459,8 @@ function bind(model, client) {
     const refOps = makeRefOps({ model, client, get, exists, dataType, folder, entity }, flows);
     const copyOps = makeCopy({ model, client, get, folder });
     const entityOps = makeEntity({ model, client, get, entity, persistable, isFresh: qn => isFresh(qn) });
+    // a native bottom bar item (page of a native layout, or "profile": "Native"): built by ops-pages also with icon / after / before
+    const nativeMenuItem = o => o.menu === undefined && o.microflow === undefined && (/^native/i.test(String(o.profile || "")) || (o.page !== undefined && require("./ops-native-ui").isNativePageQn(client, model, String(o.page)) === true));
     const themeOps = makeTheme({ client });
     const nativeTheme = makeNativeTheme({ client });
     const marketOps = makeMarket({ client, model });
@@ -859,7 +861,7 @@ function bind(model, client) {
         deleteWidget: o => pageEdit.deleteWidget(o),
         moveWidget: o => pageEdit.moveWidget(o),
         changePage: o => pageEdit.changePage(o),
-        addMenuItem: o => (extendedMenuItem(o) ? navOps.addMenuItem(o) : pageOps.addMenuItem(o)),
+        addMenuItem: o => (extendedMenuItem(o) && !nativeMenuItem(o) ? navOps.addMenuItem(o) : pageOps.addMenuItem(o)),
         ...navOps.impl,
         ...themeOps.impl,
         ...nativeTheme.impl,
@@ -1050,7 +1052,7 @@ function bind(model, client) {
         ...pageEdit.checks,
         setHomePage: o => pageOps.checks.setHomePage(o),
         ...navOps.checks,
-        addMenuItem: o => (extendedMenuItem(o) ? navOps.checks.addMenuItem(o) : pageOps.checks.addMenuItem(o)),
+        addMenuItem: o => (extendedMenuItem(o) && !nativeMenuItem(o) ? navOps.checks.addMenuItem(o) : pageOps.checks.addMenuItem(o)),
         ...themeOps.checks,
         ...nativeTheme.checks,
         ...marketOps.checks,

@@ -180,6 +180,11 @@ function nativePlan(mod, T, x) {
             // a native snippet shown on the native page (N5)
             { op: "createSnippet", module: mod, name: `${T}_NatSnippet`, native: true, folder: "ZzNative", widgets: [{ widget: "text", name: "zzNatSnText", text: "In a snippet" }] },
             { op: "addWidgets", page, into: "zzNatCard", widgets: [{ widget: "snippetCall", name: "zzNatSnCall", snippet: `${mod}.${T}_NatSnippet` }] },
+            // native navigation (N7): bottom bar items with an icon and a place, the native home page
+            { op: "createPage", module: mod, name: `${T}_NativeB`, native: true, folder: "ZzNative", widgets: [{ widget: "text", text: "B" }] },
+            { op: "addMenuItem", page, caption: `${T} A`, icon: 57377 },
+            { op: "addMenuItem", page: `${mod}.${T}_NativeB`, caption: `${T} B`, before: `${T} A`, icon: 57378 },
+            { op: "setHomePage", page: `${mod}.${T}_NativeB`, profile: "Native" },
             { op: "moveWidget", page, widget: "zzNatAdd", before: "zzNatText" },
             { op: "deleteWidget", page, widget: "zzNatTmp" }
         );
@@ -275,6 +280,16 @@ function nativeProblems(project, mod, T, x, plan) {
         const bad = Object.entries(want).filter(([n, t]) => !types[n] || types[n].$Type !== t).map(([n, t]) => `${n} (${types[n] ? types[n].$Type : "missing"}, want ${t})`);
         say(!bad.length, `native page widget kinds not stored: ${bad.join(", ")}`);
         say(types.zzNatPaid && types.zzNatPaid.ConditionalVisibilitySettings, "conditional visibility on a native check box not stored");
+        let nav = null;
+        for (const id of project.units.keys()) {
+            const p = project.read(id);
+            if (p.$Type === "Navigation$NavigationDocument") nav = p;
+        }
+        const np = nav && nav.Profiles.find(p => p.$Type === "Navigation$NativeNavigationProfile");
+        const bb = np ? np.BottomBarItems : [];
+        const ia = bb.findIndex(b => b.Page === plan.page), ib = bb.findIndex(b => b.Page === `${mod}.${T}_NativeB`);
+        say(ia >= 0 && ib >= 0 && ib < ia && bb[ia].Icon && bb[ia].Icon.$Type === "Forms$GlyphIcon" && bb[ia].Icon.Code === 57377, `native bottom bar items (icon, before) not stored: ${JSON.stringify(bb.map(b => [b.Page, b.Icon && b.Icon.Code])).slice(0, 200)}`);
+        say(np && JSON.stringify(np.NativeHomePage || {}).includes(`${T}_NativeB`), "native home page not stored");
         let sn = null;
         for (const id of project.units.keys()) {
             const p = project.read(id);
@@ -305,6 +320,12 @@ async function nativePhase({ s2, reopen, copy, src, mod, T, layout, layoutProble
         made = true;
     }
     const x = nativeTargets(s, mod);
+    // no test project has a native profile: one made with the SDK's defaults, as Studio Pro adds it (phase pages2 too)
+    if (x.nativeLayout) {
+        const sdk = require("mendixmodelsdk");
+        const nav = await s.model.allNavigationDocuments()[0].load();
+        if (!nav.profiles.some(p => p instanceof sdk.navigation.NativeNavigationProfile)) sdk.navigation.NativeNavigationProfile.createIn(nav).name = "Native";
+    }
     const plan = nativePlan(mod, T, x);
     const problems = [];
     const before = new Set(s.ctx.project.units.keys());
@@ -346,7 +367,7 @@ async function nativePhase({ s2, reopen, copy, src, mod, T, layout, layoutProble
     const what = ["setNativeVariables (value, light/dark, reference)", "setNativeTokens (colour scales, spacing, radius, font sizes + line heights, elevation, dark mode)",
         x.own && "addNativeStyle (elevation level, theme variables, button)", x.own && "addNativeDesignProperty", plan.page && "native page with classes" + (x.own ? " + native design (createPage, changeWidget)" : ""),
         plan.page && "every core native widget kind (text area, drop-down, radio buttons, date picker, check box with visibility, reference selector, tab container, layout grid)",
-        plan.page && `addWidgets / moveWidget / deleteWidget on a native page${x.nativePl ? `, native pluggable ${x.nativePl.split(".").pop()}` : ""}${x.popup ? ", native pop-up page" : ""}, native snippet + snippet call`,
+        plan.page && `addWidgets / moveWidget / deleteWidget on a native page${x.nativePl ? `, native pluggable ${x.nativePl.split(".").pop()}` : ""}${x.popup ? ", native pop-up page" : ""}, native snippet + snippet call, native bottom bar (icon, place) + home page`,
         plan.page && "NATIVE STYLE CHECK", `${plan.refuse.length} refusals (web CSS, web-only widgets and actions, native / web page mix)`].filter(Boolean);
     if (plan.page && !x.nativePl) results.push("SKIP native: native pluggable widget: no com.mendix.widget.native.* in widgets/");
     if (made) results.push("NOTE native: no native theme in this project; an empty theme/native/custom-variables.js was made in the copy");

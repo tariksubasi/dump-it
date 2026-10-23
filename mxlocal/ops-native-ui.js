@@ -66,4 +66,32 @@ function checkAction(client, model, page, action, spec, where) {
     if (native && action === "callMicroflow") client.warn(`${where}: a microflow on a native page runs on the server: it fails without a connection; prefer a nanoflow (callNanoflow), and call the microflow from the nanoflow only where the app is online`);
 }
 
-module.exports = { NATIVE_KINDS, INSTEAD, checkNativeNodes, checkAction, isNativePageQn };
+// A detached icon for a bottom bar item: a glyph code, Module.IconCollection.icon or Module.ImageCollection.image
+// (as menu items take them). { icon, text }
+async function iconOf(h, model, v, where) {
+    const { pages, images, customicons } = require("mendixmodelsdk");
+    const { fail } = require("./ops-util");
+    if (typeof v === "number" || /^\d+$/.test(String(v))) {
+        const g = pages.GlyphIcon.create(model);
+        g.code = Number(v);
+        return { icon: g, text: `glyph ${v}` };
+    }
+    const parts = String(v).split(".");
+    if (parts.length !== 3) throw new Error(`${where}: icon '${v}' must be Module.Collection.Icon (icon collection or image collection) or a glyph code number`);
+    const coll = await h.get(parts.slice(0, 2).join("."));
+    if (customicons && coll instanceof customicons.CustomIconCollection) {
+        const icon = coll.icons.find(x => x.name === parts[2]) || fail(`${where}: icon collection ${coll.qualifiedName} has no icon '${parts[2]}'`, parts[2], coll.icons.map(x => x.name));
+        const ic = pages.IconCollectionIcon.create(model);
+        ic.image = icon;
+        return { icon: ic, text: `icon ${v}` };
+    }
+    if (coll instanceof images.ImageCollection) {
+        const img = coll.images.find(x => x.name === parts[2]) || fail(`${where}: image collection ${coll.qualifiedName} has no image '${parts[2]}'`, parts[2], coll.images.map(x => x.name));
+        const ic = pages.ImageIcon.create(model);
+        ic.image = img;
+        return { icon: ic, text: `image ${v}` };
+    }
+    throw new Error(`${where}: '${parts.slice(0, 2).join(".")}' is neither an icon collection nor an image collection`);
+}
+
+module.exports = { iconOf, NATIVE_KINDS, INSTEAD, checkNativeNodes, checkAction, isNativePageQn };

@@ -1383,6 +1383,9 @@ Native pages:
 - `showPage` on a native page opens only native pages; a web page cannot open a native page.
 - `callMicroflow` on a native page gives a warning: it needs a connection. Prefer `callNanoflow`.
 - `addWidgets`, `changeWidget`, `moveWidget`, `deleteWidget` work on native pages as on web pages.
+- Native navigation: `addMenuItem` with a native page adds a bottom bar item; it takes `icon` (a glyph code number,
+  `Module.IconCollection.icon` or `Module.Images.image`) and `after` / `before` (the caption of another bottom bar
+  item). `setHomePage` with a native page or nanoflow sets the native home page (with `roles`: per user role).
 - Native snippets: `createSnippet` with `"native": true`. A native page shows only native snippets (`snippetCall`),
   a web page only web snippets.
 - `"class"` and `"design"` on its widgets: design properties come from the `native/design-properties.json` files.
