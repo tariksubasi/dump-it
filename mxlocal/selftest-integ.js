@@ -325,8 +325,10 @@ function odataProblems(project, T, version) {
 // follow it (new values, a new object with its entity, a removed and a retyped value), element settings (keys, find
 // with ignore, a custom microflow, a value transform, the root as the mapping parameter), an import step passing the
 // parameter, and the error-handler recipe (callRest whose handler parses $latestHttpResponse with an import mapping).
-function changePlan(mod, T) {
+function changePlan(mod, T, dir) {
     const E = `${mod}.${T}`;
+    const xsd2 = require("path").join(dir, "zz-order2.xsd");
+    require("fs").writeFileSync(xsd2, XSD.replace('<xs:element name="Placed" type="xs:dateTime"/>', '<xs:element name="Placed" type="xs:dateTime"/>\n        <xs:element name="Status" type="xs:string" minOccurs="0"/>').replace('<xs:element name="Qty" type="xs:int"/>', '<xs:element name="Qty" type="xs:int"/>\n      <xs:element name="Price" type="xs:decimal"/>'));
     const api = `${E}_OrderApi`, pub = `${E}_Pub`; // made by the REST phase
     const map = { entity: `${E}ChOrder`, entities: { lines: `${E}ChLine` } };
     const snippet2 = "{ \"order_id\": 7, \"total\": \"2.50\", \"status\": \"open\", \"lines\": [ { \"sku\": \"A\", \"qty\": 1, \"price\": 1.5 } ], \"customer\": { \"name\": \"Ann\" } }";
@@ -367,7 +369,14 @@ function changePlan(mod, T) {
             { op: "changePublishedRestOperation", service: pub, resource: "orders", method: "Get", path: "{Id}", summary: "One order by id", deprecated: true },
             { op: "deletePublishedRestOperation", service: pub, resource: "orders", method: "Post", path: "{Shop}" },
             { op: "publishRest", module: mod, service: `${T}_Pub`, resource: "zztmp", method: "Get", microflow: `${E}_RestCall`, path: "{Id}", exportMapping: `${E}_RestExm` },
-            { op: "deletePublishedRestResource", service: pub, resource: "zztmp" }
+            { op: "deletePublishedRestResource", service: pub, resource: "zztmp" },
+            // XML schema and message definition of the OData/XML phase
+            { op: "changeXmlSchema", schema: `${E}_Xsd`, file: xsd2 },
+            { op: "updateImportMapping", mapping: `${E}_XmlImm`, createAttributes: true },
+            { op: "updateExportMapping", mapping: `${E}_XmlExm`, createAttributes: true },
+            { op: "changeMessageDefinition", definition: `${E}_MD.${T}OdOrder`, associations: [`${E}OdLine_${T}OdOrder`] },
+            { op: "updateImportMapping", mapping: `${E}_MdImm`, prune: true },
+            { op: "updateExportMapping", mapping: `${E}_MdExm`, prune: true }
         ],
         reject: [
             { op: { op: "updateImportMapping", mapping: `${E}_ChImm2` }, expect: /no longer in .*order_id|no longer in .*note.*"prune": true/ },
@@ -433,6 +442,18 @@ function changeProblems(project, T) {
     walk(rc, o => o.$Type === "Microflows$RestOperationCallAction" && /GetOrder$/.test(o.Operation) && o.ParameterMappings.some(m => /trace$/.test(m.Parameter)) && r.push("the GetOrder call still passes trace"));
     const ops = pub.Resources.flatMap(x => x.Operations);
     if (pub.Version !== "2.1.0" || ops.some(o => o.HttpMethod === "Post") || pub.Resources.some(x => x.Name === "zztmp")) r.push(`published service version ${pub.Version}, ${ops.length} operations, resources ${pub.Resources.map(x => x.Name)}`);
+    const xsd = all[`${T}_Xsd`], xi = all[`${T}_XmlImm`], xe = all[`${T}_XmlExm`], mdc = all[`${T}_MD`], mi = all[`${T}_MdImm`], me = all[`${T}_MdExm`];
+    if (!xsd || !xi || !xe || !mdc || !mi || !me) return [...r, "XML documents of the OData/XML phase missing"];
+    if (!xsd.Entries[0].Contents.includes("Status")) r.push("XML schema not imported again");
+    for (const [n, m, paths] of [["XmlImm", xi, ["Order|Status", "Order|Line|Price"]], ["XmlExm", xe, ["Order|Status", "Order|Line|Price"]]]) {
+        const have = [];
+        walk(m.Elements, e => have.push(e.XmlPath));
+        for (const p of paths) if (!have.includes(p)) r.push(`${n} lacks ${p}`);
+    }
+    const mem = [];
+    walk(mdc.MessageDefinitions[0].ExposedEntity, e => e.Path && mem.push(e.Path));
+    if (mem.some(p => /OdCust/.test(p)) || !mem.some(p => /OdLine/.test(p))) r.push(`message definition members ${mem.join(", ")}`);
+    for (const [n, m] of [["MdImm", mi], ["MdExm", me]]) walk(m.Elements, e => /OdCust/.test(e.XmlPath || "") && r.push(`${n} still maps ${e.XmlPath}`));
     const one = ops.find(o => o.HttpMethod === "Get");
     if (!one || one.Summary !== "One order by id" || !one.Deprecated || !one.ExportMapping) r.push("published Get not changed (summary, deprecated, export mapping kept)");
     return r;
