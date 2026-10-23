@@ -305,7 +305,7 @@ function mediaProblems(project, T, version) {
 
 function dataPlan(mod, T, version) {
     const E = `${mod}.${T}`;
-    const access = cmp(version, "11.0.0") < 0;
+    const access = cmp(version, "11.0.0") < 0; // Mendix 11 drops data set access (the SDK refuses it from some 11.x on; 11.13 deletes it)
     return {
         refuse: ["createDatabaseConnection", "createDataTransformer", "createMLModelMapping", "createChangeDataCaptureService", "createExcelImportTemplate", "createDataImporter", "importDocument"].map(op => ({ op })),
         ops: [
@@ -319,8 +319,7 @@ function dataPlan(mod, T, version) {
             { op: { op: "createDataSet", module: mod, name: `${T}_DsBad`, oql: `SELECT s.Region FROM ${E}DocSale AS s WHERE s.Amount > $Mn`, parameters: [{ name: "Min", type: "Decimal" }] }, expect: /uses \$Mn, which is not in parameters.*Did you mean: Min/ },
             { op: { op: "createDataSet", module: mod, name: `${T}_DsBad`, oql: `SELECT s.Region FROM ${E}DocSal AS s` }, expect: /no entity .*DocSal.*Did you mean/ },
             { op: { op: "createDataSet", module: mod, name: `${T}_DsBad`, oql: `SELECT s.Region FROM ${E}DocSale AS s`, parameters: [{ name: "Min", type: "Decimal" }] }, expect: /parameter Min is not used/ },
-            { op: { op: "createDataSet", module: mod, name: `${T}_DsBad`, sql: "SELECT 1" }, expect: /unknown field 'sql'.*OQL, not SQL/ },
-            ...(access ? [] : [{ op: { op: "createDataSet", module: mod, name: `${T}_DsBad`, oql: `SELECT s.Region FROM ${E}DocSale AS s`, roles: [`${mod}.ZzDocReports`] }, expect: /stores no role access/ }])
+            { op: { op: "createDataSet", module: mod, name: `${T}_DsBad`, sql: "SELECT 1" }, expect: /unknown field 'sql'.*OQL, not SQL/ }
         ]
     };
 }
