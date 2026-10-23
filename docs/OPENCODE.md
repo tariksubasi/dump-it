@@ -1230,6 +1230,9 @@ dry run says "check it in Studio Pro" (first use).
 | `changeTaskQueue` | **queue**, threads, scope | The dry run lists the calls in it |
 | `importIconCollection` | **module**, **name**, **font** (`.ttf`/`.otf` in the export folder), **icons** (JSON file or map `{ "home": "e900" }`; IcoMoon `selection.json` works), prefix, class, tags `{ "home": ["house"] }`, folder | Mendix 9.22+. Every code must have a glyph in the font (checked). WOFF files are refused: use the `.ttf`. Icons are named like Atlas icons: `Module.Collection.home` |
 
+| `createDocumentTemplate` | | Not supported: refused with the Studio Pro steps. Document templates are deprecated and their styles store colors no test project has a sample of. Use the Document Generation module (Marketplace) for new PDFs |
+| Kafka services | | No op: consumed/published Kafka services were removed in Mendix 10.2 (the SDK has them up to 10.1). Use the Kafka connector from the Marketplace (Java actions: `callJava`) |
+
 A call in a task queue (`call` or `callJava` in a microflow, field `queue`) runs later in the background: it has no
 `variable`, and a queued Java action must return nothing. `retry`: `{ "retries": 3, "interval": 10, "unit": "Seconds" }`
 (fixed) or `{ "retries": 3, "initialInterval": 10, "maximumInterval": 600, "unit": "Minutes" }` (exponential).

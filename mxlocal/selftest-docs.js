@@ -260,6 +260,7 @@ function mediaPlan(mod, T, version, dir) {
     const icons = cmp(version, "9.22.0") >= 0;
     return {
         changeFile: path.join(edits, "zz-docs.json"),
+        refuse: [{ op: "createDocumentTemplate", module: mod, name: `${T}_Doc` }],
         ops: [
             { op: "createImageCollection", module: mod, name: `${T}_Img`, folder: "ZzDocs" },
             { op: "addImage", collection: `${E}_Img`, file: "edits/zz-a.png", name: "Keep" },
@@ -312,5 +313,5 @@ module.exports.WHAT = {
     "regex/queues": "regular expressions (create with examples, Java-only syntax, change; a validation rule using one), task queues (threads, cluster scope, change), a call in a queue with exponential retry, changeAction moving a call to another queue with a fixed retry and one out of its queue; refusals (bad pattern, failing example, a pattern given as rule regex, did-you-mean names, threads 0, bad scope, queued call with a result variable, unknown retry field)",
     "OData change": "changePublishedOData change: add and remove attributes of a published entity, insert by microflow, paging off, count off, update kept (Mendix 10.4+); refusals (unknown attribute, already published, entity not published, unknown change field)",
     services: "business event service (Mendix 10+: events with attributes, add/remove events and attributes), published web service (object, list and primitive operations, optional parameter; change: add, remove, authentication, validate), consumed web service compared with a new WSDL (added/removed operations, refused with the Studio Pro steps); refusals with did-you-mean",
-    media: "deleteImage of an image an enumeration value shows (STILL USED BY), the other image kept; importIconCollection from a .ttf with an IcoMoon selection.json (two names for a code, tags) and with an inline hex map and prefix; refusals (did-you-mean image and collection, a name without collection, a code the font lacks, a WOFF file, a missing file, a bad code)"
+    media: "deleteImage of an image an enumeration value shows (STILL USED BY), the other image kept; importIconCollection from a .ttf with an IcoMoon selection.json (two names for a code, tags) and with an inline hex map and prefix; refusals (did-you-mean image and collection, a name without collection, a code the font lacks, a WOFF file, a missing file, a bad code); createDocumentTemplate refused with the Studio Pro steps"
 };

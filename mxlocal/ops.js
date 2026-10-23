@@ -491,7 +491,7 @@ function bind(model, client) {
     const version = client.project.version;
     const restOps = makeRest({ model, client, get, exists, folder, version, mappingInternals: mappingOps.internals, impl: () => impl });
     const odataOps = makeOData({ model, client, get, exists, entity, folder, version, persistable, attributeChain, loadParents });
-    const docsOps = makeDocs({ model, client, get, exists, entity, folder, version });
+    const docsOps = makeDocs({ model, client, get, exists, entity, folder, version, text, attributeChain, loadParents });
     const serviceOps = makeServices({ model, client, get, exists, entity, folder, version, attributeChain, loadParents });
     const xmlOps = makeXml({ model, client, get, exists, entity, folder, version, attributeChain, loadParents, mappingInternals: mappingOps.internals });
     const workflowOps = makeWorkflows({ model, client, get, exists, entity, folder, version, persistable, attributeChain, loadParents, grantAccess: o => impl.grantAccess(o), impl: () => impl,

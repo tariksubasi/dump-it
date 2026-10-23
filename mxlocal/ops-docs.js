@@ -43,6 +43,10 @@ const DOCS_OPS = {
             tags: "optional { \"home\": [ \"house\" ] } search words in Studio Pro", folder: "optional folder path"
         }
     },
+    createDocumentTemplate: {
+        doc: "NOT SUPPORTED (refused with the Studio Pro steps): create a document template for the generateDocument action (document templates are deprecated).",
+        fields: { module: "optional module name", name: "optional", widgets: "optional", header: "optional", footer: "optional", folder: "optional" }
+    },
     changeTaskQueue: {
         doc: "Change the threads or scope of a task queue; the dry run lists the calls that run in it.",
         fields: { queue: "R Module.Queue", threads: "optional number or expression", scope: "optional node | cluster" }
@@ -58,6 +62,8 @@ const DOCS_SYNONYMS = {
     createTaskQueue: { parallelism: "use \"threads\"", clusterWide: "use \"scope\": \"cluster\"" },
     changeTaskQueue: { parallelism: "use \"threads\"", clusterWide: "use \"scope\": \"cluster\"", name: "the queue goes in \"queue\": Module.Queue" }
 };
+
+const DOCUMENT_TEMPLATE_WHY = "Document templates are deprecated in Studio Pro, and no test project has one: every widget of a template stores a style with colors (DocumentTemplates$Style.FontColor, BackgroundColor, border colors), a value type with no Studio Pro sample anywhere, so ops cannot write one Studio Pro is sure to load. In Studio Pro: right-click the module > Add other > Document template, add a data view or data grid (its name is the parameter), then call it with the 'Generate document' action (generateDocument works in projects that already use that action). For new work use the Document Generation module from the Marketplace (PDF from a page). Record it with: mx.py gap \"createDocumentTemplate\"";
 
 // Java regex constructs JavaScript does not parse; a pattern with them is checked by Studio Pro only.
 const JAVA_ONLY = /\(\?[imsux-]+\)|\\[AZz]|[*+?}]\+|\\p\{(?:Alpha|Digit|Alnum|Upper|Lower|Punct|Space|L[ultmo]?|javaLowerCase)\}|\\Q|\\E/;
@@ -317,6 +323,9 @@ function makeDocs(h) {
     }
 
     const impl = {
+        async createDocumentTemplate() {
+            throw new Error(`createDocumentTemplate is not supported. ${DOCUMENT_TEMPLATE_WHY}`);
+        },
         async importIconCollection(o) {
             validName(o.name, "icon collection name");
             const qn = `${o.module}.${o.name}`;
@@ -414,6 +423,9 @@ function makeDocs(h) {
     };
 
     const checks = {
+        async createDocumentTemplate() {
+            return [];
+        },
         async importIconCollection(o) {
             const c = await get(`${o.module}.${o.name}`).catch(() => null);
             return c instanceof ci.CustomIconCollection && c.icons.length && c.fontData ? [] : [`${o.module}.${o.name} is not an icon collection with icons and a font`];
