@@ -320,6 +320,25 @@ async function errorsPhase({ copy, mod, T, reopen, layout, layoutProblems }) {
     await refused("changeAction onError retry", { ops: [{ op: "changeAction", microflow: qn, id: ids.logCustom, onError: { pattern: "retry" } }] }, /cannot do; delete the step/);
     await refused("unknown recipe", flow("ErrR8", [{ action: "log", message: "x", onError: "logAndShw" }]), /Did you mean: logAndShow/);
     await refused("storeError without entity", flow("ErrR9", [{ action: "log", message: "x", onError: "storeError" }]), /needs 'entity'|entity/);
+    // offline sync recipe (nanoflow synchronize + logAndShow; dry run): only in an app with an offline profile
+    let sync = "skipped (no offline or native navigation profile)";
+    {
+        const r = await reopen(copy);
+        try {
+            const lint = await r.ops.runPlan(flow("ErrSync", [{ action: "synchronize", onError: "logAndShow" }], true), () => {});
+            const nf = await r.ops.get(`${E}_ErrSync`);
+            let eh = null, msg = 0;
+            for (const o of nf.objectCollection.objects) {
+                if (o.action && o.action.structureTypeName === "Microflows$SynchronizeAction") eh = o.action.errorHandlingType.name;
+                if (o.action && o.action.structureTypeName === "Microflows$ShowMessageAction") msg++;
+            }
+            if (lint.length || eh !== "CustomWithoutRollBack" || msg !== 1) problems.push(`synchronize + logAndShow: error handling ${eh}, ${msg} message(s)${lint.length ? `, lint ${lint.join("; ")}` : ""}`);
+            else sync = "synchronize + logAndShow";
+        } catch (e) {
+            if (!/offline-first app|offline or native navigation profile|navigation document/.test(e.message)) problems.push(`synchronize + logAndShow: ${e.message}`);
+        }
+        await r.model.flushChanges().catch(() => {});
+    }
     // reopen: 0 errors, 0 deltas
     s = await reopen(copy);
     const errs = [];
@@ -327,7 +346,7 @@ async function errorsPhase({ copy, mod, T, reopen, layout, layoutProblems }) {
     await s.model.flushChanges();
     if (s.client.log.length) errs.push(`${s.client.log.length} deltas on open`);
     problems.push(...errs.slice(0, 3));
-    return { problems: [...new Set(problems)], ops: p1.ops.length + p2.ops.length };
+    return { problems: [...new Set(problems)], ops: p1.ops.length + p2.ops.length, sync };
 }
 
 module.exports = { flowsPhase, errorsPhase };
