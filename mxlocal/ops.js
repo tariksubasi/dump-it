@@ -75,7 +75,7 @@ const OPS = {
         fields: { microflow: "R Module.Microflow or Module.Nanoflow", after: "optional \"start\", the variable name an existing step creates, or a step id (see: steps)", branch: "with after = a decision: which outgoing flow, e.g. \"true\" or an enumeration value", handlerOf: "optional step id: put the actions at the start of that step's custom error handler (instead of after; later in a handler: after = a step id inside it)", actions: "R [ actions ]" }
     },
     changeAction: {
-        doc: "Change one existing step. Get its id with: steps Module.Flow. Give only the fields to change.",
+        doc: "Change one existing step. Get its id with: steps Module.Flow. Give only the fields to change (sendRestRequest, sendEmail, callWebService, ...: an object field like args merges with the stored one, null removes a field).",
         fields: {
             microflow: "R Module.Microflow or Module.Nanoflow", id: "R step id from 'steps', e.g. 3f2a9c1b",
             xpath: "retrieve: new XPath", first: "retrieve: true/false", entity: "retrieve: Module.Entity",
@@ -148,6 +148,14 @@ const OPS = {
     rename: { doc: "Rename a module, document, entity, attribute, association or enumeration value. Updates references, reports names left in expressions/XPath/Java.", fields: { target: "R qualified name, e.g. Module.Entity.Attribute", newName: "R new short name" } },
     delete: { doc: "Delete a document, entity, attribute, association, enumeration value or module role. Lists what still uses it. (Validation rules, event handlers, indexes: deleteValidationRule, deleteEventHandler, deleteIndex; access rules: deleteAccessRule; widgets: deleteWidget; flow steps: deleteAction.)", fields: { target: "R qualified name" } }
 };
+// changeAction also changes the fields of the actions that can give their stored fields back (spec): sendRestRequest,
+// sendEmail, callWebService, ...; it builds them again with the new fields (ops-flows.js rebuildExtra)
+{
+    const byField = {};
+    for (const [n, x] of Object.entries(ACTIONS)) if (x.spec) for (const k of Object.keys(x.fields)) (byField[k] = byField[k] || []).push(n);
+    const f = OPS.changeAction.fields;
+    for (const [k, names] of Object.entries(byField)) f[k] = `${f[k] ? f[k] + "; " : ""}${names.join(", ")}: as in ops <action>`;
+}
 
 // Without a name: one line per operation (short, so a small model reads it every time). With a name: the fields of
 // that operation, action or flow control kind.
@@ -468,7 +476,7 @@ function bind(model, client) {
     const pageOps = makePages({ model, client, get, exists, entity, text, translationsOf, folder, attributeChain, loadParents, persistable, dataType, grantAccess: o => impl.grantAccess(o), createNanoflow: o => createFlowOp(o, true) });
     const pageEdit = makePageEdit({ model, client, get, text, translationsOf, attributeChain, persistable }, pageOps.internals);
     const securityOps = makeSecurity({ model, get });
-    const refOps = makeRefOps({ model, client, get, exists, dataType, folder, entity }, flows);
+    const refOps = makeRefOps({ model, client, get, exists, dataType, folder, entity, text }, flows);
     const copyOps = makeCopy({ model, client, get, folder });
     const entityOps = makeEntity({ model, client, get, entity, persistable, isFresh: qn => isFresh(qn) });
     const themeOps = makeTheme({ client });
