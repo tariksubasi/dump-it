@@ -68,6 +68,11 @@ async function targets(s) {
     x.colAssoc = !!(x.grid2 && x.grid2.lines.some(l => l.startsWith("columns/filterAssociation ")));
     x.alignment = !!(x.grid2 && x.grid2.lines.some(l => l.startsWith("columns/alignment ")));
     x.exportType = !!(x.grid2 && x.grid2.lines.some(l => l.startsWith("columns/exportType ")));
+    // what the installed .mpk offers: Gallery 3.x has no loadMore paging (buttons | virtualScrolling), Data grid 2 2.x
+    // without showNumberOfRows (or 3.x showTotalCount) has no total count setting (2.21.1)
+    const enumKeys = (w, key) => { const l = w && w.lines.find(z => z.startsWith(`${key} `)); const m = l && / enum=(\S*)/.exec(l); return m && m[1] ? m[1].split(",").map(e => e.split("=")[0]) : []; };
+    x.galMode = ["loadMore", "virtualScrolling"].find(k => enumKeys(x.gallery, "pagination").includes(k)) || null;
+    x.showTotal = !!(x.grid2 && x.grid2.lines.some(l => /^(showNumberOfRows|showTotalCount) /.test(l)));
     return x;
 }
 
@@ -121,8 +126,8 @@ function plans(mod, T, x) {
                 { widget: "dataView", name: "zgeDetail", listenTo: "zgeClassic", fields: ["Note"], editable: false },
                 { widget: "dataGrid", kind: "datagrid2", name: "zgeGrid", entity: O, columns: ["Number", { type: "dynamicText", text: "{1} / {2}", params: ["Number", "Note"], caption: "Both", exportValue: "{Note}" },
                     { attribute: "Note", ...expCols }, { type: "customContent", caption: "Act", widgets: [{ widget: "actionButton", action: "delete", name: "zgeDel" }] }],
-                    paging: { mode: "buttons", pageSize: 15, showButtons: "auto", position: "both", showTotal: true }, emptyMessage: "No orders", onClickTrigger: "double" },
-                ...(x.gallery ? [{ widget: "gallery", name: "zgeGal", entity: O, columns: { desktop: 3, tablet: 2, phone: 1 }, paging: { mode: "loadMore", loadMoreCaption: "More" }, emptyMessage: "Nothing" }] : []),
+                    paging: { mode: "buttons", pageSize: 15, showButtons: "auto", position: "both", ...(x.showTotal ? { showTotal: true } : {}) }, emptyMessage: "No orders", onClickTrigger: "double" },
+                ...(x.gallery ? [{ widget: "gallery", name: "zgeGal", entity: O, columns: { desktop: 3, tablet: 2, phone: 1 }, ...(x.galMode ? { paging: { mode: x.galMode, ...(x.galMode === "loadMore" ? { loadMoreCaption: "More" } : {}) } } : {}), emptyMessage: "Nothing" }] : []),
                 { widget: "listView", name: "zgeList", entity: O, editable: true, onClick: { action: "showPage", page: pg("OrdForm") } }] },
             { op: "convertGrid", page: PE, widget: "zgeClassic" },
             { op: "changeWidget", page: PE, widget: "zgeGrid", columns: { add: [{ type: "customContent", caption: "More", widgets: [{ widget: "text", text: "{Note}", name: "zgeMore" }] }, { text: "#{Number}" }], change: [{ column: "Number", caption: "No." }], move: [{ column: "Note", position: 1 }] },
@@ -142,6 +147,8 @@ function plans(mod, T, x) {
             [{ op: "changeWidget", page: PE, widget: "zgeClassic", selection: "Multi" }, /zgeDetail listens to zgeClassic, which needs selection Single/],
             [{ op: "changeWidget", page: pg("Grid"), widget: "zzgClassic", columns: { add: [{ type: "dynamicText", text: "{Note}" }] } }, /classic data grid shows attributes only/],
             [{ op: "convertGrid", page: pg("Grid"), widget: "zzgClassic", strict: true, name: "zzgList" }, /already used/]);
+        if (!x.showTotal) refuse.push([{ op: "changeWidget", page: PE, widget: "zgeGrid", paging: { showTotal: true } }, /has no total count setting/]);
+        if (x.gallery && x.galMode !== "loadMore") refuse.push([{ op: "changeWidget", page: PE, widget: "zgeGal", paging: { mode: "loadMore" } }, /paging mode 'loadMore' is not known \(use buttons \| virtualScrolling\)/]);
         if (x.exportType) refuse.push([{ op: "changeWidget", page: PE, widget: "zgeGrid", columns: { change: [{ column: "Number", exportNumberFormat: "'0.0'" }] } }, /goes with "exportType": "number"/]);
     }
     if (x.pageable && !x.grid2) {
@@ -396,7 +403,7 @@ function editProblems(project, T, x) {
         const p = gal && props(gal);
         if (!p || val(p, "desktopItems") !== "3" || val(p, "tabletItems") !== "2" || val(p, "phoneItems") !== "2") r.push("zgeGal: columns per device not stored");
         else {
-            if (val(p, "pagination") !== "loadMore" || tmpl(p.get("loadMoreButtonCaption")) !== "More") r.push("zgeGal: paging not stored");
+            if (x.galMode && (val(p, "pagination") !== x.galMode || (x.galMode === "loadMore" && tmpl(p.get("loadMoreButtonCaption")) !== "More"))) r.push(`zgeGal: paging ${x.galMode} not stored`);
             if (p.get("content").Widgets.length !== 1 || p.get("content").Widgets[0].Name !== "zgeGalText") r.push("zgeGal: template not replaced");
             if (p.get("itemSelection").Selection !== "None") r.push("zgeGal: selection None not stored");
             if (!p.get("datasource").DataSource || p.get("datasource").DataSource.XPathConstraint !== "[Number > 1]") r.push("zgeGal: source XPath not stored");
