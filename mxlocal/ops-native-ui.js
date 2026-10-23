@@ -9,7 +9,7 @@ const { isNativeDoc } = require("./theme-native");
 
 // widget kinds of createPage / addWidgets that native pages have (core widgets; pluggable: a native .mpk)
 const NATIVE_KINDS = ["text", "container", "actionButton", "dataView", "listView", "input", "textBox", "textArea", "checkBox", "datePicker", "radioButtons", "dropDown",
-    "referenceSelector", "image", "tabContainer", "layoutGrid", "snippetCall", "pluggable"];
+    "referenceSelector", "image", "tabContainer", "layoutGrid", "snippetCall", "pluggable", "scrollContainer", "title"];
 // web-only kinds -> what a native page uses instead
 const INSTEAD = {
     dataGrid: "use a listView (one item per object; a list view item can open a page) — native pages have no data grids",
@@ -20,7 +20,19 @@ const INSTEAD = {
     fileManager: "native pages have no file manager: take or pick a picture with the NativeMobileResources JavaScript actions (TakePicture) in a nanoflow, and show it with an image",
     imageUploader: "native pages have no image uploader: use the NativeMobileResources TakePicture / TakePictureAdvanced JavaScript action in a nanoflow, then an image of the object",
     groupBox: "use a container (with a heading text), or the native Group box pluggable widget (com.mendix.widget.native.groupbox.GroupBox) when it is in widgets/",
-    dropDownButton: "use the native Pop-up menu or Bottom sheet pluggable widget (widgets/*.mpk), or several buttons"
+    dropDownButton: "use the native Pop-up menu or Bottom sheet pluggable widget (widgets/*.mpk), or several buttons",
+    // wave 2 kinds (widget-kinds.js); backButton is an action button with a close page action: allowed
+    navigationTree: "a native app navigates with the bottom bar (addMenuItem with a native page) or the side menu of a native layout; pages have no menu widgets",
+    menuBar: "a native app navigates with the bottom bar (addMenuItem with a native page) or the side menu of a native layout; pages have no menu widgets",
+    simpleMenuBar: "a native app navigates with the bottom bar (addMenuItem with a native page); pages have no menu widgets",
+    sidebarToggle: "a native layout with a side menu opens it by a swipe or its header button; a button can call the ToggleSidebar nanoflow action (NanoflowCommons)",
+    label: "use a text (\"widget\": \"text\")",
+    linkButton: "native buttons have no link look: use an actionButton (with a native style class or design property for a link look)",
+    loginIdTextBox: "a native app signs in with a nanoflow: a text box and a password text box (textBox on non-persistent attributes) and a button calling the NanoflowCommons SignIn JavaScript action",
+    passwordTextBox: "a native app signs in with a nanoflow: a text box and a password text box (textBox on non-persistent attributes) and a button calling the NanoflowCommons SignIn JavaScript action",
+    loginButton: "a native app signs in with a nanoflow calling the NanoflowCommons SignIn JavaScript action (callNanoflow on an actionButton)",
+    validationMessage: "a native sign-in nanoflow shows its own message (a text on a non-persistent attribute)",
+    navigationList: "use a listView, or containers with onClick (one per row)"
 };
 // button actions on native pages
 const ACTION_NOTES = {
@@ -32,9 +44,11 @@ const ACTION_NOTES = {
 // throws when a node of a native page is a web-only kind (with what to use instead)
 function checkNativeNodes(nodes) {
     for (const n of nodes) {
-        if (NATIVE_KINDS.includes(n.kind)) continue;
-        const hint = INSTEAD[n.kind];
-        throw new Error(`${n.where}: a native page has no ${n.kind}${hint ? `; ${hint}` : ` (native pages take ${NATIVE_KINDS.join(", ")})`}`);
+        // n.from: the kind asked for when it is built as another one (linkButton -> actionButton)
+        if (NATIVE_KINDS.includes(n.kind) && !(n.from && INSTEAD[n.from])) continue;
+        const k = n.from && INSTEAD[n.from] ? n.from : n.kind;
+        const hint = INSTEAD[k];
+        throw new Error(`${n.where}: a native page has no ${k}${hint ? `; ${hint}` : ` (native pages take ${NATIVE_KINDS.join(", ")})`}`);
     }
 }
 

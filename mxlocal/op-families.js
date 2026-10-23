@@ -7,7 +7,7 @@ const CATALOGUES = [
     ["./ops-domain", "DOMAIN_OPS", "domain"], ["./ops-entity", "ENTITY_OPS", "domain"], ["./ops-dmlayout", "DMLAYOUT_OPS", "domain"],
     ["./ops-security", "SECURITY_OPS", "security"], ["./ops-texts", "TEXT_OPS", "texts"],
     ["./ops-flow-edit", "FLOW_EDIT_OPS", "flows"], ["./ops-refs", "REF_OPS", "flows"], ["./ops-code", "CODE_OPS", "code"],
-    ["./ops-page-edit", "PAGE_EDIT_OPS", "data widgets"], ["./ops-scaffold", "SCAFFOLD_OPS", "data widgets"],
+    ["./ops-page-edit", "PAGE_EDIT_OPS", "data widgets"], ["./ops-scaffold", "SCAFFOLD_OPS", "data widgets"], ["./widget-edit", "WIDGET_EDIT_OPS", "data widgets"],
     ["./ops-nav", "NAV_OPS", "navigation"], ["./theme", "THEME_OPS", "design system"], ["./marketplace", "MARKET_OPS", "marketplace"],
     ["./ops-mappings", "MAPPING_OPS", "mapping"], ["./ops-xml", "XML_OPS", "mapping"], ["./ops-rest", "REST_OPS", "rest"], ["./ops-odata", "ODATA_OPS", "odata"],
     ["./ops-workflows", "WORKFLOW_OPS", "workflows"], ["./ops-small", "SMALL_OPS", "small changes"], ["./ops-offline", "OFFLINE_OPS", "native"],

@@ -191,10 +191,14 @@ for (const [k, f] of Object.entries(ui.KIND_UI)) Object.assign(WIDGETS[k].fields
 // pluggable widget presets (pl-presets.js): badge, progressBar, accordion, popupMenu, treeNode, charts
 const presets = require("./pl-presets");
 for (const [k, p] of Object.entries(presets.PRESETS)) WIDGETS[k] = { doc: `${p.doc}; needs widgets/*.mpk with ${p.id.split(".").pop()} (else refused); becomes a "pluggable" widget with working values`, fields: p.fields };
+// layout, navigation and sign-in widgets (widget-kinds.js): menus, scroll container, side bar toggle, title, label, back /
+// link button, login widgets, navigation list
+const wk = require("./widget-kinds");
+Object.assign(WIDGETS, wk.KINDS);
 
 const INPUTS = { textBox: "TextBox", textArea: "TextArea", checkBox: "CheckBox", datePicker: "DatePicker", radioButtons: "RadioButtonGroup", dropDown: "DropDown" };
 const ALIASES = { button: "actionButton", grid: "dataGrid", datagrid: "dataGrid", datagrid2: "dataGrid", list: "listView", heading: "text", div: "container", radiobuttongroup: "radioButtons",
-    tabs: "tabContainer", tabcontrol: "tabContainer", snippet: "snippetCall", referencesetselector: "referenceSetSelector", inputreferencesetselector: "referenceSetSelector", staticimage: "image", dynamicimage: "image", imageviewer: "image", reference: "referenceSelector", combo: "comboBox" };
+    tabs: "tabContainer", tabcontrol: "tabContainer", snippet: "snippetCall", referencesetselector: "referenceSetSelector", inputreferencesetselector: "referenceSetSelector", staticimage: "image", dynamicimage: "image", imageviewer: "image", reference: "referenceSelector", combo: "comboBox", ...wk.ALIASES };
 // fields a weak model takes from a neighbouring widget kind -> what to write instead
 const MASTER_DETAIL = `to show objects linked to the selected row, put a listView or dataGrid inside the listening dataView with "source": "association", "association": "Module.Assoc"`;
 const SYNONYMS = {
@@ -421,6 +425,7 @@ function makePages(h) {
         if (raw === undefined) throw new Error(`${where}: missing "widget". Supported: ${KINDS.join(", ")}`);
         if (typeof raw !== "string") throw new Error(`${where}: "widget" must be a kind name such as "text" (supported: ${KINDS.join(", ")})`);
         const kind = widgetKind(raw);
+        if (!kind && wk.DEPRECATED[raw.toLowerCase().replace(/[\s_-]/g, "")]) throw new Error(`${where}: ${wk.DEPRECATED[raw.toLowerCase().replace(/[\s_-]/g, "")]}`);
         if (!kind) fail(`${where}: unknown widget '${raw}'. Supported: ${KINDS.join(", ")} (other pluggable widgets: "widget": "pluggable", "type": ... ; see widgettype)`, raw, KINDS);
         const own = [...new Set([...Object.keys((WIDGETS[kind] || WIDGETS.input).fields), ...Object.keys(COMMON_FIELDS)])];
         const known = ["widget", "type", "name", ...own];
@@ -461,12 +466,18 @@ function makePages(h) {
     function scan(specs, where, container, nodes) {
         return list(specs, where).map((spec, i) => {
             const at = `${where}[${i + 1}]`;
-            let kind = kindOf(spec, at);
+            let kind = kindOf(spec, at), from = null;
             if (presets.PRESETS[kind]) {
                 spec = presets.expand(kind, spec, at, client.project.dir);
                 kind = "pluggable";
             }
-            const node = { kind, spec, where: `${at} (${kind})`, container, name: spec.name !== undefined ? String(spec.name) : null, heading: /^heading$/i.test(spec.widget || spec.type) };
+            if (wk.REWRITE[kind]) {
+                // back / link button: an action button, as Mendix stores them
+                from = kind;
+                spec = wk.REWRITE[kind](spec, at);
+                kind = "actionButton";
+            }
+            const node = { kind, spec, from, where: `${at} (${from || kind})`, container, name: spec.name !== undefined ? String(spec.name) : null, heading: /^heading$/i.test(spec.widget || spec.type) };
             nodes.push(node);
             if (kind === "layoutGrid") {
                 if (spec.rows !== undefined && spec.columns !== undefined) throw new Error(`${node.where}: give rows or columns, not both`);
@@ -500,6 +511,7 @@ function makePages(h) {
                 node.footer = scan(spec.footer, `${node.where}.footer`, node, nodes);
             } else if (kind === "listView" || kind === "gallery" || kind === "templateGrid") node.widgets = scan(spec.widgets, `${node.where}.widgets`, node, nodes);
             else if (kind === "groupBox") node.widgets = scan(spec.widgets, `${node.where}.widgets`, container, nodes);
+            else if (wk.CHILDREN[kind]) wk.CHILDREN[kind](node, spec, (specs, w) => scan(specs, w, container, nodes));
             else if (kind === "tabContainer") {
                 const tabs = list(spec.tabs, `${node.where}.tabs`);
                 if (!tabs.length) throw new Error(`${node.where}: needs at least one tab: "tabs": [ { "caption": "General", "widgets": [...] } ]`);
@@ -2952,7 +2964,10 @@ function makePages(h) {
         return `${w.name} (${image ? "image uploader" : "file manager"} of ${dv.ent.name}${bits.length ? ", " + bits.join(", ") : ""})`;
     }
 
+    let kindsMade = null;
+    const kindsFns = () => kindsMade || (kindsMade = wk.makeKinds(h, () => internals));
     const BUILD = {
+        ...Object.fromEntries(Object.keys(wk.KINDS).filter(k => !wk.REWRITE[k]).map(k => [k, (node, target, ctx) => kindsFns().BUILD[k](node, target, ctx)])),
         async buildingBlock(node, target, ctx) {
             const tpl = await templateOf(String(node.spec.from), node.where);
             if (!(tpl.doc instanceof pages.BuildingBlock)) throw new Error(`${node.where}: ${tpl.doc.qualifiedName} is a page template; a page takes it with createPage "from", a widget list takes a building block`);
@@ -4148,7 +4163,7 @@ function makePages(h) {
     const internals = { scan, setPlatform, build, gridKind, entityOf, attributeOf, pathOf, attrRefOf, prepareAssocs, formatInto, pageVariables, dvSettings, inputExtras, onChange, selectPage, ACTION_DOC, names, textAll, templateAll, noPlaceholder, checkXPath, dg2Info,
         isGrid2, isPl, valueOf, humanize, condition, sameCondition, fill, languages, shown, listenTarget, classicColumn, dg2Column, typeOf, isA, list, unitNamed,
         prepare, listEntity, resolveSources, sourceKind, makeAction, plDef, plApply, plScan, widgetType, widgetTypes,
-        blankObject, exprCheck, textTemplate, inputDefaults, templateOf, adopt, sortOrder, dg2Export, listSource, dg2Types: () => dg2Types(dg2Live()), buildPluggable: (n, t, c) => BUILD.pluggable(n, t, c), associations: () => ASSOCS || [], gridExtras: () => GX(), ui: () => uiFns() };
+        blankObject, exprCheck, textTemplate, inputDefaults, templateOf, adopt, sortOrder, dg2Export, listSource, dg2Types: () => dg2Types(dg2Live()), buildPluggable: (n, t, c) => BUILD.pluggable(n, t, c), associations: () => ASSOCS || [], gridExtras: () => GX(), ui: () => uiFns(), kinds: () => kindsFns() };
     let uiMade = null;
     function uiFns() {
         return uiMade || (uiMade = ui.makeUi(h, () => internals));
