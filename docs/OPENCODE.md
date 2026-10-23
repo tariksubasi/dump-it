@@ -66,6 +66,7 @@ Run all of these from the export folder.
 | `python mx.py unused [Module]` | Documents, entities, attributes and enumeration values nobody references, with the reason (default: the app's own modules). Entry points are not listed (menus, home pages, scheduled events, published services, after-startup, event handlers, flows named in Java/JavaScript code, pages with a URL, toolbox actions, "mark as used"). Only "probably unused": never delete without `usages` and the user's yes | no |
 | `python mx.py steps <Module.Flow>` | Lists the steps of a microflow/nanoflow with stable ids (for `changeAction`, `deleteAction`, `addActions` `after`) | no |
 | `python mx.py widgets <Module.Page>` | Lists the widget tree of a page or snippet: names, kinds, entity of each data view / list view, and where new widgets can go (`[into]`, layout grid column paths). For `addWidgets`, `changeWidget`, `deleteWidget`, `moveWidget` | no |
+| `python mx.py mapping-test <Module.ImportMapping> <sample.json>` | Shows what a sample JSON would make with an import mapping: each object (created, found by keys, from a microflow, the parameter), each attribute value, values that would fail at runtime (text in a number, a bad date, too long), sample keys the mapping ignores. Static: no database, no microflows run. The file may be in `edits/` | no |
 | `python mx.py texts [Module\|Module.Doc\|menu] [--missing <lang>]` | Lists translatable texts (page titles, widget captions/texts/labels/placeholders, enumeration captions, show-message and validation feedback texts, validation messages, menu captions) as `where [part]` with their text in every project language; `--missing tr_TR`: only those without Turkish. For `setTranslations` | no |
 | `python mx.py ops [name]` | One line per operation; with a name (`ops createPage`, `ops retrieve`): its fields. `ops all`: everything | no |
 | `python mx.py api <Type> [word]` | SDK type reference for this Mendix version (for `.js` files only) | no |
@@ -82,7 +83,7 @@ Run all of these from the export folder.
 | `python mx.py mergefix [--pick "<id or Module.Doc>=ours\|theirs,..."] [--all ours\|theirs]` | Dry run of the merge fix: writes nothing, prints the merged documents and an approval code. Every true conflict needs a side (the other side's change to that document is lost; tell the user to redo it in Studio Pro). Then `python mx.py apply <CODE>` writes the merged unit files and rebuilds the unit table; the user finishes with `git add <app>.mpr mprcontents` and `git commit` | no (apply: **yes**) |
 
 The same lookups also exist as tools of the `mendix` MCP server (in OpenCode: `mendix_find`, in Claude Code:
-`mcp__mendix__find`): `find`, `usages`, `unused`, `steps`, `widgets`, `texts`, `ops`, `api`, `dryrun`, `check`, `gap`, `mergecheck` and **`plan`**
+`mcp__mendix__find`): `find`, `usages`, `unused`, `steps`, `widgets`, `mapping_test`, `texts`, `ops`, `api`, `dryrun`, `check`, `gap`, `mergecheck` and **`plan`**
 (`plan` and `dryrun` take `"check": "yes"` for the STUDIO PRO CHECK of the change). `plan` takes a short name and the
 ops list, saves `edits/<name>.json` and dry-runs it in one call; the server keeps the model loaded, so this takes a
 fraction of a second. Use the tool or the command; the result is the same. `apply` and `undo` exist only as commands,
@@ -869,6 +870,13 @@ error list.
 |---|---|---|
 | `createConsumedRestService` | **module**, **name**, **baseUrl**, **operations**, authentication (`"none"` or `{username, password}`; a value `"@Module.Constant"` uses a constant), folder | Mendix 10.1+ REST client document. Each operation: **name**, **path** (`/orders/{id}`, after the base URL), method (default Get), parameters `{"id": "Integer"}` (types of the `{name}` placeholders in path, headers and body; default String), query `["status"]` or `{"page": {"required": false}}` (Mendix 11; on Mendix 10 they go into the path as `?status={status}`, optional ones are refused), headers `{"Name": "value {param}"}`, body (Post/Put/Patch: a text template with `{param}`, or `{snippet, entity, entities, attributes, skip, create}` = an export mapping of one object), response (`"none"`, or `{snippet, entity, entities, attributes, skip, keys, create}` = an import mapping like `createImportMapping`), timeout (s, 300). Added for Studio Pro's rules: `Accept: application/json` on every operation, `Content-Type: application/json` and a `{}` body for Post/Put/Patch without one |
 | `addRestOperation` | **service** (`Module.Service`) + the operation fields above | Adds one operation to an existing consumed REST service |
+| `changeRestService` | **service**, baseUrl, authentication (`"none"` or `{username, password}`) | Give only what changes |
+| `changeRestOperation` | **operation** (`Module.Service.Operation`), method, path, parameters, query, headers, body, response, timeout | Changes the operation in place; what you leave out stays. headers are merged: `{"X-Trace": null}` removes one (Accept stays). query replaces all query parameters. The `{placeholders}` are counted again: a removed parameter also leaves the calling `sendRestRequest` steps; a new one is listed with the callers (`STILL USED BY`): delete those steps and add them again with the new arg |
+| `deleteRestOperation` | **operation** | Lists the microflows that still call it (`STILL USED BY`). The last operation: delete the service with `delete` |
+| `changePublishedRestService` | **service**, path, version, authentication, roles | authentication and roles replace the old lists |
+| `changePublishedRestOperation` | **service**, **resource**, **method**, path (the current ones, to find it), newMethod, newPath, microflow, importMapping, exportMapping (`""` removes), commit, headers, summary, description, deprecated | The operation is made again from the (new) microflow; mappings and texts you leave out stay |
+| `deletePublishedRestOperation` | **service**, **resource**, **method**, path | |
+| `deletePublishedRestResource` | **service**, **resource** | With all its operations |
 | `publishRest` | **module**, **service**, **resource**, **method**, **microflow**, path (`{Id}`), headers `["Param"]`, importMapping, exportMapping, commit, summary, description, deprecated, create, query, servicePath, version, authentication, roles, folder | Creates the service (version default 1.0.0, shown in its OpenAPI document; authentication default `["Basic"]`) and resource when missing. Microflow parameters: `{Name}` in the path -> path, listed in `headers` -> header, an object/list -> the body (needs `importMapping` of that entity; commit `yes`/`no`/`withoutEvents`, default yes), `System.HttpRequest`/`HttpResponse` -> none, others -> query. An object/list result needs `exportMapping`. `create: true` makes the microflow when it is missing (String parameters from path, headers and `query`, the import mapping's entity, returns String or the export mapping's entity). `roles` may call the service |
 
 Action `sendRestRequest` calls an operation: `{ "action": "sendRestRequest", "operation": "Module.Service.Operation",
@@ -889,6 +897,32 @@ does not allow a custom error handler here); use `callRest` when the call needs 
   { "op": "createMicroflow", "module": "Sales", "name": "ACT_Order_Fetch", "parameters": [ { "name": "Id", "type": "Integer" } ],
     "returns": "Sales.RemoteOrder", "returnValue": "$Order",
     "actions": [ { "action": "sendRestRequest", "operation": "Sales.OrderApi.GetOrder", "args": { "id": "$Id" }, "variable": "Order" } ] }
+] }
+```
+
+Change an operation: new path and header, one header removed, a shorter timeout:
+
+```json
+{ "ops": [
+  { "op": "changeRestOperation", "operation": "Sales.OrderApi.GetOrder", "path": "/v2/orders/{id}",
+    "headers": { "X-Trace": null, "X-Api-Version": "2" }, "timeout": 60 } ] }
+```
+
+Error handling of a REST call (recipe). `sendRestRequest` cannot have `onError` (Studio Pro rule). Use `callRest` with
+`errorBody: true` (default): in its `onError` handler `$latestHttpResponse` holds the status code and the body. Copy the
+body into a String variable, parse it with an import mapping (make the mapping from a sample error body), then log or
+show it. `rollback: false` keeps earlier changes; the flow returns `returnValue` from the handler:
+
+```json
+{ "ops": [
+  { "op": "createJsonStructure", "module": "Sales", "name": "JSON_ApiError", "snippet": "{ \"code\": \"E1\", \"message\": \"bad request\" }" },
+  { "op": "createImportMapping", "module": "Sales", "name": "IMM_ApiError", "jsonStructure": "Sales.JSON_ApiError", "entity": "Sales.ApiError", "create": true, "persistable": false },
+  { "op": "createMicroflow", "module": "Sales", "name": "ACT_Order_Send", "returns": "Boolean", "returnValue": "true",
+    "actions": [ { "action": "callRest", "method": "Post", "url": "https://api.example.com/orders", "body": "{}",
+      "onError": { "rollback": false, "returnValue": "false", "actions": [
+        { "action": "variable", "name": "ErrorBody", "type": "String", "value": "$latestHttpResponse/Content" },
+        { "action": "importWithMapping", "mapping": "Sales.IMM_ApiError", "source": "ErrorBody", "variable": "ApiError", "commit": "no" },
+        { "action": "log", "level": "Error", "message": "API error {1}: {2}", "args": [ "toString($latestHttpResponse/StatusCode)", "$ApiError/Message" ] } ] } } ] }
 ] }
 ```
 
@@ -966,6 +1000,11 @@ Workflow actions (in microflows; System variables are written by name, e.g. a pa
 | `createJsonStructure` | **module**, **name**, **snippet** (JSON text), folder | Elements as Studio Pro derives them: root `Root`, keys capitalized (`orderId` -> `OrderId`, reserved `id`/`class` -> `_id`/`_class`), arrays of objects -> `<Name>Item`, arrays of values -> a wrapper per item, ISO dates -> DateTime, `1.0` -> Decimal, `null` -> Unknown. Uses the first item of each array. Give the snippet as a string |
 | `createImportMapping` | **module**, **name**, **jsonStructure**, entity (root), entities `{"json/path":"Module.Entity"}`, attributes `{"json/path/key":"Attr"}`, skip `[paths]`, keys `[paths]`, create, persistable, folder | One entity per JSON object, an attribute per value (the element name), child -> parent associations (`Child_Parent`). Arrays: the item maps straight under its parent (many children). Paths are the JSON keys joined with `/` (`lines/sku`, `[]` may be written). keys: the object is found by those values, else created. Default `create: false`: maps onto existing entities/attributes/associations by name and says "did you mean"; `create: true` creates what is missing (strings unlimited, integers Long). Root arrays are fine |
 | `createExportMapping` | same fields, no keys | The root entity is the parameter; nested objects are found over the association. Export over a JSON structure whose root is an array: Studio Pro |
+| `createImportMapping` extra fields | createAttributes, parameter | Onto EXISTING entities (no `create`): attributes match by name ignoring case and `_` (`order_id` -> `OrderID`; the dry run lists them under `matched`); `createAttributes: true` creates missing attributes only (never entities). `parameter`: `Module.Entity` or `String`/`Integer`/... (the mapping parameter) |
+| `changeJsonStructure` | **structure**, **snippet** | New elements from the new snippet in the same document (mappings keep pointing to it). The dry run lists `added`, `removed`, `retyped` paths and, per mapping, the update op to run next (with `prune` when it maps a removed path) |
+| `updateImportMapping` | **mapping**, entities, attributes, skip, keys, createAttributes, create, persistable, prune | Brings the mapping in step with its JSON structure, XML schema or message definition. Elements of paths that stay keep their settings (keys, transforms, custom microflows). New values map to the attribute of the same name; without it they are listed as `NOT MAPPED` (`createAttributes: true` creates them, `attributes` names others). New objects map to `entities` or `<module>.<element name>` (`create: true` creates entity and association). Retyped values are checked against their attribute. Mapped paths that are gone: refused, nothing changes, unless `prune: true` (the attributes stay). Values the mapping left out before come back as new unless you `skip` them |
+| `updateExportMapping` | same, no keys | |
+| `changeMapping` | **mapping**, element (path, `""` = root), keys, objectHandling, ifNotFound, microflow, transform, attribute, association, parameter | One element. Import objects: `keys` (`["sku"]`, values that identify the object), `objectHandling` `create` / `find` (by keys; `ifNotFound` default `error`) / `findOrCreate` / `custom` (with `microflow`: returns the object; its parameters are matched by name to values of the object, or are an object of a parent element's entity) / `parameter` (the root, when the mapping parameter is its entity), `ifNotFound` `create`/`ignore`/`error`. Objects: `association` (between its entity and the parent's). Values: `attribute`, `transform` (a microflow with one parameter: import `(String) -> attribute type`, export `(attribute type) -> String`; `""` removes it). Without element: `parameter` (`Module.Entity`, `String`, ... or `none`). Refused with a reason before anything changes: a value setting on an object, import settings on an export mapping, find without keys, a transform with the wrong signature |
 
 Typical plan: structure, import mapping that creates the entities, export mapping on the same entities, then a flow:
 
@@ -979,7 +1018,23 @@ Typical plan: structure, import mapping that creates the entities, export mappin
                  { "action": "exportWithMapping", "mapping": "Sales.EXM_Order", "object": "Order", "variable": "Out" } ] } ] }
 ```
 
-The export shows a structure as `json/path: Name type` lines and a mapping as `json/path -> Entity via Association [Create/Find/Parameter]`; use those paths in `entities`, `attributes`, `skip`, `keys`. Custom handlers and converters: Studio Pro. XML schemas and message definitions: see below.
+A structure changed (new API version):
+
+```json
+{ "ops": [
+  { "op": "changeJsonStructure", "structure": "Sales.JSON_Order", "snippet": "{ \"orderId\": 12, \"total\": \"10.50\", \"status\": \"open\", \"lines\": [ { \"sku\": \"A1\", \"qty\": 2, \"price\": 1.5 } ] }" },
+  { "op": "updateImportMapping", "mapping": "Sales.IMM_Order", "createAttributes": true, "prune": true },
+  { "op": "updateExportMapping", "mapping": "Sales.EXM_Order", "createAttributes": true, "prune": true },
+  { "op": "changeMapping", "mapping": "Sales.IMM_Order", "element": "lines", "keys": ["sku"], "ifNotFound": "ignore" },
+  { "op": "changeMapping", "mapping": "Sales.IMM_Order", "element": "total", "transform": "Sales.SUB_TextToDecimal" } ] }
+```
+
+A mapping with a parameter: `{ "op": "changeMapping", "mapping": "Sales.IMM_Order", "parameter": "Sales.Order" }`, then pass it:
+`{ "action": "importWithMapping", "mapping": "Sales.IMM_Order", "source": "Json", "parameter": "Order" }` (`callRest`:
+`"mappingParameter"`). Before you apply a mapping change, test it with a sample: `python mx.py mapping-test
+Sales.IMM_Order edits/order-sample.json`.
+
+The export shows a structure as `json/path: Name type` lines and a mapping as `json/path -> Entity via Association [Create/Find/Parameter]`; use those paths in `entities`, `attributes`, `skip`, `keys` and `element`. XML schemas and message definitions: see below.
 
 ### OData, XML schemas, message definitions
 
@@ -990,7 +1045,14 @@ The export shows a structure as `json/path: Name type` lines and a mapping as `j
 | `createMessageDefinition` | **module**, **name** (collection), **entity**, definition (default the entity name), attributes, associations `["Module.Assoc"]`, folder | A list of the entity (`<Entity>s` with items `<Entity>`), its attributes (all but binary) and per association the other entity with its attributes. Layout of the Mendix 8.18 sample |
 | `createXmlImportMapping` | **module**, **name**, xmlSchema + rootElement, or messageDefinition (`Module.Collection.Definition`), entity, entities, attributes, skip, keys, create, persistable, folder | Like `createImportMapping`, over an XML schema element or a message definition. Paths are the element names joined with `/` from the root: `Order/Line/Sku`. A message definition says its entities (no entity/entities/create). XSD support: sequences/all-groups of elements with built-in types, named and anonymous complex types, repeated complex elements; attributes, choices, extensions and repeated simple elements are refused |
 | `createXmlExportMapping` | same fields, no keys | Like `createExportMapping` |
+| `changePublishedOData` | **service**, entities (add, or replace when published: same fields as publishOData), remove `["Module.Entity"]`, version, path, authentication, roles, summary, description | Navigation properties are made again; enumerations nobody publishes any more are removed |
+| `changeXmlSchema` | **schema**, file (default: the file it came from) | Imports the `.xsd` again. Lists added/removed elements and, per mapping over it, the changed paths and the update op |
+| `changeMessageDefinition` | **definition** (`Module.Collection.Definition`), attributes (`[..]` or `"all"`), associations | Rebuilds the definition from its entity; what you leave out stays. Lists the mappings to update (`prune` when members are gone) |
+| `updateConsumedODataService` | | Not supported: refused with the Studio Pro steps (Update from the new `$metadata`). Removing an external entity: `delete` |
 | `consumeODataService`, `consumeWebService`, `createBusinessEvent` | | Not supported: refused with the Studio Pro steps (consumed OData from `$metadata`, consumed SOAP web services from a WSDL, business events). They are contracts Studio Pro reads and keeps in sync |
+
+Delete any of these documents (structure, mapping, XML schema, message definition, published or consumed service,
+web service, business event service) with `delete` (`STILL USED BY` lists who uses it).
 
 Mappings over XML schemas have no Studio Pro sample in the test projects: the dry run says to check them in Studio
 Pro (if a path does not match, Studio Pro shows an error on the mapping; right-click it and choose to update it).

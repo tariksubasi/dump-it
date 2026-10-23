@@ -325,8 +325,9 @@ function odataProblems(project, T, version) {
 // follow it (new values, a new object with its entity, a removed and a retyped value), element settings (keys, find
 // with ignore, a custom microflow, a value transform, the root as the mapping parameter), an import step passing the
 // parameter, and the error-handler recipe (callRest whose handler parses $latestHttpResponse with an import mapping).
-function changePlan(mod, T, dir) {
+function changePlan(mod, T, dir, version) {
     const E = `${mod}.${T}`;
+    const odata = cmp(version, "10.4.0") >= 0;
     const xsd2 = require("path").join(dir, "zz-order2.xsd");
     require("fs").writeFileSync(xsd2, XSD.replace('<xs:element name="Placed" type="xs:dateTime"/>', '<xs:element name="Placed" type="xs:dateTime"/>\n        <xs:element name="Status" type="xs:string" minOccurs="0"/>').replace('<xs:element name="Qty" type="xs:int"/>', '<xs:element name="Qty" type="xs:int"/>\n      <xs:element name="Price" type="xs:decimal"/>'));
     const api = `${E}_OrderApi`, pub = `${E}_Pub`; // made by the REST phase
@@ -376,7 +377,8 @@ function changePlan(mod, T, dir) {
             { op: "updateExportMapping", mapping: `${E}_XmlExm`, createAttributes: true },
             { op: "changeMessageDefinition", definition: `${E}_MD.${T}OdOrder`, associations: [`${E}OdLine_${T}OdOrder`] },
             { op: "updateImportMapping", mapping: `${E}_MdImm`, prune: true },
-            { op: "updateExportMapping", mapping: `${E}_MdExm`, prune: true }
+            { op: "updateExportMapping", mapping: `${E}_MdExm`, prune: true },
+            ...(odata ? [{ op: "changePublishedOData", service: `${E}_OData`, remove: [`${E}OdCust`], entities: [{ entity: `${E}OdOrder`, key: ["Number"], insert: true, pageSize: 100 }, `${E}ChOrder`], version: "1.1.0" }] : [])
         ],
         reject: [
             { op: { op: "updateImportMapping", mapping: `${E}_ChImm2` }, expect: /no longer in .*order_id|no longer in .*note.*"prune": true/ },
@@ -390,6 +392,8 @@ function changePlan(mod, T, dir) {
             { op: { op: "changeRestOperation", operation: `${api}.GetOrder`, headers: { Accept: null } }, expect: /keeps an Accept header/ },
             { op: { op: "changeRestOperation", operation: `${api}.GetOrder` }, expect: /nothing to change/ },
             { op: { op: "deletePublishedRestOperation", service: pub, resource: "orders", method: "Put" }, expect: /no Put operation .*its operations: Get '\{Id\}'/ },
+            ...(odata ? [{ op: { op: "changePublishedOData", service: `${E}_OData`, remove: [`${E}OdCustomer`] }, expect: /OdCustomer is not published in .*Did you mean/ }] : []),
+            { op: { op: "updateConsumedODataService", service: `${E}_Remote` }, expect: /is not supported\. .*In Studio Pro/ },
             { op: { op: "createMicroflow", module: mod, name: `${T}_ChBadFlow`, parameters: [{ name: "Json", type: "String" }], actions: [{ action: "importWithMapping", mapping: `${E}_ChImm`, source: "Json" }] }, expect: /takes a parameter .*give "parameter"/ }
         ],
         after: [{ op: "delete", target: `${E}_ChImm2` }],
@@ -401,7 +405,7 @@ function changePlan(mod, T, dir) {
     };
 }
 
-function changeProblems(project, T) {
+function changeProblems(project, T, version) {
     const r = [];
     const u = unitsNamed(project, `${T}_Ch`);
     const s = u[`${T}_ChJson`], imm = u[`${T}_ChImm`], exm = u[`${T}_ChExm`], flow = u[`${T}_ChImport`];
@@ -454,6 +458,13 @@ function changeProblems(project, T) {
     walk(mdc.MessageDefinitions[0].ExposedEntity, e => e.Path && mem.push(e.Path));
     if (mem.some(p => /OdCust/.test(p)) || !mem.some(p => /OdLine/.test(p))) r.push(`message definition members ${mem.join(", ")}`);
     for (const [n, m] of [["MdImm", mi], ["MdExm", me]]) walk(m.Elements, e => /OdCust/.test(e.XmlPath || "") && r.push(`${n} still maps ${e.XmlPath}`));
+    const od = all[`${T}_OData`];
+    if (cmp(version, "10.4.0") >= 0) {
+        const types = od ? od.EntityTypes.map(t => t.Entity.split(".").pop()) : [];
+        if (!od || od.Version !== "1.1.0" || types.includes(`${T}OdCust`) || !types.includes(`${T}ChOrder`) || od.EntitySets.length !== types.length || od.Enumerations.length) r.push(`published OData: version ${od && od.Version}, entities ${types}, enumerations ${od && od.Enumerations.length}`);
+        const set = od && od.EntitySets.find(x => x.EntityTypePointer === (od.EntityTypes.find(t => /OdOrder$/.test(t.Entity)) || {}).$ID);
+        if (!set || set.PageSize !== 100 || set.UpdateMode.$Type !== "ODataPublish$ChangeNotSupported") r.push("replaced order set settings");
+    }
     const one = ops.find(o => o.HttpMethod === "Get");
     if (!one || one.Summary !== "One order by id" || !one.Deprecated || !one.ExportMapping) r.push("published Get not changed (summary, deprecated, export mapping kept)");
     return r;

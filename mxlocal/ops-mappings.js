@@ -1202,6 +1202,7 @@ function integChangedLater(name, o, rest) {
     if (svcQn && rest.some(x => ["changeRestService", "changeRestOperation", "deleteRestOperation"].includes(x.op) && String(x.service || x.operation || "").startsWith(svcQn))) return true;
     const pub = name === "publishRest" ? `${o.module}.${o.service}` : name === "changePublishedRestOperation" ? o.service : null;
     if (pub && rest.some(x => ["changePublishedRestOperation", "deletePublishedRestOperation", "deletePublishedRestResource", "changePublishedRestService"].includes(x.op) && x.service === pub)) return true;
+    if (name === "publishOData" && rest.some(x => x.op === "changePublishedOData" && x.service === qn)) return true;
     if (name === "changeRestOperation" && rest.some(x => ["changeRestOperation", "deleteRestOperation"].includes(x.op) && x.operation === o.operation)) return true;
     return false;
 }
