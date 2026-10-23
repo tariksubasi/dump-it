@@ -1747,6 +1747,44 @@
         "app",
         "flows"
       ]
+    },
+    {
+      "id": "docodatachange",
+      "text": "OrderOData servisinde Order entity'sine Note attribute'unu da yayınla, Total'ı yayından kaldır ve sayfalamayı kapat.",
+      "setup": [
+        {
+          "op": "addAttribute",
+          "entity": "MyFirstModule.Order",
+          "name": "Note",
+          "type": "String(200)"
+        },
+        {
+          "op": "publishOData",
+          "module": "MyFirstModule",
+          "name": "OrderOData",
+          "entities": [
+            {
+              "entity": "MyFirstModule.Order",
+              "attributes": [
+                "Number",
+                "Total"
+              ],
+              "pageSize": 100
+            }
+          ]
+        }
+      ],
+      "checks": {
+        "find": [
+          "MyFirstModule.OrderOData"
+        ]
+      },
+      "ops": [
+        "changePublishedOData"
+      ],
+      "families": [
+        "odata"
+      ]
     }
   ]
 }

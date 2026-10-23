@@ -1184,11 +1184,19 @@ The export shows a structure as `json/path: Name type` lines and a mapping as `j
 | `createMessageDefinition` | **module**, **name** (collection), **entity**, definition (default the entity name), attributes, associations `["Module.Assoc"]`, folder | A list of the entity (`<Entity>s` with items `<Entity>`), its attributes (all but binary) and per association the other entity with its attributes. Layout of the Mendix 8.18 sample |
 | `createXmlImportMapping` | **module**, **name**, xmlSchema + rootElement, or messageDefinition (`Module.Collection.Definition`), entity, entities, attributes, skip, keys, create, persistable, folder | Like `createImportMapping`, over an XML schema element or a message definition. Paths are the element names joined with `/` from the root: `Order/Line/Sku`. A message definition says its entities (no entity/entities/create). XSD support: sequences/all-groups of elements with built-in types, named and anonymous complex types, repeated complex elements; attributes, choices, extensions and repeated simple elements are refused |
 | `createXmlExportMapping` | same fields, no keys | Like `createExportMapping` |
-| `changePublishedOData` | **service**, entities (add, or replace when published: same fields as publishOData), remove `["Module.Entity"]`, version, path, authentication, roles, summary, description | Navigation properties are made again; enumerations nobody publishes any more are removed |
+| `changePublishedOData` | **service**, entities (add, or replace when published: same fields as publishOData), change, remove `["Module.Entity"]`, version, path, authentication, roles, summary, description | change: `[{ "entity": "Module.Entity", "addAttributes": ["Attr"], "removeAttributes": ["Attr"], "insert": true, "update": "Module.Microflow", "delete": false, "count": true, "topSkip": true, "pageSize": 500 }]` changes part of a published entity (`"pageSize": null` = no paging); the rest stays. Navigation properties are made again; enumerations nobody publishes any more are removed |
 | `changeXmlSchema` | **schema**, file (default: the file it came from) | Imports the `.xsd` again. Lists added/removed elements and, per mapping over it, the changed paths and the update op |
 | `changeMessageDefinition` | **definition** (`Module.Collection.Definition`), attributes (`[..]` or `"all"`), associations | Rebuilds the definition from its entity; what you leave out stays. Lists the mappings to update (`prune` when members are gone) |
 | `updateConsumedODataService` | | Not supported: refused with the Studio Pro steps (Update from the new `$metadata`). Removing an external entity: `delete` |
 | `consumeODataService`, `consumeWebService`, `createBusinessEvent` | | Not supported: refused with the Studio Pro steps (consumed OData from `$metadata`, consumed SOAP web services from a WSDL, business events). They are contracts Studio Pro reads and keeps in sync |
+
+Change part of a published entity (here: publish Note, stop publishing Qty, insert through a microflow):
+
+```json
+{ "ops": [
+  { "op": "changePublishedOData", "service": "Sales.OrderOData", "change": [ { "entity": "Sales.Order", "addAttributes": ["Note"], "removeAttributes": ["Qty"], "insert": "Sales.ODATA_InsertOrder" } ] }
+] }
+```
 
 Delete any of these documents (structure, mapping, XML schema, message definition, published or consumed service,
 web service, business event service) with `delete` (`STILL USED BY` lists who uses it).

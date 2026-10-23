@@ -83,11 +83,47 @@ function regexQueueProblems(project, T, version) {
 
 module.exports = { regexQueuePlan, regexQueueProblems };
 
+// ---------------------------------------------------------------- published OData: change part of an entity
+
+function odataChangePlan(mod, T, version) {
+    const E = `${mod}.${T}`;
+    if (cmp(version, "10.4.0") < 0) return { ops: [{ op: "createModuleRole", module: mod, name: "ZzDocOdNone" }] };
+    return {
+        ops: [
+            { op: "createEntity", module: mod, name: `${T}DocOdA`, attributes: [{ name: "Code", type: "String(20)" }, { name: "Qty", type: "Integer" }, { name: "Note", type: "String(200)" }] },
+            { op: "createMicroflow", module: mod, name: `${T}_DocOdIns`, folder: "ZzDocs", parameters: [{ name: "A", type: `${E}DocOdA` }], actions: [{ action: "commit", variable: "A" }] },
+            { op: "publishOData", module: mod, name: `${T}_DocOd`, folder: "ZzDocs", entities: [{ entity: `${E}DocOdA`, attributes: ["Code", "Qty"], pageSize: 100, update: true }] },
+            { op: "changePublishedOData", service: `${E}_DocOd`, change: [{ entity: `${E}DocOdA`, addAttributes: ["Note"], removeAttributes: ["Qty"], insert: `${E}_DocOdIns`, pageSize: null, count: false }] }
+        ],
+        reject: [
+            { op: { op: "changePublishedOData", service: `${E}_DocOd`, change: [{ entity: `${E}DocOdA`, removeAttributes: ["Notee"] }] }, expect: /does not publish attribute 'Notee'.*Did you mean: Note/ },
+            { op: { op: "changePublishedOData", service: `${E}_DocOd`, change: [{ entity: `${E}DocOdA`, addAttributes: ["Code"] }] }, expect: /already publishes 'Code'/ },
+            { op: { op: "changePublishedOData", service: `${E}_DocOd`, change: [{ entity: `${E}DocOdB` }] }, expect: /is not published in .*add it with "entities"/ },
+            { op: { op: "changePublishedOData", service: `${E}_DocOd`, change: [{ entity: `${E}DocOdA`, insrt: true }] }, expect: /unknown change field 'insrt'.*Did you mean: insert/ }
+        ]
+    };
+}
+
+function odataChangeProblems(project, T, version) {
+    if (cmp(version, "10.4.0") < 0) return [];
+    const s = unitsNamed(project, `${T}_`)[`${T}_DocOd`];
+    if (!s) return ["published OData service missing"];
+    const r = [];
+    const t = s.EntityTypes[0];
+    const attrs = t.ChildMembers.filter(m => m.$Type === "ODataPublish$PublishedAttribute").map(m => m.Attribute.split(".").pop());
+    if (attrs.join(",") !== "Code,Note") r.push(`published attributes ${attrs.join(",")}`);
+    const set = s.EntitySets[0];
+    if (!set || set.InsertMode.$Type !== "ODataPublish$CallMicroflowToChange" || set.UpdateMode.$Type !== "ODataPublish$ChangeSource" || set.UsePaging !== false || set.QueryOptions.Countable !== false) r.push("entity set capabilities after change");
+    return r;
+}
+
 // name -> [ plan(mod, T, version, dir), problems(project, T, version) ] (selftest.js runs them in this order)
 module.exports.PHASES = {
-    "regex/queues": [(mod, T) => regexQueuePlan(mod, T), regexQueueProblems]
+    "regex/queues": [(mod, T) => regexQueuePlan(mod, T), regexQueueProblems],
+    "OData change": [(mod, T, version) => odataChangePlan(mod, T, version), odataChangeProblems]
 };
 // name -> what the phase covers (the selftest line)
 module.exports.WHAT = {
-    "regex/queues": "regular expressions (create with examples, Java-only syntax, change; a validation rule using one), task queues (threads, cluster scope, change), a call in a queue with exponential retry, changeAction moving a call to another queue with a fixed retry and one out of its queue; refusals (bad pattern, failing example, a pattern given as rule regex, did-you-mean names, threads 0, bad scope, queued call with a result variable, unknown retry field)"
+    "regex/queues": "regular expressions (create with examples, Java-only syntax, change; a validation rule using one), task queues (threads, cluster scope, change), a call in a queue with exponential retry, changeAction moving a call to another queue with a fixed retry and one out of its queue; refusals (bad pattern, failing example, a pattern given as rule regex, did-you-mean names, threads 0, bad scope, queued call with a result variable, unknown retry field)",
+    "OData change": "changePublishedOData change: add and remove attributes of a published entity, insert by microflow, paging off, count off, update kept (Mendix 10.4+); refusals (unknown attribute, already published, entity not published, unknown change field)"
 };
