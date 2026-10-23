@@ -224,6 +224,29 @@ function servicesProblems(project, T, version) {
 // An 1x1 PNG.
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
 
+// A TrueType file with only a character map (format 4) of the codes from..to: enough for importIconCollection's
+// checks (magic, glyphs of the map), not a font a browser draws.
+function tinyFont(from, to) {
+    const sub = Buffer.alloc(16 + 2 * 8);
+    const segs = 2; // the range and the 0xFFFF end segment
+    sub.writeUInt16BE(4, 0);
+    sub.writeUInt16BE(sub.length, 2);
+    sub.writeUInt16BE(segs * 2, 6);
+    sub.writeUInt16BE(to, 14);
+    sub.writeUInt16BE(0xffff, 16);
+    sub.writeUInt16BE(0, 18); // reserved pad
+    sub.writeUInt16BE(from, 20);
+    sub.writeUInt16BE(0xffff, 22);
+    const cmap = Buffer.concat([Buffer.from([0, 0, 0, 1, 0, 3, 0, 1, 0, 0, 0, 12]), sub]);
+    const head = Buffer.alloc(12 + 16);
+    head.writeUInt32BE(0x00010000, 0);
+    head.writeUInt16BE(1, 4);
+    head.write("cmap", 12, "latin1");
+    head.writeUInt32BE(head.length, 20);
+    head.writeUInt32BE(cmap.length, 24);
+    return Buffer.concat([head, cmap]);
+}
+
 function mediaPlan(mod, T, version, dir) {
     const E = `${mod}.${T}`;
     const fs = require("fs");
@@ -231,6 +254,10 @@ function mediaPlan(mod, T, version, dir) {
     const edits = path.join(dir, "edits");
     fs.mkdirSync(edits, { recursive: true });
     fs.writeFileSync(path.join(edits, "zz-a.png"), PNG);
+    fs.writeFileSync(path.join(edits, "zz-icons.ttf"), tinyFont(0xe900, 0xe902));
+    fs.writeFileSync(path.join(edits, "zz-icons.json"), JSON.stringify({ icons: [{ properties: { name: "home, house", code: 0xe900 } }, { properties: { name: "cart", code: 0xe901 } }] }));
+    fs.writeFileSync(path.join(edits, "zz-icons.woff"), Buffer.from("wOFF0000"));
+    const icons = cmp(version, "9.22.0") >= 0;
     return {
         changeFile: path.join(edits, "zz-docs.json"),
         ops: [
@@ -239,21 +266,37 @@ function mediaPlan(mod, T, version, dir) {
             { op: "addImage", collection: `${E}_Img`, file: "edits/zz-a.png", name: "Gone" },
             { op: "createEnumeration", module: mod, name: `${T}DocEnum`, values: ["A", "B"] },
             { op: "changeEnumerationValue", value: `${E}DocEnum.A`, image: `${E}_Img.Gone` },
-            { op: "deleteImage", image: `${E}_Img.Gone` }
+            { op: "deleteImage", image: `${E}_Img.Gone` },
+            ...(icons ? [
+                { op: "importIconCollection", module: mod, name: `${T}_Icons`, folder: "ZzDocs", font: "edits/zz-icons.ttf", icons: "edits/zz-icons.json", tags: { cart: ["basket"] } },
+                { op: "importIconCollection", module: mod, name: `${T}_Icons2`, folder: "ZzDocs", font: "edits/zz-icons.ttf", icons: { star: "e902" }, prefix: "zz" }] : [])
         ],
         reject: [
             { op: { op: "deleteImage", image: `${E}_Img.Kep` }, expect: /has no image 'Kep'.*Did you mean: Keep/ },
             { op: { op: "deleteImage", image: `${E}_Imgs.Keep` }, expect: /no image collection .*Did you mean: .*_Img/ },
-            { op: { op: "deleteImage", image: "Keep" }, expect: /image is Module.Collection.Image/ }
+            { op: { op: "deleteImage", image: "Keep" }, expect: /image is Module.Collection.Image/ },
+            ...(icons ? [
+                { op: { op: "importIconCollection", module: mod, name: `${T}_IcBad`, font: "edits/zz-icons.ttf", icons: { star: "e9ff" } }, expect: /no glyph for star \(e9ff\)/ },
+                { op: { op: "importIconCollection", module: mod, name: `${T}_IcBad`, font: "edits/zz-icons.woff", icons: { star: "e900" } }, expect: /WOFF web font/ },
+                { op: { op: "importIconCollection", module: mod, name: `${T}_IcBad`, font: "edits/zz-icon.ttf", icons: { star: "e900" } }, expect: /no file .*Did you mean: zz-icons.ttf/ },
+                { op: { op: "importIconCollection", module: mod, name: `${T}_IcBad`, font: "edits/zz-icons.ttf", icons: { star: "zz" } }, expect: /not a character code/ }] : [])
         ]
     };
 }
 
-function mediaProblems(project, T) {
+function mediaProblems(project, T, version) {
     const r = [];
     const c = unitsNamed(project, `${T}_`)[`${T}_Img`];
     const names = c ? c.Images.map(i => i.Name).join(",") : "missing";
     if (names !== "Keep") r.push(`images ${names}`);
+    const ic = unitsNamed(project, `${T}_`)[`${T}_Icons`];
+    if (cmp(version, "9.22.0") >= 0 && !ic) r.push("icon collection missing");
+    if (ic) {
+        const got = ic.Icons.map(i => `${i.Name}:${i.CharacterCode.toString(16)}`).join(",");
+        if (got !== "home:e900,house:e900,cart:e901") r.push(`icons ${got}`);
+        if (!ic.FontData || ic.FontData.length < 40 || ic.Prefix !== `${T}_icons`.toLowerCase() || ic.CollectionClass !== `${ic.Prefix}-icons`) r.push("icon collection font, prefix or class");
+        if (!ic.Icons.find(i => i.Name === "cart").Tags.includes("basket")) r.push("icon tags");
+    }
     return r;
 }
 
@@ -269,5 +312,5 @@ module.exports.WHAT = {
     "regex/queues": "regular expressions (create with examples, Java-only syntax, change; a validation rule using one), task queues (threads, cluster scope, change), a call in a queue with exponential retry, changeAction moving a call to another queue with a fixed retry and one out of its queue; refusals (bad pattern, failing example, a pattern given as rule regex, did-you-mean names, threads 0, bad scope, queued call with a result variable, unknown retry field)",
     "OData change": "changePublishedOData change: add and remove attributes of a published entity, insert by microflow, paging off, count off, update kept (Mendix 10.4+); refusals (unknown attribute, already published, entity not published, unknown change field)",
     services: "business event service (Mendix 10+: events with attributes, add/remove events and attributes), published web service (object, list and primitive operations, optional parameter; change: add, remove, authentication, validate), consumed web service compared with a new WSDL (added/removed operations, refused with the Studio Pro steps); refusals with did-you-mean",
-    media: "deleteImage of an image an enumeration value shows (STILL USED BY), the other image kept; refusals (did-you-mean image and collection, a name without collection)"
+    media: "deleteImage of an image an enumeration value shows (STILL USED BY), the other image kept; importIconCollection from a .ttf with an IcoMoon selection.json (two names for a code, tags) and with an inline hex map and prefix; refusals (did-you-mean image and collection, a name without collection, a code the font lacks, a WOFF file, a missing file, a bad code)"
 };

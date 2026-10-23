@@ -7,7 +7,9 @@ const sdk = require("mendixmodelsdk");
 const { fail, bool, validName, enumValue } = require("./ops-util");
 const { cmp } = require("./versions");
 
-const { regularexpressions: rx, queues, microflows: mf, domainmodels: dm, images } = sdk;
+const { regularexpressions: rx, queues, microflows: mf, domainmodels: dm, images, customicons: ci } = sdk;
+const fs = require("fs");
+const path = require("path");
 
 const DOCS_OPS = {
     createRegularExpression: {
@@ -32,6 +34,15 @@ const DOCS_OPS = {
         doc: "Delete an image from an image collection; lists the widgets, buttons and enumeration values that still show it. (Replace an image: addImage with \"replace\": true.)",
         fields: { image: "R Module.Collection.Image" }
     },
+    importIconCollection: {
+        doc: "Import a custom icon collection (icon font) from a .ttf/.otf file and a name -> character code map; the icons are used like Atlas icons (icon fields: Module.Collection.icon).",
+        fields: {
+            module: "R module name", name: "R collection name, e.g. BrandIcons", font: "R path of the .ttf or .otf file inside the export folder, e.g. edits/brand.ttf",
+            icons: "R path of a JSON file, or the map itself: { \"home\": \"e900\", \"cart\": 59649 } (hex or number); an IcoMoon selection.json works too",
+            prefix: "optional CSS class prefix of the icons (default the collection name in lower case)", class: "optional CSS class of the collection (default prefix-icons)",
+            tags: "optional { \"home\": [ \"house\" ] } search words in Studio Pro", folder: "optional folder path"
+        }
+    },
     changeTaskQueue: {
         doc: "Change the threads or scope of a task queue; the dry run lists the calls that run in it.",
         fields: { queue: "R Module.Queue", threads: "optional number or expression", scope: "optional node | cluster" }
@@ -43,6 +54,7 @@ const DOCS_SYNONYMS = {
     createRegularExpression: { regex: "the expression goes in \"pattern\"", expression: "the expression goes in \"pattern\"", value: "the expression goes in \"pattern\"" },
     changeRegularExpression: { regex: "the document goes in \"regularExpression\", the new expression in \"pattern\"", name: "the document goes in \"regularExpression\": Module.Name" },
     deleteImage: { name: "the image goes in \"image\": Module.Collection.Image", collection: "the image goes in \"image\": Module.Collection.Image" },
+    importIconCollection: { file: "the font goes in \"font\", the name -> code map in \"icons\"", map: "the name -> code map goes in \"icons\"" },
     createTaskQueue: { parallelism: "use \"threads\"", clusterWide: "use \"scope\": \"cluster\"" },
     changeTaskQueue: { parallelism: "use \"threads\"", clusterWide: "use \"scope\": \"cluster\"", name: "the queue goes in \"queue\": Module.Queue" }
 };
@@ -100,6 +112,64 @@ function scopeOf(v, where) {
     if (["node", "pernode", "local"].includes(s)) return false;
     if (["cluster", "clusterwide"].includes(s)) return true;
     return fail(`${where}: scope '${v}' is node or cluster`, v, SCOPES);
+}
+
+// Character codes of a TrueType / OpenType font (its cmap: format 4 and 12 subtables). null when it cannot be read.
+function fontCodes(buf) {
+    try {
+        const n = buf.readUInt16BE(4);
+        let cmap = -1;
+        for (let i = 0; i < n; i++) if (buf.toString("latin1", 12 + i * 16, 16 + i * 16) === "cmap") cmap = buf.readUInt32BE(12 + i * 16 + 8);
+        if (cmap < 0) return null;
+        const codes = new Set();
+        const subs = buf.readUInt16BE(cmap + 2);
+        for (let i = 0; i < subs; i++) {
+            const at = cmap + buf.readUInt32BE(cmap + 4 + i * 8 + 4);
+            const format = buf.readUInt16BE(at);
+            if (format === 4) {
+                const segs = buf.readUInt16BE(at + 6) / 2;
+                for (let k = 0; k < segs; k++) {
+                    const end = buf.readUInt16BE(at + 14 + k * 2);
+                    const start = buf.readUInt16BE(at + 16 + segs * 2 + k * 2);
+                    if (start === 0xffff) continue;
+                    for (let c = start; c <= end && end - start < 70000; c++) codes.add(c);
+                }
+            } else if (format === 12) {
+                const groups = buf.readUInt32BE(at + 12);
+                for (let k = 0; k < groups; k++) {
+                    const start = buf.readUInt32BE(at + 16 + k * 12);
+                    const end = buf.readUInt32BE(at + 20 + k * 12);
+                    for (let c = start; c <= end && end - start < 70000; c++) codes.add(c);
+                }
+            }
+        }
+        return codes;
+    } catch {
+        return null;
+    }
+}
+
+// { name: code } from { "home": "e900" | 59648 | "\ue900" } or an IcoMoon selection.json.
+function iconMap(raw, where) {
+    if (raw && Array.isArray(raw.icons)) {
+        const out = {};
+        for (const ic of raw.icons) {
+            const p = ic.properties || {};
+            for (const n of String(p.name || "").split(",").map(x => x.trim()).filter(Boolean)) out[n] = p.code;
+        }
+        return iconMap(out, where);
+    }
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error(`${where}: icons is { "home": "e900", ... } or a JSON file with that map`);
+    const out = {};
+    for (const [n, v] of Object.entries(raw)) {
+        let code = typeof v === "number" ? v : /^(0x|u\+|\\u|&#x)?[0-9a-f]{2,6};?$/i.test(String(v)) ? parseInt(String(v).replace(/^(0x|u\+|\\u|&#x)/i, ""), 16) : [...String(v)].length === 1 ? String(v).codePointAt(0) : NaN;
+        if (!Number.isInteger(code) || code < 32 || code > 0x10ffff) throw new Error(`${where}: icon ${n}: '${v}' is not a character code (hex like "e900" or a number)`);
+        const name = String(n).trim();
+        if (!/^[a-z0-9][a-z0-9_-]*$/i.test(name)) throw new Error(`${where}: icon name '${n}': letters, digits, - and _`);
+        out[name] = code;
+    }
+    if (!Object.keys(out).length) throw new Error(`${where}: icons is empty`);
+    return out;
 }
 
 // "queue" / "retry" of a call action (call: the MicroflowCall, callJava: the JavaActionCallAction). Used by ops-flows.
@@ -235,7 +305,60 @@ function makeDocs(h) {
         return img;
     }
 
+    function exportFile(file, where) {
+        const f = h.client && h.client.changeFile;
+        const dir = f ? path.dirname(f) : process.cwd();
+        const base = path.basename(dir) === "edits" ? path.dirname(dir) : dir;
+        const full = path.resolve(base, String(file));
+        const rel = path.relative(base, full);
+        if (rel.startsWith("..") || path.isAbsolute(rel)) throw new Error(`${where}: file '${file}' is outside the export folder (${base}); copy it into the export folder (e.g. edits/) first`);
+        if (!fs.existsSync(full)) fail(`${where}: no file '${file}'`, path.basename(full), fs.existsSync(path.dirname(full)) ? fs.readdirSync(path.dirname(full)) : []);
+        return full;
+    }
+
     const impl = {
+        async importIconCollection(o) {
+            validName(o.name, "icon collection name");
+            const qn = `${o.module}.${o.name}`;
+            const where = `importIconCollection ${qn}`;
+            if (!atLeast("9.22.0")) throw new Error(`${where}: custom icon collections need Mendix 9.22 (this project is ${version})`);
+            if (await exists(qn)) throw new Error(`${qn} already exists`);
+            const font = fs.readFileSync(exportFile(o.font, where));
+            const magic = font.slice(0, 4).toString("hex");
+            if (["774f4646", "774f4632"].includes(magic)) throw new Error(`${where}: ${o.font} is a WOFF web font; give the .ttf (or .otf) of the icon font`);
+            if (!["00010000", "4f54544f", "74727565"].includes(magic)) throw new Error(`${where}: ${o.font} is not a TrueType or OpenType font (by its content)`);
+            if (font.length > 2 * 1048576) throw new Error(`${where}: ${o.font} is ${(font.length / 1048576).toFixed(1)} MB; an icon font is at most 2 MB`);
+            let raw = o.icons;
+            if (typeof raw === "string") {
+                try {
+                    raw = JSON.parse(fs.readFileSync(exportFile(raw, where), "utf8"));
+                } catch (e) {
+                    if (/JSON|Unexpected/.test(e.message)) throw new Error(`${where}: ${o.icons} is not JSON: ${e.message}`);
+                    throw e;
+                }
+            }
+            const map = iconMap(raw, where);
+            const codes = fontCodes(font);
+            const missing = codes ? Object.entries(map).filter(([, c]) => !codes.has(c)) : [];
+            if (missing.length) throw new Error(`${where}: the font has no glyph for ${missing.slice(0, 8).map(([n, c]) => `${n} (${c.toString(16)})`).join(", ")}${missing.length > 8 ? ", ..." : ""}; check the map`);
+            const dup = Object.entries(map).filter(([, c], i, all) => all.findIndex(x => x[1] === c) !== i);
+            const tags = o.tags || {};
+            for (const n of Object.keys(tags)) if (!(n in map)) fail(`${where}: tags: no icon '${n}'`, n, Object.keys(map));
+            const prefix = o.prefix === undefined ? o.name.toLowerCase() : String(o.prefix);
+            if (!/^[a-z_-][a-z0-9_-]*$/i.test(prefix)) throw new Error(`${where}: prefix '${prefix}' is not a CSS class name`);
+            const c = ci.CustomIconCollection.createIn(folder(o.module, o.folder));
+            c.name = o.name;
+            c.prefix = prefix;
+            c.collectionClass = o.class === undefined ? `${prefix}-icons` : String(o.class);
+            c.fontData = font.toString("base64");
+            for (const [n, code] of Object.entries(map)) {
+                const ic = ci.CustomIcon.createIn(c);
+                ic.name = n;
+                ic.characterCode = code;
+                for (const t of [].concat(tags[n] || [])) ic.tags.push(String(t));
+            }
+            return `${qn}: ${Object.keys(map).length} icon(s), font ${Math.ceil(font.length / 1024)} KB, class ${c.collectionClass}, icons as ${prefix}-<name>` + (codes ? "" : " (glyphs not checked: the font's character map could not be read)") + (dup.length ? `\n      NOTE: same code for ${dup.map(([n]) => n).join(", ")}` : "");
+        },
         async deleteImage(o) {
             const where = `deleteImage ${o.image}`;
             const img = await imageOf(o.image, where);
@@ -291,6 +414,10 @@ function makeDocs(h) {
     };
 
     const checks = {
+        async importIconCollection(o) {
+            const c = await get(`${o.module}.${o.name}`).catch(() => null);
+            return c instanceof ci.CustomIconCollection && c.icons.length && c.fontData ? [] : [`${o.module}.${o.name} is not an icon collection with icons and a font`];
+        },
         async deleteImage(o) {
             return (await imageOf(o.image, "").then(() => true, () => false)) ? [`${o.image} still exists`] : [];
         },
@@ -335,4 +462,4 @@ function docsChangedLater(name, o, rest) {
     return false;
 }
 
-module.exports = { makeDocs, DOCS_OPS, DOCS_SYNONYMS, docsChangedLater, setQueue, queuedCallProblem, checkPattern };
+module.exports = { makeDocs, DOCS_OPS, DOCS_SYNONYMS, docsChangedLater, setQueue, queuedCallProblem, checkPattern, fontCodes, iconMap };
