@@ -2226,13 +2226,14 @@ function makeFlows(h) {
         const old = x.spec(a);
         const next = { ...old };
         const plain = v => v && typeof v === "object" && !Array.isArray(v);
+        const newTarget = ["operation", "service", "name"].some(k => keys.includes(k) && o[k] !== old[k]);
         for (const k of keys) {
             const v = o[k];
             if (v === null) delete next[k];
-            else if (plain(v) && plain(old[k])) next[k] = Object.fromEntries(Object.entries({ ...old[k], ...v }).filter(([, y]) => y !== null));
+            else if (plain(v) && plain(old[k]) && !(newTarget && ["args", "query"].includes(k))) next[k] = Object.fromEntries(Object.entries({ ...old[k], ...v }).filter(([, y]) => y !== null));
             else next[k] = v;
         }
-        if (["operation", "service", "name"].some(k => keys.includes(k) && o[k] !== old[k])) for (const k of ["args", "query"]) if (!keys.includes(k)) delete next[k];
+        if (newTarget) for (const k of ["args", "query"]) if (!keys.includes(k)) delete next[k];
         const errorType = a.errorHandlingType;
         const c = { f, h, model, expr: (v, w) => expr(f.m, v, w), variableInfo: (n, w) => variableInfo(f.m, n, w), needVariable: (n, l, w) => needVariable(f.m, n, l, w), fillTemplate: (t, text, args, w) => fillTemplate(f, t, text, args, w) };
         validate("action", kind, { fields: { ...x.fields, ...COMMON } }, { action: kind, ...next }, where);

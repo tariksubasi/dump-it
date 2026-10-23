@@ -1388,6 +1388,8 @@ async function selftest(mpr, keep, { out, relevant, mxcheck, mx, timeout }) {
         // phase S (selftest-smallops.js): retrieve sort/range, reference set add/remove, snippets, CRUD pages, changing
         // and deleting constants, scheduled events, rules, handlers, indexes, enumeration values
         s2 = await require("./selftest-smallops").smallPhase({ s2, reopen, copy, mod, T, role, layout, layoutProblems, check, results, src });
+        // phase W (selftest-wflows.js): microflow settings and the flow / workflow editing of wave 2, one step per feature
+        s2 = await require("./selftest-wflows").wflowsPhase({ s2, reopen, copy, mod, T, layout, layoutProblems, check, results });
 
         // phase 4 + 5: change a page Studio Pro saved (add into a column, change a caption and a class), then move the
         // text into the new container, delete that and put the class back: the page must be byte for byte what it was
