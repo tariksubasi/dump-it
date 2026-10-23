@@ -60,6 +60,9 @@ const USAGE = `mxlocal - Mendix Model SDK offline on a local .mpr (v2)
   node mxlocal.js widgets <Module.Page> --project <app.mpr|folder>
                                         the widget tree of a page or snippet: names, kinds, entity, where new
                                         widgets can go (for addWidgets/changeWidget/deleteWidget/moveWidget)
+  node mxlocal.js preview <Module.Page> [--out file.html] --project <app.mpr|folder>
+                                        APPROXIMATE static picture of a page with the compiled theme (Mendix-like
+                                        HTML, no data): the .html, and phone/tablet/desktop .png with Playwright
   node mxlocal.js widgettype [name] --project <app.mpr|folder>
                                         the pluggable widgets in widgets/*.mpk; with a name: its properties
                                         (types, defaults, values) for { "widget": "pluggable", "properties": ... }
@@ -320,6 +323,10 @@ async function run(file, mpr, allowJs, ctx, opts = {}) {
     layoutCheck(ops, change, file, say, opts);
     const a11y = require("./ui").a11yLint(client);
     if (a11y.length) say("A11Y CHECK (accessibility of the new or changed widgets; warnings, nothing refused):\n" + a11y.map(w => "  ! " + w).join("\n"));
+    // STYLE CHECK: the theme compiled as Studio Pro builds it (when a .scss changed), classes, inline styles, contrast
+    const strict = !!(change.plan && (change.plan.styleCheck === "strict" || change.plan.ops.some(o => o && o.op === "setTokens" && o.strict === true)));
+    const style = await require("./stylecheck").styleCheck(client, model, { strict, mode: change.plan && change.plan.styleCheck });
+    if (style.lines.length) say("STYLE CHECK (web theme compiled with Dart Sass as Studio Pro builds it, classes, contrast; lines without (warning) / (info) refuse the change):\n" + style.lines.map(w => "  ! " + w).join("\n"));
     if (lost.length) say("NOT STORED (the script set these, but this Mendix version does not keep them; use api <Type>):\n" + lost.map(w => "  ! " + w).join("\n"));
     if (s.leftovers.length) say("OLD NAME STILL USED (rename does not update expressions, XPath, Java; fix these too):\n" + s.leftovers.map(w => "  ! " + w).join("\n"));
     if (warnings.length) say("Warnings:\n" + warnings.map(w => "  ! " + w).join("\n"));
@@ -329,6 +336,11 @@ async function run(file, mpr, allowJs, ctx, opts = {}) {
         out(`Refused: ${lint.length} XPATH CHECK / EXPRESSION CHECK error(s) above (lines without "(warning)"). Fix them in the change file and run again. Nothing written, no approval code.`);
         process.exitCode = 1;
         return { client, refused: lint.length };
+    }
+    if (style.errors) {
+        out(`Refused: ${style.errors} STYLE CHECK error(s) above (lines without "(warning)" / "(info)"). Fix the SCSS or tokens in the change file and run again. Nothing written, no approval code.`);
+        process.exitCode = 1;
+        return { client, refused: style.errors };
     }
     if (opts.check) say(studioCheck(client.project.mpr, opts, "run", enc).text);
     const code = pending.save(client.project.dir, enc, { fingerprint, source: path.resolve(file), summary: lines, plan: change.plan,
@@ -550,6 +562,13 @@ async function main() {
         const client = new LocalClient(ctx);
         const model = await client.open();
         out(await require("./ops").bind(model, client).widgets(a._[1]));
+    } else if (cmd === "preview") {
+        if (!a._[1]) throw new Error("preview needs a page, e.g. preview Module.Customer_Overview [--out edits/preview/page.html]");
+        const ctx = await loadProject(mpr);
+        const client = new LocalClient(ctx);
+        const model = await client.open();
+        const outFile = path.resolve(a.out && a.out !== true ? a.out : path.join("edits", "preview", `${a._[1]}.html`));
+        await require("./preview").preview(client, model, a._[1], outFile, out);
     } else if (cmd === "widgettype" || cmd === "widgettypes") {
         const ctx = await loadProject(mpr);
         const client = new LocalClient(ctx);

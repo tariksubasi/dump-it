@@ -9,13 +9,16 @@ const { fail, suggest } = require("./ops-util");
 
 const ROOTS = ["theme", "themesource"];
 const EXT = /\.(scss|css|json)$/i;
+// other text files Studio Pro reads from theme/web (not in sub folders): the login page, the web app manifest
+const WEB_TEXT = /^theme\/web\/[^/]+\.(html|webmanifest)$/i;
+const LOGIN_IDS = ["loginForm", "usernameInput", "passwordInput", "loginButton"];
 const DEFAULT_CSS_FILE = "theme/web/main.scss";
 
 const THEME_OPS = {
     editThemeFile: {
-        doc: "Change a theme file (theme/web/*.scss, themesource/<module>/web/*.scss, design-properties.json): new content, find/replace edits, or text appended. Shown as a diff in the dry run; backed up and undone like model changes.",
+        doc: "Change a theme file (theme/web/*.scss, themesource/<module>/web/*.scss, design-properties.json, theme/web/settings.json, login.html, *.webmanifest): new content, find/replace edits, or text appended. Shown as a diff in the dry run; backed up and undone like model changes.",
         fields: {
-            path: "R file under theme/ or themesource/, e.g. theme/web/custom-variables.scss (.scss, .css or .json)",
+            path: "R file under theme/ or themesource/, e.g. theme/web/custom-variables.scss (.scss, .css or .json; in theme/web also login.html, *.html and *.webmanifest)",
             content: "optional the whole new content (also creates a new file)",
             edits: "optional [ { \"find\": \"exact text\", \"replace\": \"new text\", \"all\": true/false } ]: each find must occur exactly once (or all: true)",
             append: "optional text added at the end of the file"
@@ -68,7 +71,7 @@ function makeTheme({ client }) {
         return i >= 0 ? ` (line ${i + 1}: ${JSON.stringify(lines[i].trim().slice(0, 80))}; find must match exactly, spaces and line breaks too)` : "";
     };
     const checkJson = (rel, body) => {
-        if (!/\.json$/i.test(rel)) return;
+        if (!/\.(json|webmanifest)$/i.test(rel)) return;
         try {
             JSON.parse(body);
         } catch (e) {
@@ -88,7 +91,7 @@ function makeTheme({ client }) {
     };
     const pathOf = (p, where) => {
         const rel = files.projectPath(dir, p, ROOTS, where);
-        if (!EXT.test(rel)) throw new Error(`${where}: only .scss, .css and .json theme files can change here ('${rel}')`);
+        if (!EXT.test(rel) && !WEB_TEXT.test(rel)) throw new Error(`${where}: only .scss, .css and .json theme files (and theme/web/*.html, *.webmanifest) can change here ('${rel}'); fonts and images: addThemeAsset`);
         return rel;
     };
 
@@ -129,6 +132,16 @@ function makeTheme({ client }) {
         }
         checkJson(rel, body);
         balanced(rel, body);
+        if (/\.html$/i.test(rel)) {
+            if (body.includes("\0")) throw new Error(`${where}: ${rel} is not a text file`);
+            if (!/<html[\s>]/i.test(body)) client.warn(`${where}: ${rel} has no <html> element`);
+            const missing = /(^|\/)login\.html$/i.test(rel) ? LOGIN_IDS.filter(id => !new RegExp(`id=["']${id}["']`).test(body)) : [];
+            if (missing.length) client.warn(`${where}: ${rel} lacks ${missing.map(i => `id="${i}"`).join(", ")}: Mendix's sign-in script needs them (start from the existing login.html)`);
+        }
+        if (/^theme\/web\/settings\.json$/i.test(rel)) {
+            const j = JSON.parse(body);
+            if (!Array.isArray(j.cssFiles) || !j.cssFiles.includes("theme.compiled.css")) client.warn(`${where}: settings.json "cssFiles" should list "theme.compiled.css", or the app loads without its theme`);
+        }
         if (created && /\.scss$/i.test(rel) && !/(^|\/)(main|custom-variables)\.scss$/i.test(rel) && !/^_/.test(rel.split("/").pop())) client.warn(`${where}: Studio Pro compiles main.scss of each theme folder; @import "${rel.split("/").pop().replace(/\.scss$/, "")}" in main.scss next to it, or the new rules are not used`);
         files.stage(client, rel, body);
         if (/design-properties\.json$/i.test(rel)) design.overlay(dir, path.join(dir, ...rel.split("/")), body);
@@ -379,7 +392,7 @@ function makeTheme({ client }) {
         return Object.entries(o.variables || {}).filter(([k, v]) => !new RegExp(`^\\s*\\$${String(k).replace(/^\$/, "").replace(/-/g, "\\-")}\\s*:\\s*${String(v).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "m").test(s)).map(([k]) => `${rel}: $${String(k).replace(/^\$/, "")} is not set`);
     };
 
-    return { impl: { editThemeFile, addCssClass, addDesignProperty, setThemeVariable }, checks };
+    return { impl: { editThemeFile, addCssClass, addDesignProperty, setThemeVariable }, checks, internals: { knownVariables, balanced, text } };
 }
 
 function listScss(dir, root) {
