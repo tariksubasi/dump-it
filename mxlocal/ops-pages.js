@@ -2750,7 +2750,11 @@ function makePages(h) {
             if (vt.dataSourceProperty) {
                 const r = dsRef(vt.dataSourceProperty, depth);
                 const f = frames[r.depth];
-                const ent = f && f.get(r.key);
+                let ent = f && f.get(r.key);
+                // a data source linked to the gallery / Data grid 2 around it (Drop-down sort in its header): its entity
+                const lpt = !ent && r.depth === 0 && node.pl && node.pl.type ? node.pl.type.ObjectType.PropertyTypes.find(p => p.PropertyKey === r.key) : null;
+                const around = node.listOwner || (node.container && node.container.kind !== "dataView" ? node.container : null);
+                if (lpt && lpt.ValueType.IsLinked && around && around.ent) ent = around.ent;
                 if (!ent) throw new Error(`${at}: give its data source '${vt.dataSourceProperty.replace(/^(\.\.\/)+/, "")}' first`);
                 return ent;
             }

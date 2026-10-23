@@ -413,9 +413,9 @@ function makeNativeTheme({ client }) {
 
     async function setNativeTokens(o) {
         const where = "setNativeTokens";
-        const t = o.tokens;
+        const t = fromWebTokens(o.tokens);
         if (!t || typeof t !== "object" || Array.isArray(t)) throw new Error(`${where}: tokens is { "colors": {...}, "spacing": {...}, "radius": {...}, "typography": {...}, "elevation": {...}, "dark": {...} }`);
-        const GROUPS = ["colors", "color", "spacing", "space", "radius", "radii", "borderRadius", "typography", "font", "elevation", "shadows", "shadow", "dark", "zIndex", "breakpoints", "motion", "opacity", "$schema", "name", "version", "description"];
+        const GROUPS = ["colors", "color", "spacing", "space", "radius", "radii", "borderRadius", "typography", "font", "elevation", "shadows", "shadow", "dark", "zIndex", "breakpoints", "motion", "opacity", "$schema", "name", "version", "description", "darkMode"];
         for (const k of Object.keys(t)) if (!GROUPS.includes(k)) fail(`${where}: unknown token group '${k}'`, k, GROUPS.slice(0, 13));
         const { rel, body } = varsFile(o, where);
         parsed(rel, body, where);
@@ -1034,4 +1034,62 @@ function nativeStyleLint(client) {
     return [...new Set(out)];
 }
 
-module.exports = { makeNativeTheme, NATIVE_OPS, nativeChangedLater, isNativeDoc, isNativeWidget, docOf, nativeStyleLint, NATIVE_STYLE_REFUSAL, RN_STYLE };
+// The web token JSON of setTokens / createDesignModule (tokens.js: surface levels 0..3, text / border groups, a 4px
+// spacing grid 0..16, typography scale / weights / baseSize, dark { surface, text, border }) -> the native shape above
+// (colors.background / surface / text / textMuted / border, spacing xs..xl, typography fontSize / fontWeight). Tokens
+// already in the native shape pass through unchanged.
+function fromWebTokens(t) {
+    const plain = o => o && typeof o === "object" && !Array.isArray(o);
+    if (!plain(t)) return t;
+    const ty = plain(t.typography) ? t.typography : {};
+    const web = plain(t.surface) || plain(t.text) || plain(t.border) || plain(ty.scale) || plain(ty.weights) || (plain(t.dark) && (plain(t.dark.surface) || plain(t.dark.text)));
+    if (!web) return t;
+    const out = {};
+    const colorsOf = (src, into) => {
+        if (plain(src.surface)) {
+            if (src.surface[0] !== undefined) into.background = src.surface[0];
+            if (src.surface[1] !== undefined) into.surface = src.surface[1];
+        }
+        if (plain(src.text)) {
+            if (src.text.primary !== undefined) into.text = src.text.primary;
+            if (src.text.secondary !== undefined) into.textMuted = src.text.secondary;
+            if (src.text.disabled !== undefined) into.textDisabled = src.text.disabled;
+        } else if (typeof src.text === "string") into.text = src.text;
+        if (plain(src.border)) {
+            const b = src.border.default !== undefined ? src.border.default : src.border.subtle;
+            if (b !== undefined && b !== null) into.border = b;
+        } else if (typeof src.border === "string") into.border = src.border;
+        return into;
+    };
+    out.colors = colorsOf(t, { ...(plain(t.colors) ? t.colors : {}) });
+    // the 4px grid steps -> Atlas native spacing names (1 = 4px smaller ... 12 = 48px largest)
+    const STEP = { 1: "xs", 2: "sm", 4: "md", 6: "lg", 8: "xl", 12: "xxl" };
+    if (plain(t.spacing)) {
+        out.spacing = {};
+        for (const [k, v] of Object.entries(t.spacing)) {
+            if (/^\d+$/.test(k)) {
+                if (STEP[k]) out.spacing[STEP[k]] = v;
+            } else out.spacing[k] = v;
+        }
+    }
+    if (plain(t.radius)) out.radius = Object.fromEntries(Object.entries(t.radius).filter(([k]) => !["none", "xl", "lg"].includes(k) || (k === "lg" && t.radius.md === undefined)));
+    if (Object.keys(ty).length) {
+        const nt = {};
+        // the web default stack (system-ui, -apple-system, ...) is the phone's own font on native: nothing to set
+        if (ty.fontFamily !== undefined && !/^\s*(system-ui|-apple-system)/.test(String(ty.fontFamily))) nt.fontFamily = ty.fontFamily;
+        const sizes = { ...(plain(ty.fontSize) ? ty.fontSize : {}) };
+        if (plain(ty.scale)) for (const [k, v] of Object.entries(ty.scale)) sizes[k === "display" ? "h1" : k] = v;
+        if (ty.baseSize !== undefined && sizes.md === undefined) sizes.md = ty.baseSize;
+        if (Object.keys(sizes).length) nt.fontSize = sizes;
+        if (plain(ty.weights)) nt.fontWeight = ty.weights;
+        else if (plain(ty.fontWeight)) nt.fontWeight = ty.fontWeight;
+        if (ty.lineHeight !== undefined && !Number.isNaN(Number(ty.lineHeight))) nt.lineHeight = Number(ty.lineHeight);
+        out.typography = nt;
+    }
+    if (t.elevation !== undefined) out.elevation = t.elevation;
+    if (plain(t.dark)) out.dark = plain(t.dark.surface) || plain(t.dark.text) || plain(t.dark.border) ? colorsOf(t.dark, plain(t.dark.colors) ? { ...t.dark.colors } : {}) : t.dark;
+    for (const k of ["zIndex", "breakpoints", "motion"]) if (t[k] !== undefined) out[k] = t[k];
+    return out;
+}
+
+module.exports = { fromWebTokens, makeNativeTheme, NATIVE_OPS, nativeChangedLater, isNativeDoc, isNativeWidget, docOf, nativeStyleLint, NATIVE_STYLE_REFUSAL, RN_STYLE };

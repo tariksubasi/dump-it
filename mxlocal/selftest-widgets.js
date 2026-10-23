@@ -61,6 +61,8 @@ function wPlan(mod, T, x) {
             { widget: "container", name: "zwBox", class: "zw-box", widgets: [{ widget: "text", text: "in box", name: "zwInBox" }] }] }] },
         { op: "convertWidget", page: q("WConv"), widget: "zwBox", to: "groupBox", caption: "Box" },
         ...(x.combo ? [{ op: "convertWidget", page: q("WConv"), widget: "zwKind", to: "comboBox" }, { op: "convertWidget", page: q("WConv"), widget: "zwCity", to: "comboBox" }, { op: "convertWidget", page: q("WConv"), widget: "zwKind", to: "radioButtons" }] : []),
+        // W10-W12 presets (the ones whose .mpk this project has)
+        ...presetOps(mod, T, x),
         // W6 sign-in widgets and createLoginPage
         { op: "createLoginPage", module: mod, name: `${T}WLogin`, title: "Welcome", ...(x.nav ? {} : { profile: false }), widgets: [{ widget: "linkButton", caption: "Help", url: "https://example.com/help" }] }
     ];
@@ -83,12 +85,48 @@ function wPlan(mod, T, x) {
         [{ op: "addWidgets", page: q("WKinds"), into: "zwNav", widgets: [{ widget: "text", text: "x" }] }, /go into one of its items/],
         [{ op: "convertWidget", page: q("WConv"), widget: "zwNote", to: "comboBox" }, /no enumeration or Boolean attribute/],
         [{ op: "convertWidget", page: q("WConv"), widget: "zwBox", to: "groupbox" }, /is a groupBox already/],
-        [{ op: "convertWidget", page: q("WConv"), widget: "zwBox", to: "grop" }, /Did you mean: groupBox/],
+        [{ op: "convertWidget", page: q("WConv"), widget: "zwBox", to: "groupbx" }, /Did you mean: groupBox/],
         [{ op: "convertWidget", page: q("WConv"), widget: "zwInBox", to: "container" }, /cannot become a container/],
         [{ op: "createLoginPage", module: mod, name: `${T}WLogin` }, /already exists/],
         [{ op: "createPage", module: mod, name: `${T}WR8`, widgets: [{ widget: "loginButton", validationMessage: "nope" }] }, /no validation message widget here/]
     ];
+    const missing = ["skipLink", "fieldset", "videoPlayer", "richText"].find(k => !x.installed.has(require("./pl-presets").PRESETS[k].id));
+    if (missing) refuse.push([{ op: "createPage", module: mod, name: `${T}WR9`, widgets: [{ widget: missing, ...(missing === "fieldset" ? { widgets: [{ widget: "text", text: "x" }] } : missing === "videoPlayer" ? { url: "x" } : missing === "richText" ? { attribute: "Note" } : {}) }] }, /needs the .* widget .*importWidget/]);
+    if (x.installed.has(require("./pl-presets").PRESETS.webImage.id)) refuse.push([{ op: "createPage", module: mod, name: `${T}WR10`, widgets: [{ widget: "webImage" }] }, /give "image" .* or "url"/]);
     return { ops, refuse };
+}
+
+// preset kind -> spec (on page WPresets; inside a data view of WE where it needs the object)
+const PRESET_SPECS = (E) => ({
+    webImage: { widget: "webImage", name: "zwImg", url: "https://example.com/a.png", alt: "A", width: 200, enlarge: true },
+    tooltip: { widget: "tooltip", name: "zwTip", trigger: [{ widget: "text", text: "hover" }], text: "Hi", position: "bottom" },
+    fieldset: { widget: "fieldset", name: "zwFs", legend: "Group", widgets: [{ widget: "text", text: "in" }] },
+    htmlElement: { widget: "htmlElement", name: "zwHtml", tag: "section", attributes: { "aria-live": "polite" }, widgets: [{ widget: "text", text: "x" }] },
+    timeline: { widget: "timeline", name: "zwTime", entity: E, title: "{Note}" },
+    skipLink: { widget: "skipLink", name: "zwSkip", target: "main" },
+    languageSelector: { widget: "languageSelector", name: "zwLang" },
+    videoPlayer: { widget: "videoPlayer", name: "zwVideo", url: "https://example.com/v.mp4" },
+    maps: { widget: "maps", name: "zwMap", markers: [{ address: "Rotterdam", title: "Office" }] },
+    imageCropper: { widget: "imageCropper", name: "zwCrop", shape: "circle" },
+    fileUploader: { widget: "fileUploader", name: "zwUp", mode: "images" }
+});
+const DV_PRESETS = E => ({
+    richText: { widget: "richText", name: "zwRich", attribute: "Note" },
+    barcodeGenerator: { widget: "barcodeGenerator", name: "zwBar", value: "$currentObject/Note", format: "QRCode" },
+    barcodeScanner: { widget: "barcodeScanner", name: "zwScan", attribute: "Note" },
+    checkboxRadioSelection: { widget: "checkboxRadioSelection", name: "zwCrs", attribute: "Kind" }
+});
+function presetOps(mod, T, x) {
+    const P = require("./pl-presets").PRESETS, E = `${mod}.${T}WE`;
+    const has = k => x.installed.has(P[k].id);
+    const top = Object.entries(PRESET_SPECS(E)).filter(([k]) => has(k)).map(([, v]) => v);
+    const dv = Object.entries(DV_PRESETS(E)).filter(([k]) => has(k)).map(([, v]) => v);
+    x.presets = [...Object.keys(PRESET_SPECS(E)), ...Object.keys(DV_PRESETS(E))].filter(has);
+    const gallery = x.installed.has("com.mendix.widget.web.gallery.Gallery") && (has("selectionHelper") || has("dropdownSort"));
+    if (gallery) x.presets.push(...["selectionHelper", "dropdownSort"].filter(has));
+    if (!top.length && !dv.length && !gallery) return [];
+    return [{ op: "createPage", module: mod, name: `${T}WPresets`, entity: E, widgets: [...top, ...(dv.length ? [{ widget: "dataView", name: "zwPreDv", widgets: dv }] : []), ...(gallery ? [{ widget: "gallery", name: "zwGal", entity: E, selection: "Multi" }] : [])] },
+        ...(gallery ? [{ op: "addWidgets", page: `${mod}.${T}WPresets`, into: "zwGal", slot: "filtersPlaceholder", widgets: [...(has("selectionHelper") ? [{ widget: "selectionHelper", name: "zwSelAll" }] : []), ...(has("dropdownSort") ? [{ widget: "dropdownSort", name: "zwSort", attributes: ["Note"] }] : [])] }] : [])];
 }
 
 function wProblems(project, mod, T, x) {
@@ -145,6 +183,14 @@ function wProblems(project, mod, T, x) {
     let stray = false;
     walk(conv || {}, o => o.Name && /_zzConverted$/.test(o.Name) && (stray = true));
     say(!stray, "a converted widget was left behind");
+    // W10-W12
+    if (x.presets.length) {
+        const ids = [];
+        walk(units[`${T}WPresets`] || {}, o => o.$Type === "CustomWidgets$CustomWidget" && o.Type && ids.push(o.Type.WidgetId));
+        const P = require("./pl-presets").PRESETS;
+        const want = [...new Set(x.presets.map(k => P[k].id))];
+        say(want.every(id => ids.includes(id)), `presets not stored: ${want.filter(id => !ids.includes(id)).join(", ")}`);
+    }
     // W6
     const login = units[`${T}WLogin`];
     const types = new Set();
@@ -198,12 +244,17 @@ async function widgetsPhase({ s2, reopen, copy, mod, T, layout, layoutProblems, 
         if (!bson.encode(bson.decode(b)).equals(b)) problems.push(`unit ${id} does not roundtrip byte for byte`);
     }
     problems.push(...wProblems(s.ctx.project, mod, T, x));
+    // X1: setNativeTokens takes the web token JSON (tokens.js defaults + dark) and maps it onto the native shape
+    const nt = require("./theme-native").fromWebTokens({ ...require("./tokens").defaults(), dark: { surface: { 0: "#000000", 1: "#111111" }, text: { primary: "#ffffff" }, border: { default: "#333333" } } });
+    if (!(nt.colors.background === "#f4f6f9" && nt.colors.text === "#111827" && nt.colors.border === "#d1d5db" && nt.spacing.md === "16px" && nt.typography.fontSize.h1 === "32px" && nt.typography.lineHeight === 1.5 && nt.dark.background === "#000000" && nt.dark.text === "#ffffff" && !nt.typography.fontFamily)) problems.push("setNativeTokens: web token JSON not mapped onto the native shape");
+    const same = { colors: { primary: "#0B5FFF" }, spacing: { md: 16 } };
+    if (require("./theme-native").fromWebTokens(same) !== same) problems.push("setNativeTokens: native-shaped tokens changed by the web mapping");
     await refused(s, plan.refuse);
     if (!x.nav) results.push("SKIP widgets: navigation tree / menu bar / sign-in page setting: no Responsive navigation profile");
     if (!x.menu) results.push("SKIP widgets: simple menu bar on a menu document: no menu document in this project");
     const what = ["tab pages (add with widgets / remove / move / rename caption and name / default, addWidgets into a tab)", x.nav && "navigation tree, menu bar", x.menu && "simple menu bar (menu document, orientation)",
         "scroll container (regions, width, layout mode; changeWidget regions add / remove / change)", "side bar toggle, page title, label, back button, link button", "navigation list (items, actions; changeWidget items add / remove / move / change; addWidgets into an item)",
-        `convertWidget (container -> group box${x.combo ? ", drop-down -> combo box -> radio buttons, reference selector -> combo box" : ""})`, `createLoginPage (sign-in widgets${x.nav ? ", sign-in page of the profile" : ""})`, "deprecated widgets refused", `${plan.refuse.length} refusals`].filter(Boolean);
+        x.presets.length && `presets ${x.presets.join(", ")}`, `convertWidget (container -> group box${x.combo ? ", drop-down -> combo box -> radio buttons, reference selector -> combo box" : ""})`, `createLoginPage (sign-in widgets${x.nav ? ", sign-in page of the profile" : ""})`, "deprecated widgets refused", "setNativeTokens with web token JSON", `${plan.refuse.length} refusals`].filter(Boolean);
     check(`widgets: ${what.join("; ")}; stored with Studio Pro's keys, reopen 0 errors`, !problems.length, [...new Set(problems)].slice(0, 6).join("; "));
     if (firstUse.length) results.push(`NOTE widgets: no Studio Pro sample in this project of ${firstUse.length} type(s) (SDK layout): ${firstUse.slice(0, 12).join(", ")}`);
     return reopen(copy);

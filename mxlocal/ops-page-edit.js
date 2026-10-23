@@ -437,7 +437,7 @@ function makePageEdit(h, I) {
     }
     function plSlotOf(P, node, value, label) {
         const linked = !!(value.type && value.type.dataSourceProperty);
-        return linked ? slotOf(P, value.widgets, node, label) : { list: value.widgets, label, node, dc: node.ctx || null };
+        return linked ? slotOf(P, value.widgets, node, label) : { list: value.widgets, label, node, dc: node.ctx || null, owner: node };
     }
 
     function checkSlot(out, slot, where) {
@@ -1156,6 +1156,12 @@ function makePageEdit(h, I) {
         }
         if (native) require("./ops-native-ui").checkNativeNodes(nodes);
         if (!top.length) throw new Error(`${where}: 'widgets' is empty`);
+        // a list of a gallery / Data grid 2 outside its items (header): widgets linked to its data source use its entity
+        if (slot.owner) {
+            const { qn } = await containerEntity(P, slot.owner).catch(() => ({}));
+            const ent = qn ? await I.entityOf(qn, where).catch(() => null) : null;
+            if (ent) for (const n of top) n.listOwner = { ent };
+        }
         const ctx = newCtx(P);
         // default entity: the op's, else the page's only object parameter
         const params = (prop(P.doc, "parameters") || []).filter(p => p.parameterType instanceof datatypes.ObjectType); // also snippet parameters (createSnippet)

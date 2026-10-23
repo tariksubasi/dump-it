@@ -1921,6 +1921,131 @@
           "Mobile_Tasks\\.txt$": "(?s)Görevler.*Title"
         }
       }
+    },
+    {
+      "id": "widtabs",
+      "setup": [
+        {
+          "op": "createEntity",
+          "module": "MyFirstModule",
+          "name": "Ticket",
+          "attributes": [
+            {
+              "name": "Title",
+              "type": "String(100)"
+            }
+          ]
+        },
+        {
+          "op": "createPage",
+          "module": "MyFirstModule",
+          "name": "Ticket_Detail",
+          "widgets": [
+            {
+              "widget": "tabContainer",
+              "name": "tabs1",
+              "tabs": [
+                {
+                  "caption": "Genel",
+                  "name": "tabGeneral"
+                },
+                {
+                  "caption": "Eski",
+                  "name": "tabOld"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "text": "Ticket_Detail sayfasındaki sekmelerde 'Eski' sekmesini sil, en başa 'Notlar' adında yeni bir sekme ekle ve içine 'Notlar burada' yazısı koy.",
+      "ops": [
+        "changeWidget"
+      ],
+      "families": [
+        "data widgets"
+      ],
+      "checks": {
+        "files": {
+          "Ticket_Detail\\.txt$": "(?s)Notlar"
+        }
+      }
+    },
+    {
+      "id": "widlogin",
+      "text": "MyFirstModule'de özel bir giriş (login) sayfası oluştur: kullanıcı adı, şifre ve giriş butonu olsun, uygulamanın giriş sayfası bu olsun.",
+      "ops": [
+        "createLoginPage"
+      ],
+      "families": [
+        "data widgets"
+      ],
+      "checks": {
+        "find": [
+          "MyFirstModule.Login"
+        ]
+      }
+    },
+    {
+      "id": "widconvert",
+      "setup": [
+        {
+          "op": "createEnumeration",
+          "module": "MyFirstModule",
+          "name": "Priority",
+          "values": [
+            "Low",
+            "High"
+          ]
+        },
+        {
+          "op": "createEntity",
+          "module": "MyFirstModule",
+          "name": "Issue",
+          "attributes": [
+            {
+              "name": "Priority",
+              "type": "Enum(MyFirstModule.Priority)"
+            }
+          ]
+        },
+        {
+          "op": "createPage",
+          "module": "MyFirstModule",
+          "name": "Issue_Edit",
+          "entity": "MyFirstModule.Issue",
+          "widgets": [
+            {
+              "widget": "dataView",
+              "widgets": [
+                {
+                  "widget": "container",
+                  "name": "box1",
+                  "widgets": [
+                    {
+                      "widget": "dropDown",
+                      "attribute": "Priority",
+                      "name": "prio"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "text": "Issue_Edit sayfasındaki box1 container'ını başlığı 'Detay' olan bir group box'a çevir; içindekiler kalsın.",
+      "ops": [
+        "convertWidget"
+      ],
+      "families": [
+        "data widgets"
+      ],
+      "checks": {
+        "files": {
+          "Issue_Edit\\.txt$": "(?s)Detay"
+        }
+      }
     }
   ]
 }
