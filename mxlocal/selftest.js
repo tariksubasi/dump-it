@@ -1448,6 +1448,11 @@ async function selftest(mpr, keep, { out, relevant, mxcheck, mx, timeout }) {
         await require("./selftest-tools").phase({ src, copy, reopen, check, results, layout, mod, T, layoutProblems, sameOutside, out });
         s2 = await reopen(copy);
 
+        // phase C (selftest-code.js): entity dialog details, folders, the SDK COVERAGE TEST, Java / JavaScript action
+        // changes, module settings and packages (export, round trip, update), app settings, security, languages,
+        // navigation profiles; on modules of its own
+        s2 = await require("./selftest-code").codePhase({ s2, reopen, copy, mod, T, layout, layoutProblems, check, results, src, tmp });
+
 
         // phase 3: attribute rename + module rename
         const phase3 = { ops: [{ op: "rename", target: `${E}.Flag`, newName: "Active" }, { op: "rename", target: mod, newName: `${mod}Zz` }] };

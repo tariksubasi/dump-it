@@ -1,6 +1,7 @@
 "use strict";
 // Entity-level changes that the reference graph (refs.js) makes safe:
-//   changeEntity  persistable on/off (DATA LOSS line when off), documentation, domain model image
+//   changeEntity  persistable on/off (DATA LOSS line when off), documentation, domain model image, system members
+//                 (createdDate, changedDate, owner, changedBy: stored on the root entity only; off = DATA LOSS)
 //   moveEntity    an entity to another module: associations follow Studio Pro's rules (stored in the owner's module;
 //                 cross-module ones name their child), access rules get the target module's roles, and every
 //                 reference (by name, expressions, XPath, OQL) is renamed through the graph
@@ -14,12 +15,23 @@ const { domainmodels: dm } = sdk;
 const ENTITY_OPS = {
     changeEntity: {
         doc: "Change an entity: persistable on/off (off drops its table: DATA LOSS), documentation, its image in the domain model.",
-        fields: { entity: "R Module.Entity", persistable: "optional true/false (entities without a parent only)", documentation: "optional text", image: "optional Module.Images.Image (\"\" for none)", color: "not stored by Mendix: refused" }
+        fields: { entity: "R Module.Entity", persistable: "optional true/false (entities without a parent only)", documentation: "optional text", image: "optional Module.Images.Image (\"\" for none)", color: "not stored by Mendix: refused",
+            createdDate: "optional true/false: system member createdDate (root entity only)", changedDate: "optional true/false: system member changedDate (root entity only)",
+            owner: "optional true/false: system member owner (System.User; root entity only)", changedBy: "optional true/false: system member changedBy (System.User; root entity only)" }
     },
     moveEntity: {
         doc: "Move an entity to another module: its associations (Module.Assoc of the owner's module, cross-module where needed), access rules (module roles mapped) and every reference are updated. Run usages first.",
         fields: { entity: "R Module.Entity", module: "R target module", roles: "optional { \"Old.Role\": \"New.Role\" } for its access rules (default: same role name in the target module, else refused)" }
     }
+};
+
+// System members: the flag on the root entity's NoGeneralization (specializations inherit them).
+const SYSTEM_FLAGS = { createdDate: "hasCreatedDate", changedDate: "hasChangedDate", owner: "hasOwner", changedBy: "hasChangedBy" };
+const SYSTEM_FLAG_WHAT = { createdDate: "createdDate (DateTime)", changedDate: "changedDate (DateTime)", owner: "owner (association to System.User)", changedBy: "changedBy (association to System.User)" };
+const strictBool = (v, field) => {
+    if (v === true || v === "true") return true;
+    if (v === false || v === "false") return false;
+    throw new Error(`${field} must be true or false, not ${JSON.stringify(v)}`);
 };
 
 const CROSS_KEYS = ["Name", "GUID", "Type", "Owner", "StorageFormat", "DeleteBehavior", "ParentPointer", "Documentation", "Source", "ExportLevel"];
@@ -42,6 +54,58 @@ function toRegular(c, childId) {
 
 function makeEntity(h) {
     const { model, client, get } = h;
+
+    // The entity at the top of e's generalization chain: { e } in the project, or { qn } of a System entity.
+    async function rootOf(e) {
+        let cur = e;
+        const seen = new Set();
+        while (cur.generalization instanceof dm.Generalization) {
+            const qn = cur.generalization.generalizationQualifiedName;
+            if (!qn || seen.has(qn)) break;
+            seen.add(qn);
+            if (/^System\./.test(qn)) return { qn };
+            cur = await h.entity(qn);
+        }
+        return { e: cur, qn: cur.qualifiedName };
+    }
+
+    // createdDate / changedDate / owner / changedBy of e (o holds the wanted true/false); lines for the summary.
+    async function systemMembers(e, o, qn) {
+        const given = Object.keys(SYSTEM_FLAGS).filter(k => o[k] !== undefined);
+        if (!given.length) return [];
+        const want = Object.fromEntries(given.map(k => [k, strictBool(o[k], k)]));
+        if (!(e.generalization instanceof dm.NoGeneralization)) {
+            const root = await rootOf(e);
+            if (!root.e) throw new Error(`REFUSED: ${qn} inherits from ${root.qn}, which defines its system members (${given.join(", ")}); they cannot be changed`);
+            throw new Error(`REFUSED: ${given.join(", ")} are stored on the root entity of the generalization chain only; ${qn} inherits them. Change them on ${root.qn}: { "op": "changeEntity", "entity": "${root.qn}", "${given[0]}": ${want[given[0]]} }`);
+        }
+        const g = e.generalization;
+        const lines = [];
+        const lost = [];
+        for (const k of given) {
+            const was = g[SYSTEM_FLAGS[k]];
+            if (was === want[k]) continue;
+            g[SYSTEM_FLAGS[k]] = want[k];
+            lines.push(`${k} ${want[k] ? "on" : "off"}`);
+            if (!want[k]) lost.push(SYSTEM_FLAG_WHAT[k]);
+        }
+        if (lost.length && h.persistable(e) && !h.isFresh(qn)) lines.push(`DATA LOSS: ${lost.join(", ")} of every ${e.name} object (and its specializations) is dropped when the app next starts`);
+        if (!lines.length) lines.push(`system members already ${given.map(k => `${k} ${want[k]}`).join(", ")}`);
+        if (lines.some(l => / on$/.test(l)) && e.accessRules.length) client.warnFirst(`DomainModels$NoGeneralization system members first use with access rules (no Studio Pro sample has one): open ${qn} in Studio Pro and check the access rules list the new members`);
+        return lines;
+    }
+
+    // the entity's image in the domain model (Module.Collection.Image, "" = none)
+    async function setImage(e, image) {
+        const qn = String(image);
+        if (qn) {
+            await model.flushChanges();
+            const g = refs.graph(client);
+            if (g.names.get(qn) !== "Images$Image") fail(`'${qn}' is not an image (Module.Collection.Image)`, qn, [...g.names].filter(([, t]) => t === "Images$Image").map(([n]) => n));
+        }
+        e.__image.updateWithRawValue(qn);
+        return qn ? `image ${qn}` : "no image";
+    }
 
     async function changeEntity(o) {
         const e = await h.entity(o.entity);
@@ -79,17 +143,9 @@ function makeEntity(h) {
             e.documentation = String(o.documentation);
             lines.push("documentation set");
         }
-        if (o.image !== undefined) {
-            const qn = String(o.image);
-            if (qn) {
-                await model.flushChanges();
-                const g = refs.graph(client);
-                if (g.names.get(qn) !== "Images$Image") fail(`'${qn}' is not an image (Module.Collection.Image)`, qn, [...g.names].filter(([, t]) => t === "Images$Image").map(([n]) => n));
-            }
-            e.__image.updateWithRawValue(qn);
-            lines.push(qn ? `image ${qn}` : "no image");
-        }
-        if (!lines.length) throw new Error("nothing to change: give persistable, documentation or image");
+        if (o.image !== undefined) lines.push(await setImage(e, o.image));
+        lines.push(...(await systemMembers(e, o, o.entity)));
+        if (!lines.length && !Object.keys(SYSTEM_FLAGS).some(k => o[k] !== undefined)) throw new Error("nothing to change: give persistable, documentation, image, createdDate, changedDate, owner or changedBy");
         return `${o.entity}: ${lines.join("; ").replace(/; DATA LOSS/, "\n      DATA LOSS")}`;
     }
 
@@ -250,10 +306,17 @@ function makeEntity(h) {
         if (o.persistable !== undefined && e.generalization instanceof dm.NoGeneralization && e.generalization.persistable !== (o.persistable === true || o.persistable === "true")) r.push(`${o.entity} persistable is ${e.generalization.persistable}`);
         if (o.documentation !== undefined && e.documentation !== String(o.documentation)) r.push(`${o.entity} documentation not set`);
         if (o.image !== undefined && (e.imageQualifiedName || "") !== String(o.image)) r.push(`${o.entity} image is ${e.imageQualifiedName || "none"}`);
+        r.push(...checkSystemMembers(e, o, o.entity));
         return r;
     }
 
-    return { impl: { changeEntity, moveEntity }, checks: { changeEntity: checkChange, moveEntity: checkMove } };
+    function checkSystemMembers(e, o, qn) {
+        const g = e.generalization;
+        if (!(g instanceof dm.NoGeneralization)) return [];
+        return Object.keys(SYSTEM_FLAGS).filter(k => o[k] !== undefined && g[SYSTEM_FLAGS[k]] !== (o[k] === true || o[k] === "true")).map(k => `${qn} ${k} is ${g[SYSTEM_FLAGS[k]]}`);
+    }
+
+    return { impl: { changeEntity, moveEntity }, checks: { changeEntity: checkChange, moveEntity: checkMove }, systemMembers, checkSystemMembers, setImage };
 }
 
-module.exports = { makeEntity, ENTITY_OPS, toCross, toRegular };
+module.exports = { makeEntity, ENTITY_OPS, SYSTEM_FLAGS, toCross, toRegular };

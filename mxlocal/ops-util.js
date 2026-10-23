@@ -76,4 +76,29 @@ function setIfAvailable(obj, prop, value) {
     }
 }
 
-module.exports = { validName, setIfAvailable, ATTRIBUTE_TYPES, DATA_TYPES, distance, suggest, fail, validate, bool, noDollar, enumValue };
+// Moves item inside an SDK list (attributes, validation rules, ...) to o.position (1 = first), or o.before / o.after
+// the element named so (nameOf gives an element's name). Returns the summary part, or "" when nothing was asked.
+function reorder(list, item, o, where, nameOf = y => y.name) {
+    const given = ["before", "after", "position"].filter(k => o[k] !== undefined);
+    if (!given.length) return "";
+    if (given.length > 1) throw new Error(`${where}: give one of "before", "after" (a name) or "position" (1 = first), not ${given.join(" and ")}`);
+    const names = [...list].map(nameOf);
+    let index;
+    if (o.position !== undefined) {
+        const n = Number(o.position);
+        if (!(Number.isInteger(n) && n >= 1 && n <= names.length)) throw new Error(`${where}: position is 1..${names.length}`);
+        index = n - 1;
+    } else {
+        const other = String(o.before !== undefined ? o.before : o.after).split(".").pop();
+        if (other === nameOf(item)) throw new Error(`${where}: it cannot go ${given[0]} itself`);
+        if (!names.includes(other)) fail(`${where}: no '${other}' to put it ${given[0]}`, other, names.filter(n => n !== nameOf(item)));
+        const rest = names.filter(n => n !== nameOf(item));
+        index = rest.indexOf(other) + (o.after !== undefined ? 1 : 0);
+    }
+    if ([...list].indexOf(item) === index) return `stays at position ${index + 1}`;
+    item.detach();
+    list.splice(index, 0, item);
+    return `position ${index + 1} of ${names.length}`;
+}
+
+module.exports = { reorder, validName, setIfAvailable, ATTRIBUTE_TYPES, DATA_TYPES, distance, suggest, fail, validate, bool, noDollar, enumValue };

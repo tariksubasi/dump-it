@@ -224,29 +224,33 @@ microflow, workflow, ...): write the full name, there is no `$prev`. Example: `c
 
 | Op | Fields | Notes |
 |---|---|---|
-| `createEntity` | **module**, **name**, persistable (default true), generalization (`Module.Parent`, or `System.FileDocument` / `System.Image` / `System.User`), attributes `[{name, type, default, calculated}]`, documentation | Placed on a free spot of the diagram (no overlap): next to its parent in the same module, and an entity of the same plan moves next to the other end of its first `addAssociation`; else right of the diagram. `color` is refused (Mendix stores none). Boxes that overlap after a plan (also when `addAttribute` makes a box bigger): `DOMAIN LAYOUT` lines in the dry run |
+| `createEntity` | **module**, **name**, persistable (default true), generalization (`Module.Parent`, or `System.FileDocument` / `System.Image` / `System.User`), attributes `[{name, type, default, calculated, localize, documentation}]`, documentation, image (`Module.Images.Name`), createdDate, changedDate, owner, changedBy (`true`/`false`: system members) | Placed on a free spot of the diagram (no overlap): next to its parent in the same module, and an entity of the same plan moves next to the other end of its first `addAssociation`; else right of the diagram. `color` is refused (Mendix stores none). Boxes that overlap after a plan (also when `addAttribute` makes a box bigger): `DOMAIN LAYOUT` lines in the dry run | System members are stored on the root entity only: with `generalization` they are refused (the message names the root)
 | `arrangeDomainModel` | **module**, mode (`compact` default: rows, boxes at their own size; `grid`: equal cells) | Tidies the module's diagram: every entity a new position, related entities (associations, parent) next to each other, largest group first; the same model always gives the same positions. Only positions change; annotations stay where they are |
-| `addAttribute` | **entity**, **name**, **type**, default, calculated (`Module.Microflow`) | Default when not given: Integer/Long/Decimal `0`, Boolean `false`, AutoNumber `1`, others empty. `calculated`: the value comes from the microflow (not stored, no default); it has no parameter or one of the entity and returns the attribute's type (Long/Integer: Integer). Existing access rules get the new member with their "new members" rights |
-| `changeAttribute` | **attribute** (`Module.Entity.Attr`), type, default, calculated, stored (`true`) | At least one field. `calculated` makes a stored attribute calculated (`DATA LOSS`: its column is dropped); `"stored": true` stores a calculated one again (existing objects get the default). ReadWrite rights on a now calculated attribute become ReadOnly |
-| `addAssociation` | **from**, **to**, name (default `From_To`), type (`Reference`/`ReferenceSet`), owner (`Default`/`Both`), storage (`Table`/`Column`), onDeleteFrom, onDeleteTo (`keep`/`delete`/`prevent`), messageFrom, messageTo | `from` stores the reference: many `from` → one `to` for Reference. Other module in `to` → cross-module association. Storage default: the app's setting (Mendix 11 apps: Column) for a Reference with owner Default, else Table |
-| `changeAssociation` | **association**, type, owner, storage, onDeleteFrom, onDeleteTo, messageFrom, messageTo | `onDeleteFrom`: what happens when a `from` (owner) object is deleted: `keep` its `to` objects (default), `delete` them too, or `prevent` the delete while linked (needs `messageFrom`, the text shown). `onDeleteTo` the same for a `to` object. Changing the type prints `DATA LOSS` (ReferenceSet → Reference keeps one link per object). Column storage: Reference with owner Default only (a reference set moves to Table). Owner Both adds the association to the `to` entity's access rules. Rename with `rename`; the two ends cannot change |
+| `addAttribute` | **entity**, **name**, **type**, default, calculated (`Module.Microflow`), localize (DateTime: `false` = shown as stored, UTC), documentation, before / after (an attribute name) | Default when not given: Integer/Long/Decimal `0`, Boolean `false`, AutoNumber `1`, others empty. `calculated`: the value comes from the microflow (not stored, no default); it has no parameter or one of the entity and returns the attribute's type (Long/Integer: Integer). Existing access rules get the new member with their "new members" rights | `before` / `after` put it at that place in the list (default: last)
+| `changeAttribute` | **attribute** (`Module.Entity.Attr`), type, default, calculated, stored (`true`), localize (DateTime only), documentation (`""` = none), position (1 = first) or before / after | At least one field. `calculated` makes a stored attribute calculated (`DATA LOSS`: its column is dropped); `"stored": true` stores a calculated one again (existing objects get the default). ReadWrite rights on a now calculated attribute become ReadOnly | `position` / `before` / `after` move it in the attribute list. `localize` on another type is refused
+| `addAssociation` | **from**, **to**, name (default `From_To`), type (`Reference`/`ReferenceSet`), owner (`Default`/`Both`), storage (`Table`/`Column`), onDeleteFrom, onDeleteTo (`keep`/`delete`/`prevent`), messageFrom, messageTo, documentation | `from` stores the reference: many `from` → one `to` for Reference. Other module in `to` → cross-module association. Storage default: the app's setting (Mendix 11 apps: Column) for a Reference with owner Default, else Table |
+| `changeAssociation` | **association**, type, owner, storage, onDeleteFrom, onDeleteTo, messageFrom, messageTo, documentation, from / to (re-point an end) | `onDeleteFrom`: what happens when a `from` (owner) object is deleted: `keep` its `to` objects (default), `delete` them too, or `prevent` the delete while linked (needs `messageFrom`, the text shown). `onDeleteTo` the same for a `to` object. Changing the type prints `DATA LOSS` (ReferenceSet → Reference keeps one link per object). Column storage: Reference with owner Default only (a reference set moves to Table). Owner Both adds the association to the `to` entity's access rules. Rename with `rename`; the two ends cannot change | `from` / `to` re-point an end (same module; a cross-module association only its `to`): member access follows the owner, the dry run lists `CHECK these places` that use it and `DATA LOSS` (existing links are dropped)
 | `createViewEntity` | **module**, **name**, **oql**, attributes `[{name, type}]`, folder | Mendix 11+ (Mendix 10 refuses: create it in Studio Pro). A read-only entity whose objects come from the OQL query, with an OQL document of the same name. Every column needs a name (`x.Total * 2 as Twice`); columns that select an attribute (`o.Total as Total`) take its type (AutoNumber → Long), the others need `attributes`. Studio Pro checks the OQL itself when it opens the app |
 | `changeViewEntity` | **entity**, **oql**, attributes | New OQL; attributes follow the columns (new ones added, missing ones removed with `STILL USED BY`) |
 | `setGeneralization` | **entity**, **generalization** (`Module.Parent` or `"none"`), persistable | Refuses loops. Check access rules and pages of the entity afterwards |
 | `addValidationRule` | **entity**, **attribute**, **rule** (`required`/`unique`/`maxLength`/`range`/`regex`/`equals`), **message**, maxLength, min, max, regex, value | |
 | `addEventHandler` | **entity**, **moment** (`Before`/`After`), **event** (`Create`/`Commit`/`Delete`/`RollBack`), **microflow**, passObject (default true), raiseErrorOnFalse | The microflow needs one parameter of the entity (when passObject) and must return Boolean for `Before` |
 | `addIndex` | **entity**, **attributes** `["A", {"name":"B","ascending":false}]` | |
-| `changeValidationRule` | **entity**, **attribute**, rule (which one, when the attribute has several), message, maxLength, min, max, regex, value | Only the values of the rule's own kind (a range rule takes min/max; `null` removes one). Another kind: `deleteValidationRule`, then `addValidationRule` |
+| `changeValidationRule` | **entity**, **attribute**, rule (which one, when the attribute has several), message, maxLength, min, max, regex, value, position (1 = first rule of the entity) | Only the values of the rule's own kind (a range rule takes min/max; `null` removes one). Another kind: `deleteValidationRule`, then `addValidationRule` | `position` alone moves the rule in the entity's list (the order the rules are checked in)
 | `deleteValidationRule` | **entity**, **attribute**, rule | |
 | `deleteEventHandler` | **entity**, moment, event, microflow | Enough of them to name one handler; the microflow stays |
+| `changeEventHandler` | **entity**, **handler** (`"Before Commit"` or a number, 1 = first), moment, event, microflow, passObject, raiseErrorOnFalse | Give only what changes. The same rules as `addEventHandler` (one parameter of the entity when passObject, Boolean for Before); `raiseErrorOnFalse` only for Before. Lists the handlers when `handler` matches none |
 | `changeIndex` | **entity**, **index** (its attributes in order `["A","B"]` or a number, 1 = first), **attributes** (new list as in addIndex) | |
 | `deleteIndex` | **entity**, **index** | |
-| `createEnumeration` | **module**, **name**, **values** (`["A", {"name":"B","caption":"Bee"}]`), folder | Captions are written in the project's default language |
+| `createEnumeration` | **module**, **name**, **values** (`["A", {"name":"B","caption":"Bee","image":"Module.Images.Bee"}]`), folder | Captions are written in the project's default language |
 | `addEnumerationValue` | **enumeration**, **name**, caption (text or `{"en_US": ..., "nl_NL": ...}`), image (`Module.Images.Name`) | |
 | `moveEnumerationValue` | **value** (`Module.Enum.Value`), before / after (a value name) or position (1 = first) | The order drop-downs and radio buttons show |
 | `changeEnumerationValue` | **value**, caption (text or per language), image (`""` = none) | Rename a value with `rename`. An image on a value: first use, check it in Studio Pro |
-| `changeEntity` | **entity**, persistable, documentation, image (`Module.Images.Name`, `""` none) | `persistable: false` drops the table: `DATA LOSS` line. Refused for an entity with a parent (it inherits persistability) or when a persistable entity owns an association to it. `color` is refused (Mendix does not store one) |
+| `changeEntity` | **entity**, persistable, documentation, image (`Module.Images.Name`, `""` none), createdDate, changedDate, owner, changedBy (`true`/`false`) | `persistable: false` drops the table: `DATA LOSS` line. Refused for an entity with a parent (it inherits persistability) or when a persistable entity owns an association to it. `color` is refused (Mendix does not store one) | System members (createdDate, changedDate, owner, changedBy) live on the root entity: on a specialization they are refused with the root's name; turning one off on a stored entity is `DATA LOSS`
 | `moveEntity` | **entity**, **module**, roles `{"Old.Role": "New.Role"}` | Moves the entity to another module. Associations it owns move with it (`Old.Assoc` becomes `New.Assoc`; cross-module when the other end stays), associations of other entities to it become cross-module ones (or regular ones when they are in the target module). Access rule roles: `roles`, else the same role name in the target module, else refused. Every reference (by name, expressions, XPath, OQL) is renamed. Data stays (same entity id). Java code that names it is listed in Warnings |
+| `addDomainAnnotation` | **module**, **text** (`\n` = new line), near (`Module.Entity` of this module), width (default 300) | A yellow note in the domain model, next to `near` on a free spot, else below the entities. (A note in a flow: `addAnnotation`) |
+| `changeDomainAnnotation` | **module**, **annotation** (a number, 1 = first, or the start of its text), text, width, near | `near` moves it next to that entity |
+| `deleteDomainAnnotation` | **module**, **annotation** | Lists the annotations when none or several match |
 
 Attribute types: `String(200)`, `String(unlimited)`, `String` (=200), `Integer`, `Long`, `Decimal`, `Boolean`,
 `DateTime`, `AutoNumber`, `HashedString`, `Binary`, `Enum(Module.Enumeration)`.
@@ -266,7 +270,8 @@ The default of an `Enum` attribute is the value name, e.g. `"default": "Open"`.
 | `createUserRole` | **name**, **moduleRoles** `["Module.Role"]`, description, manageAllRoles | Project-level role that users get. Gets its own GUID, checks security. `System.User` / `System.Administrator` are accepted (written by name, as Studio Pro stores them) |
 | `addModuleRoles` | **userRole** (e.g. `Administrator`), **moduleRoles** | Typical after a new module role: give it to the user roles that need it |
 | `createDemoUser` | **userName**, **userRoles** `["UserRole"]`, entity, password | Entity defaults to the one the other demo users use (`System.User` when there are none). Says so when demo users are off |
-| `setSecurity` | level (`Off`/`Prototype`/`Production`), demoUsers, guestRole (`""` = guest access off) | At least one field |
+| `setSecurity` | level (`Off`/`Prototype`/`Production`), demoUsers, guestRole (anonymous users' user role; `""` = guest access off), passwordPolicy `{"minimumLength": 8, "requireDigit": true, "requireMixedCase": true, "requireSymbol": true}` | At least one field. The administrator's role as guest role is refused; a guest role that manages users is warned |
+| `changeUserRole` | **role**, manageAllRoles, manageableRoles `["UserRole"]`, manageUsersWithoutRoles, description, addModuleRoles, removeModuleRoles | Which users this role may manage (Administration pages). `manageableRoles` sets `manageAllRoles` false |
 
 ### Microflows and nanoflows
 
@@ -284,6 +289,8 @@ The default of an `Enum` attribute is the value name, e.g. `"default": "Open"`.
 | `createJavaAction` | **module**, **name**, folder, parameters `[{name, type, description, required}]`, returns (default `Boolean`; `Nothing` for none), documentation, exposed `{caption, category}` | Also writes `javasource/<module>/actions/<Name>.java` as Studio Pro generates it. Types: `String`, `Integer`/`Long`, `Decimal`, `Boolean`, `DateTime`, `Module.Entity`, `List(Module.Entity)`, `Enum(Module.Enum)`, `EntityType(T)` (declares type parameter T), `Object(T)`, `List(T)`, `Microflow`. A file that exists keeps its imports, user code and extra code |
 | `setJavaActionCode` | **javaAction**, **code**, imports, extra, compile | Replaces the code between BEGIN USER CODE and END USER CODE of the action's file (`extra`: between BEGIN/END EXTRA CODE; `imports`: `["java.util.List"]`). `createJavaAction` takes the same `code`, `imports`, `extra`. Parameters are fields of the same name (`Input`). JAVA CHECK: javac compiles the file with `userlib/`, `vendorlib/` and the Mendix runtime jars (`MXLOCAL_RUNTIME_JARS`, else the runtime of the project's mx); errors refuse the change. No JDK or no runtime jars: a `JAVA CHECK: skipped` line, not an error. `"compile": false` writes it unchecked |
 | `createJavaScriptAction` | same as `createJavaAction`, platform (`All`/`Web`/`Native`) | Writes `javascriptsource/<module>/actions/<Name>.js`. `Nanoflow` instead of `Microflow` as parameter type |
+| `changeJavaScriptAction` | **javaScriptAction**, addParameters `[{name, type, value, description, required}]`, removeParameters, parameterTypes `{"Name": "type"}`, returns, platform, documentation, code, extra | The `.js` file is renewed (JSDoc, function parameters) and keeps its imports, USER CODE and EXTRA CODE. `code` replaces the USER CODE: JS CHECK runs `node --check` (an ES module; `await` works); a syntax error refuses it. Nanoflows that call it follow: an added parameter gets `value` in every call (required when there are calls), a removed one is dropped. `returns: "Nothing"` is refused while a call uses the result |
+| `changeJavaAction` | **javaAction**, addParameters, removeParameters, parameterTypes, returns, documentation, code, imports, extra, compile | Same for Java: the `.java` file is regenerated as Studio Pro does (BEGIN/END USER CODE and EXTRA CODE kept, JAVA CHECK on code). Microflow calls follow. Type parameters: `EntityType(T)` declares T, `Object(T)` / `List(T)` use it; removing the declaring parameter while others use T is refused |
 | `changeMicroflow` | **microflow** (also a nanoflow or rule), addParameters `[{name, type, value}]`, removeParameters `["Name"]`, renameParameters `{"Old": "New"}`, parameterTypes `{"Name": "type"}`, returns, returnValue | Updates every caller found by `usages`: call steps, rule decisions, page buttons, data sources, on-change (`value` = the argument they pass, required when there are callers). The dry run lists `CALLERS UPDATED`. Refused with the list: callers that pass no parameters (scheduled events, menu items, home pages, after-startup), event handlers / calculated attributes, published services and workflows; removing a parameter the flow still uses; `returns` Nothing while a caller uses the result; a new return type for a data source. Renaming a parameter also renames `$Old` in the flow. Rename the flow itself with `rename` |
 | `createRule` | **module**, **name**, **returns** (`Boolean` or `Enum(...)`), **returnValue**, parameters, actions, folder, documentation | Rules only read and compute: retrieve, variable, set, aggregateList, listOperation, createList, changeList, if, switch, loop, end. Use it in `if`/`switch` with `"rule"` + `"args"` |
 
@@ -509,6 +516,8 @@ FLOW CHECK (dry run, for new or changed steps; `steps`, for the whole flow) give
 | `createMenu` | **module**, **name**, folder, items (`[{"caption", "page" or "microflow", "icon", "items": [...]}]`) | A menu document (`Menus$MenuDocument`), as used by menu bars and navigation trees. Show it with `useMenu` |
 | `useMenu` | **document** (layout, page or snippet), widget (the menu widget name; default the only one), menu or profile | Points a menu bar, navigation tree or simple menu bar at a menu document or a navigation profile. On a layout this changes every page that uses it (the dry run says so) |
 | `createNavigationProfile` | **kind** (`Responsive`, `Tablet`, `Phone`, `ResponsiveOffline`, `TabletOffline`, `PhoneOffline`), homePage, copyMenu | A web navigation profile for a device type the project does not have yet (one per device type). Home page default: the Responsive one. `copyMenu: true` copies the Responsive menu. Native mobile profiles: Studio Pro |
+| `changeNavigationProfile` | **profile**, ota, logging, encryptDatabase, encryptFiles, encryptCookies, applyScreenTransition (`true`/`false`), networkTimeoutMs, screenTransition, popupTransition, throwPartialSyncError | Native profile options; `throwPartialSyncError` for offline / native profiles (Mendix 11.12+). A native option on a web profile is refused. Per-entity sync: `setOfflineSync` |
+| `deleteNavigationProfile` | **profile** | Deletes a profile with its menu and home pages. The Responsive profile is refused |
 
 Widgets in `"widgets": [ { "widget": "<kind>", ... } ]`, top to bottom. Every widget takes `name` (default as
 Studio Pro: `grid1`, `dataGrid2_1`, `dataView1`, ...) and the common fields `visible` (an expression
@@ -928,6 +937,8 @@ What pages cannot do yet (use Studio Pro, and `python mx.py gap "<what>"`):
 |---|---|---|
 | `addLanguage` | **code** (e.g. `tr_TR`), default (true = make it the default language) | Adds the language as Studio Pro does (Settings > Languages). Existing texts keep their languages: list the untranslated ones with `texts --missing tr_TR`. A wrong code gets a did-you-mean (`Turkish`, `tr` -> `tr_TR`) |
 | `setTranslations` | **translations** `[{"where", "language", "text"}]`, language (for items without one) | `where` as `texts` lists it: `Module.Page [title]`, `Module.Page.widget [caption\|text\|label\|placeholder\|...]`, `Module.Enumeration.Value`, `Module.Flow.<step id>` (show message / validation feedback), `Module.Entity.Attribute [required\|unique\|maxLength\|range\|regex\|equals]` (validation message), `menu:Responsive/Caption/Sub`, `system:mendix.signin.username` (system texts: `texts system` lists the keys; `mendix.` may be left out). The `[part]` may be left out when the place has one text. `{Attribute}` shows the same value as in the default text. `"text": {"tr_TR": ..., "de_DE": ...}` sets several languages at once |
+| `changeLanguage` | **code**, default (`true`), checkCompleteness, dateFormat, timeFormat, dateTimeFormat (`""` = the language's own) | Settings > Languages. A format needs date/time letters (`dd-MM-yyyy`, `HH:mm`) |
+| `deleteLanguage` | **code** | The default language is refused (make another one default first). Texts keep their translations in it, unused |
 
 Per-language texts in every op: wherever an op takes a text (captions, titles, texts, labels, placeholders,
 enumeration captions, messages, validation messages, menu captions), it also takes
@@ -949,8 +960,8 @@ Studio Pro stores a translation per language in the text; the order is the order
 ```
 
 Pluggable widget texts are listed and translated by path, e.g. `Module.Page.dataGrid1 [columns[2].header]`. Not
-supported: removing a language, menu captions of native navigation profiles, pluggable widget system texts and the
-date/time formats of a language. System texts (App > Language > System texts) are translated by key:
+supported: menu captions of native navigation profiles and pluggable widget system texts (remove a language with
+`deleteLanguage`, date/time formats with `changeLanguage`). System texts (App > Language > System texts) are translated by key:
 
 ```json
 { "ops": [ { "op": "setTranslations", "language": "tr_TR", "translations": [
@@ -962,8 +973,11 @@ date/time formats of a language. System texts (App > Language > System texts) ar
 
 | Op | Fields | Notes |
 |---|---|---|
-| `setProjectSettings` | afterStartup, beforeShutdown, healthCheck (`Module.Microflow`, `""` = none), hashAlgorithm (`BCrypt`/`SSHA256`), bcryptCost (10..15), roundingMode (`HalfUp`/`HalfEven`), firstDayOfWeek (`Default`/`Sunday`..`Saturday`), defaultTimeZone (e.g. `Europe/Istanbul`, `""` = none) | App > Settings. The microflows have no parameters; after startup returns Boolean, health check returns String. A wrong time zone gets a did-you-mean (`istanbul` -> `Europe/Istanbul`) |
+| `setProjectSettings` | afterStartup, beforeShutdown, healthCheck (`Module.Microflow`, `""` = none), hashAlgorithm (`BCrypt`/`SSHA256`), bcryptCost (10..15), roundingMode (`HalfUp`/`HalfEven`), firstDayOfWeek (`Default`/`Sunday`..`Saturday`), defaultTimeZone (e.g. `Europe/Istanbul`, `""` = none) | App > Settings. The microflows have no parameters; after startup returns Boolean, health check returns String. A wrong time zone gets a did-you-mean (`istanbul` -> `Europe/Istanbul`) | Also: scheduledEventTimeZone, multipleSessions, optimisticLocking, backgroundSystemContext, foreignKeys, oqlVersion2 (`true`/`false`), javaVersion (`Java11`/`Java17`/`Java21`), sslCertificateAlgorithm (`PKIX`/`SunX509`), decimalScale (1..20; below 8 rounds stored values). A setting the Mendix version lacks is refused
 | `setConfiguration` | **name**, applicationRootUrl, constants `{"Module.Constant": "value"}` (`null` = use the default), customSettings `{"Name": "value"}` (`null` = remove) | App > Settings > Configurations. A new name creates a configuration like the first one (without its database password). Database settings: Studio Pro |
+| `addCertificate` | **file** (`.crt`/`.cer`/`.pem`/`.der` authority, `.p12`/`.pfx` client, inside the export folder), type (`Authority`/`Client`) | App > Settings > Certificates. Says the subject and expiry of an authority certificate; the same certificate twice is refused. First use: check it in Studio Pro |
+| `deleteCertificate` | **certificate** (a number, 1 = first, or part of its subject) | Lists the certificates when none or several match |
+| `setModuleSettings` | **module**, version (`x.y.z`), exportLevel (`source` / `protected` = `addOn` / `solution`), solutionIdentifier | A protected module hides its documents from apps that import it (only export level API is usable): warned. Marketplace modules are refused. First use of protected: check it in Studio Pro |
 | `createImageCollection` | **module**, **name**, folder | |
 | `addImage` | **collection**, **file**, name (default the file name), replace | A PNG, JPG or SVG file inside the export folder (e.g. copy it to `edits/logo.png`), at most 2 MB; the kind is read from the content. Use it in a static image widget or button by `Module.Collection.Image` |
 
@@ -975,6 +989,7 @@ date/time formats of a language. System texts (App > Language > System texts) ar
 | `createScheduledEvent` | **module**, **name**, **microflow**, **every** (`Minute`/`Hour`/`Day`/`Week`), interval, at (`HH:MM`), days, enabled (default false), timeZone, onOverlap, folder | The microflow must have no parameters |
 | `changeConstant` | **constant**, default (or value), type, exposedToClient | The value must fit the type. A new type: check configuration values and `@Module.Constant` uses |
 | `changeScheduledEvent` | **event**, microflow, every, interval, at, days, enabled, timeZone, onOverlap | A schedule field gives a new schedule of `every` (default: the current kind; what is not given is kept). Start time = `at` |
+| `moveConstant` | **constant**, **module**, folder | Moves the constant to another module: every reference is renamed (`@Old.Name` in expressions becomes `@New.Name`, configurations keep the value). Java code that reads it is listed. Marketplace modules are refused as target |
 | `publishRest` | see REST services below | |
 
 ### REST services (consumed and published)
@@ -1163,17 +1178,77 @@ A company design system (design module, tokens, components, fonts, dark mode): s
 |---|---|---|
 | `importWidget` | **file** (a `.mpk` inside the export folder, e.g. `downloads/Badge.mpk`), replace | Copies a widget package into `widgets/` and reports its widget id, name and type (pluggable or classic, web or native). Refused when that widget is installed already; `"replace": true` swaps the installed package (another version). Studio Pro loads it when the app opens (or F4) |
 | `importModulePackage` | **file** (a module `.mpk` inside the export folder) | Adds the module's documents with their own ids (as Studio Pro's *Import module package*) and copies its `javasource/`, `userlib/`, `vendorlib/`, `themesource/` and `widgets/` files. Refused: a module of that name exists (updating a module: Studio Pro), the package is for a newer Mendix version, an older package whose documents this Mendix version stores differently (Studio Pro converts those), files that exist with other contents. Widgets the app has already stay as they are. Put it alone in a change; later changes can use the module |
+| `exportModulePackage` | **module**, file (default `packages/<Module>.mpk`) | Writes a module package Studio Pro imports: the module's units (same ids), `javasource/<module>`, `javascriptsource/<module>`, `themesource/<module>`, userlib jars marked `<jar>.<Module>.RequiredLib`, and the widget packages its pages use. Run it in a change of its own (it packs the saved model) |
+| `updateModulePackage` | **file** (a module `.mpk`), replace | Compares the package with the installed module: `ADDED`, `REMOVED`, `CHANGED` documents, `STILL USED BY` for removed ones, `DATA LOSS` for entities that go. Without `"replace": true` it is refused after the report (nothing changes); with it the module and its files are replaced (the app's own changes to that module are lost) |
 
 ### Documents, rename and delete
 
 | Op | Fields | Notes |
 |---|---|---|
 | `moveDocument` | **document**, folder (missing or `""` = module root) | Within the same module |
+| `renameFolder` | **module**, **folder** (`Orders/Actions`), **newName** | No references change (qualified names have no folders) |
+| `moveFolder` | **module**, **folder**, **to** (a folder path, `""` = module root; missing folders are made) | Same module only; into itself is refused |
+| `deleteFolder` | **module**, **folder**, force | A folder that is not empty is refused with its contents; `"force": true` deletes its documents too (as `delete`: `STILL USED BY` listed) |
 | `copyDocument` | **document** (page, snippet, layout, microflow, nanoflow, rule, enumeration or entity), name, module, folder, entity `{"Module.Source": "Module.Target"}`, skipUnmatched, roles `{"Old.Role": "New.Role"}`, associations | Copies what Studio Pro stored, with new ids; references inside the copy point to the copy. `entity`: the copy works on Target: attributes and associations by name; names Target lacks are listed and refused, or with `"skipUnmatched": true` the widgets / member changes showing them are left out (not steps or expressions: refused). In another module the module roles map by `roles`, else by the same role name, else refused. An entity copy takes its attributes, validation rules, access rules, indexes and event handlers; `"associations": true` also the associations it owns. A page URL is not copied. Ops after it in the same file cannot change the copy: put them in a second change |
 | `moveAttribute` | **attribute**, **to** (a parent or specialization of its entity, any module), newName, allowDataLoss | Run `usages` first. Moves the attribute (validation rules and access rule members follow; references move with it). The dry run lists every place that uses it. A stored attribute loses its values (the column moves, empty): refused unless the user agreed and you add `"allowDataLoss": true`. Moving down: objects of the parent that are not the specialization lose it (Studio Pro shows the places that break). In an index: refused (`deleteIndex` first). `{ "op": "moveAttribute", "attribute": "Sales.Person.Phone", "to": "Sales.Party", "allowDataLoss": true }` |
 | `createUnitTest` | **module**, **name**, **asserts** `[{"that": "$Order/Total = 50", "message": "..."}]`, actions, folder | A `Test_...` microflow returning Boolean for the Marketplace UnitTesting module: `actions` prepare data and call the flow under test, then each assert calls UnitTesting's `AssertTrue2` (or, without it, returns false with an error log). Refused when the project has no UnitTesting module: tell the user to import it (`importModulePackage` with the .mpk from the Marketplace) or record a gap |
 | `rename` | **target** (qualified name, or a module name), **newName** | Run `usages` first. Updates every reference (flow parameters too: callers' mappings follow). A module rename also updates `Module.` in expressions and XPath and lists code folders to move. Other renames report old names left in expressions, XPath and Java (`OLD NAME STILL USED`) |
 | `delete` | **target** | Run `usages` first (and `unused` to find candidates). Deletes a document (also a constant, scheduled event, snippet), entity, attribute, association, enumeration value or module role. Lists documents that still use it (`STILL USED BY`). Not by name: validation rules `deleteValidationRule`, event handlers `deleteEventHandler`, indexes `deleteIndex`, access rules `deleteAccessRule`, widgets `deleteWidget`, flow steps `deleteAction` |
+
+### Examples: entity details, folders, code actions, app settings
+
+Entity dialog details: system members on a root entity, an event handler changed, attribute documentation /
+localize / place, association documentation and a new owner, annotations, rule order, access rule documentation:
+
+```json
+{ "ops": [
+  { "op": "createEntity", "module": "Sales", "name": "Audit", "createdDate": true, "owner": true, "image": "Sales.Images.Audit" },
+  { "op": "changeEntity", "entity": "Sales.Order", "changedDate": true, "changedBy": true },
+  { "op": "changeEventHandler", "entity": "Sales.Order", "handler": "Before Commit", "microflow": "Sales.BCo_Order_Check", "raiseErrorOnFalse": false },
+  { "op": "addAttribute", "entity": "Sales.Order", "name": "ShippedOn", "type": "DateTime", "localize": false, "documentation": "UTC", "after": "OrderDate" },
+  { "op": "changeAttribute", "attribute": "Sales.Order.Note", "documentation": "Shown to the customer", "position": 1 },
+  { "op": "changeAssociation", "association": "Sales.Line_Order", "documentation": "Each line belongs to one order" },
+  { "op": "changeAssociation", "association": "Sales.Tag_Order", "to": "Sales.Invoice" },
+  { "op": "addDomainAnnotation", "module": "Sales", "text": "Orders come from the web shop", "near": "Sales.Order" },
+  { "op": "changeDomainAnnotation", "module": "Sales", "annotation": "Orders come", "width": 400 },
+  { "op": "deleteDomainAnnotation", "module": "Sales", "annotation": 2 },
+  { "op": "changeValidationRule", "entity": "Sales.Order", "attribute": "Email", "rule": "required", "position": 1 },
+  { "op": "changeAccessRule", "entity": "Sales.Order", "roles": ["Sales.User"], "documentation": "Users see their own orders" }
+] }
+```
+
+Folders, Java / JavaScript actions (parameters, code; callers follow), module settings and packages:
+
+```json
+{ "ops": [
+  { "op": "renameFolder", "module": "Sales", "folder": "Flows/Old", "newName": "Archive" },
+  { "op": "moveFolder", "module": "Sales", "folder": "Flows/Archive", "to": "Retired" },
+  { "op": "deleteFolder", "module": "Sales", "folder": "Tmp", "force": true },
+  { "op": "changeJavaScriptAction", "javaScriptAction": "Sales.JS_Format", "addParameters": [ { "name": "Digits", "type": "Integer", "value": "2" } ], "platform": "Web", "code": "return Number(Amount).toFixed(Number(Digits));" },
+  { "op": "changeJavaAction", "javaAction": "Sales.JA_Check", "removeParameters": ["Old"], "returns": "Boolean", "code": "return Limit != null;" },
+  { "op": "setModuleSettings", "module": "Sales", "version": "1.2.0" },
+  { "op": "moveConstant", "constant": "Sales.ApiUrl", "module": "Integration", "folder": "Settings" },
+  { "op": "exportModulePackage", "module": "Sales", "file": "packages/Sales_1.2.0.mpk" },
+  { "op": "updateModulePackage", "file": "downloads/Administration.mpk", "replace": true },
+  { "op": "createEnumeration", "module": "Sales", "name": "Level", "values": [ { "name": "Low", "caption": "Low", "image": "Sales.Images.Low" }, "High" ] }
+] }
+```
+
+App settings, security, languages, navigation:
+
+```json
+{ "ops": [
+  { "op": "setProjectSettings", "multipleSessions": false, "scheduledEventTimeZone": "Europe/Istanbul" },
+  { "op": "addCertificate", "file": "edits/partner-ca.crt" },
+  { "op": "deleteCertificate", "certificate": 1 },
+  { "op": "setSecurity", "guestRole": "Anonymous", "passwordPolicy": { "minimumLength": 10, "requireDigit": true } },
+  { "op": "changeUserRole", "role": "Administrator", "manageableRoles": ["Administrator", "User"] },
+  { "op": "changeLanguage", "code": "nl_NL", "checkCompleteness": true, "dateFormat": "dd-MM-yyyy" },
+  { "op": "deleteLanguage", "code": "de_DE" },
+  { "op": "changeNavigationProfile", "profile": "Native", "ota": true, "networkTimeoutMs": 20000 },
+  { "op": "deleteNavigationProfile", "profile": "Phone" }
+] }
+```
 
 ### Examples
 

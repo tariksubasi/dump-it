@@ -1,12 +1,13 @@
 "use strict";
-// Changing and deleting what the create/add ops make: constants, scheduled events, validation rules, event
-// handlers, indexes, and enumeration values (order, captions per language, images). The elements keep the keys
+// Changing and deleting what the create/add ops make: constants, scheduled events, validation rules (also their
+// order), event handlers (changeEventHandler: moment, event, microflow, options), indexes, and enumeration values
+// (order, captions per language, images). The elements keep the keys
 // Studio Pro stored for them (or the add op wrote); only values change. Samples: Constants$Constant in every test
 // project; DomainModels$EntityIndex (DataGrid, ImageCropper); no Studio Pro sample of a scheduled event, a domain
 // model validation rule, an event handler or an enumeration value with an image (Image "" everywhere): their
 // first use is reported.
 const sdk = require("mendixmodelsdk");
-const { fail, bool, enumValue } = require("./ops-util");
+const { fail, bool, enumValue, reorder } = require("./ops-util");
 
 const { domainmodels: dm, microflows: mf, constants, scheduledevents: se, enumerations } = sdk;
 
@@ -28,17 +29,24 @@ const SMALL_OPS = {
         }
     },
     changeValidationRule: {
-        doc: "Change a validation rule of an attribute: its message or its values (max length, range, regular expression, value).",
+        doc: "Change a validation rule of an attribute: its message, its values (max length, range, regular expression, value) or its place in the entity's list of rules.",
         fields: {
             entity: "R Module.Entity", attribute: "R attribute name", rule: `optional ${RULE_NAMES.join(" | ")}: which rule (needed when the attribute has several)`,
             message: "optional new error message (text, or { \"en_US\": ..., \"nl_NL\": ... })", maxLength: "maxLength: number", min: "range: minimum (null = none)", max: "range: maximum (null = none)",
-            regex: "regex: Module.RegularExpression", value: "equals: value"
+            regex: "regex: Module.RegularExpression", value: "equals: value",
+            position: "optional number: its place among the entity's validation rules (1 = first; the order the messages are checked in)"
         }
     },
     deleteValidationRule: { doc: "Delete a validation rule of an attribute.", fields: { entity: "R Module.Entity", attribute: "R attribute name", rule: `optional ${RULE_NAMES.join(" | ")} (needed when the attribute has several)` } },
     deleteEventHandler: {
         doc: "Delete an event handler of an entity (the microflow stays).",
         fields: { entity: "R Module.Entity", moment: "optional Before | After", event: "optional Create | Commit | Delete | RollBack", microflow: "optional Module.Microflow (what it runs)" }
+    },
+    changeEventHandler: {
+        doc: "Change an event handler of an entity: when it runs (moment, event), the microflow, pass the object, raise an error on false. Give only what changes.",
+        fields: { entity: "R Module.Entity", handler: "R which handler: \"Before Commit\" (moment and event) or a number (1 = the entity's first handler)",
+            moment: "optional new Before | After", event: "optional new Create | Commit | Delete | RollBack", microflow: "optional new Module.Microflow",
+            passObject: "optional true/false: pass the object as the microflow's parameter", raiseErrorOnFalse: "optional true/false (Before only)" }
     },
     changeIndex: { doc: "Change the attributes of a database index.", fields: { entity: "R Module.Entity", index: INDEX, attributes: "R new attributes [ \"Attr\" or { \"name\": \"Attr\", \"ascending\": false } ]" } },
     deleteIndex: { doc: "Delete a database index.", fields: { entity: "R Module.Entity", index: INDEX } },
@@ -57,12 +65,19 @@ const SMALL_SYNONYMS = {
     changeScheduledEvent: { start: "write the start time as \"at\": \"HH:MM\" (Day/Week) or \"MM\" (Hour)", startDateTime: "write the start time as \"at\": \"HH:MM\"", name: "rename it with { \"op\": \"rename\" }", schedule: "use \"every\", \"interval\", \"at\" and \"days\"" },
     changeValidationRule: { type: "the kind of rule cannot change: deleteValidationRule, then addValidationRule", errorMessage: "write it as \"message\"" },
     deleteIndex: { attributes: "name the index with \"index\": [ \"Attr\", ... ]" },
+    changeEventHandler: { index: "write it as \"handler\": 1", passEventObject: "write it as \"passObject\"", raiseError: "write it as \"raiseErrorOnFalse\"", when: "write it as \"moment\": \"Before\" | \"After\"" },
     changeEnumerationValue: { name: "rename it with { \"op\": \"rename\", \"target\": \"Module.Enum.Value\", \"newName\": ... }", newName: "rename it with { \"op\": \"rename\" }" },
     moveEnumerationValue: { to: "use \"position\" (1 = first), \"before\" or \"after\"", index: "use \"position\" (1 = first)" },
     delete: {
         rule: "a validation rule is deleted with deleteValidationRule { entity, attribute, rule }", moment: "an event handler is deleted with deleteEventHandler { entity, moment, event }",
         event: "an event handler is deleted with deleteEventHandler { entity, moment, event }", index: "an index is deleted with deleteIndex { entity, index }"
     }
+};
+
+const strict = (v, field, where) => {
+    if (v === true || v === "true") return true;
+    if (v === false || v === "false") return false;
+    throw new Error(`${where}: ${field} must be true or false, not ${JSON.stringify(v)}`);
 };
 
 // x: { model, client, get, entity, text, dataType, exists }
@@ -229,7 +244,7 @@ function makeSmall(x) {
         const allowed = { maxlength: ["maxLength"], range: ["min", "max"], regex: ["regex"], equals: ["value"] }[kind] || [];
         const given = ["maxLength", "min", "max", "regex", "value"].filter(k => o[k] !== undefined);
         for (const k of given) if (!allowed.includes(k)) throw new Error(`${where}: '${k}' does not apply to a ${ruleName(kind)} rule${allowed.length ? ` (it takes ${allowed.join(", ")})` : ""}; to change the kind: deleteValidationRule, then addValidationRule`);
-        if (o.message === undefined && !given.length) throw new Error(`${where}: give "message"${allowed.length ? ` or ${allowed.join(", ")}` : ""}`);
+        if (o.message === undefined && !given.length && o.position === undefined) throw new Error(`${where}: give "message"${allowed.length ? `, ${allowed.join(", ")}` : ""} or "position"`);
         const info = r.ruleInfo;
         const done = [];
         if (o.message !== undefined) {
@@ -264,6 +279,10 @@ function makeSmall(x) {
             info.useValue = true;
             info.equalsToValue = String(o.value);
             done.push(`equals ${o.value}`);
+        }
+        if (o.position !== undefined) {
+            const label = y => `${(y.attributeQualifiedName || "?").split(".").pop()} ${ruleName(kindOf(y.ruleInfo))}`;
+            done.push(reorder(e.validationRules, r, { position: o.position }, where, label) + ` (${[...e.validationRules].map(label).join(", ")})`);
         }
         return `${o.entity}.${o.attribute} ${ruleName(kind)}: ${done.join(", ")}`;
     }
@@ -306,6 +325,58 @@ function makeSmall(x) {
         const t = handlerText(h);
         h.delete();
         return `${o.entity}: ${t} deleted (the microflow stays)`;
+    }
+
+    // handler: "Before Commit" or a number (1-based)
+    function handlerBy(e, o, where) {
+        const all = [...e.eventHandlers];
+        if (!all.length) throw new Error(`${where}: ${o.entity} has no event handlers (add one with addEventHandler)`);
+        const list = all.map((h, i) => `${i + 1}: ${handlerText(h)}`).join("; ");
+        if (typeof o.handler === "number" || /^\d+$/.test(String(o.handler))) {
+            const n = Number(o.handler);
+            if (n < 1 || n > all.length) throw new Error(`${where}: ${o.entity} has ${all.length} event handler(s): ${list}`);
+            return all[n - 1];
+        }
+        const m = /^\s*(\w+)\s+(\w+)\s*$/.exec(String(o.handler || ""));
+        if (!m) throw new Error(`${where}: handler is "Before Commit" (moment and event) or a number; ${o.entity} has: ${list}`);
+        const moment = enumValue(dm.ActionMoment, m[1], "moment");
+        const event = enumValue(dm.EventType, m[2], "event");
+        const hits = all.filter(h => h.moment === moment && h.event === event);
+        if (!hits.length) throw new Error(`${where}: ${o.entity} has no ${moment.name} ${event.name} handler; its handlers: ${list}`);
+        if (hits.length > 1) throw new Error(`${where}: ${hits.length} ${moment.name} ${event.name} handlers; give its number: ${list}`);
+        return hits[0];
+    }
+
+    async function changeEventHandler(o) {
+        const where = `changeEventHandler ${o.entity}`;
+        const e = await ownEntity(o.entity);
+        const h = handlerBy(e, o, where);
+        const before = handlerText(h);
+        const keys = ["moment", "event", "microflow", "passObject", "raiseErrorOnFalse"].filter(k => o[k] !== undefined);
+        if (!keys.length) throw new Error(`${where}: give what changes: moment, event, microflow, passObject or raiseErrorOnFalse`);
+        const moment = o.moment !== undefined ? enumValue(dm.ActionMoment, o.moment, "moment") : h.moment;
+        const event = o.event !== undefined ? enumValue(dm.EventType, o.event, "event") : h.event;
+        const pass = o.passObject !== undefined ? strict(o.passObject, "passObject", where) : h.passEventObject;
+        let flow = h.microflow;
+        if (o.microflow !== undefined) {
+            flow = await x.get(o.microflow);
+            if (!(flow instanceof mf.Microflow)) throw new Error(`${where}: '${o.microflow}' is not a microflow`);
+        }
+        if (!flow) throw new Error(`${where}: the handler's microflow ${h.microflowQualifiedName || ""} is missing; give "microflow"`);
+        if (!flow.isLoaded) flow = await flow.load();
+        const fq = flow.qualifiedName;
+        const params = flow.objectCollection.objects.filter(y => y instanceof mf.MicroflowParameterObject);
+        if (pass && params.length !== 1) throw new Error(`${where}: ${fq} must have exactly one parameter (the ${o.entity} object), it has ${params.length}; or set "passObject": false`);
+        if (!pass && params.length) throw new Error(`${where}: ${fq} has parameters, but passObject is false`);
+        if (moment === dm.ActionMoment.Before && !(flow.microflowReturnType instanceof sdk.datatypes.BooleanType)) throw new Error(`${where}: a Before handler microflow must return Boolean; ${fq} does not`);
+        if (o.raiseErrorOnFalse !== undefined && moment !== dm.ActionMoment.Before) throw new Error(`${where}: raiseErrorOnFalse applies to Before handlers only (this one runs After)`);
+        if (e.eventHandlers.some(y => y !== h && y.moment === moment && y.event === event && y.microflow === flow)) throw new Error(`${where}: ${o.entity} already has ${moment.name} ${event.name} -> ${fq}`);
+        h.moment = moment;
+        h.event = event;
+        if (flow !== h.microflow) h.microflow = flow;
+        h.passEventObject = pass;
+        h.raiseErrorOnFalse = moment === dm.ActionMoment.Before ? (o.raiseErrorOnFalse !== undefined ? strict(o.raiseErrorOnFalse, "raiseErrorOnFalse", where) : h.raiseErrorOnFalse) : false;
+        return `${o.entity}: ${before} -> ${handlerText(h)}${h.passEventObject ? "" : " (no object passed)"}${moment === dm.ActionMoment.Before ? `, raise an error on false: ${h.raiseErrorOnFalse}` : ""}`;
     }
 
     const attrsOf = (e, ix) => ix.attributes.map(a => (a.attribute ? a.attribute.name : (a.attributeQualifiedName || "?").split(".").pop()));
@@ -458,6 +529,7 @@ function makeSmall(x) {
             if (o.maxLength !== undefined && r.ruleInfo.maxLength !== Number(o.maxLength)) out.push(`max length is ${r.ruleInfo.maxLength}`);
             if (o.min !== undefined && o.min !== null && r.ruleInfo.minValue !== String(o.min)) out.push(`minimum is ${r.ruleInfo.minValue}`);
             if (o.max !== undefined && o.max !== null && r.ruleInfo.maxValue !== String(o.max)) out.push(`maximum is ${r.ruleInfo.maxValue}`);
+            if (o.position !== undefined && [...e.validationRules].indexOf(r) !== Number(o.position) - 1) out.push(`${o.entity}.${o.attribute} rule is at position ${[...e.validationRules].indexOf(r) + 1}`);
             return out;
         },
         async deleteValidationRule(o) {
@@ -470,6 +542,12 @@ function makeSmall(x) {
             const e = await ownEntity(o.entity);
             const left = e.eventHandlers.filter(h => (o.moment === undefined || h.moment.name.toLowerCase() === String(o.moment).toLowerCase()) && (o.event === undefined || h.event.name.toLowerCase() === String(o.event).toLowerCase()) && (o.microflow === undefined || h.microflowQualifiedName === o.microflow));
             return left.length ? [`${o.entity} still has ${left.map(handlerText).join("; ")}`] : [];
+        },
+        async changeEventHandler(o) {
+            const e = await ownEntity(o.entity);
+            const ok = e.eventHandlers.some(h => (o.moment === undefined || h.moment.name.toLowerCase() === String(o.moment).toLowerCase()) && (o.event === undefined || h.event.name.toLowerCase() === String(o.event).toLowerCase()) && (o.microflow === undefined || h.microflowQualifiedName === o.microflow)
+                && (o.passObject === undefined || h.passEventObject === bool(o.passObject, true)) && (o.raiseErrorOnFalse === undefined || h.raiseErrorOnFalse === bool(o.raiseErrorOnFalse, true)));
+            return ok ? [] : [`${o.entity} has no handler ${[o.moment, o.event, o.microflow].filter(Boolean).join(" ")} as changed; its handlers: ${e.eventHandlers.map(handlerText).join("; ")}`];
         },
         async changeIndex(o) {
             const e = await ownEntity(o.entity);
@@ -496,7 +574,7 @@ function makeSmall(x) {
         }
     };
 
-    return { impl: { changeConstant, changeScheduledEvent, changeValidationRule, deleteValidationRule, deleteEventHandler, changeIndex, deleteIndex, moveEnumerationValue, changeEnumerationValue }, checks, setImage };
+    return { impl: { changeConstant, changeScheduledEvent, changeValidationRule, deleteValidationRule, deleteEventHandler, changeEventHandler, changeIndex, deleteIndex, moveEnumerationValue, changeEnumerationValue }, checks, setImage };
 }
 
 // checkPlan: a later op of the plan changes what this op made (only the final state is checked)
@@ -506,7 +584,7 @@ function smallChangedLater(name, o, rest) {
     if (name === "createConstant" || name === "changeConstant") return later(["changeConstant"], x => x.constant === (qn && name === "createConstant" ? qn : o.constant));
     if (name === "createScheduledEvent" || name === "changeScheduledEvent") return later(["changeScheduledEvent"], x => x.event === (name === "createScheduledEvent" ? qn : o.event));
     if (["addValidationRule", "changeValidationRule"].includes(name)) return later(["changeValidationRule", "deleteValidationRule"], x => x.entity === o.entity && x.attribute === o.attribute);
-    if (name === "addEventHandler") return later(["deleteEventHandler"], x => x.entity === o.entity);
+    if (["addEventHandler", "changeEventHandler"].includes(name)) return later(["deleteEventHandler", "changeEventHandler"], x => x.entity === o.entity);
     if (["addIndex", "changeIndex"].includes(name)) return later(["changeIndex", "deleteIndex"], x => x.entity === o.entity);
     const enumQn = name === "createEnumeration" ? qn : name === "addEnumerationValue" ? o.enumeration : ["moveEnumerationValue", "changeEnumerationValue"].includes(name) ? String(o.value).split(".").slice(0, 2).join(".") : null;
     if (enumQn) return later(["moveEnumerationValue", "changeEnumerationValue"], x => String(x.value).startsWith(enumQn + "."));

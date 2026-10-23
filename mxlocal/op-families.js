@@ -11,7 +11,7 @@ const CATALOGUES = [
     ["./ops-nav", "NAV_OPS", "navigation"], ["./theme", "THEME_OPS", "design system"], ["./marketplace", "MARKET_OPS", "marketplace"],
     ["./ops-mappings", "MAPPING_OPS", "mapping"], ["./ops-xml", "XML_OPS", "mapping"], ["./ops-rest", "REST_OPS", "rest"], ["./ops-odata", "ODATA_OPS", "odata"],
     ["./ops-workflows", "WORKFLOW_OPS", "workflows"], ["./ops-small", "SMALL_OPS", "small changes"], ["./ops-offline", "OFFLINE_OPS", "native"],
-    ["./ops-copy", "COPY_OPS", "refactor"], ["./ops-general", "GENERAL_OPS", "refactor"]
+    ["./ops-copy", "COPY_OPS", "refactor"], ["./ops-general", "GENERAL_OPS", "refactor"], ["./ops-folders", "FOLDER_OPS", "refactor"], ["./ops-app", "APP_OPS", "app"]
 ];
 
 const CORE = {

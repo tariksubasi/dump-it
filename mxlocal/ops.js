@@ -4,7 +4,7 @@
 const sdk = require("mendixmodelsdk");
 
 const { domainmodels: dm, microflows: mf, datatypes, enumerations, texts, security, projects, constants, scheduledevents, rest, pages } = sdk;
-const { ATTRIBUTE_TYPES, DATA_TYPES, suggest, fail, validate, bool, noDollar, enumValue, validName } = require("./ops-util");
+const { ATTRIBUTE_TYPES, DATA_TYPES, suggest, fail, validate, bool, noDollar, enumValue, validName, reorder } = require("./ops-util");
 
 
 // ---------------------------------------------------------------- op catalog (also the 'ops' help text)
@@ -36,21 +36,28 @@ const { makeOffline, OFFLINE_OPS } = require("./ops-offline");
 const { makeDmLayout, DMLAYOUT_OPS } = require("./ops-dmlayout");
 const { makeComposite, COMPOSITE_OPS, COMPOSITE_SYNONYMS } = require("./ops-composite");
 const { makeGeneral, GENERAL_OPS } = require("./ops-general");
+const { makeFolders, FOLDER_OPS, FOLDER_SYNONYMS } = require("./ops-folders");
+const { makeApp, APP_OPS, APP_SYNONYMS } = require("./ops-app");
 
 const OPS = {
     createEntity: {
         doc: "Create an entity in a module's domain model.",
-        fields: { module: "R module name", name: "R entity name", persistable: "optional true/false (default true)", generalization: "optional Module.ParentEntity (also System.FileDocument, System.Image, System.User)", attributes: "optional [ { \"name\": ..., \"type\": ..., \"default\": ..., \"calculated\": ... } ]", documentation: "optional text" }
+        fields: { module: "R module name", name: "R entity name", persistable: "optional true/false (default true)", generalization: "optional Module.ParentEntity (also System.FileDocument, System.Image, System.User)", attributes: "optional [ { \"name\": ..., \"type\": ..., \"default\": ..., \"calculated\": ... } ]", documentation: "optional text", image: "optional Module.Images.Image shown in the domain model",
+            createdDate: "optional true/false: system member createdDate (not with generalization: the root entity has them)", changedDate: "optional true/false: system member changedDate", owner: "optional true/false: system member owner (System.User)", changedBy: "optional true/false: system member changedBy (System.User)" }
     },
-    addAttribute: { doc: "Add an attribute to an entity (stored, or calculated by a microflow).", fields: { entity: "R Module.Entity", name: "R attribute name", type: "R " + ATTRIBUTE_TYPES, default: "optional default value (as Studio Pro shows it)", calculated: "optional Module.Microflow that computes the value (not stored): no parameter or one of the entity, returns the attribute type" } },
-    changeAttribute: { doc: "Change the type, default, or stored/calculated of an attribute.", fields: { attribute: "R Module.Entity.Attribute", type: "optional new type", default: "optional new default value", calculated: "optional Module.Microflow: make it calculated (its column is dropped)", stored: "optional true: make a calculated attribute stored again" } },
+    addAttribute: { doc: "Add an attribute to an entity (stored, or calculated by a microflow).", fields: { entity: "R Module.Entity", name: "R attribute name", type: "R " + ATTRIBUTE_TYPES, default: "optional default value (as Studio Pro shows it)", calculated: "optional Module.Microflow that computes the value (not stored): no parameter or one of the entity, returns the attribute type",
+        localize: "optional DateTime only: true (default) shows the date in the user's time zone, false shows it as stored (UTC)", documentation: "optional text",
+        before: "optional attribute name it goes before (default: last)", after: "optional attribute name it goes after" } },
+    changeAttribute: { doc: "Change the type, default, stored/calculated, localize (DateTime), documentation or place in the list of an attribute.", fields: { attribute: "R Module.Entity.Attribute", type: "optional new type", default: "optional new default value", calculated: "optional Module.Microflow: make it calculated (its column is dropped)", stored: "optional true: make a calculated attribute stored again",
+        localize: "optional DateTime only: true = the user's time zone, false = as stored (UTC)", documentation: "optional text (\"\" = none)",
+        position: "optional number: its place in the entity's attribute list (1 = first)", before: "optional attribute name it goes before", after: "optional attribute name it goes after" } },
     addAssociation: {
         doc: "Add an association. 'from' stores the reference: many 'from' objects point to one 'to' object (Reference), or to many (ReferenceSet).",
         fields: { from: "R Module.Entity (owner side)", to: "R Module.Entity or OtherModule.Entity", name: "optional (default From_To)", type: "optional Reference | ReferenceSet (default Reference)", owner: "optional Default | Both",
             storage: "optional Table | Column (default: the app's setting for a Reference with owner Default, else Table)", onDeleteFrom: "optional keep | delete | prevent (default keep): when a 'from' object is deleted", onDeleteTo: "optional keep | delete | prevent: when a 'to' object is deleted",
-            messageFrom: "prevent on onDeleteFrom: message", messageTo: "prevent on onDeleteTo: message" }
+            messageFrom: "prevent on onDeleteFrom: message", messageTo: "prevent on onDeleteTo: message", documentation: "optional text" }
     },
-    createEnumeration: { doc: "Create an enumeration.", fields: { module: "R module name", name: "R enumeration name", values: "R [ \"Value\" or { \"name\": ..., \"caption\": ... } ]", folder: "optional folder path, e.g. Enums/Order" } },
+    createEnumeration: { doc: "Create an enumeration (values with captions and images).", fields: { module: "R module name", name: "R enumeration name", values: "R [ \"Value\" or { \"name\": ..., \"caption\": ..., \"image\": \"Module.Images.Icon\" } ]", folder: "optional folder path, e.g. Enums/Order" } },
     addEnumerationValue: { doc: "Add a value to an enumeration.", fields: { enumeration: "R Module.Enumeration", name: "R value name", caption: "optional caption (default the name; or { \"en_US\": ..., \"nl_NL\": ... })", image: "optional Module.ImageCollection.Image" } },
     createModule: { doc: "Create a module (with its domain model, module security and settings, as Studio Pro does).", fields: { name: "R module name, e.g. EmployeeOnboarding", roles: "optional [ \"RoleName\" ] module roles to create in it" } },
     createModuleRole: { doc: "Create a module role.", fields: { module: "R module name", name: "R role name", description: "optional" } },
@@ -59,7 +66,7 @@ const OPS = {
     ...TEXT_OPS,
     addAccessRule: {
         doc: "Add an entity access rule. Members not listed in 'members' get 'access'.",
-        fields: { entity: "R Module.Entity", roles: "R [ \"Module.Role\" ]", access: "optional ReadWrite | ReadOnly | None (default ReadOnly)", members: "optional { \"Attribute\": \"ReadWrite\", \"Module.Assoc\": \"ReadOnly\", \"System.FileDocument.Name\": \"ReadWrite\" }", create: "optional true/false", delete: "optional true/false", xpath: "optional XPath, e.g. [Owner = '[%CurrentUser%]']", newMembers: "optional ReadWrite | ReadOnly | None: rights of members added later (default: access)" }
+        fields: { entity: "R Module.Entity", roles: "R [ \"Module.Role\" ]", access: "optional ReadWrite | ReadOnly | None (default ReadOnly)", members: "optional { \"Attribute\": \"ReadWrite\", \"Module.Assoc\": \"ReadOnly\", \"System.FileDocument.Name\": \"ReadWrite\" }", create: "optional true/false", delete: "optional true/false", xpath: "optional XPath, e.g. [Owner = '[%CurrentUser%]']", newMembers: "optional ReadWrite | ReadOnly | None: rights of members added later (default: access)", documentation: "optional text: why the rule exists" }
     },
     ...DOMAIN_OPS,
     createMicroflow: {
@@ -144,6 +151,8 @@ const OPS = {
     ...OFFLINE_OPS,
     ...DMLAYOUT_OPS,
     ...GENERAL_OPS,
+    ...FOLDER_OPS,
+    ...APP_OPS,
     moveDocument: { doc: "Move a document to another folder of the same module.", fields: { document: "R Module.Document", folder: "optional folder path, e.g. Orders/Actions (missing or \"\" = the module root)" } },
     rename: { doc: "Rename a module, document, entity, attribute, association or enumeration value. Updates references, reports names left in expressions/XPath/Java.", fields: { target: "R qualified name, e.g. Module.Entity.Attribute", newName: "R new short name" } },
     delete: { doc: "Delete a document, entity, attribute, association, enumeration value or module role. Lists what still uses it. (Validation rules, event handlers, indexes: deleteValidationRule, deleteEventHandler, deleteIndex; access rules: deleteAccessRule; widgets: deleteWidget; flow steps: deleteAction.)", fields: { target: "R qualified name" } }
@@ -467,7 +476,7 @@ function bind(model, client) {
     const flowEdit = makeFlowEdit({ model, exists, createFlow: (o, nano) => flows.createFlow(o, nano, folder(o.module, o.folder)) }, flows);
     const pageOps = makePages({ model, client, get, exists, entity, text, translationsOf, folder, attributeChain, loadParents, persistable, dataType, grantAccess: o => impl.grantAccess(o), createNanoflow: o => createFlowOp(o, true) });
     const pageEdit = makePageEdit({ model, client, get, text, translationsOf, attributeChain, persistable }, pageOps.internals);
-    const securityOps = makeSecurity({ model, get });
+    const securityOps = makeSecurity({ model, get, client });
     const refOps = makeRefOps({ model, client, get, exists, dataType, folder, entity }, flows);
     const copyOps = makeCopy({ model, client, get, folder });
     const entityOps = makeEntity({ model, client, get, entity, persistable, isFresh: qn => isFresh(qn) });
@@ -493,6 +502,8 @@ function bind(model, client) {
     const offlineOps = makeOffline({ model, client, entity, persistable });
     const dmLayout = makeDmLayout({ model, client, domainModel, isFresh: qn => isFresh(qn) });
     const generalOps = makeGeneral({ model, client, get, exists, entity, persistable, isFresh: qn => isFresh(qn), impl: () => impl, addMemberToRules: (e, m) => domainOps.addMemberToRules(e, m) });
+    const folderOps = makeFolders({ model, client, moduleNamed, folder, impl: () => impl });
+    const appOps = makeApp({ model, client, get, folder, moduleNamed });
     const scaffoldOps = makeScaffold({ model, client, get, exists, entity, folder, impl: () => impl, pageOps, pageEdit });
     const compositeOps = makeComposite({ model, client, get, exists, entity, folder, impl: () => impl, pageOps, pageEdit, themeOps });
 
@@ -539,6 +550,22 @@ function bind(model, client) {
         return out;
     }
 
+    // localize (DateTime) and documentation of an attribute: summary parts
+    function attributeExtras(a, o, qn) {
+        const out = [];
+        if (o.localize !== undefined) {
+            if (!(a.type instanceof dm.DateTimeAttributeType)) throw new Error(`${qn}: localize applies to DateTime attributes only (this one is ${a.type.structureTypeName.split("$")[1].replace("AttributeType", "")})`);
+            if (o.localize !== true && o.localize !== false && o.localize !== "true" && o.localize !== "false") throw new Error(`${qn}: localize must be true or false`);
+            a.type.localizeDate = o.localize === true || o.localize === "true";
+            out.push(a.type.localizeDate ? "localized (user's time zone)" : "not localized (UTC)");
+        }
+        if (o.documentation !== undefined) {
+            a.documentation = String(o.documentation).replace(/\r?\n/g, "\r\n");
+            out.push(a.documentation ? "documentation set" : "no documentation");
+        }
+        return out;
+    }
+
     // Entities, attributes and associations created by this plan: deleting or retyping them loses no stored data.
     const fresh = new Set();
     const isFresh = qn => [...fresh].some(f => qn === f || qn.startsWith(f + "."));
@@ -555,7 +582,9 @@ function bind(model, client) {
             e.location = { x: xs.length ? Math.max(...xs) + 250 : 100, y: 100 };
             if (o.generalization) await setParent(e, o.generalization);
             else if (e.generalization instanceof dm.NoGeneralization) e.generalization.persistable = bool(o.persistable, true);
-            const attrSpec = { fields: { name: "R attribute name", type: "R " + ATTRIBUTE_TYPES, default: "optional default value", calculated: "optional Module.Microflow" } };
+            const sys = await entityOps.systemMembers(e, o, `${o.module}.${o.name}`);
+            if (o.image) sys.push(await entityOps.setImage(e, o.image));
+            const attrSpec = { fields: { name: "R attribute name", type: "R " + ATTRIBUTE_TYPES, default: "optional default value", calculated: "optional Module.Microflow", localize: "optional DateTime: true/false", documentation: "optional text" } };
             for (const [i, a] of (o.attributes || []).entries()) {
                 validate("-", "attribute", attrSpec, a || {}, `${o.module}.${o.name} attribute ${i + 1}`);
                 await impl.addAttribute({ entity: `${o.module}.${o.name}`, ...a }, e);
@@ -564,7 +593,7 @@ function bind(model, client) {
             // a free spot in the diagram (next to its parent in the same module)
             const parent = o.generalization && e.generalization instanceof dm.Generalization ? d.entities.find(x => x.qualifiedName === o.generalization) : null;
             const at = dmLayout.place(d, e, parent);
-            return `${o.module}.${o.name} (at ${at.x};${at.y}${parent ? `, next to ${parent.name}` : ""})`;
+            return `${o.module}.${o.name} (at ${at.x};${at.y}${parent ? `, next to ${parent.name}` : ""}${sys.length ? `; ${sys.join(", ")}` : ""})`;
         },
         async addAttribute(o, loaded) {
             fresh.add(`${o.entity}.${o.name}`);
@@ -580,13 +609,16 @@ function bind(model, client) {
             const dflt = await attributeType(a, o.type);
             setDefault(a, o.default !== undefined ? o.default : dflt);
             if (o.calculated !== undefined) await domainOps.calculate(a, o.calculated);
+            const extra = attributeExtras(a, o, `${o.entity}.${o.name}`);
+            const at = reorder(e.attributes, a, { before: o.before, after: o.after }, `addAttribute ${o.entity}.${o.name}`);
+            if (at) extra.push(at);
             if (!loaded) await domainOps.addMemberToRules(e, a);
-            return `${o.entity}.${o.name}: ${o.type}` + (o.calculated ? ` calculated by ${o.calculated}` : "");
+            return `${o.entity}.${o.name}: ${o.type}` + (o.calculated ? ` calculated by ${o.calculated}` : "") + extra.map(l => `, ${l}`).join("");
         },
         async changeAttribute(o) {
             const a = await get(o.attribute);
             if (!(a instanceof dm.Attribute)) throw new Error(`'${o.attribute}' is not an attribute`);
-            if (o.type === undefined && o.default === undefined && o.calculated === undefined && o.stored === undefined) throw new Error("changeAttribute needs 'type', 'default', 'calculated' or 'stored'");
+            if (["type", "default", "calculated", "stored", "localize", "documentation", "position", "before", "after"].every(k => o[k] === undefined)) throw new Error("changeAttribute needs 'type', 'default', 'calculated', 'stored', 'localize', 'documentation' or 'position' / 'before' / 'after'");
             domainOps.assertOwnAttributes(a.containerAsEntity, o.attribute.split(".").slice(0, 2).join("."));
             if (o.calculated !== undefined && bool(o.stored, false)) throw new Error("changeAttribute: give 'calculated' or 'stored', not both");
             const wasCalc = a.value instanceof dm.CalculatedValue;
@@ -603,6 +635,10 @@ function bind(model, client) {
             if (o.calculated !== undefined) note = await domainOps.calculate(a, o.calculated);
             else if (wasCalc && o.type !== undefined && calcAfter) note = await domainOps.calculate(a, oldFlow);
             else if (wasCalc && bool(o.stored, false) && !(a.value instanceof dm.StoredValue)) setDefault(a, o.default !== undefined ? o.default : "");
+            const extra = attributeExtras(a, o, o.attribute);
+            const moved = reorder(a.containerAsEntity.attributes, a, o, `changeAttribute ${o.attribute}`);
+            if (moved) extra.push(moved);
+            if (extra.length) note += `, ${extra.join(", ")}`;
             const stored = persistable(a.containerAsEntity) && !isFresh(o.attribute);
             const changed = a.type.structureTypeName !== before && stored && !wasCalc && !calcAfter;
             const lines = [];
@@ -625,6 +661,7 @@ function bind(model, client) {
             a.type = enumValue(dm.AssociationType, o.type || "Reference", "association type");
             a.owner = enumValue(dm.AssociationOwner, o.owner || "Default", "association owner");
             fresh.add(`${o.from.split(".")[0]}.${name}`);
+            if (o.documentation !== undefined) a.documentation = String(o.documentation).replace(/\r?\n/g, "\r\n");
             const near = dmLayout.associated(from, to);
             const { notes } = await domainOps.associationSettings(a, o, true);
             await domainOps.addMemberToRules(from, a);
@@ -640,12 +677,15 @@ function bind(model, client) {
             const en = enumerations.Enumeration.createIn(folder(o.module, o.folder));
             en.name = o.name;
             if (!Array.isArray(o.values) || !o.values.length) throw new Error(`createEnumeration ${qn} needs values: ["A", "B"]`);
-            for (const v of o.values) {
+            const imgs = [];
+            for (const [i, v] of o.values.entries()) {
+                if (typeof v !== "string") validate("-", "value", { fields: { name: "R value name", caption: "optional caption", image: "optional Module.ImageCollection.Image" } }, v || {}, `${qn} value ${i + 1}`);
                 const val = enumerations.EnumerationValue.createIn(en);
                 val.name = typeof v === "string" ? v : v.name;
                 await text(val.caption, typeof v === "string" ? v : v.caption || v.name);
+                if (typeof v === "object" && v.image) imgs.push(`${val.name} ${await smallOps.setImage(val, v.image, `createEnumeration ${qn}.${val.name}`)}`);
             }
-            return qn;
+            return qn + (imgs.length ? ` (${imgs.join(", ")})` : "");
         },
         async addEnumerationValue(o) {
             const en = await get(o.enumeration);
@@ -948,17 +988,34 @@ function bind(model, client) {
         ...smallOps.impl,
         ...offlineOps.impl,
         ...dmLayout.impl,
-        ...generalOps.impl
+        ...generalOps.impl,
+        ...folderOps.impl,
+        ...appOps.impl
     };
 
     // ------------------------------------------------ checks (run after apply on a freshly loaded model)
 
     const typeName = t => t && t.structureTypeName.split("$")[1].replace("AttributeType", "");
+    const attributeExtrasCheck = (a, o, qn) => [
+        ...(o.localize !== undefined && a.type.localizeDate !== (o.localize === true || o.localize === "true") ? [`${qn} localize is ${a.type.localizeDate}`] : []),
+        ...(o.documentation !== undefined && a.documentation !== String(o.documentation).replace(/\r?\n/g, "\r\n") ? [`${qn} documentation not set`] : []),
+        ...placeCheck([...a.containerAsEntity.attributes].map(y => y.name), a.name, o, qn)
+    ];
+    // where an element ended up after reorder (before/after/position of o)
+    const placeCheck = (names, name, o, qn) => {
+        const i = names.indexOf(name);
+        if (o.position !== undefined && i !== Number(o.position) - 1) return [`${qn} is at position ${i + 1}`];
+        if (o.before !== undefined && names[i + 1] !== String(o.before).split(".").pop()) return [`${qn} is not before ${o.before} (${names.join(", ")})`];
+        if (o.after !== undefined && names[i - 1] !== String(o.after).split(".").pop()) return [`${qn} is not after ${o.after} (${names.join(", ")})`];
+        return [];
+    };
     const checks = {
         async createEntity(o) {
             const e = await entity(`${o.module}.${o.name}`);
             const missing = (o.attributes || []).filter(a => !e.attributes.some(x => x.name === a.name));
-            return missing.length ? [`${o.module}.${o.name} lacks attributes ${missing.map(a => a.name).join(", ")}`] : [];
+            const r = missing.length ? [`${o.module}.${o.name} lacks attributes ${missing.map(a => a.name).join(", ")}`] : [];
+            if (o.image && e.imageQualifiedName !== o.image) r.push(`${o.module}.${o.name} image is ${e.imageQualifiedName || "none"}`);
+            return [...r, ...entityOps.checkSystemMembers(e, o, `${o.module}.${o.name}`)];
         },
         async addAttribute(o) {
             const a = await get(`${o.entity}.${o.name}`);
@@ -966,6 +1023,7 @@ function bind(model, client) {
             const got = typeName(a.type).toLowerCase().replace("enumeration", "enum");
             const r = got === want ? [] : [`${o.entity}.${o.name} has type ${typeName(a.type)}, expected ${o.type}`];
             if (o.calculated !== undefined && !(a.value instanceof dm.CalculatedValue && a.value.microflowQualifiedName === o.calculated)) r.push(`${o.entity}.${o.name} is not calculated by ${o.calculated}`);
+            r.push(...attributeExtrasCheck(a, o, `${o.entity}.${o.name}`));
             return r;
         },
         async changeAttribute(o) {
@@ -974,18 +1032,22 @@ function bind(model, client) {
             if (o.default !== undefined && a.value.defaultValue !== String(o.default)) r.push(`${o.attribute} default is '${a.value.defaultValue}'`);
             if (o.calculated !== undefined && !(a.value instanceof dm.CalculatedValue && a.value.microflowQualifiedName === o.calculated)) r.push(`${o.attribute} is not calculated by ${o.calculated}`);
             if (bool(o.stored, false) && !(a.value instanceof dm.StoredValue)) r.push(`${o.attribute} is not stored`);
+            r.push(...attributeExtrasCheck(a, o, o.attribute));
             return r;
         },
         async addAssociation(o) {
             const from = await entity(o.from);
             const name = o.name || `${from.name}_${o.to.split(".").pop()}`;
-            return (await exists(`${o.from.split(".")[0]}.${name}`)) ? [] : [`association ${name} missing`];
+            if (!(await exists(`${o.from.split(".")[0]}.${name}`))) return [`association ${name} missing`];
+            const a = await get(`${o.from.split(".")[0]}.${name}`);
+            return o.documentation !== undefined && a.documentation !== String(o.documentation).replace(/\r?\n/g, "\r\n") ? [`association ${name} documentation not set`] : [];
         },
         async createEnumeration(o) {
             const en = await get(`${o.module}.${o.name}`);
             const want = o.values.map(v => (typeof v === "string" ? v : v.name));
             const missing = want.filter(v => !en.values.some(x => x.name === v));
-            return missing.length ? [`${o.module}.${o.name} lacks values ${missing.join(", ")}`] : [];
+            const noImage = o.values.filter(v => typeof v === "object" && v.image && (en.values.find(x => x.name === v.name) || {}).imageQualifiedName !== v.image).map(v => v.name);
+            return [...(missing.length ? [`${o.module}.${o.name} lacks values ${missing.join(", ")}`] : []), ...(noImage.length ? [`${o.module}.${o.name}: no image on ${noImage.join(", ")}`] : [])];
         },
         async addEnumerationValue(o) {
             return (await exists(`${o.enumeration}.${o.name}`)) ? [] : [`${o.enumeration}.${o.name} missing`];
@@ -1134,6 +1196,8 @@ function bind(model, client) {
         ...offlineOps.checks,
         ...dmLayout.checks,
         ...generalOps.checks,
+        ...folderOps.checks,
+        ...appOps.checks,
         createWorkflow: o => workflowOps.checks.createWorkflow(o),
         changeWorkflow: o => workflowOps.checks.changeWorkflow(o),
         deleteWorkflowActivity: o => workflowOps.checks.deleteWorkflowActivity(o),
@@ -1146,7 +1210,7 @@ function bind(model, client) {
         const name = Object.keys(OPS).find(k => k.toLowerCase() === String(o.op).toLowerCase());
         if (!name) fail(`${where}: unknown op '${o.op}'`, o.op, Object.keys(OPS));
         if (name === "addMenuItem" && o.roles !== undefined) throw new Error(`${where} (addMenuItem): ${NO_MENU_ROLES(o.page)}`);
-        for (const [k, hint] of Object.entries({ ...(DOMAIN_SYNONYMS[name] || {}), ...(FIELD_SYNONYMS[name] || {}), ...(SCAFFOLD_SYNONYMS[name] || {}), ...(SMALL_SYNONYMS[name] || {}), ...(COMPOSITE_SYNONYMS[name] || {}) })) if (o[k] !== undefined && !OPS[name].fields[k]) throw new Error(`${where} (${name}): unknown field '${k}': ${hint}`);
+        for (const [k, hint] of Object.entries({ ...(DOMAIN_SYNONYMS[name] || {}), ...(FIELD_SYNONYMS[name] || {}), ...(SCAFFOLD_SYNONYMS[name] || {}), ...(SMALL_SYNONYMS[name] || {}), ...(COMPOSITE_SYNONYMS[name] || {}), ...(FOLDER_SYNONYMS[name] || {}), ...(APP_SYNONYMS[name] || {}) })) if (o[k] !== undefined && !OPS[name].fields[k]) throw new Error(`${where} (${name}): unknown field '${k}': ${hint}`);
         validate("op", name, OPS[name], o, where);
         return { name, where };
     }

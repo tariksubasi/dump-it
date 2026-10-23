@@ -24,21 +24,24 @@ const RIGHTS = "ReadWrite | ReadOnly | None";
 const DELETE = "keep | delete | prevent";
 const DOMAIN_OPS = {
     changeAccessRule: {
-        doc: "Change an entity access rule: member rights, XPath, create/delete, rights for members added later, roles.",
+        doc: "Change an entity access rule: member rights, XPath, create/delete, rights for members added later, roles, documentation.",
         fields: {
             entity: "R Module.Entity", roles: "R [ \"Module.Role\" ] of the rule to change (as the export shows it)", rule: "optional number when several rules have these roles (1 = first rule of the entity)",
             setRoles: "optional [ \"Module.Role\" ]: the rule's new roles", access: `optional ${RIGHTS}: every member not in 'members' gets this (and members added later, unless newMembers)`,
             members: "optional { \"Attribute\": \"ReadOnly\", \"Assoc\": \"None\", \"System.FileDocument.Name\": \"ReadWrite\" }", newMembers: `optional ${RIGHTS}: rights of members added to the entity later`,
-            create: "optional true/false", delete: "optional true/false", xpath: "optional XPath, e.g. [Owner = '[%CurrentUser%]'] (\"\" = no constraint)"
+            create: "optional true/false", delete: "optional true/false", xpath: "optional XPath, e.g. [Owner = '[%CurrentUser%]'] (\"\" = no constraint)",
+            documentation: "optional text: why the rule exists (\"\" = none)"
         }
     },
     deleteAccessRule: { doc: "Delete an entity access rule.", fields: { entity: "R Module.Entity", roles: "R [ \"Module.Role\" ] of the rule", rule: "optional number when several rules have these roles" } },
     changeAssociation: {
-        doc: "Change an association: type, owner, storage, what happens on delete.",
+        doc: "Change an association: type, owner, storage, what happens on delete, documentation, or re-point an end (from / to; lists the places that use it).",
         fields: {
             association: "R Module.Association", type: "optional Reference | ReferenceSet", owner: "optional Default | Both", storage: "optional Table | Column (Column: Reference with owner Default only)",
             onDeleteFrom: `optional ${DELETE}: when a 'from' (owner) object is deleted: keep its 'to' objects, delete them too, or prevent the delete while linked`,
-            onDeleteTo: `optional ${DELETE}: when a 'to' object is deleted`, messageFrom: "prevent on onDeleteFrom: message shown", messageTo: "prevent on onDeleteTo: message shown"
+            onDeleteTo: `optional ${DELETE}: when a 'to' object is deleted`, messageFrom: "prevent on onDeleteFrom: message shown", messageTo: "prevent on onDeleteTo: message shown",
+            documentation: "optional text (\"\" = none)",
+            from: "optional Module.Entity: re-point the owner end (same module; existing links are dropped: DATA LOSS)", to: "optional Module.Entity: re-point the other end (same module, or any module for a cross-module association; DATA LOSS)"
         }
     },
     createViewEntity: {
@@ -50,11 +53,15 @@ const DOMAIN_OPS = {
     },
     changeViewEntity: { doc: "Change the OQL of a view entity; its attributes follow the columns.", fields: { entity: "R Module.ViewEntity", oql: "R the new OQL", attributes: "optional [ { \"name\", \"type\" } ] for expression columns" } },
     setProjectSettings: {
-        doc: "Set app settings (App > Settings > Runtime/Model): startup, shutdown and health check microflows, hashing, rounding, first day of week, time zone.",
+        doc: "Set app settings (App > Settings > Runtime/Model): startup, shutdown and health check microflows, hashing, rounding, first day of week, time zones, sessions, locking, foreign keys, OQL version, Java version, decimals.",
         fields: {
             afterStartup: "optional Module.Microflow (no parameters, returns Boolean), \"\" = none", beforeShutdown: "optional Module.Microflow (no parameters), \"\" = none",
             healthCheck: "optional Module.Microflow (no parameters, returns String), \"\" = none", hashAlgorithm: "optional BCrypt | SSHA256", bcryptCost: "optional number 10..15 (BCrypt)",
-            roundingMode: "optional HalfUp | HalfEven", firstDayOfWeek: "optional Default | Sunday | Monday | ... | Saturday", defaultTimeZone: "optional time zone, e.g. Europe/Istanbul (\"\" = none)"
+            roundingMode: "optional HalfUp | HalfEven", firstDayOfWeek: "optional Default | Sunday | Monday | ... | Saturday", defaultTimeZone: "optional time zone, e.g. Europe/Istanbul (\"\" = none)",
+            scheduledEventTimeZone: "optional time zone of scheduled events, e.g. Europe/Istanbul (\"\" = UTC)", multipleSessions: "optional true/false: a user may be signed in more than once",
+            optimisticLocking: "optional true/false: refuse to commit an object another user changed meanwhile", backgroundSystemContext: "optional true/false: background tasks run in the system context",
+            foreignKeys: "optional true/false: database foreign key constraints", oqlVersion2: "optional true/false: OQL version 2", javaVersion: "optional Java11 | Java17 | Java21 (what the version offers)",
+            sslCertificateAlgorithm: "optional PKIX | SunX509", decimalScale: "optional number of decimals stored for Decimal (default 8)"
         }
     },
     setConfiguration: {
@@ -81,13 +88,19 @@ const DOMAIN_SYNONYMS = {
         color: "Mendix does not store an entity color (the domain model colors entities by kind); leave out color",
         colour: "Mendix does not store an entity color (the domain model colors entities by kind); leave out color",
         location: "new entities get a free spot next to related ones; to tidy a diagram use arrangeDomainModel { \"module\": ... }",
-        position: "new entities get a free spot next to related ones; to tidy a diagram use arrangeDomainModel { \"module\": ... }"
+        position: "new entities get a free spot next to related ones; to tidy a diagram use arrangeDomainModel { \"module\": ... }",
+        hasOwner: "write it as \"owner\": true", hasCreatedDate: "write it as \"createdDate\": true", hasChangedDate: "write it as \"changedDate\": true", hasChangedBy: "write it as \"changedBy\": true",
+        createdBy: "the creator is the system member \"owner\": true", modifiedDate: "write it as \"changedDate\": true", modifiedBy: "write it as \"changedBy\": true"
+    },
+    changeEntity: {
+        hasOwner: "write it as \"owner\": true", hasCreatedDate: "write it as \"createdDate\": true", hasChangedDate: "write it as \"changedDate\": true", hasChangedBy: "write it as \"changedBy\": true",
+        createdBy: "the creator is the system member \"owner\"", modifiedDate: "write it as \"changedDate\"", modifiedBy: "write it as \"changedBy\"", name: "rename it with { \"op\": \"rename\" }"
     },
     addAttribute: { microflow: "use \"calculated\": \"Module.Microflow\"", calculatedBy: "use \"calculated\": \"Module.Microflow\"" },
     changeAttribute: { microflow: "use \"calculated\": \"Module.Microflow\" (or \"stored\": true to store it again)" },
     addAccessRule: { xPath: "write it as \"xpath\"", allowCreate: "write it as \"create\"", allowDelete: "write it as \"delete\"", defaultAccess: "write it as \"newMembers\"" },
     changeAccessRule: { xPath: "write it as \"xpath\"", allowCreate: "write it as \"create\"", allowDelete: "write it as \"delete\"", defaultAccess: "write it as \"newMembers\"" },
-    changeAssociation: { deleteBehavior: "use onDeleteFrom / onDeleteTo: keep | delete | prevent", name: "rename it with { \"op\": \"rename\" }", from: "the ends of an association cannot change: delete it and add a new one", to: "the ends of an association cannot change: delete it and add a new one" }
+    changeAssociation: { deleteBehavior: "use onDeleteFrom / onDeleteTo: keep | delete | prevent", name: "rename it with { \"op\": \"rename\" }", parent: "write it as \"from\": \"Module.Entity\"", child: "write it as \"to\": \"Module.Entity\"" }
 };
 
 // Members of System entities as Studio Pro lists them in a specialization's access rule ([name, read-only]).
@@ -383,6 +396,61 @@ function makeDomain(h) {
                 ma.accessRights = ro && r.defaultMemberAccessRights === dm.MemberAccessRights.ReadWrite ? dm.MemberAccessRights.ReadOnly : r.defaultMemberAccessRights;
             }
         }
+    }
+
+    // changeAssociation from / to: a new owner (parent) or other end (child). The association stays in its domain model
+    // (an owner in another module would move it: refused); member access follows the owner; the places that use it
+    // are listed (their paths now start or end at another entity).
+    async function repoint(a, o) {
+        const qn = a.qualifiedName;
+        const notes = [];
+        const loss = [];
+        const d = a.containerAsDomainModel;
+        const oldParent = a.parent;
+        const oldChild = a.child;
+        const oldParentQn = oldParent ? oldParent.qualifiedName : "?";
+        const oldChildQn = a instanceof dm.CrossAssociation ? a.childQualifiedName : oldChild ? oldChild.qualifiedName : "?";
+        if (o.from !== undefined) {
+            const e = await entity(o.from);
+            if (e.containerAsDomainModel !== d) throw new Error(`REFUSED: ${qn} is stored in ${d.containerAsModule.name}'s domain model; an owner in ${e.containerAsDomainModel.containerAsModule.name} would move it. Delete it and addAssociation from ${o.from}, or moveEntity`);
+            if (isView(e) || isExternal(e)) throw new Error(`${o.from} is a ${isView(e) ? "view" : "external"} entity: it cannot own an association`);
+            if (e !== oldParent) a.parent = e;
+        }
+        if (o.to !== undefined) {
+            const e = await entity(o.to);
+            const cross = a instanceof dm.CrossAssociation;
+            if (!cross && e.containerAsDomainModel !== d) throw new Error(`REFUSED: ${qn} links entities of ${d.containerAsModule.name}; ${o.to} is in another module (that is a cross-module association). Delete it and addAssociation to ${o.to}`);
+            if (cross && e.containerAsDomainModel === d) throw new Error(`REFUSED: ${qn} is a cross-module association; ${o.to} is in its own module. Delete it and addAssociation to ${o.to}`);
+            if (isExternal(e)) throw new Error(`${o.to} is an external entity: link it in Studio Pro`);
+            if (e !== oldChild) a.child = e;
+        }
+        const newParentQn = a.parent.qualifiedName;
+        const newChildQn = a instanceof dm.CrossAssociation ? a.childQualifiedName : a.child.qualifiedName;
+        if (newParentQn === oldParentQn && newChildQn === oldChildQn) {
+            notes.push(`ends unchanged: ${oldParentQn} -> ${oldChildQn}`);
+            return { notes, loss };
+        }
+        // a persistable owner cannot point to a non-persistable entity
+        if (persistable(a.parent) && !persistable(a.child)) throw new Error(`REFUSED: ${newParentQn} is persistable and ${newChildQn} is not; a persistable entity cannot own an association to a non-persistable one`);
+        // member access: rules of entities that no longer have it lose it, the new ends' rules get it
+        const ends = [a.parent, ...(a.owner === dm.AssociationOwner.Both ? [a.child] : [])];
+        for (const x of await allEntities()) {
+            if (!x.accessRules.length) continue;
+            const { chain } = await chainOf(x);
+            if (ends.some(en => chain.includes(en))) continue;
+            for (const r of x.accessRules) for (const ma of [...r.memberAccesses]) if (memberOf(ma) === qn) ma.delete();
+        }
+        for (const en of ends) await addMemberToRules(en, a);
+        notes.push(`ends ${oldParentQn} -> ${oldChildQn} became ${newParentQn} -> ${newChildQn}`);
+        await model.flushChanges();
+        const g = require("./refs").graph(client);
+        const dmUnits = new Set(g.units.filter(u => u.type === "DomainModels$DomainModel").map(u => u.id));
+        const uses = g.usesOf(qn, false).filter(u => !dmUnits.has(u.unit));
+        const docs = [...new Set(uses.map(u => `${u.doc} (${u.place})`))];
+        if (docs.length) notes.push(`CHECK these places that use ${qn} (paths, retrieves, data sources): ${docs.slice(0, 12).join(", ")}${docs.length > 12 ? `, and ${docs.length - 12} more` : ""}`);
+        const stored = persistable(a.parent) && !isFresh(qn);
+        if (stored) loss.push(`existing ${qn} links between ${oldParentQn} and ${oldChildQn} objects are dropped when the app next starts`);
+        return { notes, loss };
     }
 
     // ReadWrite on a now read-only attribute becomes ReadOnly in every rule.
@@ -704,6 +772,7 @@ function makeDomain(h) {
             const rule = dm.AccessRule.createInEntityUnderAccessRules(e);
             for (const r of roles) rule.moduleRoles.push(r);
             const { members, sys } = await fillRule(rule, e, o, true);
+            if (o.documentation !== undefined) rule.documentation = String(o.documentation).replace(/\r?\n/g, "\r\n");
             const sysNote = sys === "System.User" ? " (System.User's own members are not listed, as in Studio Pro)" : sys ? ` (with ${sys} members)` : "";
             return `${o.entity} for ${roles.map(r => r.qualifiedName).join(", ")}: ${members.length} member(s)${sysNote}`;
         },
@@ -718,8 +787,12 @@ function makeDomain(h) {
                 done.push(`roles ${roles.map(x => x.qualifiedName).join(", ")}`);
             }
             const changes = ["access", "members", "newMembers", "create", "delete", "xpath"].filter(k => o[k] !== undefined);
-            if (!changes.length && !done.length) throw new Error("changeAccessRule needs something to change: access, members, newMembers, create, delete, xpath or setRoles");
-            await fillRule(r, e, o, false);
+            if (!changes.length && !done.length && o.documentation === undefined) throw new Error("changeAccessRule needs something to change: access, members, newMembers, create, delete, xpath, setRoles or documentation");
+            if (changes.length || done.length) await fillRule(r, e, o, false);
+            if (o.documentation !== undefined) {
+                r.documentation = String(o.documentation).replace(/\r?\n/g, "\r\n");
+                done.push(r.documentation ? "documentation set" : "no documentation");
+            }
             if (o.access !== undefined) done.push(`every member ${o.access}`);
             if (o.members) done.push(Object.entries(o.members).map(([k, v]) => `${k} ${v}`).join(", "));
             if (o.newMembers !== undefined) done.push(`new members ${o.newMembers}`);
@@ -741,8 +814,15 @@ function makeDomain(h) {
             if (!(a instanceof dm.AssociationBase)) throw new Error(`'${o.association}' is not an association`);
             if (a.source) throw new Error(`${o.association} belongs to a ${isView(a.parent) ? "view entity (its OQL)" : "consumed OData service"}: change it there`);
             const keys = ["type", "owner", "storage", "onDeleteFrom", "onDeleteTo", "messageFrom", "messageTo"].filter(k => o[k] !== undefined);
-            if (!keys.length) throw new Error("changeAssociation needs type, owner, storage, onDeleteFrom/onDeleteTo or messageFrom/messageTo");
-            const { notes, loss } = await associationSettings(a, o, false);
+            if (!keys.length && o.documentation === undefined && o.from === undefined && o.to === undefined) throw new Error("changeAssociation needs type, owner, storage, onDeleteFrom/onDeleteTo, messageFrom/messageTo, documentation, from or to");
+            const ends = o.from !== undefined || o.to !== undefined ? await repoint(a, o) : { notes: [], loss: [] };
+            const { notes, loss } = keys.length ? await associationSettings(a, o, false) : { notes: [], loss: [] };
+            notes.unshift(...ends.notes);
+            loss.unshift(...ends.loss);
+            if (o.documentation !== undefined) {
+                a.documentation = String(o.documentation).replace(/\r?\n/g, "\r\n");
+                notes.push(a.documentation ? "documentation set" : "documentation removed");
+            }
             const kind = `${a.type.name}, owner ${a.owner.name}${a.storageFormat ? ", " + a.storageFormat.name : ""}, delete ${a.parent.name}: ${deleteName(a.deleteBehavior.parentDeleteBehavior.name)}, delete ${a.child.name}: ${deleteName(a.deleteBehavior.childDeleteBehavior.name)}`;
             return `${o.association}: ${kind}` + notes.map(n => `\n      NOTE: ${n}`).join("") + loss.map(l => `\n      DATA LOSS: ${l}`).join("");
         },
@@ -838,6 +918,43 @@ function makeDomain(h) {
                 }
                 rs.defaultTimeZoneCode = z;
                 done.push(`time zone ${z || "none"}`);
+            }
+            if (o.scheduledEventTimeZone !== undefined) {
+                const z = String(o.scheduledEventTimeZone);
+                if (z && !timeZones().includes(z)) fail(`scheduledEventTimeZone: '${z}' is not a time zone (Region/City, e.g. Europe/Istanbul)`, z, timeZones());
+                rs.scheduledEventTimeZoneCode = z;
+                done.push(`scheduled event time zone ${z || "UTC"}`);
+            }
+            const v = client.project.version;
+            const setOr = (prop, value, field) => {
+                if (!setIfAvailable(rs, prop, value)) throw new Error(`${field} is not a setting of Mendix ${v}`);
+            };
+            for (const [f, prop, what] of [["multipleSessions", "allowUserMultipleSessions", "multiple sessions"], ["optimisticLocking", "enableDataStorageOptimisticLocking", "optimistic locking"],
+                ["backgroundSystemContext", "useSystemContextForBackgroundTasks", "system context for background tasks"], ["foreignKeys", "useDatabaseForeignKeyConstraints", "foreign key constraints"], ["oqlVersion2", "useOQLVersion2", "OQL version 2"]]) {
+                if (o[f] === undefined) continue;
+                if (o[f] !== true && o[f] !== false && o[f] !== "true" && o[f] !== "false") throw new Error(`${f} must be true or false`);
+                const on = o[f] === true || o[f] === "true";
+                setOr(prop, on, f);
+                done.push(`${what} ${on ? "on" : "off"}`);
+                if (f === "foreignKeys" && !on) client.warn("foreign key constraints off: the database no longer guards associations; only switch off for a migration that needs it");
+                if (f === "oqlVersion2" && on) client.warn("OQL version 2 changes how some OQL queries behave (data sets, view entities, OQL in Java): test them after the switch");
+            }
+            if (o.javaVersion !== undefined) {
+                if (!settings.JavaVersion) throw new Error(`javaVersion is not a setting of Mendix ${v}`);
+                setOr("javaVersion", enumValue(settings.JavaVersion, o.javaVersion, "javaVersion"), "javaVersion");
+                done.push(`Java ${rs.javaVersion.name}`);
+                client.warn(`Java version ${rs.javaVersion.name}: the build uses that JDK; Java actions and userlib jars must compile with it`);
+            }
+            if (o.sslCertificateAlgorithm !== undefined) {
+                setOr("sslCertificateAlgorithm", enumValue(settings.SslCertificateAlgorithm, o.sslCertificateAlgorithm, "sslCertificateAlgorithm"), "sslCertificateAlgorithm");
+                done.push(`SSL certificate algorithm ${rs.sslCertificateAlgorithm.name}`);
+            }
+            if (o.decimalScale !== undefined) {
+                const n = Number(o.decimalScale);
+                if (!(Number.isInteger(n) && n >= 1 && n <= 20)) throw new Error("decimalScale is a whole number 1..20 (default 8)");
+                setOr("decimalScale", n, "decimalScale");
+                done.push(`decimal scale ${n}`);
+                if (n < 8) client.warn(`decimal scale ${n}: stored Decimal values with more decimals are rounded when the app next starts (DATA LOSS of precision)`);
             }
             return done.join(", ");
         },
@@ -958,6 +1075,7 @@ function makeDomain(h) {
             if (o.create !== undefined && r.allowCreate !== bool(o.create, false)) out.push(`${o.entity}: create is ${r.allowCreate}`);
             if (o.delete !== undefined && r.allowDelete !== bool(o.delete, false)) out.push(`${o.entity}: delete is ${r.allowDelete}`);
             if (o.xpath !== undefined && r.xPathConstraint !== String(o.xpath).trim()) out.push(`${o.entity}: xpath is '${r.xPathConstraint}'`);
+            if (o.documentation !== undefined && r.documentation !== String(o.documentation).replace(/\r?\n/g, "\r\n")) out.push(`${o.entity}: rule documentation not set`);
             if (o.newMembers !== undefined && rightName(r.defaultMemberAccessRights).toLowerCase() !== String(o.newMembers).toLowerCase()) out.push(`${o.entity}: new members get ${rightName(r.defaultMemberAccessRights)}`);
             for (const [k, v] of Object.entries(o.members || {})) {
                 const ma = r.memberAccesses.find(x => [memberOf(x), memberOf(x).split(".").pop()].includes(k));
@@ -979,6 +1097,9 @@ function makeDomain(h) {
             for (const [side, f] of [["parent", "onDeleteFrom"], ["child", "onDeleteTo"]]) {
                 if (o[f] !== undefined && a.deleteBehavior[`${side}DeleteBehavior`].name !== DELETE_KINDS[String(o[f]).toLowerCase()]) out.push(`${o.association} ${f} is ${deleteName(a.deleteBehavior[`${side}DeleteBehavior`].name)}`);
             }
+            if (o.documentation !== undefined && a.documentation !== String(o.documentation).replace(/\r?\n/g, "\r\n")) out.push(`${o.association} documentation not set`);
+            if (o.from !== undefined && a.parent.qualifiedName !== o.from) out.push(`${o.association} is owned by ${a.parent.qualifiedName}`);
+            if (o.to !== undefined && (a instanceof dm.CrossAssociation ? a.childQualifiedName : a.child.qualifiedName) !== o.to) out.push(`${o.association} points to ${a instanceof dm.CrossAssociation ? a.childQualifiedName : a.child.qualifiedName}`);
             return out;
         },
         async createViewEntity(o) {
@@ -1004,6 +1125,11 @@ function makeDomain(h) {
             if (o.firstDayOfWeek !== undefined && rs.firstDayOfWeek.name.toLowerCase() !== String(o.firstDayOfWeek).toLowerCase()) out.push(`first day is ${rs.firstDayOfWeek.name}`);
             if (o.defaultTimeZone !== undefined && rs.defaultTimeZoneCode !== String(o.defaultTimeZone)) out.push(`time zone is '${rs.defaultTimeZoneCode}'`);
             if (o.hashAlgorithm !== undefined && rs.hashAlgorithm.name.toLowerCase() !== String(o.hashAlgorithm).toLowerCase()) out.push(`hash is ${rs.hashAlgorithm.name}`);
+            for (const [f, prop] of [["multipleSessions", "allowUserMultipleSessions"], ["optimisticLocking", "enableDataStorageOptimisticLocking"], ["backgroundSystemContext", "useSystemContextForBackgroundTasks"], ["foreignKeys", "useDatabaseForeignKeyConstraints"], ["oqlVersion2", "useOQLVersion2"]]) {
+                if (o[f] !== undefined && rs[prop] !== (o[f] === true || o[f] === "true")) out.push(`${f} is ${rs[prop]}`);
+            }
+            if (o.decimalScale !== undefined && rs.decimalScale !== Number(o.decimalScale)) out.push(`decimal scale is ${rs.decimalScale}`);
+            if (o.scheduledEventTimeZone !== undefined && rs.scheduledEventTimeZoneCode !== String(o.scheduledEventTimeZone)) out.push(`scheduled event time zone is '${rs.scheduledEventTimeZoneCode}'`);
             return out;
         },
         async setConfiguration(o) {
@@ -1046,6 +1172,15 @@ function makeDomain(h) {
 function changedLater(name, o, rest) {
     const attr = name === "addAttribute" ? `${o.entity}.${o.name}` : name === "changeAttribute" ? o.attribute : null;
     if (attr && rest.some(x => x.op === "changeAttribute" && x.attribute === attr)) return true;
+    // the place in the list: later attributes of the same entity move it
+    const ent = name === "addAttribute" ? o.entity : name === "changeAttribute" ? String(o.attribute).split(".").slice(0, 2).join(".") : null;
+    if (ent && ["position", "before", "after"].some(k => o[k] !== undefined) && rest.some(x => (x.op === "addAttribute" && x.entity === ent) || (x.op === "changeAttribute" && String(x.attribute).startsWith(ent + ".")))) return true;
+    if (["addDomainAnnotation", "changeDomainAnnotation"].includes(name) && rest.some(x => ["changeDomainAnnotation", "deleteDomainAnnotation"].includes(x.op) && x.module === o.module)) return true;
+    // system members and image of a new entity changed later
+    if (name === "createEntity" && rest.some(x => x.op === "changeEntity" && x.entity === `${o.module}.${o.name}`)) return true;
+    if (name === "changeEntity" && rest.some(x => x.op === "changeEntity" && x.entity === o.entity)) return true;
+    if (["addLanguage", "changeLanguage"].includes(name) && rest.some(x => ["changeLanguage", "deleteLanguage"].includes(x.op) && String(x.code).toLowerCase() === String(o.code).toLowerCase())) return true;
+    if (name === "changeUserRole" && rest.some(x => x.op === "changeUserRole" && x.role === o.role)) return true;
     if (name === "addAccessRule" || name === "changeAccessRule") {
         const roles = [].concat(o.setRoles || o.roles || []).sort().join();
         if (rest.some(x => ["deleteAccessRule", "changeAccessRule"].includes(x.op) && x.entity === o.entity && [].concat(x.roles || []).sort().join() === roles)) return true;

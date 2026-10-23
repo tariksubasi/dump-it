@@ -1631,6 +1631,166 @@
           "NF_Order_Save\\.txt$": "(?s)on error: custom handler, no rollback.*Kaydedilemedi"
         }
       }
+    },
+    {
+      "id": "dmsysmembers",
+      "text": "Order entity'sinde createdDate, changedDate ve owner sistem üyelerini aç; Total attribute'una 'KDV dahil toplam' açıklamasını yaz.",
+      "checks": {
+        "files": {
+          "domain-model\\.txt$": "(?s)system members: createdDate, changedDate, owner.*Total.*KDV dahil toplam"
+        }
+      },
+      "ops": [
+        "changeEntity",
+        "changeAttribute"
+      ],
+      "families": [
+        "domain"
+      ]
+    },
+    {
+      "id": "dmnote",
+      "text": "MyFirstModule domain modelinde Order entity'sinin yanına 'Siparişler web mağazasından gelir' notunu ekle.",
+      "checks": {
+        "files": {
+          "domain-model\\.txt$": "NOTE: Siparişler web mağazasından gelir"
+        }
+      },
+      "ops": [
+        "addDomainAnnotation"
+      ]
+    },
+    {
+      "id": "dmhandler",
+      "setup": [
+        {
+          "op": "createMicroflow",
+          "module": "MyFirstModule",
+          "name": "BCo_Order",
+          "parameters": [
+            {
+              "name": "Order",
+              "type": "MyFirstModule.Order"
+            }
+          ],
+          "returns": "Boolean",
+          "returnValue": "true"
+        },
+        {
+          "op": "createMicroflow",
+          "module": "MyFirstModule",
+          "name": "BCo_Order_Strict",
+          "parameters": [
+            {
+              "name": "Order",
+              "type": "MyFirstModule.Order"
+            }
+          ],
+          "returns": "Boolean",
+          "returnValue": "$Order/Total > 0"
+        },
+        {
+          "op": "addEventHandler",
+          "entity": "MyFirstModule.Order",
+          "moment": "Before",
+          "event": "Commit",
+          "microflow": "MyFirstModule.BCo_Order"
+        }
+      ],
+      "text": "Order'ın Before Commit event handler'ı artık BCo_Order_Strict microflow'unu çalıştırsın; false dönerse kayıt hata vermeden dursun.",
+      "checks": {
+        "files": {
+          "domain-model\\.txt$": "EVENT Before Commit -> MyFirstModule\\.BCo_Order_Strict"
+        }
+      },
+      "ops": [
+        "changeEventHandler"
+      ]
+    },
+    {
+      "id": "codejsparam",
+      "setup": [
+        {
+          "op": "createJavaScriptAction",
+          "module": "MyFirstModule",
+          "name": "JS_Greet",
+          "parameters": [
+            {
+              "name": "Name",
+              "type": "String"
+            }
+          ],
+          "returns": "String"
+        }
+      ],
+      "text": "JS_Greet JavaScript action'ına Times adında Integer parametre ekle ve kodunu Name metnini Times kez yan yana döndürecek şekilde yaz.",
+      "checks": {
+        "find": [
+          "MyFirstModule.JS_Greet"
+        ]
+      },
+      "ops": [
+        "changeJavaScriptAction"
+      ],
+      "families": [
+        "code"
+      ]
+    },
+    {
+      "id": "codefolders",
+      "setup": [
+        {
+          "op": "createMicroflow",
+          "module": "MyFirstModule",
+          "name": "ACT_Old_Cleanup",
+          "folder": "Old"
+        }
+      ],
+      "text": "MyFirstModule'deki Old klasörünün adını Archive yap.",
+      "checks": {
+        "find": [
+          "MyFirstModule.ACT_Old_Cleanup"
+        ]
+      },
+      "ops": [
+        "renameFolder"
+      ],
+      "families": [
+        "refactor"
+      ]
+    },
+    {
+      "id": "codelanguage",
+      "text": "Projeye Felemenkçe (nl_NL) dilini ekle, eksik çeviri kontrolünü aç ve tarih biçimini dd-MM-yyyy yap.",
+      "checks": {
+        "find": [
+          "MyFirstModule.Order"
+        ]
+      },
+      "ops": [
+        "addLanguage",
+        "changeLanguage"
+      ],
+      "families": [
+        "texts"
+      ]
+    },
+    {
+      "id": "codesettings",
+      "text": "Kullanıcıların aynı anda birden fazla oturum açmasını kapat ve şifre politikasında en az 10 karakter ve bir rakam iste.",
+      "checks": {
+        "find": [
+          "MyFirstModule.Order"
+        ]
+      },
+      "ops": [
+        "setProjectSettings",
+        "setSecurity"
+      ],
+      "families": [
+        "app",
+        "security"
+      ]
     }
   ]
 }

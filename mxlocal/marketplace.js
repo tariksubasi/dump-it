@@ -31,6 +31,14 @@ const MARKET_OPS = {
     importModulePackage: {
         doc: "Import a Marketplace module package (.mpk): the module's documents with their ids, Java sources, libraries, theme and widgets, as Studio Pro's Import module package does.",
         fields: { file: "R path to the module .mpk, inside the export folder" }
+    },
+    exportModulePackage: {
+        doc: "Export a module as a module package (.mpk) Studio Pro can import: its documents (same ids), javasource/ and javascriptsource/ of the module, its theme (themesource/<module>), the userlib jars marked for it (.RequiredLib) and the widget packages its pages use. Writes the .mpk into the project folder (default packages/<Module>.mpk) with the change.",
+        fields: { module: "R module name", file: "optional output path in the project folder, e.g. packages/Sales_1.0.0.mpk (default packages/<Module>.mpk)" }
+    },
+    updateModulePackage: {
+        doc: "Update an installed module from a module package (.mpk), as Studio Pro's Import module package > Replace: lists documents added, removed and changed (and what of the app still uses removed ones); with replace: true the module's units and files are replaced.",
+        fields: { file: "R path to the module .mpk, inside the export folder", replace: "optional true: replace the module (without it the op only reports the differences and is refused)" }
     }
 };
 
@@ -285,7 +293,216 @@ function makeMarket({ client, model }) {
         return `module ${name}${version ? " " + version : ""} (Mendix ${meta._ProductVersion}): ${docs} document(s), ${take.length} unit(s); ${plan.length} file(s)${plan.length ? ` (${Object.entries(byRoot).map(([k, n]) => `${k} ${n}`).join(", ")})` : ""}`;
     }
 
+    // ---------------------------------------------------------------- export / update
+
+    // units of module name in this project: [unit] (the module first)
+    function moduleUnits(name) {
+        const all = [...project.units.values()];
+        const mod = all.find(u => u.containmentName === "Modules" && project.read(u.id).Name === name);
+        if (!mod) return null;
+        const take = [mod];
+        for (let i = 0; i < take.length; i++) take.push(...all.filter(u => u.containerId === take[i].id));
+        return take;
+    }
+    // files under dir (posix rel paths)
+    function filesUnder(rel) {
+        const out = [];
+        const walk = r => {
+            const full = path.join(dir, ...r.split("/"));
+            if (!fs.existsSync(full)) return;
+            for (const e of fs.readdirSync(full, { withFileTypes: true })) {
+                const sub = `${r}/${e.name}`;
+                if (e.isDirectory()) walk(sub);
+                else if (e.isFile()) out.push(sub);
+            }
+        };
+        walk(rel);
+        return out;
+    }
+    // widget ids of pluggable / custom widgets in plain unit trees
+    function widgetIds(plains) {
+        const ids = new Set();
+        const walk = v => {
+            if (Array.isArray(v)) return v.forEach(walk);
+            if (!v || typeof v !== "object" || Buffer.isBuffer(v)) return;
+            if (/^CustomWidgets\$CustomWidgetType$/.test(v.$Type || "") && v.WidgetId) ids.add(v.WidgetId);
+            for (const x of Object.values(v)) if (x && typeof x === "object") walk(x);
+        };
+        plains.forEach(walk);
+        return ids;
+    }
+
+    async function exportModulePackage(o) {
+        const where = `exportModulePackage ${o.module}`;
+        const name = String(o.module || "");
+        const m = model.allModules().find(x => x.name === name);
+        if (!m) fail(`${where}: no module '${name}'`, name, model.allModules().map(x => x.name));
+        await model.flushChanges();
+        const take = moduleUnits(name);
+        const pending = take.filter(u => client.changes.updated.has(u.id) || client.changes.created.has(u.id) || (client.changes.moved && client.changes.moved.has(u.id)) || (client.rawUnits && client.rawUnits.has(u.id)));
+        if (pending.length) throw new Error(`${where}: earlier ops of this change modify ${name}; the package is made from the saved model. Apply those first, then export in a change of its own`);
+        const rel = String(o.file || `packages/${name}.mpk`).replace(/\\/g, "/");
+        files.projectPath(dir, rel, ["packages", "deployment", "export"], where);
+        if (!/\.mpk$/i.test(rel)) throw new Error(`${where}: file must end in .mpk`);
+        const lower = name.toLowerCase();
+        const extra = {};
+        const add = r => {
+            const b = files.current(client, r);
+            if (b) extra[r] = b;
+        };
+        for (const root of ["javasource", "javascriptsource", "themesource"]) filesUnder(`${root}/${lower}`).forEach(add);
+        // userlib jars Studio Pro marks as required by this module: <jar>.<Module>.RequiredLib
+        const libs = fs.existsSync(path.join(dir, "userlib")) ? fs.readdirSync(path.join(dir, "userlib")) : [];
+        for (const f of libs) {
+            const mm = new RegExp(`^(.+\\.jar)\\.${name}\\.RequiredLib$`, "i").exec(f);
+            if (!mm) continue;
+            add(`userlib/${f}`);
+            if (libs.includes(mm[1])) add(`userlib/${mm[1]}`);
+        }
+        // widget packages its pages use
+        const ids = widgetIds(take.map(u => project.read(u.id)));
+        const inst = installedWidgets();
+        const missing = [];
+        for (const id of ids) {
+            const w = inst.get(id);
+            if (w) add(`widgets/${w.file}`);
+            else missing.push(id);
+        }
+        if (missing.length) client.warn(`${where}: no widgets/*.mpk for ${missing.join(", ")} (built-in or missing): the importing app needs them`);
+        if (m.fromAppStore) client.warn(`${where}: ${name} is a Marketplace module; share the Marketplace version instead of a copy where you can`);
+        const bytes = exportModule(project, name, extra);
+        files.stage(client, rel, bytes);
+        const docs = take.filter(u => u.containmentName === "Documents").length;
+        const byRoot = {};
+        for (const r of Object.keys(extra)) byRoot[r.split("/")[0]] = (byRoot[r.split("/")[0]] || 0) + 1;
+        client.warnFirst(`exportModulePackage first use: the .mpk follows importModulePackage's reader (project.mpr with the units + package.xml); import ${rel} in Studio Pro once (App Explorer > right-click the app > Import module package) to check it`);
+        return `${rel}: module ${name} (Mendix ${project.meta._ProductVersion}): ${docs} document(s), ${take.length} unit(s), ${Object.keys(extra).length} file(s)${Object.keys(extra).length ? ` (${Object.entries(byRoot).map(([k, n]) => `${k} ${n}`).join(", ")})` : ""}, ${(bytes.length / 1024).toFixed(0)} KB`;
+    }
+
+    async function updateModulePackage(o) {
+        const where = `updateModulePackage ${o.file}`;
+        const file = packagePath(o.file, where);
+        const pkg = readPackage(file);
+        if (pkg.kind !== "module") throw new Error(`${where}: this is a ${pkg.kind} package; ${pkg.kind === "widget" ? "use importWidget with \"replace\": true" : STUDIO_PRO}`);
+        const { meta, units } = readUnits(pkg, where);
+        const theirs = ver(meta._ProductVersion), mine = ver(project.meta._ProductVersion);
+        if (theirs[0] !== mine[0] || theirs[1] !== mine[1]) throw new Error(`${where}: the package is for Mendix ${meta._ProductVersion}, this app is ${project.meta._ProductVersion}; an update needs a package of the same minor version. ${STUDIO_PRO}`);
+        const mods = units.filter(u => u.plain.$Type === "Projects$ModuleImpl" && u.containmentName === "Modules");
+        if (mods.length !== 1) throw new Error(`${where}: the package has ${mods.length} modules; only one-module packages are supported. ${STUDIO_PRO}`);
+        const mod = mods[0];
+        const name = mod.plain.Name;
+        const have = moduleUnits(name);
+        if (!have) throw new Error(`${where}: the app has no module ${name}; install it with importModulePackage`);
+        const byContainer = new Map();
+        for (const u of units) {
+            if (!byContainer.has(u.containerId)) byContainer.set(u.containerId, []);
+            byContainer.get(u.containerId).push(u);
+        }
+        const take = [mod];
+        for (let i = 0; i < take.length; i++) take.push(...(byContainer.get(take[i].id) || []));
+        const appMod = have[0];
+        // the package's module unit takes the app module's place (its id may differ)
+        const newIds = new Map(take.map(u => [u.id === mod.id ? appMod.id : u.id, u]));
+        const oldIds = new Map(have.map(u => [u.id, u]));
+        const foreign = take.filter(u => u !== mod && project.units.has(u.id) && !oldIds.has(u.id));
+        if (foreign.length) throw new Error(`${where}: ${foreign.length} unit id(s) of the package belong to other modules of the app (${foreign.slice(0, 3).map(u => u.plain.Name || u.id).join(", ")}). ${STUDIO_PRO}`);
+        const label = (plain, id) => `${String(plain.$Type).split("$").pop()} ${plain.Name || id.slice(0, 8)}`;
+        const added = [], removed = [], changed = [];
+        for (const [id, u] of newIds) {
+            if (!oldIds.has(id)) {
+                if (u.containmentName === "Documents" || u.containmentName === "Folders") added.push(label(u.plain, id));
+            } else if (!project.readBytes(id).equals(u.bytes) && id !== appMod.id) changed.push(label(u.plain, id));
+        }
+        for (const [id, u] of oldIds) if (!newIds.has(id) && (u.containmentName === "Documents" || u.containmentName === "Folders")) removed.push(label(project.read(id), id));
+        // what of the rest of the app uses removed documents
+        await model.flushChanges();
+        const g = require("./refs").graph(client);
+        const removedNames = [...oldIds].filter(([id]) => !newIds.has(id)).map(([id]) => project.read(id)).filter(pl => pl.Name).map(pl => `${name}.${pl.Name}`);
+        const users = new Set();
+        for (const qn of removedNames) for (const e of g.usesOf(qn, false)) if (!oldIds.has(e.unit)) users.add(`${e.doc} (${qn})`);
+        // entities: dropped ones lose their table
+        const entities = pl => new Set(((pl && pl.Entities) || []).map(e => e.Name));
+        const dmOld = have.find(u => project.read(u.id).$Type === "DomainModels$DomainModel");
+        const dmNew = take.find(u => u.plain.$Type === "DomainModels$DomainModel");
+        const lostEntities = dmOld && dmNew ? [...entities(project.read(dmOld.id))].filter(e => !entities(dmNew.plain).has(e)) : [];
+        const version = mod.plain.AppStoreVersion || "";
+        const report = [`${name}${version ? ` -> ${version}` : ""}: ${added.length} added, ${removed.length} removed, ${changed.length} changed document(s)`,
+            ...(added.length ? [`ADDED: ${added.slice(0, 20).join(", ")}${added.length > 20 ? ", ..." : ""}`] : []),
+            ...(removed.length ? [`REMOVED: ${removed.slice(0, 20).join(", ")}${removed.length > 20 ? ", ..." : ""}`] : []),
+            ...(changed.length ? [`CHANGED: ${changed.slice(0, 20).join(", ")}${changed.length > 20 ? ", ..." : ""}`] : []),
+            ...(users.size ? [`STILL USED BY (fix these after the update): ${[...users].slice(0, 12).join(", ")}`] : []),
+            ...(lostEntities.length ? [`DATA LOSS: entities ${lostEntities.join(", ")} are gone from the package; their tables are dropped when the app next starts`] : [])];
+        if (!(o.replace === true || o.replace === "true")) throw new Error(`REFUSED (nothing changed): ${report.join("\n      ")}\n      Give "replace": true to replace ${name} (its own changes in this app are lost)`);
+        // files: the package's files replace the app's (javasource etc. of the module)
+        const plan = [];
+        for (const raw of pkg.files) {
+            const rel = path.posix.normalize(String(raw).replace(/\\/g, "/"));
+            const read = pkg.zip.get(raw) || pkg.zip.get(rel);
+            if (!read || rel.endsWith("/")) continue;
+            files.projectPath(dir, rel, FILE_ROOTS, where);
+            const bytes = read();
+            const now = files.current(client, rel);
+            if (now && now.equals(bytes)) continue;
+            plan.push([rel, bytes]);
+        }
+        for (const [rel, bytes] of plan) files.stage(client, rel, bytes);
+        // units: removed, changed, added (the module unit keeps its id and place)
+        project.raw = project.raw || new Map();
+        for (const [id] of oldIds) {
+            if (newIds.has(id)) continue;
+            project.units.delete(id);
+            client.changes.updated.delete(id);
+            client.changes.deleted.add(id);
+        }
+        for (const [id, u] of newIds) {
+            const containerId = u === mod ? appMod.containerId : u.containerId === mod.id ? appMod.id : u.containerId;
+            const plain = u === mod ? { ...u.plain, $ID: id } : u.plain;
+            const bytes = u === mod ? bson.encode(require("./convert").fromPlain(plain)) : u.bytes;
+            project.plain.set(id, plain);
+            project.raw.set(id, bytes);
+            if (oldIds.has(id)) {
+                const old = project.units.get(id);
+                if (old.containerId !== containerId || old.containmentName !== u.containmentName) {
+                    client.changes.moved = client.changes.moved || new Map();
+                    client.changes.moved.set(id, { containerId, containmentName: u.containmentName });
+                }
+                project.units.set(id, { ...old, containerId, containmentName: u.containmentName });
+                client.changes.updated.add(id);
+            } else {
+                project.units.set(id, { id, containerId, containmentName: u.containmentName, hash: null });
+                client.changes.created.set(id, { containerId, containmentName: u.containmentName });
+            }
+        }
+        client.warn(`${where}: ${name} replaced from the package; Studio Pro reloads it when the app opens: check the Errors pane`);
+        return `${report.join("\n      ")}\n      ${plan.length} file(s) replaced or added`;
+    }
+
     const checks = {
+        async exportModulePackage(o) {
+            const rel = String(o.file || `packages/${o.module}.mpk`);
+            const full = path.join(dir, rel);
+            if (!fs.existsSync(full)) return [`${rel} missing`];
+            try {
+                const pkg = readPackage(full);
+                return pkg.kind === "module" && pkg.name === o.module ? [] : [`${rel} is not a module package of ${o.module}`];
+            } catch (e) {
+                return [`${rel}: ${e.message}`];
+            }
+        },
+        async updateModulePackage(o) {
+            let pkg;
+            try {
+                pkg = readPackage(packagePath(o.file, "check"));
+            } catch (e) {
+                return [];
+            }
+            const take = moduleUnits(pkg.name);
+            if (!take) return [`module ${pkg.name} is not in the app`];
+            const { units } = readUnits(pkg, "check");
+            const ids = new Set(take.map(u => u.id));
+            const missing = units.filter(u => u.plain.$Type !== "Projects$ModuleImpl" && u.plain.$Type !== "Projects$Project" && !ids.has(u.id));
+            return missing.length ? [`${missing.length} unit(s) of the package are not in ${pkg.name}`] : [];
+        },
         async importWidget(o) {
             const rel = `widgets/${path.basename(String(o.file))}`;
             return fs.existsSync(path.join(dir, rel)) ? [] : [`${rel} is missing`];
@@ -302,7 +519,7 @@ function makeMarket({ client, model }) {
         }
     };
 
-    return { impl: { importWidget, importModulePackage }, checks };
+    return { impl: { importWidget, importModulePackage, exportModulePackage, updateModulePackage }, checks };
 }
 
 // ---------------------------------------------------------------- writing packages (self test, export)

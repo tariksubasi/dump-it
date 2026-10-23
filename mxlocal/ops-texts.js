@@ -33,6 +33,15 @@ const TEXT_OPS = {
         doc: "Add a language to the project (Settings > Languages), optionally as the default language. Existing texts keep their languages: translate them with setTranslations (list: texts --missing <code>).",
         fields: { code: "R language code, e.g. tr_TR, de_DE, nl_NL", default: "optional true: make it the default language (the language plain-string texts are written in)" }
     },
+    changeLanguage: {
+        doc: "Change a project language (Settings > Languages): make it the default, check completeness, custom date / time formats.",
+        fields: { code: "R language code of the project, e.g. nl_NL", default: "optional true: make it the default language", checkCompleteness: "optional true/false: Studio Pro reports texts missing in this language",
+            dateFormat: "optional custom date format, e.g. dd-MM-yyyy (\"\" = the language's own)", timeFormat: "optional custom time format, e.g. HH:mm", dateTimeFormat: "optional custom date-time format" }
+    },
+    deleteLanguage: {
+        doc: "Delete a project language (not the default one: make another default first with changeLanguage). Texts keep their translations in that language (unused).",
+        fields: { code: "R language code of the project" }
+    },
     setTranslations: {
         doc: "Translate existing texts: page titles, widget captions/texts/labels/placeholders, enumeration captions, show-message and validation-feedback texts, validation rule messages, menu captions, system texts. Find them with: texts Module[.Document] | system [--missing <code>].",
         fields: {
@@ -435,6 +444,45 @@ function makeTexts(h) {
             if (!done[0].endsWith("added") && done.length === 1) return done[0];
             return done.join(", ") + (done[0].endsWith("added") ? `; translate existing texts with setTranslations (list: texts --missing ${code})` : "");
         },
+        async changeLanguage(o) {
+            const code = languageCode(o.code);
+            const ls = await languageSettings();
+            const l = ls.languages.find(x => x.code === code);
+            if (!l) fail(`changeLanguage: ${code} is not a project language (add it with addLanguage)`, code, ls.languages.map(x => x.code));
+            const done = [];
+            if (["default", "checkCompleteness", "dateFormat", "timeFormat", "dateTimeFormat"].every(k => o[k] === undefined)) throw new Error("changeLanguage: give default, checkCompleteness, dateFormat, timeFormat or dateTimeFormat");
+            if (o.default !== undefined) {
+                if (!bool(o.default, false)) throw new Error(`changeLanguage: "default": false is not a change; make another language the default`);
+                if (ls.defaultLanguageCode !== code) {
+                    const was = ls.defaultLanguageCode;
+                    ls.defaultLanguageCode = code;
+                    if (h.resetLanguage) h.resetLanguage();
+                    done.push(`default language ${was} -> ${code}`);
+                    client.warn(`default language is now ${code}: plain-string texts in later ops are written in ${code}; texts that exist only in ${was} need a ${code} text (texts --missing ${code})`);
+                } else done.push(`${code} is already the default`);
+            }
+            if (o.checkCompleteness !== undefined) {
+                l.checkCompleteness = bool(o.checkCompleteness, false);
+                done.push(`check completeness ${l.checkCompleteness}`);
+            }
+            for (const [k, prop] of [["dateFormat", "customDateFormat"], ["timeFormat", "customTimeFormat"], ["dateTimeFormat", "customDateTimeFormat"]]) {
+                if (o[k] === undefined) continue;
+                const f = String(o[k]);
+                if (f && !/[dMyHhmsaEu]/.test(f)) throw new Error(`changeLanguage: ${k} '${f}' has no date/time letters (d, M, y, H, h, m, s, a), e.g. dd-MM-yyyy or HH:mm`);
+                l[prop] = f;
+                done.push(`${k} ${f || "(language default)"}`);
+            }
+            return `${code}: ${done.join(", ")}`;
+        },
+        async deleteLanguage(o) {
+            const code = languageCode(o.code);
+            const ls = await languageSettings();
+            const l = ls.languages.find(x => x.code === code);
+            if (!l) fail(`deleteLanguage: ${code} is not a project language`, code, ls.languages.map(x => x.code));
+            if (ls.defaultLanguageCode === code) throw new Error(`REFUSED: ${code} is the default language; make another language the default first: { "op": "changeLanguage", "code": "${ls.languages.find(x => x.code !== code) ? ls.languages.find(x => x.code !== code).code : "en_US"}", "default": true }`);
+            l.delete();
+            return `${code} deleted (${ls.languages.length} language(s) left: ${ls.languages.map(x => x.code).join(", ")}); texts keep their ${code} translations, unused`;
+        },
         async setTranslations(o) {
             const list = await items(o);
             for (const x of list) setTranslation(x.e.t, x.code, x.text);
@@ -454,6 +502,21 @@ function makeTexts(h) {
             if (!ls.languages.some(l => l.code === code)) r.push(`${code} is not a project language`);
             if (bool(o.default, false) && ls.defaultLanguageCode !== code) r.push(`default language is ${ls.defaultLanguageCode}`);
             return r;
+        },
+        async changeLanguage(o) {
+            const code = languageCode(o.code);
+            const ls = await languageSettings();
+            const l = ls.languages.find(x => x.code === code);
+            const r = [];
+            if (!l) return [`${code} is not a project language`];
+            if (bool(o.default, false) && ls.defaultLanguageCode !== code) r.push(`default language is ${ls.defaultLanguageCode}`);
+            if (o.checkCompleteness !== undefined && l.checkCompleteness !== bool(o.checkCompleteness, false)) r.push(`${code} check completeness is ${l.checkCompleteness}`);
+            if (o.dateFormat !== undefined && l.customDateFormat !== String(o.dateFormat)) r.push(`${code} date format is ${l.customDateFormat}`);
+            return r;
+        },
+        async deleteLanguage(o) {
+            const ls = await languageSettings();
+            return ls.languages.some(x => x.code === languageCode(o.code)) ? [`${o.code} is still a project language`] : [];
         },
         async setTranslations(o) {
             const r = [];

@@ -116,6 +116,8 @@ function doccheck() {
     for (const name of [...Object.keys(OPS), ...Object.keys(ACTIONS), ...Object.keys(CONTROL)]) {
         if (!manual.includes("`" + name + "`")) problems.push(`docs/OPENCODE.md does not describe \`${name}\``);
     }
+    // COVERAGE TEST: every SDK document type and microflow action has an op or a NOT_SUPPORTED entry (coverage.js)
+    problems.push(...require("./coverage").coverage().problems);
     return { count, problems };
 }
 

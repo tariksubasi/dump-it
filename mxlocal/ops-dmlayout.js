@@ -12,11 +12,21 @@ const { fail } = require("./ops-util");
 
 const { domainmodels: dm } = sdk;
 
+const ANNOTATION = "R which annotation: a number (1 = the first) or the start of its text";
 const DMLAYOUT_OPS = {
     arrangeDomainModel: {
         doc: "Tidy the domain model diagram of a module: every entity gets a new position, related entities next to each other (no box overlaps); only positions change (no semantic change). Annotations stay where they are.",
         fields: { module: "R module name", mode: "optional compact (rows, boxes at their own size; default) | grid (equal cells)" }
-    }
+    },
+    addDomainAnnotation: {
+        doc: "Add an annotation (a yellow note) to a module's domain model, next to an entity or below the entities. (A note in a microflow: addAnnotation.)",
+        fields: { module: "R module name", text: "R note text (\\n for a new line)", near: "optional Module.Entity of this module: put it next to that entity", width: "optional width in pixels (default 300)" }
+    },
+    changeDomainAnnotation: {
+        doc: "Change an annotation of a module's domain model: its text, width, or move it next to an entity.",
+        fields: { module: "R module name", annotation: ANNOTATION, text: "optional new text", width: "optional width in pixels", near: "optional Module.Entity: move it next to that entity" }
+    },
+    deleteDomainAnnotation: { doc: "Delete an annotation of a module's domain model.", fields: { module: "R module name", annotation: ANNOTATION } }
 };
 
 const GAP = 60, MARGIN = 20, LINE = 18, HEADER = 32, CHAR = 7;
@@ -103,6 +113,102 @@ function makeDmLayout(h) {
     }
     const touch = e => touched.add(e);
 
+    // ------------------------------------------------ annotations (DomainModels$Annotation: Caption, Location, Width)
+
+    // estimated box of an annotation: the text wrapped at its width
+    const noteBox = n => {
+        const w = n.width || 300;
+        const perLine = Math.max(1, Math.floor((w - 20) / CHAR));
+        const lines = String(n.caption || "").split(/\r?\n/).reduce((k, l) => k + Math.max(1, Math.ceil(l.length / perLine)), 0);
+        return { x: n.location.x, y: n.location.y, w, h: lines * LINE + 20 };
+    };
+    // a free spot for annotation n of d: next to entity near, else below everything
+    function placeNote(d, n, near) {
+        const others = [...d.entities.map(box), ...d.annotations.filter(x => x !== n).map(noteBox)];
+        let c;
+        if (near) c = freeSpot(noteBox(n), others, box(near));
+        else {
+            const bottom = others.length ? Math.max(...others.map(o => o.y + o.h)) + GAP : 100;
+            const left = others.length ? Math.min(...others.map(o => o.x)) : 100;
+            c = { x: Math.max(0, left), y: bottom };
+        }
+        n.location = { x: c.x, y: c.y };
+        return c;
+    }
+    async function nearEntity(d, qn, where) {
+        if (qn === undefined) return null;
+        const m = d.containerAsModule.name;
+        const e = d.entities.find(x => `${m}.${x.name}` === String(qn));
+        if (!e) {
+            if (!String(qn).startsWith(m + ".")) throw new Error(`${where}: near must be an entity of ${m} (annotations belong to one domain model), not ${qn}`);
+            fail(`${where}: ${m} has no entity '${String(qn).split(".").pop()}'`, String(qn), d.entities.map(x => `${m}.${x.name}`));
+        }
+        return e;
+    }
+    const noteText = t => String(t).replace(/\r?\n/g, "\r\n");
+    const short = n => JSON.stringify(String(n.caption).replace(/\s+/g, " ").slice(0, 40));
+    function noteOf(d, o, where) {
+        const all = [...d.annotations];
+        const m = d.containerAsModule.name;
+        if (!all.length) throw new Error(`${where}: the domain model of ${m} has no annotations`);
+        const list = all.map((n, i) => `${i + 1}: ${short(n)}`).join("; ");
+        if (typeof o.annotation === "number" || /^\d+$/.test(String(o.annotation))) {
+            const i = Number(o.annotation);
+            if (i < 1 || i > all.length) throw new Error(`${where}: ${m} has ${all.length} annotation(s): ${list}`);
+            return all[i - 1];
+        }
+        const start = String(o.annotation || "").trim().toLowerCase();
+        const hits = start ? all.filter(n => String(n.caption).trim().toLowerCase().startsWith(start)) : [];
+        if (hits.length !== 1) throw new Error(`${where}: ${hits.length ? `${hits.length} annotations start with` : "no annotation starts with"} ${JSON.stringify(o.annotation)}; give its number: ${list}`);
+        return hits[0];
+    }
+    const validWidth = (w, where) => {
+        const n = Number(w);
+        if (!(Number.isInteger(n) && n >= 60 && n <= 2000)) throw new Error(`${where}: width is a whole number of pixels, 60..2000`);
+        return n;
+    };
+
+    async function addDomainAnnotation(o) {
+        const where = `addDomainAnnotation ${o.module}`;
+        const d = await h.domainModel(o.module);
+        if (!String(o.text || "").trim()) throw new Error(`${where}: text is empty`);
+        const near = await nearEntity(d, o.near, where);
+        const n = dm.Annotation.createIn(d);
+        n.caption = noteText(o.text);
+        n.width = o.width !== undefined ? validWidth(o.width, where) : 300;
+        const c = placeNote(d, n, near);
+        return `${o.module}: annotation ${d.annotations.length} ${short(n)} at ${c.x};${c.y}${near ? ` next to ${near.name}` : ""}`;
+    }
+    async function changeDomainAnnotation(o) {
+        const where = `changeDomainAnnotation ${o.module}`;
+        const d = await h.domainModel(o.module);
+        const n = noteOf(d, o, where);
+        if (o.text === undefined && o.width === undefined && o.near === undefined) throw new Error(`${where}: give text, width or near`);
+        const done = [];
+        if (o.text !== undefined) {
+            if (!String(o.text).trim()) throw new Error(`${where}: text is empty (delete it with deleteDomainAnnotation)`);
+            n.caption = noteText(o.text);
+            done.push("text");
+        }
+        if (o.width !== undefined) {
+            n.width = validWidth(o.width, where);
+            done.push(`width ${n.width}`);
+        }
+        if (o.near !== undefined) {
+            const near = await nearEntity(d, o.near, where);
+            const c = placeNote(d, n, near);
+            done.push(`moved to ${c.x};${c.y} next to ${near.name}`);
+        }
+        return `${o.module}: annotation ${short(n)}: ${done.join(", ")}`;
+    }
+    async function deleteDomainAnnotation(o) {
+        const d = await h.domainModel(o.module);
+        const n = noteOf(d, o, `deleteDomainAnnotation ${o.module}`);
+        const t = short(n);
+        n.delete();
+        return `${o.module}: annotation ${t} deleted`;
+    }
+
     async function arrangeDomainModel(o) {
         const where = `arrangeDomainModel ${o.module}`;
         const mode = String(o.mode || "compact").toLowerCase();
@@ -183,6 +289,18 @@ function makeDmLayout(h) {
     }
 
     const checks = {
+        async addDomainAnnotation(o) {
+            const d = await h.domainModel(o.module);
+            return d.annotations.some(n => n.caption === noteText(o.text)) ? [] : [`${o.module} has no annotation ${JSON.stringify(o.text)}`];
+        },
+        async changeDomainAnnotation(o) {
+            const d = await h.domainModel(o.module);
+            if (o.text !== undefined) return d.annotations.some(n => n.caption === noteText(o.text) && (o.width === undefined || n.width === Number(o.width))) ? [] : [`${o.module} has no annotation ${JSON.stringify(o.text)}${o.width !== undefined ? ` of width ${o.width}` : ""}`];
+            return [];
+        },
+        async deleteDomainAnnotation() {
+            return []; // found by what it was
+        },
         async arrangeDomainModel(o) {
             const d = await h.domainModel(o.module);
             const all = d.entities.map(box);
@@ -191,7 +309,7 @@ function makeDmLayout(h) {
             return r.slice(0, 5);
         }
     };
-    return { impl: { arrangeDomainModel }, checks, place, associated, touch, lint, box };
+    return { impl: { arrangeDomainModel, addDomainAnnotation, changeDomainAnnotation, deleteDomainAnnotation }, checks, place, associated, touch, lint, box };
 }
 
 module.exports = { makeDmLayout, DMLAYOUT_OPS, box, overlap };
