@@ -412,13 +412,22 @@ function makeDocs(h) {
             d.name = o.name;
             const src = ds.OqlDataSetSource.createIn(d);
             src.query = oql;
-            const access = ds.DataSetAccess.createIn(d);
+            let access = null;
+            try {
+                access = ds.DataSetAccess.createIn(d);
+            } catch (e) {
+                // Mendix 11 keeps no per-role access in the data set (the SDK refuses DataSetAccess)
+                if (roles.length) {
+                    d.delete();
+                    throw new Error(`${where}: this Mendix version (${version}) stores no role access in a data set; leave out "roles" (who may run it follows the module roles of the microflow or report that uses it)`);
+                }
+            }
             for (const [i, p] of params.entries()) {
                 const dp = ds.DataSetParameter.createIn(d);
                 dp.name = p.name;
                 dp.parameterType = types[i];
             }
-            for (const r of roles) {
+            for (const r of access ? roles : []) {
                 const ra = ds.DataSetModuleRoleAccess.createIn(access);
                 ra.moduleRole = r;
                 for (const p of params) ds.DataSetParameterAccess.createIn(ra).parameterName = p.name;

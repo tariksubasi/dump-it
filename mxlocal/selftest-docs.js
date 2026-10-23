@@ -303,14 +303,15 @@ function mediaProblems(project, T, version) {
 
 // ---------------------------------------------------------------- data sets, refused documents
 
-function dataPlan(mod, T) {
+function dataPlan(mod, T, version) {
     const E = `${mod}.${T}`;
+    const access = cmp(version, "11.0.0") < 0;
     return {
         refuse: ["createDatabaseConnection", "createDataTransformer", "createMLModelMapping", "createChangeDataCaptureService", "createExcelImportTemplate", "createDataImporter", "importDocument"].map(op => ({ op })),
         ops: [
             { op: "createEntity", module: mod, name: `${T}DocSale`, attributes: [{ name: "Amount", type: "Decimal" }, { name: "Region", type: "String(50)" }] },
             { op: "createModuleRole", module: mod, name: "ZzDocReports" },
-            { op: "createDataSet", module: mod, name: `${T}_Sales`, folder: "ZzDocs", roles: [`${mod}.ZzDocReports`],
+            { op: "createDataSet", module: mod, name: `${T}_Sales`, folder: "ZzDocs", ...(access ? { roles: [`${mod}.ZzDocReports`] } : {}),
                 oql: `SELECT s.Region AS Region, SUM(s.Amount) AS Total FROM ${E}DocSale AS s WHERE s.Amount > $Min AND s.Region != '$Not' GROUP BY s.Region`,
                 parameters: [{ name: "Min", type: "Decimal" }] }
         ],
@@ -318,19 +319,20 @@ function dataPlan(mod, T) {
             { op: { op: "createDataSet", module: mod, name: `${T}_DsBad`, oql: `SELECT s.Region FROM ${E}DocSale AS s WHERE s.Amount > $Mn`, parameters: [{ name: "Min", type: "Decimal" }] }, expect: /uses \$Mn, which is not in parameters.*Did you mean: Min/ },
             { op: { op: "createDataSet", module: mod, name: `${T}_DsBad`, oql: `SELECT s.Region FROM ${E}DocSal AS s` }, expect: /no entity .*DocSal.*Did you mean/ },
             { op: { op: "createDataSet", module: mod, name: `${T}_DsBad`, oql: `SELECT s.Region FROM ${E}DocSale AS s`, parameters: [{ name: "Min", type: "Decimal" }] }, expect: /parameter Min is not used/ },
-            { op: { op: "createDataSet", module: mod, name: `${T}_DsBad`, sql: "SELECT 1" }, expect: /unknown field 'sql'.*OQL, not SQL/ }
+            { op: { op: "createDataSet", module: mod, name: `${T}_DsBad`, sql: "SELECT 1" }, expect: /unknown field 'sql'.*OQL, not SQL/ },
+            ...(access ? [] : [{ op: { op: "createDataSet", module: mod, name: `${T}_DsBad`, oql: `SELECT s.Region FROM ${E}DocSale AS s`, roles: [`${mod}.ZzDocReports`] }, expect: /stores no role access/ }])
         ]
     };
 }
 
-function dataProblems(project, T) {
+function dataProblems(project, T, version) {
     const d = unitsNamed(project, `${T}_`)[`${T}_Sales`];
     if (!d || d.$Type !== "DataSets$DataSet") return ["data set missing"];
     const r = [];
     if (!d.Source || d.Source.$Type !== "DataSets$OqlDataSetSource" || !/\$Min/.test(d.Source.Query)) r.push("OQL source");
     if (d.Parameters.length !== 1 || d.Parameters[0].Name !== "Min" || !/DecimalType/.test(d.Parameters[0].ParameterType.$Type)) r.push("parameter Min Decimal");
     const ra = d.DataSetAccess && d.DataSetAccess.ModuleRoleAccessList;
-    if (!ra || ra.length !== 1 || ra[0].ParameterAccessList.length !== 1) r.push("role access");
+    if (cmp(version, "11.0.0") < 0 && (!ra || ra.length !== 1 || ra[0].ParameterAccessList.length !== 1)) r.push("role access");
     return r;
 }
 
