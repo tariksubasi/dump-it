@@ -277,14 +277,16 @@ The default of an `Enum` attribute is the value name, e.g. `"default": "Open"`.
 | `addActions` | **microflow** (or nanoflow), **actions**, after (`"start"`, a variable name, or a step id) | Without `after`: before the single end event. Works inside loops too. Inserted actions must not end the flow |
 | `changeAction` | **microflow**, **id** (from `steps`), and the fields to change | See the table below |
 | `deleteAction` | **microflow**, **id** | Deletes one action or loop and reconnects the line. Refuses steps with an error handler, decisions, merges and events |
-| `moveAction` | **microflow**, **id**, **after** (`"start"`, a variable, a step id), branch (with a decision: `"true"`, `"false"`, an enumeration value, `"empty"`) | Moves one action or loop (keeps its id), also into a branch or a loop. Refused when the step then uses a variable made after it, or has an error handler |
-| `extractMicroflow` | **microflow**, **from** (step id), to (step id, default from), **name**, module, folder | The steps from..to (one line, no decisions or error handlers) go into a new microflow (nanoflow in a nanoflow) that the old place calls. Parameters = the variables they use; returns the one variable they make that is used later (more than one: refused) |
+| `moveAction` | **microflow**, **id**, **after** (`"start"`, a variable, a step id), branch (with a decision: `"true"`, `"false"`, an enumeration value, `"empty"`) | Moves one action or loop (keeps its id), also into a branch or a loop. A custom error handler moves along (its lane stays under the step; when that covers other steps the flow is laid out again). Refused when the step then uses a variable made after it, when its handler goes back to the main line, or for the first step of a handler |
+| `extractMicroflow` | **microflow**, **from** (step id), to (step id, default from), **name**, module, folder | The steps from..to (one line, no decisions) go into a new microflow (nanoflow in a nanoflow) that the old place calls; their custom error handlers go along when they end with an error event (a handler with an end event, or one that goes back to the main line: refused). Parameters = the variables they use; returns the one variable they make that is used later (more than one: refused) |
+| `deleteBranch` | **microflow**, **id** (a decision), **branch** (`"true"`, `"false"`, an enumeration value, `"empty"`, `"other"`) | Deletes the branch and the steps only it reaches. An `if` (or any decision left with one way) goes away: its other branch becomes the line. A merge left with one line in goes too |
+| `rerouteBranch` | **microflow**, **id** (a decision or a step), branch (with a decision), **to** (step id), deleteOrphans | The flow now goes to `to` (same level: not into or out of a loop). A step that already has a line in gets a merge in front. Steps nobody reaches any more: refused with their list, or deleted with `"deleteOrphans": true`. Refused when it makes a cycle or a step after `to` then uses a variable the new way does not make |
 | `addAnnotation` | **microflow**, **text**, to (step id) | A note, attached to a step or free. On a new action use `"note": "text"` instead |
 | `formatMicroflow` | **microflow** (also a nanoflow or rule), keepAnnotations (`true`: notes stay put) | Lays the whole flow out again as Studio Pro draws it: main path on one line at the start event's height, branches and error handlers as lanes below, merges after their branches, loops sized to their content, every flow on Studio Pro's sides. Only positions, sizes and flow sides change (steps and ids stay). Formatting twice gives the same result. Use it when LAYOUT CHECK shows errors or the user calls a flow unreadable |
 | `createJavaAction` | **module**, **name**, folder, parameters `[{name, type, description, required}]`, returns (default `Boolean`; `Nothing` for none), documentation, exposed `{caption, category}` | Also writes `javasource/<module>/actions/<Name>.java` as Studio Pro generates it. Types: `String`, `Integer`/`Long`, `Decimal`, `Boolean`, `DateTime`, `Module.Entity`, `List(Module.Entity)`, `Enum(Module.Enum)`, `EntityType(T)` (declares type parameter T), `Object(T)`, `List(T)`, `Microflow`. A file that exists keeps its imports, user code and extra code |
 | `setJavaActionCode` | **javaAction**, **code**, imports, extra, compile | Replaces the code between BEGIN USER CODE and END USER CODE of the action's file (`extra`: between BEGIN/END EXTRA CODE; `imports`: `["java.util.List"]`). `createJavaAction` takes the same `code`, `imports`, `extra`. Parameters are fields of the same name (`Input`). JAVA CHECK: javac compiles the file with `userlib/`, `vendorlib/` and the Mendix runtime jars (`MXLOCAL_RUNTIME_JARS`, else the runtime of the project's mx); errors refuse the change. No JDK or no runtime jars: a `JAVA CHECK: skipped` line, not an error. `"compile": false` writes it unchecked |
 | `createJavaScriptAction` | same as `createJavaAction`, platform (`All`/`Web`/`Native`) | Writes `javascriptsource/<module>/actions/<Name>.js`. `Nanoflow` instead of `Microflow` as parameter type |
-| `changeMicroflow` | **microflow** (also a nanoflow or rule), addParameters `[{name, type, value}]`, removeParameters `["Name"]`, renameParameters `{"Old": "New"}`, parameterTypes `{"Name": "type"}`, returns, returnValue | Updates every caller found by `usages`: call steps, rule decisions, page buttons, data sources, on-change (`value` = the argument they pass, required when there are callers). The dry run lists `CALLERS UPDATED`. Refused with the list: callers that pass no parameters (scheduled events, menu items, home pages, after-startup), event handlers / calculated attributes, published services and workflows; removing a parameter the flow still uses; `returns` Nothing while a caller uses the result; a new return type for a data source. Renaming a parameter also renames `$Old` in the flow. Rename the flow itself with `rename` |
+| `changeMicroflow` | **microflow** (also a nanoflow or rule), addParameters `[{name, type, value}]`, removeParameters `["Name"]`, renameParameters `{"Old": "New"}`, parameterTypes `{"Name": "type"}`, returns, returnValue; settings: allowConcurrentExecution, concurrencyErrorMessage, concurrencyErrorMicroflow, applyEntityAccess, markAsUsed, url, toolbox, workflowToolbox | Settings only (no parameter change): nothing else changes. `allowConcurrentExecution: false` + a message (text) or an error microflow (it gets the parameters of the flow by name: same names and types). `applyEntityAccess`: microflows and rules (a nanoflow always applies it). `url` (microflows): `"/orders/{Order}"`, every `{Name}` a parameter, `""` = none. `toolbox` / `workflowToolbox` (microflows): `{"caption": "Approve order", "category": "Orders", "icon": "Module.Images.Name"}` (a PNG of an image collection) shows the microflow as an action in Studio Pro's toolbox, `"none"` removes it. Updates every caller found by `usages`: call steps, rule decisions, page buttons, data sources, on-change (`value` = the argument they pass, required when there are callers). The dry run lists `CALLERS UPDATED`. Refused with the list: callers that pass no parameters (scheduled events, menu items, home pages, after-startup), event handlers / calculated attributes, published services and workflows; removing a parameter the flow still uses; `returns` Nothing while a caller uses the result; a new return type for a data source. Renaming a parameter also renames `$Old` in the flow. Rename the flow itself with `rename` |
 | `createRule` | **module**, **name**, **returns** (`Boolean` or `Enum(...)`), **returnValue**, parameters, actions, folder, documentation | Rules only read and compute: retrieve, variable, set, aggregateList, listOperation, createList, changeList, if, switch, loop, end. Use it in `if`/`switch` with `"rule"` + `"args"` |
 
 Data types for parameters, variables and returns: `String`, `Integer`, `Long`, `Decimal`, `Boolean`, `DateTime`,
@@ -313,7 +315,7 @@ Actions (inside `"actions": [ { "action": "<name>", ... } ]`). Every action also
 | `listOperation` | **variable**, **operation**, **list**, other, attribute + value, expression, sort, offset, limit | `union`/`intersect`/`subtract`: other = second list (`equals` is refused: Studio Pro 10.24/11.12 cannot load it); `contains` (Boolean): other = object; `head`/`tail`; `find` (one object)/`filter` (a list): attribute (or `Module.Assoc`) + value, or expression on `$currentObject`; `sort`: `["Attr", {"attribute":"B","descending":true}]`; `range`: limit, offset (default 0) |
 | `validationFeedback` | **variable** (object), **member** (attribute or `Module.Assoc`), **message** (`{1}` = args), args | Text in the default language |
 | `rollback` | **variable** (object or list), refresh | refresh = false |
-| `callJava` | **javaAction** (`Module.JavaAction`), args `{"Param":"expr"}`, variable | Microflows only. Every required parameter needs an arg (`"empty"` for none); an entity type parameter takes `"Module.Entity"`. variable only when the action returns something. Parameters that take a microflow, mapping or file are refused |
+| `callJava` | **javaAction** (`Module.JavaAction`), args `{"Param":"expr"}`, variable; or **preset** `publishBusinessEvent` + **event** (object variable) | Preset: calls the publish Java action of the Marketplace Business Events module with the event object (a specialization of `BusinessEvents.PublishedBusinessEvent`); refused with the Studio Pro steps when the module is missing. Microflows only. Every required parameter needs an arg (`"empty"` for none); an entity type parameter takes `"Module.Entity"`. variable only when the action returns something. Parameters that take a microflow, mapping or file are refused |
 | `callJavaScript` | **jsAction** (`Module.JSAction`), args, variable | Nanoflows only; same rules as `callJava` |
 | `synchronize` | objects (`all` default, `unsynchronized`, or `["Order", "Lines"]` object/list variables) | Nanoflows only, and only in an app with an offline or native navigation profile (else refused). No Studio Pro sample: check it in Studio Pro |
 | `callRest` | **url** (`{1}` = urlArgs), urlArgs, method (default `Get`), headers `{"Name":"expr"}`, timeout (s, default 300), body (`{1}` = bodyArgs) or exportMapping + exportObject, response (`none`/`string`/`Module.ImportMapping`), variable, commit | Microflows only. Write the body as plain text, e.g. `{"name": "{1}"}`: braces are escaped for Mendix. response defaults to `string` with variable, else `none`. An import mapping response gets an object or list of the mapping's root entity; commit `yes`/`no`/`withoutEvents` (default). auth `{"user": "@Module.User", "password": "@Module.Password"}` (expressions, basic authentication); proxy `default`/`none`/`{host, port, user, password}`; formData `{"key": "expr"}` or binaryBody `"$File"` instead of body; response `file` + variable (+ fileEntity, default `System.FileDocument`); errorBody false = do not keep the error response in `$latestHttpResponse` |
@@ -321,6 +323,13 @@ Actions (inside `"actions": [ { "action": "<name>", ... } ]`). Every action also
 | `exportWithMapping` | **mapping** (`Module.ExportMapping`), **object** (variable to export), **variable** (new String) | Microflows only. The object must be the mapping's root entity |
 | `downloadFile` | **variable** (object of a `System.FileDocument` specialization), showInBrowser | Microflows only. showInBrowser = false |
 | `sendRestRequest` | **operation** (`Module.Service.Operation`), args, query, body, variable | Microflows only. Calls an operation of a consumed REST service, see REST services below |
+| `sendEmail` | **to**, cc, bcc, **subject**, subjectArgs, body and/or html, bodyArgs, **server** `{"host", "port", "from", "security" (none/ssl/tls), "user", "password", "checkIdentity", "timeout"}`, attachment, headers | Microflows only, Mendix 11.2+. 11.12+: subject and body are text with `{1}` from subjectArgs / bodyArgs; before 11.12 they are expressions (`"'Order ' + $Order/Number"`). host, port, from, user, password are expressions: use constants (`"@Sales.SmtpPassword"`) for secrets. attachment: 11.3+, headers: 11.11+. First use: check it in Studio Pro |
+| `callWebService` | **service** (`Module.ImportedWebService`), **operation** (or `Service/Operation`), args `{"part":"expr"}`, timeout, location (+ locationArgs), variable | Microflows only. Needs a consumed web service imported in Studio Pro (ops cannot import a WSDL). Simple RPC parameters only; `variable` only for a response of one simple value. Stored as `Microflows$CallWebServiceAction` (first use: check it in Studio Pro) |
+| `callExternalAction` | **service** (`Module.ConsumedODataService`), **name** (OData action), args, variable | Mendix 10.2+. Unbound actions with primitive parameters and result; a nullable parameter left out gets `empty` |
+| `sendExternalObject` / `deleteExternalObject` | **variable** (object of an external entity), refresh | Only external entities (from a consumed OData service); a normal entity: `commit` / `delete` |
+| `synchronizeToDevice` | **variable** (object or list) | Microflows only (Studio Pro: Synchronize to device, offline apps) |
+| `clearFromDevice` | **entity**, or objects (`"all"` or `["Var"]`, 11.14+) | Nanoflows only (Studio Pro: Clear from device) |
+| `cancelSynchronization` | | Nanoflows only, Mendix 11.8+, offline-first apps |
 | `cast` | **variable** | Only as the first action of an `ifType` case: the object as that case's entity |
 | `metric` | **type** (`counter`/`increment`/`gauge`), **name** (plain text, e.g. `orders.created`), value (counter: default 1; gauge: required), description, tags `{"tag":"expr"}` | Microflows only. First use in a project: check it in Studio Pro |
 | `generateDocument` | **template** (`Module.DocumentTemplate`), **variable** (file document), args `{"Widget":"$Var"}`, type (`PDF` default) | Microflows only, and only in projects that already have a Generate document action (document templates are deprecated); otherwise refused |
@@ -358,6 +367,7 @@ Inside a loop a handler must end with `break`, `continue` or `error`. Recipes, c
 | message | text, type, blocking |
 | variable / set | value |
 | callJava / callJavaScript | args |
+| sendRestRequest, sendEmail, callWebService, callExternalAction, external objects, synchronizeToDevice, clearFromDevice, lockWorkflow, unlockWorkflow, changeWorkflowState | the fields of the action (e.g. operation, args, query, body, variable; to, subject, server). An object field merges with the stored one (`"server": {"port": "465"}` keeps the host), `null` removes a field, a new operation drops the old args |
 | validationFeedback | message, args |
 | rollback | refresh |
 | changeList | type, value |
@@ -366,7 +376,7 @@ Inside a loop a handler must end with `break`, `continue` or `error`. Recipes, c
 | callRest | url, urlArgs, method, headers (replaces all), timeout, body, bodyArgs, commit, auth (or `"none"`), proxy, errorBody |
 | importWithMapping | commit |
 | downloadFile | showInBrowser |
-| decision (`IF`, also an enumeration decision) | condition, caption; a decision that calls a rule (`IF RULE`): args, caption |
+| decision (`IF`, also an enumeration decision) | condition, caption; a decision that calls a rule (`IF RULE`): args, caption. Delete a branch: `deleteBranch`; send a branch elsewhere: `rerouteBranch` |
 | object type decision (`IF TYPE OF`) | caption |
 | loop | while (while loop), over (list loop), onError |
 | end | value |
@@ -1025,7 +1035,7 @@ Publish an operation with a body and a result (the mappings first, see JSON stru
 | Op | Fields | Notes |
 |---|---|---|
 | `createWorkflow` | **module**, **name**, **context** (a stored `Module.Entity`), **steps**, title, description, dueDate, adminPage, roles, folder | The context is `$WorkflowContext` in every expression (`$WorkflowContext/Amount > 1000`); `$Workflow` is the `System.Workflow`. `roles` may open the task pages and the admin page (workflow security: who sees a task is the step's `assignee`). Steps run top to bottom; the end of the main flow is added (`end1`, and on Mendix 11 a `start1`). Activities get Studio Pro's names (`userTask1`, `decision1`, `parallelSplit1`, `callMicroflow1`, ...) unless the step has `name`. The fields of one step kind: `ops userTask` |
-| `changeWorkflow` | **workflow**, add, move, change, remove, title, description, dueDate | Changes a workflow. Order: add, move, change, remove. Activity names are in the workflows export (`userTask1`, `decision1`, ...). `add`: `[{"after": "userTask1", "steps": [...]}]` (`"after": "start"`, `"before": "name"`, or `"into": "decision1", "outcome": "true"`; a parallel split: `"outcome": 2`, one more = a new path; `"outcome": "timeout"`: the timeout path). `move`: `[{"activity": "x", "after": "y"}]`. `remove`: `["name"]` (with the steps in its outcomes). `change`: `{"userTask1": {"dueDate": "...", "page": "...", "assignee": null, "outcomes": {"add": ["Escalate"], "remove": ["Reject"], "rename": {"Approve": "Accept"}}, "timeout": {...}}}` (the task page buttons follow outcome changes); decision `condition`, callMicroflow `microflow`/`args`, waitForTimer `delay`, jumpTo `target`, any `caption`. The dry run lists every change (`+`, `-`, `>`, `~`). Refused: removing start/end of the main flow, a jump target still in use, an end/jump that is not last |
+| `changeWorkflow` | **workflow**, add, move, change, remove, title, description, dueDate, context, adminPage, roles | Changes a workflow. Settings: `context` (`Module.Entity`, stored; refused while an expression or a called microflow needs the old entity), `adminPage` (a page with a `System.Workflow` parameter; `""` = none), `roles` (`["Module.Role"]` may open the admin page and every user task page: workflow security lives on those pages). Mendix keeps no workflow version or allowed roles on the workflow itself. Order: add, move, change, remove. Activity names are in the workflows export (`userTask1`, `decision1`, ...). `add`: `[{"after": "userTask1", "steps": [...]}]` (`"after": "start"`, `"before": "name"`, or `"into": "decision1", "outcome": "true"`; a parallel split: `"outcome": 2`, one more = a new path; `"outcome": "timeout"`: the timeout path). `move`: `[{"activity": "x", "after": "y"}]`. `remove`: `["name"]` (with the steps in its outcomes). `change`: `{"userTask1": {"dueDate": "...", "page": "...", "assignee": null, "outcomes": {"add": ["Escalate"], "remove": ["Reject"], "rename": {"Approve": "Accept"}}, "timeout": {...}}}` (the task page buttons follow outcome changes); decision `condition`, callMicroflow `microflow`/`args`, waitForTimer `delay`, jumpTo `target`, any `caption`. The dry run lists every change (`+`, `-`, `>`, `~`). Refused: removing start/end of the main flow, a jump target still in use, an end/jump that is not last |
 | `deleteWorkflowActivity` | **workflow**, **activity** | Deletes one activity and the steps in its outcomes (same refusals as `remove`) |
 | `createPage` with `"kind": "userTaskPage"` | **module**, **name**, **outcomes** `["Approve","Reject"]`, entity + **workflow** + fields + editable, title, folder, layout, roles | The page a user task opens: parameter `WorkflowUserTask` (`System.WorkflowUserTask`), a data view of it with one Complete-user-task button per outcome and a Close button. With `entity`: the context object read-only (`editable: true` to edit) in a data view inside it, from a new microflow `<Page>_Context` that retrieves the workflow context; `workflow` may be created later in the same plan |
 
@@ -1075,6 +1085,7 @@ Workflow actions (in microflows; System variables are written by name, e.g. a pa
 | `generateJumpToOptions` | **workflow**, **variable** | A `System.WorkflowJumpToDetails` to pick the jump target in |
 | `applyJumpTo` | **details**, variable | Moves the workflow to the chosen option |
 | `lockWorkflow` | **workflow** (`Module.Workflow`), unlock, pauseAll | Lock: no new instances (pauseAll pauses running ones); unlock: true (pauseAll resumes them) |
+| `unlockWorkflow` | **workflow** (`Module.Workflow`), resumeAll | New instances can start again; resumeAll also resumes the instances the lock paused |
 | `notifyWorkflow` | **workflow**, **definition**, **activity** (name of a `waitForNotification` step), variable | variable: Boolean, true when it continued |
 | `openUserTask` | **task**, assign (default true) | Opens the task page |
 | `openWorkflow` | **workflow** | Opens the workflow admin page |
@@ -1308,6 +1319,36 @@ Java action with its file, a REST call with authentication and form data, then r
   { "op": "moveAction", "microflow": "Sales.ACT_Order_Close", "id": "3f2a9c1b", "after": "7c0d11e2", "branch": "true" },
   { "op": "extractMicroflow", "microflow": "Sales.ACT_Order_Close", "from": "5b6e0a7d", "to": "9e8f1c2a", "name": "SUB_Order_Totals" }
 ] }
+```
+
+Decisions: change the condition, delete a branch, send a branch to another step (ids from `steps`):
+
+```json
+{ "ops": [
+  { "op": "changeAction", "microflow": "Sales.ACT_Order_Close", "id": "4d1e2f3a", "condition": "$Order/Total > 1000", "caption": "Large order?" },
+  { "op": "deleteBranch", "microflow": "Sales.ACT_Order_Close", "id": "4d1e2f3a", "branch": "false" },
+  { "op": "rerouteBranch", "microflow": "Sales.ACT_Order_Check", "id": "8a7b6c5d", "branch": "false", "to": "1f2e3d4c", "deleteOrphans": true }
+] }
+```
+
+Microflow settings (no parameter change needed):
+
+```json
+{ "ops": [
+  { "op": "changeMicroflow", "microflow": "Sales.ACT_Order_Approve", "allowConcurrentExecution": false,
+    "concurrencyErrorMessage": "This order is being approved, try again", "applyEntityAccess": true,
+    "url": "/orders/{Order}/approve", "toolbox": { "caption": "Approve order", "category": "Orders" } }
+] }
+```
+
+Send an email (Mendix 11.12+; before 11.12 subject and body are expressions) and publish a business event:
+
+```json
+{ "ops": [ { "op": "addActions", "microflow": "Sales.ACT_Order_Ship", "actions": [
+  { "action": "sendEmail", "to": "$Customer/Email", "subject": "Order {1} shipped", "subjectArgs": [ "toString($Order/Number)" ],
+    "body": "Your order is on its way.", "server": { "host": "@Sales.SmtpHost", "port": "587", "from": "'shop@example.com'",
+    "security": "tls", "user": "@Sales.SmtpUser", "password": "@Sales.SmtpPassword" } },
+  { "action": "callJava", "preset": "publishBusinessEvent", "event": "OrderShipped" } ] } ] }
 ```
 
 Lay out a messy flow again and draw it before/after (`"preview": true`, or `run ... --preview`):
@@ -1658,11 +1699,11 @@ native navigation profile and native pluggable widgets, open user task / open wo
 column offset or order per device, a tooltip on an input or an aria label on a button (Mendix stores none: the
 refusal names the alternative), alternative text with `{Attribute}` (plain text only), consumed OData services, consumed SOAP web services and business events
 (refused with the Studio Pro steps), XML schemas of several files or with attributes/choices/extensions, OpenAPI
-imports of consumed REST services, multi-user tasks, boundary events and event sub-processes of workflows, changing
-an existing workflow (only `createWorkflow`), custom mapping handlers and converters, and setting attributes inherited
+imports of consumed REST services, multi-user tasks, boundary events and event sub-processes of workflows, custom mapping handlers and converters, and setting attributes inherited
 from System entities (for example `System.User.Name`). In flows: calling an ML model (refused with the Studio Pro
-steps), generate document in a project that has no Generate document action yet, moving or extracting steps that have
-a custom error handler or a decision in between, extracting steps that make more than one variable used later,
+steps), generate document in a project that has no Generate document action yet, moving a step whose error handler
+goes back to the main line, extracting steps with a decision in between or with an error handler that ends the flow
+(an end event), list operation `equals` (no verified storage type), workflow event handlers, extracting steps that make more than one variable used later,
 sorting or a range on an association retrieve (Studio Pro has none either: retrieve from the database or sort with
 `listOperation`), add/remove on a reference (one object: `set`),
 changing a Java/JavaScript action after it was created (ops keep the user code when a file exists), and renaming or
