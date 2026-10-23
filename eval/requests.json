@@ -870,6 +870,69 @@
           "Mobile_Start\\.txt$": "(?s)Kart görünümü: Yükseltilmiş.*Özet|Özet.*Kart görünümü: Yükseltilmiş"
         }
       }
+    },
+    {
+      "id": "dsnpopup",
+      "setup": [
+        {
+          "op": "createEntity",
+          "module": "MyFirstModule",
+          "name": "Visit",
+          "attributes": [
+            {
+              "name": "Note",
+              "type": "String(500)"
+            },
+            {
+              "name": "Done",
+              "type": "Boolean"
+            }
+          ]
+        }
+      ],
+      "text": "MyFirstModule'de Visit nesnesini düzenlemek için Visit_EditPopup adında native bir pop-up sayfa oluştur: not için çok satırlı bir alan, 'Tamamlandı' onay kutusu ve Kaydet butonu olsun.",
+      "checks": {
+        "find": [
+          "MyFirstModule.Visit_EditPopup"
+        ],
+        "files": {
+          "Visit_EditPopup\\.txt$": "(?s)Note.*Done|Done.*Note"
+        }
+      }
+    },
+    {
+      "id": "dsnweb",
+      "setup": [
+        {
+          "op": "createEntity",
+          "module": "MyFirstModule",
+          "name": "Task",
+          "attributes": [
+            {
+              "name": "Title",
+              "type": "String(100)"
+            }
+          ]
+        },
+        {
+          "op": "createPage",
+          "module": "MyFirstModule",
+          "name": "Mobile_Tasks",
+          "native": true,
+          "widgets": [
+            {
+              "widget": "text",
+              "text": "Görevler"
+            }
+          ]
+        }
+      ],
+      "text": "Mobile_Tasks native sayfasına görevleri (Task) gösteren bir data grid ekle, her satırda başlık görünsün.",
+      "checks": {
+        "files": {
+          "Mobile_Tasks\\.txt$": "(?s)Görevler.*Title"
+        }
+      }
     }
   ]
 }

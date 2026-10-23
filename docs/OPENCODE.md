@@ -1393,7 +1393,14 @@ Native pages:
 - Native layouts: `createLayout` copies a native layout (`"from": "Atlas_Core.NativePhone_Default"`); the copy takes
   `bottomBar` (true/false), `sidebar` (true/false) and `popup` (true: pages on it open as a modal). A layout from
   nothing is not supported: copy one.
-- Native snippets: `createSnippet` with `"native": true`. A native page shows only native snippets (`snippetCall`),
+- Native snippets: `createSnippet` with `"native": true`.
+- App events (online / offline, resume, timers): the native App events pluggable widget
+  (`com.mendix.widget.native.appevents.AppEvents`) on a native page, with its nanoflows in `properties`, when its
+  .mpk is in `widgets/`.
+- Deep links and push notifications: the JavaScript actions `RegisterDeepLink`, `RequestNotificationPermission`,
+  `GetPushNotificationToken`, `DisplayNotification`, `ScheduleNotification` (NativeMobileResources) in nanoflows.
+  Setting up the push service (Firebase / APNs keys, the PushNotifications module, the native app build) is done in
+  Studio Pro and the Native Builder: give the user those steps. A native page shows only native snippets (`snippetCall`),
   a web page only web snippets.
 - `"class"` and `"design"` on its widgets: design properties come from the `native/design-properties.json` files.
 
