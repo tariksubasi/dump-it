@@ -1330,6 +1330,9 @@ async function selftest(mpr, keep, { out, relevant, mxcheck, mx, timeout }) {
                 if (r.firstUse.length) results.push(`NOTE ${name}: no Studio Pro sample of ${r.firstUse.length} type(s) in this project (built from the SDK metamodel): ${r.firstUse.slice(0, 8).join(", ")}${r.firstUse.length > 8 ? ", ..." : ""}`);
             }
         }
+        // phase G (selftest-general.js): a plan chaining many op families, changeWorkflow, unit tests, moveAttribute,
+        // Java action code (JAVA CHECK), selective undo
+        s2 = await require("./selftest-general").generalPhase({ s2, reopen, copy, mod, T, layout, layoutProblems, check, results, pageable, web, tmp });
         // phase P: generic pluggable widgets (every installed web widget, defaults as Studio Pro drops it, compared with
         // the Studio Pro-saved ones), Data grid 2 filters / sort / paging, search and sort of classic lists, design
         // properties, visibility by module role, URL, pop-up size, parameter rename, file widgets, native page

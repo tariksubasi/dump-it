@@ -125,7 +125,10 @@ function makeGeneral(h) {
         }
         a.detach();
         to.attributes.push(a);
-        if (newName !== a.name) a.name = newName;
+        // references store the qualified name: a name change makes the Model SDK rewrite every one (as rename does)
+        const keep = a.name;
+        a.name = `${keep}ZzMoving`;
+        a.name = newName;
         // validation rules go with it; member accesses where the new owner is not in the entity's chain go
         const moved = [];
         for (const r of [...from.validationRules]) {
@@ -147,6 +150,8 @@ function makeGeneral(h) {
             }
         }
         await h.addMemberToRules(to, a);
+        for (const x of ents) for (const r of x.accessRules) for (const ma of r.memberAccesses) if (ma.attribute === a) ma.attribute = a;
+        for (const r of to.validationRules) if (r.attribute === a) r.attribute = a;
         const lines = [];
         if (moved.length) lines.push(`${moved.length} validation rule(s) moved with it`);
         if (dropped) lines.push(`${dropped} member access(es) removed from rules of entities that no longer have it`);
