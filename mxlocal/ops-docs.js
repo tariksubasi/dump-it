@@ -7,7 +7,7 @@ const sdk = require("mendixmodelsdk");
 const { fail, bool, validName, enumValue } = require("./ops-util");
 const { cmp } = require("./versions");
 
-const { regularexpressions: rx, queues, microflows: mf, domainmodels: dm, images, customicons: ci } = sdk;
+const { regularexpressions: rx, queues, microflows: mf, domainmodels: dm, images, customicons: ci, datasets: ds, security } = sdk;
 const fs = require("fs");
 const path = require("path");
 
@@ -47,6 +47,41 @@ const DOCS_OPS = {
         doc: "NOT SUPPORTED (refused with the Studio Pro steps): create a document template for the generateDocument action (document templates are deprecated).",
         fields: { module: "optional module name", name: "optional", widgets: "optional", header: "optional", footer: "optional", folder: "optional" }
     },
+    createDataSet: {
+        doc: "Create a data set: an OQL query with parameters (used by reports and by Java actions that run a data set). Module roles in roles may run it.",
+        fields: {
+            module: "R module name", name: "R data set name, e.g. SalesPerMonth", oql: "R OQL query; parameters as $Name, e.g. SELECT o.Number AS Number FROM Sales.Order AS o WHERE o.Total > $Min",
+            parameters: "optional [ { \"name\": \"Min\", \"type\": \"Decimal\" } ] (String, Integer, Long, Decimal, Boolean, DateTime, Module.Entity, Enum(Module.Enumeration))", roles: "optional [ \"Module.Role\" ] that may run it", folder: "optional folder path"
+        }
+    },
+    createDatabaseConnection: {
+        doc: "NOT SUPPORTED (refused with the Studio Pro steps): an external database connection with queries and the 'Execute database query' action.",
+        fields: { module: "optional module name", name: "optional", type: "optional", queries: "optional" }
+    },
+    createDataTransformer: {
+        doc: "NOT SUPPORTED (refused with the Studio Pro steps): a data transformer (Mendix 11.1+, JSLT) and the 'Transform JSON' action.",
+        fields: { module: "optional module name", name: "optional", json: "optional", jslt: "optional" }
+    },
+    createMLModelMapping: {
+        doc: "NOT SUPPORTED (refused with the Studio Pro steps): an ML model mapping (ONNX model) and the 'Call ML model' action.",
+        fields: { module: "optional module name", name: "optional", model: "optional .onnx file" }
+    },
+    createChangeDataCaptureService: {
+        doc: "NOT SUPPORTED (refused with the Studio Pro steps): a change data capture service (Mendix 11.5+).",
+        fields: { module: "optional module name", name: "optional", entities: "optional" }
+    },
+    createExcelImportTemplate: {
+        doc: "NOT SUPPORTED (refused with the steps): an Excel Importer template (Marketplace module; its templates are data in the running app).",
+        fields: { module: "optional module name", name: "optional", entity: "optional", file: "optional" }
+    },
+    createDataImporter: {
+        doc: "NOT SUPPORTED (refused with the Studio Pro steps): a Data Importer document (Mendix 10+, from an Excel or CSV sample) and the 'Import data from file' action.",
+        fields: { module: "optional module name", name: "optional", file: "optional", entity: "optional" }
+    },
+    importDocument: {
+        doc: "NOT SUPPORTED (refused with the steps): import one document from a file exported by Studio Pro (Import document from file).",
+        fields: { file: "optional", module: "optional module name" }
+    },
     changeTaskQueue: {
         doc: "Change the threads or scope of a task queue; the dry run lists the calls that run in it.",
         fields: { queue: "R Module.Queue", threads: "optional number or expression", scope: "optional node | cluster" }
@@ -59,11 +94,23 @@ const DOCS_SYNONYMS = {
     changeRegularExpression: { regex: "the document goes in \"regularExpression\", the new expression in \"pattern\"", name: "the document goes in \"regularExpression\": Module.Name" },
     deleteImage: { name: "the image goes in \"image\": Module.Collection.Image", collection: "the image goes in \"image\": Module.Collection.Image" },
     importIconCollection: { file: "the font goes in \"font\", the name -> code map in \"icons\"", map: "the name -> code map goes in \"icons\"" },
+    createDataSet: { query: "the query goes in \"oql\"", sql: "the query goes in \"oql\" (OQL, not SQL: entity and attribute names)" },
     createTaskQueue: { parallelism: "use \"threads\"", clusterWide: "use \"scope\": \"cluster\"" },
     changeTaskQueue: { parallelism: "use \"threads\"", clusterWide: "use \"scope\": \"cluster\"", name: "the queue goes in \"queue\": Module.Queue" }
 };
 
 const DOCUMENT_TEMPLATE_WHY = "Document templates are deprecated in Studio Pro, and no test project has one: every widget of a template stores a style with colors (DocumentTemplates$Style.FontColor, BackgroundColor, border colors), a value type with no Studio Pro sample anywhere, so ops cannot write one Studio Pro is sure to load. In Studio Pro: right-click the module > Add other > Document template, add a data view or data grid (its name is the parameter), then call it with the 'Generate document' action (generateDocument works in projects that already use that action). For new work use the Document Generation module from the Marketplace (PDF from a page). Record it with: mx.py gap \"createDocumentTemplate\"";
+
+// Documents ops do not write: why, and the Studio Pro way. Each refusal names the Mendix version the document needs.
+const NOT_WRITTEN = {
+    createDatabaseConnection: { since: "9.22.0", why: "An external database connection is set up in Studio Pro against the live database: it tests the connection, runs each query to learn its columns and types, and generates the result entity and its mapping; offline there is no database to ask, and no test project has a sample. In Studio Pro: add the External Database Connector module (Marketplace), right-click the module > Add other > External database connection, enter the connection details (constants), add queries, run them and use the result in a microflow with the 'Execute database query' action." },
+    createDataTransformer: { since: "11.1.0", why: "Studio Pro builds a data transformer from a JSON sample and runs its JSLT on the sample to learn the output structure; ops have no JSLT engine, and no test project has a sample. In Studio Pro: right-click the module > Add other > Data transformer, paste a JSON sample, write the JSLT step, then use the 'Transform JSON' action (an import mapping maps its output)." },
+    createMLModelMapping: { since: "9.17.0", why: "Studio Pro reads the ONNX model file (its input and output tensors, shapes and types) to make the mapping and its entities; no test project has a sample. In Studio Pro: right-click the module > Add other > ML model mapping, import the .onnx file, then call it with the 'Call ML model' action." },
+    createChangeDataCaptureService: { since: "11.5.0", why: "A change data capture service publishes entity changes through a contract Studio Pro generates and versions; no test project has a sample. In Studio Pro (11.5+): right-click the module > Add other > Change data capture service, pick the entities and attributes, and deploy." },
+    createExcelImportTemplate: { since: "0.0.0", why: "Excel Importer templates are not model documents: they are objects in the running app's database, made in its Excel Importer pages. In Studio Pro: install the Excel Importer module from the Marketplace (with ops: importModulePackage of its .mpk), add its overview page to the navigation (addMenuItem), run the app, open it and create the template (sheet, columns, the entity and attributes); call ExcelImporter.Import from a microflow (callJava / call) to import a file." },
+    createDataImporter: { since: "10.0.0", why: "Studio Pro reads the Excel or CSV sample (sheets, header row, column types) to build the Data Importer document and its entity mapping; no test project has a sample. In Studio Pro: right-click the module > Add other > Data importer, upload a sample file, choose the sheet and columns, map them to an entity, then use the 'Import data from file' action." },
+    importDocument: { since: "0.0.0", why: "There is no sample of Studio Pro's single-document export file, so its format cannot be read safely. In Studio Pro: right-click the module > Import document from file. For a whole module (.mpk) use importModulePackage; to copy a document inside the app use copyDocument." }
+};
 
 // Java regex constructs JavaScript does not parse; a pattern with them is checked by Studio Pro only.
 const JAVA_ONLY = /\(\?[imsux-]+\)|\\[AZz]|[*+?}]\+|\\p\{(?:Alpha|Digit|Alnum|Upper|Lower|Punct|Space|L[ultmo]?|javaLowerCase)\}|\\Q|\\E/;
@@ -323,6 +370,62 @@ function makeDocs(h) {
     }
 
     const impl = {
+        ...Object.fromEntries(Object.entries(NOT_WRITTEN).map(([n, { since, why }]) => [n, async () => {
+            const old = !atLeast(since) ? ` It needs Mendix ${since.replace(/\.0$/, "")} (this project is ${version}).` : "";
+            let extra = "";
+            if (n === "createExcelImportTemplate") extra = model.allModules().some(m => m.name === "ExcelImporter") ? " The ExcelImporter module is in this app." : " The ExcelImporter module is not in this app yet.";
+            throw new Error(`${n} is not supported.${old}${extra} ${why} Record it with: mx.py gap "${n}"`);
+        }])),
+        async createDataSet(o) {
+            validName(o.name, "data set name");
+            const qn = `${o.module}.${o.name}`;
+            const where = `createDataSet ${qn}`;
+            if (await exists(qn)) throw new Error(`${qn} already exists`);
+            const oql = String(o.oql || "").trim();
+            if (!/^select\b|^from\b/i.test(oql)) throw new Error(`${where}: oql is an OQL query that starts with SELECT or FROM`);
+            const params = [].concat(o.parameters || []);
+            const PKEYS = ["name", "type"];
+            for (const [i, p] of params.entries()) {
+                if (!p || typeof p !== "object") throw new Error(`${where}: parameter ${i + 1} is { "name": "Min", "type": "Decimal" }`);
+                for (const k of Object.keys(p)) if (!PKEYS.includes(k)) fail(`${where}: parameter ${i + 1}: unknown field '${k}'`, k, PKEYS);
+                validName(p.name, "parameter name");
+                if (!p.type) throw new Error(`${where}: parameter ${p.name} needs a "type"`);
+            }
+            const names = params.map(p => p.name);
+            const used = [...new Set([...oql.replace(/'(?:[^']|'')*'/g, "''").matchAll(/\$([A-Za-z_]\w*)/g)].map(m => m[1]))];
+            for (const u of used) if (!names.includes(u)) fail(`${where}: the query uses $${u}, which is not in parameters`, u, names);
+            for (const n of names) if (!used.includes(n)) throw new Error(`${where}: parameter ${n} is not used in the query ($${n})`);
+            // entities after FROM / JOIN must exist
+            for (const m of oql.matchAll(/\b(?:from|join)\s+([A-Za-z_]\w*\.[A-Za-z_]\w*)/gi)) {
+                if (/^System\./.test(m[1])) continue;
+                await h.entity(m[1]).catch(() => fail(`${where}: no entity ${m[1]} (OQL uses Module.Entity)`, m[1], model.allDomainModels().flatMap(d => (d.isLoaded ? d.entities.map(e => e.qualifiedName) : []))));
+            }
+            const roles = [];
+            for (const r of [].concat(o.roles || [])) {
+                const role = await get(r).catch(() => fail(`${where}: no module role ${r}`, r, model.allModuleSecurities().flatMap(x => (x.isLoaded ? x.moduleRoles.map(y => y.qualifiedName) : []))));
+                if (!(role instanceof security.ModuleRole)) throw new Error(`${where}: ${r} is not a module role`);
+                roles.push(role);
+            }
+            const types = [];
+            for (const p of params) types.push(await h.dataType(p.type));
+            const d = ds.DataSet.createIn(folder(o.module, o.folder));
+            d.name = o.name;
+            const src = ds.OqlDataSetSource.createIn(d);
+            src.query = oql;
+            const access = ds.DataSetAccess.createIn(d);
+            for (const [i, p] of params.entries()) {
+                const dp = ds.DataSetParameter.createIn(d);
+                dp.name = p.name;
+                dp.parameterType = types[i];
+            }
+            for (const r of roles) {
+                const ra = ds.DataSetModuleRoleAccess.createIn(access);
+                ra.moduleRole = r;
+                for (const p of params) ds.DataSetParameterAccess.createIn(ra).parameterName = p.name;
+            }
+            firstUse("DataSets$DataSet", qn);
+            return `${qn}: ${params.length} parameter(s)${roles.length ? `, roles ${roles.map(r => r.qualifiedName).join(", ")}` : ", no role may run it yet (roles)"}`;
+        },
         async createDocumentTemplate() {
             throw new Error(`createDocumentTemplate is not supported. ${DOCUMENT_TEMPLATE_WHY}`);
         },
@@ -423,6 +526,12 @@ function makeDocs(h) {
     };
 
     const checks = {
+        ...Object.fromEntries(Object.keys(NOT_WRITTEN).map(n => [n, async () => []])),
+        async createDataSet(o) {
+            const d = await get(`${o.module}.${o.name}`).catch(() => null);
+            if (!(d instanceof ds.DataSet) || !(d.source instanceof ds.OqlDataSetSource)) return [`${o.module}.${o.name} is not an OQL data set`];
+            return d.parameters.length === [].concat(o.parameters || []).length ? [] : [`${o.module}.${o.name} has ${d.parameters.length} parameters`];
+        },
         async createDocumentTemplate() {
             return [];
         },

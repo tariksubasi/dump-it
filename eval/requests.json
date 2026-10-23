@@ -1817,6 +1817,34 @@
       "families": [
         "services"
       ]
+    },
+    {
+      "id": "docdataset",
+      "text": "Order'ları Total değeri verilen bir alt sınırın üstünde olanlarla listeleyen BigOrders adında bir OQL data set oluştur (Min adında Decimal parametre); User rolü çalıştırabilsin.",
+      "checks": {
+        "find": [
+          "MyFirstModule.BigOrders"
+        ]
+      },
+      "ops": [
+        "createDataSet"
+      ],
+      "families": [
+        "app"
+      ]
+    },
+    {
+      "id": "docdbrefuse",
+      "text": "PostgreSQL veritabanına bağlanan bir external database connection oluştur ve müşteri tablosunu sorgula.",
+      "checks": {
+        "gap": true
+      },
+      "ops": [
+        "createDatabaseConnection"
+      ],
+      "families": [
+        "app"
+      ]
     }
   ]
 }
