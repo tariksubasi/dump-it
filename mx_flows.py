@@ -14,6 +14,7 @@ ON_ERROR = {
     "Continue": "[on error: continue]",
     "Custom": "[on error: custom handler, rollback]",
     "CustomWithoutRollback": "[on error: custom handler, no rollback]",
+    "CustomWithoutRollBack": "[on error: custom handler, no rollback]",  # the stored spelling
 }
 COMMIT = {"Yes": " + COMMIT", "YesWithoutEvents": " + COMMIT (no events)"}
 WORKFLOW_ACTIONS = {

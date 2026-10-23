@@ -294,7 +294,7 @@ Actions (inside `"actions": [ { "action": "<name>", ... } ]`). Every action also
 | `commit` | **variable**, events | events = true |
 | `delete` | **variable** | |
 | `call` | **microflow** (a nanoflow too, inside a nanoflow), args `{"Param":"expr"}`, variable | Every parameter needs an arg. A microflow cannot call a nanoflow |
-| `log` | **message** (`{1}`, `{2}` = args), args `["expr"]`, level, node | Microflows only. level Info, node = module name |
+| `log` | **message** (`{1}`, `{2}` = args), args `["expr"]`, level, node, stackTrace | Microflows only. level Info, node = module name. stackTrace true = add the stack trace of `$latestError` (in an error handler) |
 | `message` | **text**, type (`Information`/`Warning`/`Error`), blocking | blocking = true |
 | `variable` | **name**, **type**, **value** | |
 | `set` | **name**, **value** | |
@@ -326,23 +326,24 @@ Flow control (also inside `"actions"`):
 | `if` | **condition** (or rule + args), then `[...]`, else `[...]`, caption | A branch may end with `end`, `break` or `continue`; open branches join again after the decision. `"rule": "Module.Rule", "args": {"Param": "expr"}` decides with a Boolean rule |
 | `switch` | **cases** `{"Value": [...], "A, B": [...]}`, value (enumeration expression) or rule + args, enumeration, other `[...]`, empty `[...]`, caption | Enumeration decision: one path per case, `other` for the values not listed, `empty` for no value. Open paths join again |
 | `ifType` | **variable** (object), **cases** `{"Module.Specialization": [...]}`, other `[...]`, empty `[...]`, caption | Object type decision. One path per specialization in cases, `other` for any other type (the variable's own entity), `empty` when there is no object. Start a case with `cast` to use the object as that entity. `currentUser` works as variable (`System.User`) |
-| `loop` | **actions** + either over (list variable), item (default `<List>Item`) or while (expression) | |
+| `loop` | **actions** + either over (list variable), item (default `<List>Item`) or while (expression), onError | onError on a loop: default, a recipe or `{ "actions": [...] }` (not `continue`) |
 | `end` | value | Required `value` when the flow returns something. Not inside loops |
 | `break` / `continue` | | Only inside a loop |
-| `error` | | Only inside an `onError` handler: ends with the error again |
+| `error` | message, args, node, jsLog | Only inside an `onError` handler: ends with the error again. With `message`: logs that text first (microflow: Error level + stack trace; nanoflow: a JavaScript log action, `jsLog`) |
 
 `"note": "text"` on any action attaches an annotation to it (see also the op `addAnnotation`). `while` loops:
 `{ "action": "loop", "while": "$N < 10", "actions": [...] }` (Mendix 10+; every supported version).
 
 `onError` on an action: `"continue"`, or `{ "rollback": true/false, "actions": [...], "returnValue": "..." }`. A
 handler path that does not end gets an end event automatically (`returnValue` when the flow returns something).
-Inside a loop a handler must end with `break`, `continue` or `error`.
+Inside a loop a handler must end with `break`, `continue` or `error`. Recipes, changing and checking handlers: see
+"Error handling" below.
 
 `changeAction` fields per kind of step:
 
 | Step | Fields |
 |---|---|
-| any action | caption, disabled |
+| any action | caption, disabled, onError (replaces the error handling; the old custom handler and its steps go) |
 | retrieve | xpath, first, entity, sort (replaces it; `[]` = none), range (or `"all"`) |
 | create / change | set (adds or replaces), unset `["Attr"]`, add, remove (replace the add/remove of that association), commit, refresh |
 | commit | events, refresh |
@@ -361,13 +362,124 @@ Inside a loop a handler must end with `break`, `continue` or `error`.
 | downloadFile | showInBrowser |
 | decision (`IF`, also an enumeration decision) | condition, caption; a decision that calls a rule (`IF RULE`): args, caption |
 | object type decision (`IF TYPE OF`) | caption |
-| loop | while (while loop), over (list loop) |
+| loop | while (while loop), over (list loop), onError |
 | end | value |
 
 Variable names are written without `$` in `variable`, `list`, `other`, `source`, `exportObject`, `from`, `over`,
 `item`, `after` and `name`. Expressions are
 Mendix expressions as text: `"'Hello'"`, `"$Order/Total * 2"`, `"empty"`, `"[%CurrentDateTime%]"`,
 `"Module.Enum.Value"`. String literals need single quotes inside the JSON string.
+
+### Error handling (microflows and nanoflows)
+
+Every action and loop can get `onError`. Short rules:
+
+- Microflow default (`"rollback"`): the flow stops and everything is undone. Nanoflow default (`"abort"`): the
+  nanoflow stops. A nanoflow never rolls back: `"rollback"` and `"rollback": true` are refused there.
+- `"continue"`: ignore the error and go on. Not on a loop.
+- Custom handler: `{ "rollback": true/false, "actions": [...], "returnValue": "..." }`. The handler path gets an end
+  event when it does not end. In a loop it must end with `break`, `continue` or `error`.
+- `$latestError` only has a value on a handler path: microflow `$latestError/Message`, `/Stacktrace`, `/ErrorType`;
+  nanoflow `$latestError` is the error text (String). `$latestHttpResponse` only after a REST call.
+  `$latestSoapFault` only in the handler of a web service call. Elsewhere EXPRESSION CHECK refuses them.
+
+Recipes (`onError` as a name, or `{ "pattern": ..., fields }`):
+
+| Recipe | Fields | What it builds |
+|---|---|---|
+| `logAndShow` | message, log, node, jsLog, rollback, returnValue | Log the error (microflow: log action with `$latestError/Message` and the stack trace), show `message` (default "Something went wrong. Please try again."), end |
+| `rethrow` | log, node, jsLog, rollback | Log the error, then `error` (the caller's handler gets it) |
+| `storeError` | **entity**, set, message, rethrow, rollback, returnValue | Create and commit an error log object; attributes named Message, Stacktrace, ErrorType, Microflow, Date are filled (or give `set`) |
+| `retry` | times (2-20, default 3), log | A counter and a while loop: the action runs again until it works; after the last failed try: log and `error`. No delay between tries. Refused for an action that makes a variable (it would only exist inside the loop) |
+
+Nanoflows have no log action: recipes log with a JavaScript action that has a String parameter (`jsLog`, or one
+named `JS_Log`/`LogMessage` in the project); without one they only show the message.
+
+Log the error and show a message after a failed REST call:
+
+```json
+{ "ops": [ { "op": "addActions", "microflow": "Sales.ACT_Order_Send", "actions": [
+  { "action": "callRest", "method": "Post", "url": "https://api.example.com/orders", "body": "{\"id\": \"{1}\"}", "bodyArgs": ["$Order/Number"],
+    "onError": { "pattern": "logAndShow", "message": "The order could not be sent. Try again later." } } ] } ] }
+```
+
+Try a call three times:
+
+```json
+{ "ops": [ { "op": "addActions", "microflow": "Sales.ACT_Order_Send", "actions": [
+  { "action": "call", "microflow": "Sales.SUB_Order_Push", "args": { "Order": "$Order" }, "onError": { "pattern": "retry", "times": 3 } } ] } ] }
+```
+
+Keep the error in a log entity (it is committed even after the rollback):
+
+```json
+{ "ops": [ { "op": "addActions", "microflow": "Sales.ACT_Order_Send", "actions": [
+  { "action": "callJava", "javaAction": "Sales.JA_Export", "onError": { "pattern": "storeError", "entity": "Sales.ErrorLog", "message": "Export failed; the error was saved." } } ] } ] }
+```
+
+Log with your own text, then end with the error (`error` + `message`; an error event has no text of its own):
+
+```json
+{ "ops": [ { "op": "addActions", "microflow": "Sales.SUB_Order_Push", "actions": [
+  { "action": "commit", "variable": "Order", "onError": { "rollback": true, "actions": [
+    { "action": "error", "message": "Order {1} could not be saved: {2}", "args": ["$Order/Number", "$latestError/Message"] } ] } } ] } ] }
+```
+
+Sub-microflow errors go up: a step without a custom handler in `SUB_Order_Push` stops it, and the error goes to the
+`call` step in the caller. Give that `call` the handler (`"rethrow"` inside the sub keeps the log there and still
+passes the error up). In the caller's handler `$latestError` is the sub's error.
+
+Nanoflow: show a message when a microflow call fails (no rollback in a nanoflow):
+
+```json
+{ "ops": [ { "op": "createNanoflow", "module": "Sales", "name": "NF_Order_Save", "parameters": [ { "name": "Order", "type": "Sales.Order" } ], "actions": [
+  { "action": "call", "microflow": "Sales.ACT_Order_Save", "args": { "Order": "$Order" },
+    "onError": { "actions": [ { "action": "message", "type": "Error", "text": "Saving failed. Please try again." } ] } } ] } ] }
+```
+
+Offline app: synchronize with a handler (the default message says the changes stay on the device):
+
+```json
+{ "ops": [ { "op": "addActions", "microflow": "Sales.NF_Sync", "actions": [ { "action": "synchronize", "onError": "logAndShow" } ] } ] }
+```
+
+A loop with one handler for the whole loop:
+
+```json
+{ "ops": [ { "op": "addActions", "microflow": "Sales.ACT_Orders_Close", "after": "Orders", "actions": [
+  { "action": "loop", "over": "Orders", "item": "Order", "actions": [ { "action": "change", "variable": "Order", "set": { "Status": "Sales.Status.Closed" }, "commit": true } ],
+    "onError": { "pattern": "logAndShow", "message": "Not all orders could be closed." } } ] } ] }
+```
+
+Change the error handling of an existing step (`"rollback"`/`"abort"` removes a custom handler and its steps):
+
+```json
+{ "ops": [ { "op": "changeAction", "microflow": "Sales.ACT_Order_Send", "id": "3f2a9c1b", "onError": "logAndShow" } ] }
+```
+
+Add steps to an existing handler: `handlerOf` = the step that owns the handler (the steps go first in it); or
+`after` = the id of a step inside the handler:
+
+```json
+{ "ops": [ { "op": "addActions", "microflow": "Sales.ACT_Order_Send", "handlerOf": "3f2a9c1b", "actions": [
+  { "action": "log", "message": "send failed for {1}: {2}", "args": ["$Order/Number", "$latestError/Message"], "level": "Error" } ] } ] }
+```
+
+`deleteAction` also works inside a handler; a step with its own handler loses that handler with it.
+
+`steps` shows a handler under its step: `[on error of 3f2a9c1b] [...]`, the step line ends with
+`{on error: custom handler with rollback}` (or without rollback / continue), and `-> ... (back on the main flow)`
+where the handler joins the main flow again. At the end it lists FLOW CHECK.
+
+FLOW CHECK (dry run, for new or changed steps; `steps`, for the whole flow) gives advice, never a refusal:
+
+| Line | What to do |
+|---|---|
+| `REST call / web service call / Java action call / external action call without a custom error handler` | Give it `"onError": "logAndShow"` (or retry / rethrow / storeError) unless the user wants the default |
+| `commits inside a loop without error handling` | Commit the list once after the loop, or give the commit `onError` |
+| `custom error handler without rollback: what was committed before it fails stays committed` | Check the handler leaves the data consistent, or use `"rollback": true` |
+| `nanoflow error handlers never roll back` | Undo object changes with a `rollback` action in the handler when needed |
+| `an error event outside an error handler` | Use `end`, or move it into the handler |
 
 ### Pages and navigation
 
@@ -1553,7 +1665,7 @@ STUDIO PRO CHECK (mx check 10.24.0.73019 on a copy of the saved model):
 | `has no step with id` | Run `python mx.py steps <Module.Flow>` and copy the id in brackets |
 | `'x' cannot be changed on ...` | The message lists the fields that kind of step accepts |
 | `is only allowed inside a loop` / `unreachable` | `break`/`continue` only in loops; nothing may follow `end`/`break`/`continue` |
-| `it has an error handler` | `deleteAction` refuses this step; give Studio Pro steps |
+| `(with its error handler: N action(s))` | `deleteAction` removed the step's custom error handler too. Fine |
 | `unknown widget 'x'. Supported: ...` | Use a listed widget kind. For other widgets: `python mx.py gap "<what>"` and Studio Pro steps |
 | `listenTo 'x' is no grid or list view on this page (...)` / `is ambiguous` | Use one of the grid or list view names the message lists |
 | `no widget 'x' on Module.Page (widgets here: ...)` | Use a listed name; all of them: `python mx.py widgets Module.Page` |
@@ -1574,6 +1686,35 @@ STUDIO PRO CHECK (mx check 10.24.0.73019 on a copy of the saved model):
 | `MPR v1 format` | This project cannot be changed by mxlocal. Give Studio Pro steps |
 | `Model editing is not available` | Node.js 22.13+ is missing. Give Studio Pro steps |
 | `ERROR` with `at ... edits/<name>.js:<line>` | The script failed at that line. Read the HINT |
+
+### The most common mistakes: error text -> fixed JSON
+
+Find the start of the error text in the left column. Write the right column instead.
+
+| Error text starts with | Wrong | Fixed |
+|---|---|---|
+| `unknown action 'callMicroflow'; use "call"` | `{"action": "callMicroflow", "microflow": "M.Sub"}` | `{"action": "call", "microflow": "M.Sub"}` |
+| `unknown field 'x'. Did you mean: y` | `{"action": "retrieve", "var": "L", "entity": "M.E"}` | `{"action": "retrieve", "variable": "L", "entity": "M.E"}` |
+| `needs 'variable'` / `needs "set", "add" or "remove"` | `{"action": "change", "variable": "O"}` | `{"action": "change", "variable": "O", "set": {"Name": "'x'"}}` |
+| `returns is set, so returnValue is required` | `{"op": "createMicroflow", ..., "returns": "Boolean"}` | `{"op": "createMicroflow", ..., "returns": "Boolean", "returnValue": "true"}` |
+| `this flow returns a value; 'end' needs 'value'` | `{"action": "end"}` | `{"action": "end", "value": "false"}` |
+| `'end' is not allowed inside a loop; use 'break'` | `"actions": [{"action": "end"}]` in a loop | `"actions": [{"action": "break"}]` |
+| `'error' is only allowed inside an onError handler` | `{"action": "error"}` on the main path | `{"action": "log", ..., "onError": {"actions": [{"action": "error"}]}}` or `{"action": "end"}` |
+| `has 2 end events; say where with "after"` | `{"op": "addActions", "microflow": "M.F", "actions": [...]}` | `{"op": "addActions", "microflow": "M.F", "after": "3f2a9c1b", "actions": [...]}` (id from `steps`) |
+| `has 2 outgoing flows; say which with "branch"` | `"after": "<id of a decision>"` | `"after": "<id of a decision>", "branch": "true"` |
+| `unreachable: an earlier action already ended this path` | `[{"action": "end"}, {"action": "log", ...}]` | `[{"action": "log", ...}, {"action": "end"}]` |
+| `needs args for: Order` | `{"action": "call", "microflow": "M.Sub"}` | `{"action": "call", "microflow": "M.Sub", "args": {"Order": "$Order"}}` |
+| `'cast' must be the first action of a case` | `"cases": {"M.Car": [{"action": "log", ...}, {"action": "cast", ...}]}` | `"cases": {"M.Car": [{"action": "cast", "variable": "Car"}, {"action": "log", ...}]}` |
+| `'log' is not available in nanoflows` | `{"action": "log", ...}` in a nanoflow | `{"action": "message", "type": "Error", "text": "..."}` or `{"action": "callJavaScript", ...}` |
+| `'callJava' is not available in nanoflows` | `{"action": "callJava", ...}` in a nanoflow | `{"action": "call", "microflow": "M.ACT_RunJava"}` (a microflow that calls it) |
+| `onError "rollback": a nanoflow never rolls back` | `"onError": "rollback"` in a nanoflow | `"onError": "abort"` or `"onError": {"actions": [...]}` |
+| `an error handler inside a loop must end with 'break', 'continue' or 'error'` | `"onError": {"actions": [{"action": "log", ...}]}` in a loop | `"onError": {"actions": [{"action": "log", ...}, {"action": "continue"}]}` |
+| `this flow returns a value; onError needs 'returnValue'` | `"onError": "logAndShow"` | `"onError": {"pattern": "logAndShow", "returnValue": "empty"}` |
+| `$latestError has no value here` | `{"action": "log", "args": ["$latestError/Message"]}` on the main path | put it in the handler: `"onError": {"actions": [{"action": "log", "message": "{1}", "args": ["$latestError/Message"]}]}` |
+| `onError retry runs the action inside a loop, so $Txt would only exist inside the loop` | `{"action": "callRest", ..., "variable": "Txt", "onError": "retry"}` | `{"action": "callRest", ..., "variable": "Txt", "onError": "logAndShow"}` |
+| `has no custom error handler ... give it one first` | `{"op": "addActions", "handlerOf": "3f2a9c1b", ...}` | first `{"op": "changeAction", "microflow": "M.F", "id": "3f2a9c1b", "onError": {"actions": []}}`, then addActions `handlerOf` |
+| `already exists` | `{"op": "createEntity", "module": "M", "name": "Order", ...}` (twice) | Leave the op out, or use another name; change it with `addAttribute` / `changeAttribute` |
+| `String literals` (EXPRESSION CHECK `unknown variable` on a word) | `"value": "Hello"` | `"value": "'Hello'"` (single quotes inside the JSON string) |
 
 ---
 

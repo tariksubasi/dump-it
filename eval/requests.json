@@ -823,6 +823,61 @@
           "Order_List\\.txt$": "(?s)Kart stili: Yükseltilmiş.*Siparişler|Siparişler.*Kart stili: Yükseltilmiş"
         }
       }
+    },
+    {
+      "id": "errrest",
+      "text": "ACT_Order_Send microflow'unu yaz: Order parametresi alsın, https://api.example.com/orders adresine POST ile REST çağrısı yapsın. Çağrı hata verirse hatayı log'a yazsın ve kullanıcıya 'Sipariş gönderilemedi' mesajı göstersin.",
+      "checks": {
+        "find": [
+          "MyFirstModule.ACT_Order_Send"
+        ],
+        "files": {
+          "ACT_Order_Send\\.txt$": "(?s)on error: custom handler.*ON ERROR:.*Sipariş gönderilemedi"
+        }
+      }
+    },
+    {
+      "id": "errretry",
+      "text": "ACT_Order_Ping microflow'unu yaz: https://api.example.com/ping adresine GET isteği atsın; hata olursa 3 kere denesin, yine olmazsa hatayı log'layıp hatayı yukarı fırlatsın.",
+      "checks": {
+        "find": [
+          "MyFirstModule.ACT_Order_Ping"
+        ],
+        "files": {
+          "ACT_Order_Ping\\.txt$": "(?s)(WHILE|while).*< 3.*on error"
+        }
+      }
+    },
+    {
+      "id": "errnano",
+      "setup": [
+        {
+          "op": "createMicroflow",
+          "module": "MyFirstModule",
+          "name": "ACT_Order_Save",
+          "parameters": [
+            {
+              "name": "Order",
+              "type": "MyFirstModule.Order"
+            }
+          ],
+          "actions": [
+            {
+              "action": "commit",
+              "variable": "Order"
+            }
+          ]
+        }
+      ],
+      "text": "NF_Order_Save nanoflow'unu yaz: Order parametresi alsın ve ACT_Order_Save microflow'unu çağırsın. Microflow hata verirse 'Kaydedilemedi, tekrar deneyin' mesajını göstersin.",
+      "checks": {
+        "find": [
+          "MyFirstModule.NF_Order_Save"
+        ],
+        "files": {
+          "NF_Order_Save\\.txt$": "(?s)on error: custom handler, no rollback.*Kaydedilemedi"
+        }
+      }
     }
   ]
 }
