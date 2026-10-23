@@ -219,15 +219,55 @@ function servicesProblems(project, T, version) {
     return r;
 }
 
+// ---------------------------------------------------------------- images, icon collections, document templates
+
+// An 1x1 PNG.
+const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
+
+function mediaPlan(mod, T, version, dir) {
+    const E = `${mod}.${T}`;
+    const fs = require("fs");
+    const path = require("path");
+    const edits = path.join(dir, "edits");
+    fs.mkdirSync(edits, { recursive: true });
+    fs.writeFileSync(path.join(edits, "zz-a.png"), PNG);
+    return {
+        changeFile: path.join(edits, "zz-docs.json"),
+        ops: [
+            { op: "createImageCollection", module: mod, name: `${T}_Img`, folder: "ZzDocs" },
+            { op: "addImage", collection: `${E}_Img`, file: "edits/zz-a.png", name: "Keep" },
+            { op: "addImage", collection: `${E}_Img`, file: "edits/zz-a.png", name: "Gone" },
+            { op: "createEnumeration", module: mod, name: `${T}DocEnum`, values: ["A", "B"] },
+            { op: "changeEnumerationValue", value: `${E}DocEnum.A`, image: `${E}_Img.Gone` },
+            { op: "deleteImage", image: `${E}_Img.Gone` }
+        ],
+        reject: [
+            { op: { op: "deleteImage", image: `${E}_Img.Kep` }, expect: /has no image 'Kep'.*Did you mean: Keep/ },
+            { op: { op: "deleteImage", image: `${E}_Imgs.Keep` }, expect: /no image collection .*Did you mean: .*_Img/ },
+            { op: { op: "deleteImage", image: "Keep" }, expect: /image is Module.Collection.Image/ }
+        ]
+    };
+}
+
+function mediaProblems(project, T) {
+    const r = [];
+    const c = unitsNamed(project, `${T}_`)[`${T}_Img`];
+    const names = c ? c.Images.map(i => i.Name).join(",") : "missing";
+    if (names !== "Keep") r.push(`images ${names}`);
+    return r;
+}
+
 // name -> [ plan(mod, T, version, dir), problems(project, T, version) ] (selftest.js runs them in this order)
 module.exports.PHASES = {
     "regex/queues": [(mod, T) => regexQueuePlan(mod, T), regexQueueProblems],
     "OData change": [(mod, T, version) => odataChangePlan(mod, T, version), odataChangeProblems],
-    services: [servicesPlan, servicesProblems]
+    services: [servicesPlan, servicesProblems],
+    media: [mediaPlan, mediaProblems]
 };
 // name -> what the phase covers (the selftest line)
 module.exports.WHAT = {
     "regex/queues": "regular expressions (create with examples, Java-only syntax, change; a validation rule using one), task queues (threads, cluster scope, change), a call in a queue with exponential retry, changeAction moving a call to another queue with a fixed retry and one out of its queue; refusals (bad pattern, failing example, a pattern given as rule regex, did-you-mean names, threads 0, bad scope, queued call with a result variable, unknown retry field)",
     "OData change": "changePublishedOData change: add and remove attributes of a published entity, insert by microflow, paging off, count off, update kept (Mendix 10.4+); refusals (unknown attribute, already published, entity not published, unknown change field)",
-    services: "business event service (Mendix 10+: events with attributes, add/remove events and attributes), published web service (object, list and primitive operations, optional parameter; change: add, remove, authentication, validate), consumed web service compared with a new WSDL (added/removed operations, refused with the Studio Pro steps); refusals with did-you-mean"
+    services: "business event service (Mendix 10+: events with attributes, add/remove events and attributes), published web service (object, list and primitive operations, optional parameter; change: add, remove, authentication, validate), consumed web service compared with a new WSDL (added/removed operations, refused with the Studio Pro steps); refusals with did-you-mean",
+    media: "deleteImage of an image an enumeration value shows (STILL USED BY), the other image kept; refusals (did-you-mean image and collection, a name without collection)"
 };

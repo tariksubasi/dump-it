@@ -967,6 +967,7 @@ date/time formats of a language. System texts (App > Language > System texts) ar
 | `setConfiguration` | **name**, applicationRootUrl, constants `{"Module.Constant": "value"}` (`null` = use the default), customSettings `{"Name": "value"}` (`null` = remove) | App > Settings > Configurations. A new name creates a configuration like the first one (without its database password). Database settings: Studio Pro |
 | `createImageCollection` | **module**, **name**, folder | |
 | `addImage` | **collection**, **file**, name (default the file name), replace | A PNG, JPG or SVG file inside the export folder (e.g. copy it to `edits/logo.png`), at most 2 MB; the kind is read from the content. Use it in a static image widget or button by `Module.Collection.Image` |
+| `deleteImage` | **image** (`Module.Collection.Image`) | Lists the widgets, buttons and enumeration values that still show it (STILL USED BY). Replace an image instead: `addImage` with `"replace": true` and the same name. Example: `{ "ops": [ { "op": "deleteImage", "image": "Sales.Images.old_logo" } ] }` |
 
 ### Constants, scheduled events, REST
 

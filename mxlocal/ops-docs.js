@@ -7,7 +7,7 @@ const sdk = require("mendixmodelsdk");
 const { fail, bool, validName, enumValue } = require("./ops-util");
 const { cmp } = require("./versions");
 
-const { regularexpressions: rx, queues, microflows: mf, domainmodels: dm } = sdk;
+const { regularexpressions: rx, queues, microflows: mf, domainmodels: dm, images } = sdk;
 
 const DOCS_OPS = {
     createRegularExpression: {
@@ -28,6 +28,10 @@ const DOCS_OPS = {
             scope: "optional node | cluster: threads per app node, or for the whole cluster (default node)", folder: "optional folder path"
         }
     },
+    deleteImage: {
+        doc: "Delete an image from an image collection; lists the widgets, buttons and enumeration values that still show it. (Replace an image: addImage with \"replace\": true.)",
+        fields: { image: "R Module.Collection.Image" }
+    },
     changeTaskQueue: {
         doc: "Change the threads or scope of a task queue; the dry run lists the calls that run in it.",
         fields: { queue: "R Module.Queue", threads: "optional number or expression", scope: "optional node | cluster" }
@@ -38,6 +42,7 @@ const DOCS_OPS = {
 const DOCS_SYNONYMS = {
     createRegularExpression: { regex: "the expression goes in \"pattern\"", expression: "the expression goes in \"pattern\"", value: "the expression goes in \"pattern\"" },
     changeRegularExpression: { regex: "the document goes in \"regularExpression\", the new expression in \"pattern\"", name: "the document goes in \"regularExpression\": Module.Name" },
+    deleteImage: { name: "the image goes in \"image\": Module.Collection.Image", collection: "the image goes in \"image\": Module.Collection.Image" },
     createTaskQueue: { parallelism: "use \"threads\"", clusterWide: "use \"scope\": \"cluster\"" },
     changeTaskQueue: { parallelism: "use \"threads\"", clusterWide: "use \"scope\": \"cluster\"", name: "the queue goes in \"queue\": Module.Queue" }
 };
@@ -218,7 +223,26 @@ function makeDocs(h) {
         return lines;
     }
 
+    async function imageOf(qn, where) {
+        const parts = String(qn).split(".");
+        if (parts.length !== 3) throw new Error(`${where}: image is Module.Collection.Image, e.g. MyFirstModule.Images.logo`);
+        const cols = model.allImageCollections();
+        const c = cols.find(x => x.qualifiedName === parts.slice(0, 2).join("."));
+        if (!c) fail(`${where}: no image collection ${parts.slice(0, 2).join(".")}`, parts.slice(0, 2).join("."), cols.map(x => x.qualifiedName));
+        const full = c.isLoaded ? c : await c.load();
+        const img = full.images.find(x => x.name === parts[2]);
+        if (!img) fail(`${where}: ${full.qualifiedName} has no image '${parts[2]}'`, parts[2], full.images.map(x => x.name));
+        return img;
+    }
+
     const impl = {
+        async deleteImage(o) {
+            const where = `deleteImage ${o.image}`;
+            const img = await imageOf(o.image, where);
+            const users = h.client && h.client.referencesTo ? h.client.referencesTo(o.image) : [];
+            img.delete();
+            return o.image + (users.length ? `\n      STILL USED BY (fix these, or Studio Pro shows errors; pick another image with changeWidget / changeEnumerationValue): ${users.join(", ")}` : "");
+        },
         async createRegularExpression(o) {
             validName(o.name, "regular expression name");
             const qn = `${o.module}.${o.name}`;
@@ -267,6 +291,9 @@ function makeDocs(h) {
     };
 
     const checks = {
+        async deleteImage(o) {
+            return (await imageOf(o.image, "").then(() => true, () => false)) ? [`${o.image} still exists`] : [];
+        },
         async createRegularExpression(o) {
             const d = await get(`${o.module}.${o.name}`).catch(() => null);
             return d instanceof rx.RegularExpression && d.regEx === o.pattern ? [] : [`${o.module}.${o.name} is not a regular expression with the pattern`];
@@ -298,6 +325,9 @@ function makeDocs(h) {
 
 // checkPlan: a later op of the plan that changes what this op made (only the final state is checked).
 function docsChangedLater(name, o, rest) {
+    const deleted = rest.filter(x => x.op === "deleteImage").map(x => x.image);
+    if (name === "addImage" && deleted.includes(`${o.collection}.${o.name || ""}`)) return true;
+    if (name === "changeEnumerationValue" && o.image && deleted.includes(o.image)) return true;
     if (name === "createRegularExpression") return rest.some(x => x.op === "changeRegularExpression" && x.regularExpression === `${o.module}.${o.name}`);
     if (name === "changeRegularExpression") return rest.some(x => x.op === "changeRegularExpression" && x.regularExpression === o.regularExpression);
     if (name === "createTaskQueue") return rest.some(x => x.op === "changeTaskQueue" && x.queue === `${o.module}.${o.name}`);
