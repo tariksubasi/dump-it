@@ -279,7 +279,6 @@
 "Projects$Module":{"$":"Projects$ModuleImpl","p":{"sortIndex":"NewSortIndex"}},
 "Projects$OneTimeConversionMarker":{"$":"Projects$OneTimeConversion"},
 "Reports$ReportChart":{"p":{"propType":"Type"}},
-"Rest$BasicAuthenticationScheme":{"$":"Rest$BasicAuthentication"},
 "Rest$PublishedODataMicroflowParameter":{"p":{"propType":"Type"}},
 "Security$DemoUser":{"$":"Security$DemoUserImpl"},
 "Security$ProjectSecurity":{"p":{"adminUserRoleName":"AdminUserRole","guestUserRoleName":"GuestUserRole"}},

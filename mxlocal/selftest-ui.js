@@ -28,7 +28,7 @@ const words = t => (t && t.Items ? t.Items.map(i => i.Text).join("") : "");
 // an image, the app module's themesource folder, theme variables.
 function uiTargets(s, mod) {
     const project = s.ctx.project, dir = project.dir;
-    const x = { layout: null, other: null, icons: false, image: null, multi: null, color: null, themeModule: null, vars: false };
+    const x = { layout: null, other: null, icons: false, image: null, multi: null, color: null, themeModule: null, vars: false, ddb: parseInt(s.ctx.project.version, 10) < 11 };
     const mains = new Map(), used = new Map(), modOf = new Map();
     const moduleName = id => {
         for (let c = id; c; c = project.units.get(c) && project.units.get(c).containerId) {
@@ -87,7 +87,7 @@ function uiPlan(mod, T, x) {
                 { widget: "text", name: "zzH3", text: "Sub", style: "H3" },
                 { widget: "actionButton", name: "zzIcon", action: "close", icon: "glyphicon-pencil", iconOnly: true, tooltip: "Close it", renderType: "link", ariaRole: "Link" },
                 { widget: "actionButton", name: "zzBare", action: "close", icon: x.icons ? "mx-icon-add" : "glyphicon-plus", iconOnly: true },
-                { widget: "dropDownButton", name: "zzMenu", caption: "More", icon: "glyphicon-cog", tooltip: "More actions", buttonStyle: "Primary", items: [{ caption: "Close", action: "close" }, { caption: "Docs", action: "openLink", url: "https://docs.mendix.com" }] },
+                ...(x.ddb ? [{ widget: "dropDownButton", name: "zzMenu", caption: "More", icon: "glyphicon-cog", tooltip: "More actions", buttonStyle: "Primary", items: [{ caption: "Close", action: "close" }, { caption: "Docs", action: "openLink", url: "https://docs.mendix.com" }] }] : []),
                 ...(x.image ? [{ widget: "image", name: "zzImg", image: x.image, alt: "Logo" }] : [])
             ] },
             { widget: "container", name: "zzClick", onClick: { action: "close" }, widgets: [{ widget: "text", text: "Click me" }] },
@@ -108,6 +108,7 @@ function uiPlan(mod, T, x) {
         { op: "changeWidget", page: `${mod}.${T}_UiLayout`, widget: "zzBrand", class: "zz-brand", textStyle: "H4" },
         { op: "deleteWidget", page: `${mod}.${T}_UiLayout`, widget: "zzOut" }
     );
+    if (!x.ddb) refuse.push([{ op: "createPage", module: mod, name: `${T}_UiR3`, widgets: [{ widget: "dropDownButton", caption: "More", items: [{ caption: "Close", action: "close" }] }] }, /has no drop-down button/]);
     refuse.push(
         [{ op: "changeWidget", page: pg("A"), widget: "zzName", tooltip: "x" }, /no tooltip/],
         [{ op: "createPage", module: mod, name: `${T}_UiR1`, widgets: [{ widget: "layoutGrid", columns: [{ weight: 6, offset: 2 }] }] }, /no column offset/],
@@ -150,7 +151,7 @@ function uiProblems(project, mod, T, x) {
     const bare = named.zzBare;
     say(bare && bare.Icon && bare.Icon.$Type === (x.icons ? "Forms$IconCollectionIcon" : "Forms$GlyphIcon") && (!x.icons || /\.add$/.test(bare.Icon.Image)) && words(bare.Tooltip) === "Add" && bare.TabIndex === 2, "icon collection icon / changeWidget tooltip + tab index not stored");
     const menu = named.zzMenu;
-    say(menu && menu.$Type === "Forms$DropDownButton" && menu.CaptionTemplate && words(menu.CaptionTemplate.Template) === "More" && menu.Items.length === 2 && menu.Items[1].Action.$Type === "Forms$OpenLinkClientAction" && menu.ButtonStyle === "Primary" && menu.Icon && words(menu.Tooltip) === "More actions", "drop-down button not stored");
+    if (x.ddb) say(menu && menu.$Type === "Forms$DropDownButton" && menu.CaptionTemplate && words(menu.CaptionTemplate.Template) === "More" && menu.Items.length === 2 && menu.Items[1].Action.$Type === "Forms$OpenLinkClientAction" && menu.ButtonStyle === "Primary" && menu.Icon && words(menu.Tooltip) === "More actions", "drop-down button not stored");
     if (x.image) say(named.zzImg && words(named.zzImg.AlternativeText.Template) === "Logo", "image alt text not stored");
     const click = named.zzClick;
     say(click && click.OnClickAction.$Type === "Forms$ClosePageClientAction" && click.RenderMode === "Aside" && click.Appearance.DynamicClasses === "'zz-click'", "container on click / changeWidget render mode not stored");
