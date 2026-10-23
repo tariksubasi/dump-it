@@ -1188,7 +1188,7 @@ The export shows a structure as `json/path: Name type` lines and a mapping as `j
 | `changeXmlSchema` | **schema**, file (default: the file it came from) | Imports the `.xsd` again. Lists added/removed elements and, per mapping over it, the changed paths and the update op |
 | `changeMessageDefinition` | **definition** (`Module.Collection.Definition`), attributes (`[..]` or `"all"`), associations | Rebuilds the definition from its entity; what you leave out stays. Lists the mappings to update (`prune` when members are gone) |
 | `updateConsumedODataService` | | Not supported: refused with the Studio Pro steps (Update from the new `$metadata`). Removing an external entity: `delete` |
-| `consumeODataService`, `consumeWebService`, `createBusinessEvent` | | Not supported: refused with the Studio Pro steps (consumed OData from `$metadata`, consumed SOAP web services from a WSDL, business events). They are contracts Studio Pro reads and keeps in sync |
+| `consumeODataService`, `consumeWebService`, `createBusinessEvent` | | Not supported: refused with the Studio Pro steps (consumed OData from `$metadata`, consumed SOAP web services from a WSDL, publishing/consuming business events). They are contracts Studio Pro reads and keeps in sync. Define this app's events with `createBusinessEventService` (below) |
 
 Change part of a published entity (here: publish Note, stop publishing Qty, insert through a microflow):
 
@@ -1242,6 +1242,28 @@ Change it later with `changeAction` (`"queue": "Module.Queue"`, `"queue": "none"
   { "op": "changeTaskQueue", "queue": "Sales.InvoiceQueue", "threads": 4 },
   { "op": "createMicroflow", "module": "Sales", "name": "ACT_SendInvoices", "parameters": [ { "name": "Order", "type": "Sales.Order" } ], "actions": [
     { "action": "call", "microflow": "Sales.SUB_SendInvoice", "args": { "Order": "$Order" }, "queue": "Sales.InvoiceQueue", "retry": { "retries": 3, "interval": 30, "unit": "Seconds" } } ] }
+] }
+```
+
+### Business events and SOAP web services
+
+No test project has a Studio Pro sample of these: the dry run says "check it in Studio Pro".
+
+| Op | Fields | Notes |
+|---|---|---|
+| `createBusinessEventService` | **module**, **name**, **events**, serviceName, eventNamePrefix, summary, description, folder | Mendix 10+. Defines the events of this app: `[{ "name": "OrderPlaced", "attributes": { "OrderId": "String" }, "publish": true, "subscribe": true }]`. Attribute types: String, Integer, Long, Decimal, Boolean, DateTime. Publishing or subscribing (the event entities, the Business Events module) is done in Studio Pro |
+| `changeBusinessEventService` | **service**, addEvents, removeEvents `["Event"]`, addAttributes `{ "Event": { "Attr": "Type" } }`, removeAttributes `{ "Event": ["Attr"] }`, summary, description, force | Only services this app defines. A consumed service (contract of another app) is refused with the Studio Pro steps. An event this app implements is removed only with `"force": true`; the dry run lists the entities to bring in step in Studio Pro |
+| `publishWebService` | **module**, **name**, **operations**, namespace, authentication (None, UsernamePassword (default), Custom + headerMicroflow), description, validate, folder | Each operation: `"Module.Microflow"` or `{ "microflow", "name", "description", "optional": ["Param"] }`. Parameters and results: primitive types, an object or a list (all attributes of the entity are published) |
+| `changeWebService` | **service**, operations (add, or replace by name), remove `["Operation"]`, namespace, authentication, headerMicroflow, description, validate | A service with more than one version is refused (change it in Studio Pro) |
+| `updateConsumedWebService` | **service**, **wsdl** | Read-only check: lists added and removed operations of the new WSDL and the Call web service actions that use them, then refuses with the Studio Pro steps (Update from file) |
+
+```json
+{ "ops": [
+  { "op": "createBusinessEventService", "module": "Sales", "name": "OrderEvents", "events": [ { "name": "OrderPlaced", "attributes": { "OrderId": "String", "Total": "Decimal" } } ] },
+  { "op": "changeBusinessEventService", "service": "Sales.OrderEvents", "addAttributes": { "OrderPlaced": { "Paid": "Boolean" } }, "addEvents": [ { "name": "OrderShipped", "attributes": { "OrderId": "String" } } ] },
+  { "op": "publishWebService", "module": "Sales", "name": "OrderService", "operations": [ "Sales.WS_GetOrder", { "microflow": "Sales.WS_ListOrders", "name": "ListOrders", "optional": ["Max"] } ] },
+  { "op": "changeWebService", "service": "Sales.OrderService", "remove": ["ListOrders"], "authentication": "None" },
+  { "op": "updateConsumedWebService", "service": "Sales.StockService", "wsdl": "edits/stock-v2.wsdl" }
 ] }
 ```
 

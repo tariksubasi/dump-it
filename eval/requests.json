@@ -1785,6 +1785,38 @@
       "families": [
         "odata"
       ]
+    },
+    {
+      "id": "docbizevents",
+      "text": "OrderEvents adında bir business event servisi tanımla: OrderPlaced event'i (OrderId metin, Total ondalık) ve OrderShipped event'i (OrderId metin).",
+      "checks": {
+        "find": [
+          "MyFirstModule.OrderEvents"
+        ]
+      },
+      "ops": [
+        "createBusinessEventService"
+      ],
+      "families": [
+        "services"
+      ]
+    },
+    {
+      "id": "docwebservice",
+      "text": "Order numarası (String) alıp Order nesnesini döndüren WS_GetOrder microflow'unu yaz ve OrderService adında bir SOAP published web service olarak yayınla; kimlik doğrulama olmasın.",
+      "checks": {
+        "find": [
+          "MyFirstModule.OrderService",
+          "MyFirstModule.WS_GetOrder"
+        ]
+      },
+      "ops": [
+        "createMicroflow",
+        "publishWebService"
+      ],
+      "families": [
+        "services"
+      ]
     }
   ]
 }

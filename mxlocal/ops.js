@@ -37,6 +37,7 @@ const { makeDmLayout, DMLAYOUT_OPS } = require("./ops-dmlayout");
 const { makeComposite, COMPOSITE_OPS, COMPOSITE_SYNONYMS } = require("./ops-composite");
 const { makeGeneral, GENERAL_OPS } = require("./ops-general");
 const { makeDocs, DOCS_OPS, DOCS_SYNONYMS, docsChangedLater } = require("./ops-docs");
+const { makeServices, SERVICE_OPS, SERVICE_SYNONYMS, servicesChangedLater } = require("./ops-services");
 
 const OPS = {
     createEntity: {
@@ -147,6 +148,7 @@ const OPS = {
     ...DMLAYOUT_OPS,
     ...GENERAL_OPS,
     ...DOCS_OPS,
+    ...SERVICE_OPS,
     moveDocument: { doc: "Move a document to another folder of the same module.", fields: { document: "R Module.Document", folder: "optional folder path, e.g. Orders/Actions (missing or \"\" = the module root)" } },
     rename: { doc: "Rename a module, document, entity, attribute, association or enumeration value. Updates references, reports names left in expressions/XPath/Java.", fields: { target: "R qualified name, e.g. Module.Entity.Attribute", newName: "R new short name" } },
     delete: { doc: "Delete a document, entity, attribute, association, enumeration value or module role. Lists what still uses it. (Validation rules, event handlers, indexes: deleteValidationRule, deleteEventHandler, deleteIndex; access rules: deleteAccessRule; widgets: deleteWidget; flow steps: deleteAction.)", fields: { target: "R qualified name" } }
@@ -490,6 +492,7 @@ function bind(model, client) {
     const restOps = makeRest({ model, client, get, exists, folder, version, mappingInternals: mappingOps.internals, impl: () => impl });
     const odataOps = makeOData({ model, client, get, exists, entity, folder, version, persistable, attributeChain, loadParents });
     const docsOps = makeDocs({ model, client, get, exists, entity, folder, version });
+    const serviceOps = makeServices({ model, client, get, exists, entity, folder, version, attributeChain, loadParents });
     const xmlOps = makeXml({ model, client, get, exists, entity, folder, version, attributeChain, loadParents, mappingInternals: mappingOps.internals });
     const workflowOps = makeWorkflows({ model, client, get, exists, entity, folder, version, persistable, attributeChain, loadParents, grantAccess: o => impl.grantAccess(o), impl: () => impl,
         textAll: (owner, prop, value) => pageOps.internals.templateAll(owner, prop, value, null, "", true) });
@@ -946,6 +949,7 @@ function bind(model, client) {
         ...odataOps.impl,
         ...xmlOps.impl,
         ...docsOps.impl,
+        ...serviceOps.impl,
         ...workflowOps.impl,
         ...scaffoldOps.impl,
         ...compositeOps.impl,
@@ -1133,6 +1137,7 @@ function bind(model, client) {
         ...odataOps.checks,
         ...xmlOps.checks,
         ...docsOps.checks,
+        ...serviceOps.checks,
         ...scaffoldOps.checks,
         ...compositeOps.checks,
         ...smallOps.checks,
@@ -1151,7 +1156,7 @@ function bind(model, client) {
         const name = Object.keys(OPS).find(k => k.toLowerCase() === String(o.op).toLowerCase());
         if (!name) fail(`${where}: unknown op '${o.op}'`, o.op, Object.keys(OPS));
         if (name === "addMenuItem" && o.roles !== undefined) throw new Error(`${where} (addMenuItem): ${NO_MENU_ROLES(o.page)}`);
-        for (const [k, hint] of Object.entries({ ...(DOMAIN_SYNONYMS[name] || {}), ...(FIELD_SYNONYMS[name] || {}), ...(SCAFFOLD_SYNONYMS[name] || {}), ...(SMALL_SYNONYMS[name] || {}), ...(COMPOSITE_SYNONYMS[name] || {}), ...(DOCS_SYNONYMS[name] || {}) })) if (o[k] !== undefined && !OPS[name].fields[k]) throw new Error(`${where} (${name}): unknown field '${k}': ${hint}`);
+        for (const [k, hint] of Object.entries({ ...(DOMAIN_SYNONYMS[name] || {}), ...(FIELD_SYNONYMS[name] || {}), ...(SCAFFOLD_SYNONYMS[name] || {}), ...(SMALL_SYNONYMS[name] || {}), ...(COMPOSITE_SYNONYMS[name] || {}), ...(DOCS_SYNONYMS[name] || {}), ...(SERVICE_SYNONYMS[name] || {}) })) if (o[k] !== undefined && !OPS[name].fields[k]) throw new Error(`${where} (${name}): unknown field '${k}': ${hint}`);
         validate("op", name, OPS[name], o, where);
         return { name, where };
     }
@@ -1194,7 +1199,7 @@ function bind(model, client) {
             const mine = PAGE_EDIT_NAMES.includes(name) ? pageEdit.touched(o) : [];
             const undoes = x => ["deleteWidget", "moveWidget"].includes(x.op) || (x.op === "changeWidget" && (x.name !== undefined || name === "changeWidget"));
             const reworked = mine.length && rest.some(x => x.page === o.page && undoes(x) && pageEdit.touched(x).some(n => mine.includes(n)));
-            if ((later && name !== "rename" && name !== "delete") || edited || undone || reworked || changedLater(name, o, rest) || smallChangedLater(name, o, rest) || workflowChangedLater(name, o, rest) || integChangedLater(name, o, rest) || docsChangedLater(name, o, rest)) continue;
+            if ((later && name !== "rename" && name !== "delete") || edited || undone || reworked || changedLater(name, o, rest) || smallChangedLater(name, o, rest) || workflowChangedLater(name, o, rest) || integChangedLater(name, o, rest) || docsChangedLater(name, o, rest) || servicesChangedLater(name, o, rest)) continue;
             try {
                 failed.push(...(await checks[name](name === "setTranslations" ? o : await textOps.prepare(o, false))).map(f => `${i + 1}. ${name}: ${f}`));
             } catch (e) {

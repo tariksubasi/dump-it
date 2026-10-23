@@ -44,7 +44,7 @@ const ODATA_OPS = {
         fields: { module: "optional module name", name: "optional", wsdl: "optional WSDL file or URL" }
     },
     createBusinessEvent: {
-        doc: "NOT SUPPORTED (refused with the Studio Pro steps): publish or consume business events.",
+        doc: "NOT SUPPORTED (refused with the Studio Pro steps): publish or consume business events (define events: createBusinessEventService).",
         fields: { module: "optional module name", name: "optional", entity: "optional", consume: "optional" }
     }
 };
@@ -53,7 +53,7 @@ const REFUSALS = {
     updateConsumedODataService: "A consumed OData service is updated by Studio Pro from the new $metadata (or the Catalog): it compares the contract, changes the external entities, their attributes, keys and associations and stores the new contract; no test project has a Studio Pro-saved consumed OData service to build that from. In Studio Pro: open the consumed OData service document, click Update (or Update from file for a $metadata file), review the changes, then drag new external entities from the Integration pane into the domain model. Removing an external entity works with ops: { \"op\": \"delete\", \"target\": \"Module.Entity\" }.",
     consumeODataService: "Consumed OData services are not written by ops: Studio Pro reads the $metadata, stores it, makes the external entities with their remote types and keys and keeps them in step; a hand-made copy breaks on the first update. In Studio Pro: right-click the module > Add other > Consumed OData service, choose the $metadata file (or the Catalog), then drag the external entities from the Integration pane into the domain model and give module roles access.",
     consumeWebService: "Consumed SOAP web services are not written by ops: Studio Pro imports the WSDL and its schemas and builds the operations from them. In Studio Pro: right-click the module > Add other > Consumed web service, import the WSDL, then call an operation with the 'Call web service' microflow action and map the result with an import mapping (createXmlImportMapping works on its XML schema too).",
-    createBusinessEvent: "Business events are not written by ops: they need the Business Events module from the Marketplace and an AsyncAPI contract that Studio Pro generates (published) or imports (consumed). In Studio Pro: add the Business Events module, right-click your module > Add other > Business event service, define the events (entities inherit from BusinessEvents.PublishedBusinessEvent / ConsumedBusinessEvent) and publish them with the 'Publish business event' action."
+    createBusinessEvent: "Publishing or consuming business events is not written by ops: it needs the Business Events module from the Marketplace, and Studio Pro makes the event entities (they inherit from BusinessEvents.PublishedBusinessEvent / ConsumedBusinessEvent) and imports contracts of other apps (AsyncAPI). Ops can define the events of this app: createBusinessEventService / changeBusinessEventService. In Studio Pro: add the Business Events module, open the business event service, tick Publish / Subscribe per event (or Add other > Business event service > use an existing contract), and publish with the 'Publish business event' action."
 };
 
 const EDM = { String: "Edm.String", HashedString: null, Integer: "Edm.Int32", Long: "Edm.Int64", AutoNumber: "Edm.Int64", Decimal: "Edm.Decimal", Boolean: "Edm.Boolean", DateTime: "Edm.DateTimeOffset", Binary: null };
