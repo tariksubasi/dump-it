@@ -102,7 +102,8 @@ function steps(mod, T, version) {
                 [{ op: "addActions", microflow: M("Mail"), actions: [{ action: "deleteExternalObject", variable: "Item" }] }, /use delete/],
                 [{ op: "addActions", microflow: M("Mail"), actions: [{ action: "clearFromDevice", entity: E }] }, /only works in nanoflows/],
                 [{ op: "addActions", microflow: M("Clear"), actions: [{ action: "synchronizeToDevice", variable: "x" }] }, /not available in nanoflows/],
-                [{ op: "addActions", microflow: M("Clear"), actions: [{ action: "cancelSynchronization" }] }, v("11.8.0") ? /offline/ : /needs Mendix 11.8.0/],
+                // 11.8+ with an offline profile it runs (not saved: refusals are dry); otherwise refused
+                [{ op: "addActions", microflow: M("Clear"), actions: [{ action: "cancelSynchronization" }] }, v("11.8.0") ? /offline/ : /needs Mendix 11.8.0/, v("11.8.0")],
                 [{ op: "addActions", microflow: M("Mail"), actions: [{ action: "sendEmail", to: "'a@b.c'", subject: "'x'", body: "'y'" }] }, v("11.2.0") ? /needs 'server'/ : /needs Mendix 11.2.0/],
                 [{ op: "addActions", microflow: M("Mail"), actions: [{ action: "pushToClient", variable: "Item" }] }, /called synchronizeToDevice/],
                 [{ op: "addActions", microflow: M("Mail"), actions: [{ action: "retrieve", variable: "All", entity: E }, { action: "listOperation", variable: "Same", operation: "equals", list: "All", other: "All" }] }, /not written/]
@@ -357,7 +358,7 @@ async function wflowsPhase({ s2, reopen, copy, mod, T, layout, layoutProblems, c
         s = r.s;
         problems.push(...r.problems);
         r.firstUse.forEach(w => firstUse.add(w));
-        for (const [o0, re] of st.refusals || []) {
+        for (const [o0, re, mayRun] of st.refusals || []) {
             let msg = "";
             try {
                 const o = await placeholders(s, o0, mod, T);
@@ -365,7 +366,7 @@ async function wflowsPhase({ s2, reopen, copy, mod, T, layout, layoutProblems, c
             } catch (e) {
                 msg = e.message;
             }
-            if (!re.test(msg)) problems.push(`${o0.op} not refused with ${re}${msg ? `: ${msg.slice(0, 160)}` : " (it ran)"}`);
+            if (!re.test(msg) && !(mayRun && !msg)) problems.push(`${o0.op} not refused with ${re}${msg ? `: ${msg.slice(0, 160)}` : " (it ran)"}`);
             s = await reopen(copy);
         }
         check(`flows W: ${st.name}; ${(st.refusals || []).length} refusals; reopen 0 errors / 0 deltas`, !problems.length, problems.slice(0, 6).join("; "));
