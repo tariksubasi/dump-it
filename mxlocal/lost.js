@@ -29,7 +29,8 @@ function flatten(json, out = new Map()) {
 
 // null, "" and a missing value are the same thing in storage (empty by-name reference, empty blob).
 const norm = v => (v === null || v === undefined || v === "" ? null : v);
-const same = (a, b) => JSON.stringify(norm(a)) === JSON.stringify(norm(b));
+// a DateTime is a BSON date (number) in storage and its text in the SDK
+const same = (a, b) => JSON.stringify(norm(a)) === JSON.stringify(norm(b)) || (typeof a !== typeof b && a !== "" && b !== "" && String(a) === String(b));
 
 function defaultsOf(schema, type, cache) {
     if (cache.has(type)) return cache.get(type);

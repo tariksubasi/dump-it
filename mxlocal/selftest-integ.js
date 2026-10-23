@@ -104,7 +104,7 @@ function restProblems(project, T) {
     if (!svc || svc.$Type !== "Rest$ConsumedRestService") return ["consumed REST service missing"];
     if (!flow || !pub) return ["REST microflow or published service missing"];
     if (svc.Operations.length !== 5) r.push(`${svc.Operations.length} operations, expected 5`);
-    if (!svc.AuthenticationScheme || svc.AuthenticationScheme.$Type !== "Rest$BasicAuthentication" || svc.AuthenticationScheme.Password.$Type !== "Rest$ConstantValue") r.push("Basic authentication with a constant password missing");
+    if (!svc.AuthenticationScheme || svc.AuthenticationScheme.$Type !== "Rest$BasicAuthenticationScheme" || svc.AuthenticationScheme.Password.$Type !== "Rest$ConstantValue") r.push("Basic authentication with a constant password missing");
     for (const op of svc.Operations) {
         if (!op.Headers.some(h => h.Name === "Accept")) r.push(`${op.Name} has no Accept header (CE7062)`);
         const body = op.Method.Body;
