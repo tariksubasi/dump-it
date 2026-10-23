@@ -123,10 +123,10 @@ CHANGING OR CHECKING THE MODEL
 
 AGENT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent")
 # mx.py commands an agent may run without asking: lookups, dry runs and the export's own history. apply/undo always ask.
-SAFE_MX_COMMANDS = ("help", "refresh", "find", "usages", "unused", "steps", "widgets", "widgettype", "texts", "ops", "api", "dryrun", "rerun", "gap", "check", "ok",
+SAFE_MX_COMMANDS = ("help", "refresh", "find", "usages", "unused", "steps", "widgets", "widgettype", "mapping-test", "texts", "ops", "api", "dryrun", "rerun", "gap", "check", "ok",
                     "selftest", "mergecheck", "mergefix", "clean")
 # Tools of the mxlocal MCP server (mxlocal/serve.js) that may run without asking: none of them writes the model.
-MCP_TOOLS = ("find", "usages", "unused", "steps", "widgets", "widgettype", "texts", "ops", "api", "plan", "dryrun", "check", "gap", "mergecheck",
+MCP_TOOLS = ("find", "usages", "unused", "steps", "widgets", "widgettype", "mapping_test", "texts", "ops", "api", "plan", "dryrun", "check", "gap", "mergecheck",
              "clean")
 # git commands that could rewrite the export history, touch the Mendix project's repo (-C) or send data out.
 GIT_DENY = ("-C", "push", "remote", "reset", "clean", "checkout", "restore", "switch", "rebase", "stash", "rm",

@@ -31,7 +31,15 @@ const XML_OPS = {
         fields: { module: "R module name", name: "R collection name, e.g. MD_Orders", entity: "R Module.Entity", definition: "optional definition name (default the entity name)", attributes: "optional [ \"Attr\" ] (default all but binary)", associations: "optional [ \"Module.Assoc\" ] exposed with all their attributes", folder: "optional folder path" }
     },
     createXmlImportMapping: { doc: "Create an import mapping (XML -> objects) from an XML schema element or a message definition.", fields: { ...XML_MAP_FIELDS, keys: "optional [ \"path\" ] values that identify their object" } },
-    createXmlExportMapping: { doc: "Create an export mapping (objects -> XML) from an XML schema element or a message definition.", fields: XML_MAP_FIELDS }
+    createXmlExportMapping: { doc: "Create an export mapping (objects -> XML) from an XML schema element or a message definition.", fields: XML_MAP_FIELDS },
+    changeXmlSchema: {
+        doc: "Import an XML schema again from its (changed) .xsd file: the dry run lists added and removed elements and the mappings to update with updateImportMapping / updateExportMapping.",
+        fields: { schema: "R Module.XmlSchema", file: "optional .xsd path (default: the file it was imported from)" }
+    },
+    changeMessageDefinition: {
+        doc: "Rebuild a message definition from its entity: attributes and associations (what is not given stays); lists the mappings to update.",
+        fields: { definition: "R Module.Collection.Definition (or Module.Collection with one definition)", attributes: "optional [ \"Attr\" ], or \"all\" (all but binary; default: the ones exposed now that still exist)", associations: "optional [ \"Module.Assoc\" ] (default: the ones exposed now)" }
+    }
 };
 
 // ---------------------------------------------------------------- a small XML reader (enough for XSD files)
@@ -284,6 +292,43 @@ function makeXml(h) {
         return `${o.module}.${o.name}: ${plan.top.entity} over ${o.xmlSchema ? `${o.xmlSchema} <${src.root}>` : o.messageDefinition} (${values} value(s))` + (created.length ? `\n      created: ${created.join(", ")}` : "");
     }
 
+    // The exposed entity of a definition: a list of the entity, its attributes, per association the other entity.
+    async function buildDefinition(def, ent, attributes, associations, qn) {
+        const o = { attributes, associations, entity: ent.qualifiedName };
+        const root = md.ExposedEntity.createInEntityMessageDefinitionUnderExposedEntity(def);
+        root.entity = ent;
+        setCommon(root, { kind: "Object", prim: "Unknown", path: ent.name, min: 0, max: -1, exposedName: `${ent.name}s`, itemName: ent.name, originalName: ent.name });
+        const addAttrs = async (owner, e, list, p) => {
+            for (const a of await attributesOf(e, list, qn)) {
+                const x = md.ExposedAttribute.createInElementUnderChildren(owner);
+                x.attribute = a;
+                setCommon(x, { kind: "Value", prim: PRIM_OF[kindOf(a)] || "String", path: `${p}|${a.name}`, min: 0, max: 1, exposedName: a.name, originalName: a.name });
+            }
+        };
+        await addAttrs(root, ent, o.attributes, ent.name);
+        for (const an of [].concat(o.associations || [])) {
+            const assoc = await get(an);
+            if (!(assoc instanceof dm.AssociationBase)) throw new Error(`${qn}: ${an} is not an association`);
+            const parent = assoc.parent, child = assoc.child;
+            let other, many;
+            if (parent === ent) {
+                other = child;
+                many = assoc.type === dm.AssociationType.ReferenceSet;
+            } else if (child === ent) {
+                other = parent;
+                many = true;
+            } else throw new Error(`${qn}: ${an} does not connect ${o.entity}`);
+            if (!other || !other.qualifiedName) throw new Error(`${qn}: ${an} goes to an entity outside the project`);
+            const x = md.ExposedAssociation.createInElementUnderChildren(root);
+            x.association = assoc;
+            x.entity = other;
+            const p = many ? `${ent.name}|${other.name}s|${other.name}` : `${ent.name}|${other.name}`;
+            setCommon(x, { kind: "Object", prim: "Unknown", path: p, min: 0, max: many ? -1 : 1, exposedName: many ? `${other.name}s` : other.name, itemName: many ? other.name : "", originalName: other.name });
+            await addAttrs(x, other, undefined, p);
+        }
+        return root;
+    }
+
     const impl = {
         async createXmlSchema(o) {
             validName(o.name, "schema name");
@@ -315,42 +360,87 @@ function makeXml(h) {
             const def = md.EntityMessageDefinition.createIn(coll);
             def.name = o.definition === undefined ? ent.name : String(o.definition);
             validName(def.name, "definition name");
-            const root = md.ExposedEntity.createInEntityMessageDefinitionUnderExposedEntity(def);
-            root.entity = ent;
-            setCommon(root, { kind: "Object", prim: "Unknown", path: ent.name, min: 0, max: -1, exposedName: `${ent.name}s`, itemName: ent.name, originalName: ent.name });
-            const addAttrs = async (owner, e, list, p) => {
-                for (const a of await attributesOf(e, list, qn)) {
-                    const x = md.ExposedAttribute.createInElementUnderChildren(owner);
-                    x.attribute = a;
-                    setCommon(x, { kind: "Value", prim: PRIM_OF[kindOf(a)] || "String", path: `${p}|${a.name}`, min: 0, max: 1, exposedName: a.name, originalName: a.name });
-                }
-            };
-            await addAttrs(root, ent, o.attributes, ent.name);
-            for (const an of [].concat(o.associations || [])) {
-                const assoc = await get(an);
-                if (!(assoc instanceof dm.AssociationBase)) throw new Error(`${qn}: ${an} is not an association`);
-                const parent = assoc.parent, child = assoc.child;
-                let other, many;
-                if (parent === ent) {
-                    other = child;
-                    many = assoc.type === dm.AssociationType.ReferenceSet;
-                } else if (child === ent) {
-                    other = parent;
-                    many = true;
-                } else throw new Error(`${qn}: ${an} does not connect ${o.entity}`);
-                if (!other || !other.qualifiedName) throw new Error(`${qn}: ${an} goes to an entity outside the project`);
-                const x = md.ExposedAssociation.createInElementUnderChildren(root);
-                x.association = assoc;
-                x.entity = other;
-                const p = many ? `${ent.name}|${other.name}s|${other.name}` : `${ent.name}|${other.name}`;
-                setCommon(x, { kind: "Object", prim: "Unknown", path: p, min: 0, max: many ? -1 : 1, exposedName: many ? `${other.name}s` : other.name, itemName: many ? other.name : "", originalName: other.name });
-                await addAttrs(x, other, undefined, p);
-            }
+            const root = await buildDefinition(def, ent, o.attributes, o.associations, qn);
             warn(`MessageDefinitions$MessageDefinitionCollection first use by ops (layout of the Mendix 8.18 sample, no Mendix 10/11 sample): check ${qn} in Studio Pro`);
             return `${qn}.${def.name} (${o.entity}, ${root.children.length} member(s))`;
         },
         createXmlImportMapping: o => createXmlMapping(o, true),
-        createXmlExportMapping: o => createXmlMapping(o, false)
+        createXmlExportMapping: o => createXmlMapping(o, false),
+        async changeXmlSchema(o) {
+            const where = `changeXmlSchema ${o.schema}`;
+            const schema = await get(o.schema).catch(() => fail(`${where}: no XML schema ${o.schema}`, o.schema, model.allXmlSchemas().map(x => x.qualifiedName)));
+            if (!(schema instanceof xmlschemas.XmlSchema)) fail(`${where}: ${o.schema} is not an XML schema`, o.schema, model.allXmlSchemas().map(x => x.qualifiedName));
+            if (schema.entries.length !== 1) throw new Error(`${where}: ${o.schema} has ${schema.entries.length} schema files; update it in Studio Pro (right-click > Update)`);
+            if (o.file === undefined && !schema.filePath) throw new Error(`${where}: ${o.schema} does not say which file it came from; give "file"`);
+            const { full, text } = readFile(o.file === undefined ? schema.filePath : o.file, where);
+            const x = parseXml(text);
+            if (local(x.name) !== "schema") throw new Error(`${where}: ${full} is not an XML schema (root <${x.name}>)`);
+            for (const k of ["import", "include", "redefine"]) if (kids(x, k).length) throw new Error(`${where}: ${full} uses xs:${k}; a schema of several files: update it in Studio Pro`);
+            const entry = schema.entries[0];
+            const oldText = entry.contents;
+            const names = t => kids(parseXml(t), "element").map(e => e.attrs.name);
+            const before = names(oldText), after = names(text);
+            const lines = [];
+            const added = after.filter(n => !before.includes(n)), removed = before.filter(n => !after.includes(n));
+            if (added.length) lines.push(`elements added: ${added.join(", ")}`);
+            if (removed.length) lines.push(`elements removed: ${removed.join(", ")}`);
+            // per mapping over this schema: the paths of its root element that changed
+            const { treeDiff, mappingsOf } = h.mappingInternals;
+            for (const m of await mappingsOf(d => d.xmlSchemaQualifiedName === o.schema)) {
+                const root = m.rootElementName;
+                if (!after.includes(root)) {
+                    lines.push(`${m.qualifiedName}: its root element <${root}> is gone; delete the mapping and create it again`);
+                    continue;
+                }
+                let d;
+                try {
+                    d = treeDiff(xsdTree(oldText, root, where).tree, xsdTree(text, root, where).tree);
+                } catch (e) {
+                    throw new Error(`${where}: ${e.message.replace(/^.*?: /, "")} (element <${root}> of ${m.qualifiedName})`);
+                }
+                const what = [d.added.length && `added ${d.added.join(", ")}`, d.removed.length && `removed ${d.removed.join(", ")}`, d.retyped.length && `retyped ${d.retyped.join(", ")}`].filter(Boolean);
+                if (what.length) lines.push(`${m.qualifiedName} <${root}>: ${what.join("; ")}; UPDATE IT: { "op": "${m instanceof im.ImportMapping ? "updateImportMapping" : "updateExportMapping"}", "mapping": "${m.qualifiedName}"${d.removed.length ? ", \"prune\": true" : ""} }`);
+            }
+            entry.contents = text;
+            entry.targetNamespace = x.attrs.targetNamespace || "";
+            entry.location = path.basename(full);
+            schema.filePath = full;
+            return `${o.schema} (${path.basename(full)}${text === oldText ? ", unchanged" : ""}, elements ${after.join(", ") || "none"})` + lines.map(l => "\n      " + l).join("");
+        },
+        async changeMessageDefinition(o) {
+            const where = `changeMessageDefinition ${o.definition}`;
+            const parts = String(o.definition).split(".");
+            if (parts.length < 2 || parts.length > 3) throw new Error(`${where}: definition is Module.Collection.Definition`);
+            const cq = parts.slice(0, 2).join(".");
+            const coll = await get(cq).catch(() => fail(`${where}: no message definition collection ${cq}`, cq, model.allMessageDefinitionCollections().map(x => x.qualifiedName)));
+            if (!(coll instanceof md.MessageDefinitionCollection)) throw new Error(`${where}: ${cq} is not a message definition collection`);
+            if (parts.length === 2 && coll.messageDefinitions.length !== 1) throw new Error(`${where}: ${cq} has ${coll.messageDefinitions.length} definitions; name one: ${coll.messageDefinitions.map(d => `${cq}.${d.name}`).join(", ")}`);
+            const def = parts.length === 2 ? coll.messageDefinitions[0] : coll.messageDefinitions.find(d => d.name === parts[2]) || fail(`${where}: ${cq} has no definition '${parts[2]}'`, parts[2], coll.messageDefinitions.map(d => d.name));
+            if (!(def instanceof md.EntityMessageDefinition) || !def.exposedEntity) throw new Error(`${where}: ${cq}.${def.name} is not a definition of an entity`);
+            const defQn = `${cq}.${def.name}`;
+            const old = def.exposedEntity;
+            const ent = await h.entity(old.entityQualifiedName);
+            await h.loadParents(ent);
+            const have = h.attributeChain(ent).attributes.map(a => a.name);
+            const nowAttrs = old.children.filter(c => c instanceof md.ExposedAttribute).map(c => String(c.attributeQualifiedName).split(".").pop());
+            const attrs = o.attributes === "all" ? undefined : o.attributes !== undefined ? [].concat(o.attributes) : nowAttrs.filter(n => have.includes(n));
+            const assocs = o.associations !== undefined ? [].concat(o.associations) : old.children.filter(c => c instanceof md.ExposedAssociation).map(c => c.associationQualifiedName);
+            const lost = nowAttrs.filter(n => !have.includes(n));
+            const before = definitionTree(def);
+            old.delete();
+            await buildDefinition(def, ent, attrs, assocs, defQn);
+            const d = h.mappingInternals.treeDiff(before, definitionTree(def));
+            const lines = [];
+            if (d.added.length) lines.push(`added: ${d.added.join(", ")}`);
+            if (d.removed.length) lines.push(`removed: ${d.removed.join(", ")}`);
+            if (lost.length) lines.push(`attributes no longer in ${ent.qualifiedName}: ${lost.join(", ")}`);
+            const notExposed = have.filter(n => !(attrs || have).includes(n) && kindOf(ent.attributes.find(a => a.name === n) || { type: { structureTypeName: "x$StringAttributeType" } }) !== "Binary");
+            if (o.attributes === undefined && notExposed.length) lines.push(`not exposed (add with "attributes"): ${notExposed.join(", ")}`);
+            if (d.added.length || d.removed.length) {
+                for (const m of await h.mappingInternals.mappingsOf(x => x.messageDefinitionQualifiedName === defQn)) lines.push(`UPDATE ${m.qualifiedName}: { "op": "${m instanceof im.ImportMapping ? "updateImportMapping" : "updateExportMapping"}", "mapping": "${m.qualifiedName}"${d.removed.length ? ", \"prune\": true" : ""} }`);
+            }
+            return `${defQn} (${ent.qualifiedName}, ${def.exposedEntity.children.length} member(s))` + lines.map(l => "\n      " + l).join("");
+        }
     };
 
     const mappingCheck = async (o, T) => {
@@ -370,10 +460,22 @@ function makeXml(h) {
             const c = await get(`${o.module}.${o.name}`);
             return c instanceof md.MessageDefinitionCollection && c.messageDefinitions.length === 1 && c.messageDefinitions[0].exposedEntity ? [] : [`${o.module}.${o.name} has no definition`];
         },
+        async changeXmlSchema(o) {
+            const s = await get(o.schema);
+            return s.entries.length === 1 && s.entries[0].contents && parseXml(s.entries[0].contents) ? [] : [`${o.schema} has no schema contents`];
+        },
+        async changeMessageDefinition(o) {
+            const parts = o.definition.split(".");
+            const c = await get(parts.slice(0, 2).join("."));
+            const def = parts[2] ? c.messageDefinitions.find(d => d.name === parts[2]) : c.messageDefinitions[0];
+            const r = def && def.exposedEntity ? [] : [`${o.definition} has no exposed entity`];
+            if (def && Array.isArray(o.attributes)) for (const a of o.attributes) if (!def.exposedEntity.children.some(x => x instanceof md.ExposedAttribute && String(x.attributeQualifiedName).endsWith("." + a))) r.push(`${o.definition} does not expose ${a}`);
+            return r;
+        },
         createXmlImportMapping: o => mappingCheck(o, im.ImportMapping),
         createXmlExportMapping: o => mappingCheck(o, em.ExportMapping)
     };
-    return { impl, checks };
+    return { impl, checks, internals: { source, definitionTree } };
 }
 
 module.exports = { makeXml, XML_OPS, parseXml, xsdTree };

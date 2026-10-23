@@ -63,6 +63,13 @@ export const widgettype = {
     execute: (args, context) => mx(context, ["widgettype", ...(args.name ? [args.name] : [])])
 };
 
+export const mapping_test = {
+    description: "What a sample JSON would make with an import mapping: the objects (created, found by keys, from a " +
+        "microflow or the parameter), their attribute values, type problems and sample keys the mapping ignores. Static, read-only.",
+    args: { mapping: text("import mapping, e.g. Sales.IMM_Order"), file: text("sample JSON file, e.g. edits/order-sample.json") },
+    execute: (args, context) => mx(context, ["mapping-test", args.mapping, args.file])
+};
+
 export const texts = {
     description: "Translatable texts (page titles, widget captions/labels, messages, enumeration and menu captions) " +
         "with their text in every project language. Use the listed where [part] in setTranslations.",

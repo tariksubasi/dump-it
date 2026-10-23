@@ -37,6 +37,8 @@ function tools(allowApply) {
             inputSchema: { type: "object", properties: { flow: str("qualified name, e.g. Sales.ACT_Order_Save") }, required: ["flow"] } },
         { name: "widgets", description: "Widget tree of a page or snippet: names, kinds, entity of each data view / list view, and where new widgets can go ([into]). Use before addWidgets, changeWidget, deleteWidget, moveWidget.",
             inputSchema: { type: "object", properties: { page: str("qualified name, e.g. Sales.Customer_Edit") }, required: ["page"] } },
+        { name: "mapping_test", description: "What a sample JSON would make with an import mapping: objects (create / find by keys / custom / parameter), attribute values, type problems, sample keys the mapping ignores. A static simulation, read-only.",
+            inputSchema: { type: "object", properties: { mapping: str("import mapping, e.g. Sales.IMM_Order"), json: str("the sample JSON text") }, required: ["mapping", "json"] } },
         { name: "widgettype", description: "Pluggable widgets installed in widgets/*.mpk; with a name (e.g. Datagrid, \"Data grid 2\", Badge): its properties with types, defaults and values, for { \"widget\": \"pluggable\", \"type\": ..., \"properties\": { ... } } in createPage / addWidgets.",
             inputSchema: { type: "object", properties: { name: str("optional widget id or short name, e.g. Datagrid") } } },
         { name: "texts", description: "Translatable texts (page titles, widget captions/labels, messages, enumeration and menu captions) with their text in every project language. Use before setTranslations; missing lists only texts without that language.",
@@ -163,6 +165,17 @@ class Server {
                     const model = await client.open();
                     try {
                         lines.push(await require("./ops").bind(model, client).widgets(String(a.page || "")));
+                    } finally {
+                        this.settle(client);
+                    }
+                    break;
+                }
+                case "mapping_test": {
+                    const ctx = await this.project();
+                    const client = new LocalClient(ctx);
+                    const model = await client.open();
+                    try {
+                        lines.push(await require("./ops").bind(model, client).mappingTest(String(a.mapping || ""), String(a.json || "")));
                     } finally {
                         this.settle(client);
                     }

@@ -77,12 +77,12 @@ const ACTIONS = {
             proxy: "optional default | none | { \"host\": \"expression\", \"port\": \"expression\", \"user\": \"expression\", \"password\": \"expression\" } (default: default = the app's proxy settings)",
             response: "optional none | string | file | Module.ImportMapping (default: string when variable is set, else none)", variable: "result variable: the response text, the file document or the import mapping result",
             fileEntity: "with response file: Module.Entity that inherits from System.FileDocument (default System.FileDocument)",
-            commit: "with an import mapping: yes | no | withoutEvents (default withoutEvents)", errorBody: "optional true/false: on an error keep the response in $latestHttpResponse (default true)"
+            commit: "with an import mapping: yes | no | withoutEvents (default withoutEvents)", mappingParameter: "with an import mapping that takes a parameter: the variable to pass (no $)", errorBody: "optional true/false: on an error keep the response in $latestHttpResponse (default true)"
         }
     },
     importWithMapping: {
         doc: "Import JSON or XML text with an import mapping (microflows only).",
-        fields: { mapping: "R Module.ImportMapping", source: "R String variable with the JSON/XML (no $)", variable: "optional result variable name", commit: "optional yes | no | withoutEvents (default withoutEvents)" }
+        fields: { mapping: "R Module.ImportMapping", source: "R String variable with the JSON/XML (no $)", variable: "optional result variable name", commit: "optional yes | no | withoutEvents (default withoutEvents)", parameter: "with a mapping that takes a parameter: the variable to pass (no $)" }
     },
     exportWithMapping: {
         doc: "Export an object (or list) to JSON or XML text with an export mapping (microflows only).",
@@ -624,11 +624,20 @@ function makeFlows(h) {
         const map = await h.get(spec.mapping);
         if (!(map instanceof importmappings.ImportMapping)) throw new Error(`${where}: '${spec.mapping}' is not an import mapping`);
         const pt = map.parameterType;
-        if (pt && !(pt instanceof datatypes.UnknownType) && !(pt instanceof datatypes.VoidType)) throw new Error(`${where}: import mapping ${spec.mapping} takes a parameter, which ops cannot pass; add this call in Studio Pro`);
+        const takes = pt && !(pt instanceof datatypes.UnknownType) && !(pt instanceof datatypes.VoidType);
+        const passed = spec.parameter !== undefined ? spec.parameter : spec.mappingParameter;
+        const pfield = spec.parameter !== undefined || spec.action === "importWithMapping" ? "parameter" : "mappingParameter";
+        if (takes && passed === undefined) throw new Error(`${where}: import mapping ${spec.mapping} takes a parameter (${pt instanceof datatypes.ObjectType ? pt.entityQualifiedName : pt.structureTypeName.split("$")[1].replace("Type", "")}); give "${pfield}": the variable to pass (no $)`);
+        if (!takes && passed !== undefined) throw new Error(`${where}: import mapping ${spec.mapping} has no parameter; leave out "${pfield}" (or give the mapping one: changeMapping "parameter")`);
+        if (takes) {
+            const info = await variableInfo(f.m, passed, where);
+            if (pt instanceof datatypes.ObjectType ? info.entity !== pt.entityQualifiedName || info.list : info.entity) throw new Error(`${where}: ${spec.mapping} takes ${pt instanceof datatypes.ObjectType ? `a ${pt.entityQualifiedName} object` : `a ${pt.structureTypeName.split("$")[1].replace("Type", "")} value`}; $${noDollar(passed)} is ${info.entity ? (info.list ? "a list of " : "") + info.entity : "a value"}`);
+        }
         const root = map.rootMappingElements[0];
         if (!root || !root.entity) throw new Error(`${where}: import mapping ${spec.mapping} has no root object (finish it in Studio Pro)`);
         const call = mf.ImportMappingCall.createIn(r);
         call.mapping = map;
+        if (takes) call.mappingArgumentVariableName = noDollar(passed);
         importCommit(r, spec.commit || "withoutEvents");
         call.contentType = contentType(map);
         call.objectHandlingBackup = sdk.mappings.ObjectHandlingBackupEnum.Create;
@@ -894,6 +903,7 @@ function makeFlows(h) {
         const how = /^none$/i.test(response) ? "none" : /^string$/i.test(response) ? "string" : /^file$/i.test(response) ? "file" : "mapping";
         if (how === "mapping" && !response.includes(".")) fail(`${where}: response '${response}' is not none, string, file or an import mapping (Module.Mapping)`, response, ["none", "string", "file"]);
         if (spec.fileEntity !== undefined && how !== "file") throw new Error(`${where}: fileEntity only applies to response "file"`);
+        if (spec.mappingParameter !== undefined && how !== "mapping") throw new Error(`${where}: mappingParameter only applies to a response import mapping`);
         const r = a.resultHandling || mf.ResultHandling.createInRestCallActionUnderResultHandling(a);
         a.resultHandlingType = mf.ResultHandlingType[await resultHandling(f, r, how, { ...spec, mapping: response }, where)];
         return a;

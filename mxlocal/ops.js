@@ -14,7 +14,7 @@ const { makeFlows, ACTIONS, CONTROL, COMMON, CREATES } = require("./ops-flows");
 const { makePages, PAGE_FIELDS, MENU_FIELDS, HOME_FIELDS, widgetFields, NO_MENU_ROLES } = require("./ops-pages");
 const { makePageEdit, PAGE_EDIT_OPS, PAGE_EDIT_NAMES, FIELD_SYNONYMS } = require("./ops-page-edit");
 const { makeSecurity, SECURITY_OPS } = require("./ops-security");
-const { makeMappings, MAPPING_OPS } = require("./ops-mappings");
+const { makeMappings, MAPPING_OPS, integChangedLater } = require("./ops-mappings");
 const { makeTexts, TEXT_OPS } = require("./ops-texts");
 const { makeNav, NAV_OPS, MENU_EXTRA, extendedMenuItem } = require("./ops-nav");
 const { makeTheme, THEME_OPS } = require("./theme");
@@ -475,7 +475,7 @@ function bind(model, client) {
     const dsTheme = makeDsTheme({ model, client, impl: () => impl, theme: themeOps });
     const marketOps = makeMarket({ client, model });
     const navOps = makeNav({ model, client, get, exists, text, translationsOf, folder, grantAccess: o => impl.grantAccess(o) }, pageOps.internals);
-    const mappingOps = makeMappings({ model, get, exists, entity, folder, attributeChain, loadParents, impl: () => impl });
+    const mappingOps = makeMappings({ model, client, get, exists, entity, folder, attributeChain, loadParents, impl: () => impl, xml: () => xmlOps.internals });
     const domainOps = makeDomain({ model, client, get, exists, entity, folder, text, attributeType, loadParents, persistable, domainModel, isFresh: qn => isFresh(qn), markFresh: qn => fresh.add(qn) });
     // a parent: a project entity, or a System entity (by name, as Studio Pro stores it)
     async function setParent(e, qn) {
@@ -1189,7 +1189,7 @@ function bind(model, client) {
             const mine = PAGE_EDIT_NAMES.includes(name) ? pageEdit.touched(o) : [];
             const undoes = x => ["deleteWidget", "moveWidget"].includes(x.op) || (x.op === "changeWidget" && (x.name !== undefined || name === "changeWidget"));
             const reworked = mine.length && rest.some(x => x.page === o.page && undoes(x) && pageEdit.touched(x).some(n => mine.includes(n)));
-            if ((later && name !== "rename" && name !== "delete") || edited || undone || reworked || changedLater(name, o, rest) || smallChangedLater(name, o, rest) || workflowChangedLater(name, o, rest)) continue;
+            if ((later && name !== "rename" && name !== "delete") || edited || undone || reworked || changedLater(name, o, rest) || smallChangedLater(name, o, rest) || workflowChangedLater(name, o, rest) || integChangedLater(name, o, rest)) continue;
             try {
                 failed.push(...(await checks[name](name === "setTranslations" ? o : await textOps.prepare(o, false))).map(f => `${i + 1}. ${name}: ${f}`));
             } catch (e) {
@@ -1199,7 +1199,7 @@ function bind(model, client) {
         return failed;
     }
 
-    const api = { get, runPlan, checkPlan, dataType, folder, lintExpressions: () => lintChanged(), layoutCheck: () => flows.layoutReport(), steps: qn => flows.steps(qn), widgets: qn => pageEdit.widgets(qn), widgetType: name => (name ? pageOps.internals.widgetType(name) : pageOps.internals.widgetTypes()), texts: (scope, missing) => textOps.list(scope, missing) };
+    const api = { get, runPlan, checkPlan, dataType, folder, lintExpressions: () => lintChanged(), layoutCheck: () => flows.layoutReport(), steps: qn => flows.steps(qn), widgets: qn => pageEdit.widgets(qn), widgetType: name => (name ? pageOps.internals.widgetType(name) : pageOps.internals.widgetTypes()), texts: (scope, missing) => textOps.list(scope, missing), mappingTest: (qn, text) => mappingOps.mappingTest(qn, text) };
     for (const name of Object.keys(OPS)) {
         api[name] = o => {
             validate("op", name, OPS[name], o || {}, `ops.${name}`);

@@ -1631,6 +1631,85 @@
           "NF_Order_Save\\.txt$": "(?s)on error: custom handler, no rollback.*Kaydedilemedi"
         }
       }
+    },
+    {
+      "id": "intjsonchange",
+      "text": "MyFirstModule'de JSON_Order adlı JSON structure'ın yeni örneği şu: {\"number\": 12, \"total\": 99.5, \"status\": \"open\"}. Structure'ı güncelle ve IMM_Order import mapping'ini yeni yapıya uydur; yeni alan için Order'a attribute ekle.",
+      "setup": [
+        {
+          "op": "createJsonStructure",
+          "module": "MyFirstModule",
+          "name": "JSON_Order",
+          "snippet": "{\"number\": 12, \"total\": 99.5}"
+        },
+        {
+          "op": "createImportMapping",
+          "module": "MyFirstModule",
+          "name": "IMM_Order",
+          "jsonStructure": "MyFirstModule.JSON_Order",
+          "entity": "MyFirstModule.Order"
+        }
+      ],
+      "checks": {
+        "find": [
+          "MyFirstModule.Order.Status"
+        ],
+        "files": {
+          "integrations/.*IMM_Order.*\\.txt$": "(?i)status"
+        }
+      }
+    },
+    {
+      "id": "intmappingkeys",
+      "text": "IMM_Order import mapping'inde Order nesnesi number alanına göre bulunsun, bulunamazsa yok sayılsın (ignore).",
+      "setup": [
+        {
+          "op": "createJsonStructure",
+          "module": "MyFirstModule",
+          "name": "JSON_Order",
+          "snippet": "{\"number\": 12, \"total\": 99.5}"
+        },
+        {
+          "op": "createImportMapping",
+          "module": "MyFirstModule",
+          "name": "IMM_Order",
+          "jsonStructure": "MyFirstModule.JSON_Order",
+          "entity": "MyFirstModule.Order"
+        }
+      ],
+      "checks": {
+        "files": {
+          "integrations/.*IMM_Order.*\\.txt$": "(?i)find"
+        }
+      }
+    },
+    {
+      "id": "intrestchange",
+      "text": "OrderApi REST istemcisinin GetOrder operasyonunun yolu /v2/orders/{id} olsun ve X-Api-Version: 2 header'ı eklensin; DeleteOrder operasyonunu sil.",
+      "setup": [
+        {
+          "op": "createConsumedRestService",
+          "module": "MyFirstModule",
+          "name": "OrderApi",
+          "baseUrl": "https://api.example.com",
+          "operations": [
+            {
+              "name": "GetOrder",
+              "path": "/orders/{id}"
+            },
+            {
+              "name": "DeleteOrder",
+              "method": "Delete",
+              "path": "/orders/{id}"
+            }
+          ]
+        }
+      ],
+      "checks": {
+        "files": {
+          "integrations/.*OrderApi.*\\.txt$": "(?s)^(?=.*/v2/orders)(?!.*DeleteOrder)"
+        }
+      }
     }
   ]
 }
