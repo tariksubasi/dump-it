@@ -29,12 +29,13 @@ const { makeXml, XML_OPS } = require("./ops-xml");
 const { makeRefOps, REF_OPS } = require("./ops-refs");
 const { makeCopy, COPY_OPS } = require("./ops-copy");
 const { makeEntity, ENTITY_OPS } = require("./ops-entity");
-const { makeWorkflows, WORKFLOW_OPS, USER_TASK_PAGE_FIELDS, SYSTEM_ENTITIES, STEP_FIELDS, STEP_COMMON } = require("./ops-workflows");
+const { makeWorkflows, workflowChangedLater, WORKFLOW_OPS, USER_TASK_PAGE_FIELDS, SYSTEM_ENTITIES, STEP_FIELDS, STEP_COMMON } = require("./ops-workflows");
 const { makeScaffold, SCAFFOLD_OPS, SCAFFOLD_SYNONYMS } = require("./ops-scaffold");
 const { makeSmall, smallChangedLater, SMALL_OPS, SMALL_SYNONYMS } = require("./ops-small");
 const { makeOffline, OFFLINE_OPS } = require("./ops-offline");
 const { makeDmLayout, DMLAYOUT_OPS } = require("./ops-dmlayout");
 const { makeComposite, COMPOSITE_OPS, COMPOSITE_SYNONYMS } = require("./ops-composite");
+const { makeGeneral, GENERAL_OPS } = require("./ops-general");
 
 const OPS = {
     createEntity: {
@@ -142,6 +143,7 @@ const OPS = {
     ...SMALL_OPS,
     ...OFFLINE_OPS,
     ...DMLAYOUT_OPS,
+    ...GENERAL_OPS,
     moveDocument: { doc: "Move a document to another folder of the same module.", fields: { document: "R Module.Document", folder: "optional folder path, e.g. Orders/Actions (missing or \"\" = the module root)" } },
     rename: { doc: "Rename a module, document, entity, attribute, association or enumeration value. Updates references, reports names left in expressions/XPath/Java.", fields: { target: "R qualified name, e.g. Module.Entity.Attribute", newName: "R new short name" } },
     delete: { doc: "Delete a document, entity, attribute, association, enumeration value or module role. Lists what still uses it. (Validation rules, event handlers, indexes: deleteValidationRule, deleteEventHandler, deleteIndex; access rules: deleteAccessRule; widgets: deleteWidget; flow steps: deleteAction.)", fields: { target: "R qualified name" } }
@@ -490,6 +492,7 @@ function bind(model, client) {
     const smallOps = makeSmall({ model, client, get, exists, entity, text, dataType });
     const offlineOps = makeOffline({ model, client, entity, persistable });
     const dmLayout = makeDmLayout({ model, client, domainModel, isFresh: qn => isFresh(qn) });
+    const generalOps = makeGeneral({ model, client, get, exists, entity, persistable, isFresh: qn => isFresh(qn), impl: () => impl, addMemberToRules: (e, m) => domainOps.addMemberToRules(e, m) });
     const scaffoldOps = makeScaffold({ model, client, get, exists, entity, folder, impl: () => impl, pageOps, pageEdit });
     const compositeOps = makeComposite({ model, client, get, exists, entity, folder, impl: () => impl, pageOps, pageEdit, themeOps });
 
@@ -944,7 +947,8 @@ function bind(model, client) {
         ...compositeOps.impl,
         ...smallOps.impl,
         ...offlineOps.impl,
-        ...dmLayout.impl
+        ...dmLayout.impl,
+        ...generalOps.impl
     };
 
     // ------------------------------------------------ checks (run after apply on a freshly loaded model)
@@ -1129,7 +1133,10 @@ function bind(model, client) {
         ...smallOps.checks,
         ...offlineOps.checks,
         ...dmLayout.checks,
+        ...generalOps.checks,
         createWorkflow: o => workflowOps.checks.createWorkflow(o),
+        changeWorkflow: o => workflowOps.checks.changeWorkflow(o),
+        deleteWorkflowActivity: o => workflowOps.checks.deleteWorkflowActivity(o),
         createPage: o => (o.kind === "userTaskPage" ? workflowOps.checks.userTaskPage(o) : pageOps.checks.createPage(o))
     };
 
@@ -1182,7 +1189,7 @@ function bind(model, client) {
             const mine = PAGE_EDIT_NAMES.includes(name) ? pageEdit.touched(o) : [];
             const undoes = x => ["deleteWidget", "moveWidget"].includes(x.op) || (x.op === "changeWidget" && (x.name !== undefined || name === "changeWidget"));
             const reworked = mine.length && rest.some(x => x.page === o.page && undoes(x) && pageEdit.touched(x).some(n => mine.includes(n)));
-            if ((later && name !== "rename" && name !== "delete") || edited || undone || reworked || changedLater(name, o, rest) || smallChangedLater(name, o, rest)) continue;
+            if ((later && name !== "rename" && name !== "delete") || edited || undone || reworked || changedLater(name, o, rest) || smallChangedLater(name, o, rest) || workflowChangedLater(name, o, rest)) continue;
             try {
                 failed.push(...(await checks[name](name === "setTranslations" ? o : await textOps.prepare(o, false))).map(f => `${i + 1}. ${name}: ${f}`));
             } catch (e) {

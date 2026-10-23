@@ -5,6 +5,7 @@
 // to the dry run, then this script applies the pending change, re-exports and runs the checks.
 //
 //   node eval/run.js --project <app.mpr> [--agent claude|opencode] [--model <model>] [--only id,id] [--out <dir>]
+//   node eval/run.js --coverage          requests per op family, ops without a request (no agent, no project)
 //
 // claude: Claude Code CLI (claude -p), tools limited to the mendix MCP server and read-only file tools.
 // opencode: OpenCode CLI (opencode run), with the folder's own opencode.json; --model e.g. deepseek/deepseek-chat.
@@ -119,8 +120,49 @@ function check(req, mpr, ctx) {
     return fails;
 }
 
+// --coverage: per op family the requests that test it (from their "ops" and "families"), and the ops of the catalogue
+// no request uses. Families that should have 2+ requests and have fewer are listed as LOW. No agent, no project.
+const WANT_FAMILIES = ["native", "mapping", "error handling", "data widgets", "design system", "workflows", "domain", "flows", "security", "navigation", "rest", "code", "tests", "refactor"];
+function coverage(spec) {
+    const { OPS } = require(path.join(ROOT, "mxlocal", "ops"));
+    const { familyOf, familiesOf } = require(path.join(ROOT, "mxlocal", "op-families"));
+    const byFamily = new Map();
+    const used = new Set();
+    const unknown = [];
+    for (const req of spec.requests) {
+        const fams = new Set(req.families || []);
+        for (const op of req.ops || []) {
+            if (!OPS[op]) unknown.push(`${req.id}: ${op}`);
+            used.add(op);
+            for (const f of familiesOf(op)) fams.add(f);
+        }
+        for (const f of fams) byFamily.set(f, [...(byFamily.get(f) || []), req.id]);
+    }
+    const lines = [`EVAL COVERAGE: ${spec.requests.length} request(s), ${used.size} of ${Object.keys(OPS).length} op(s) used`, "", "Requests per op family:"];
+    const fams = [...new Set([...WANT_FAMILIES, ...byFamily.keys(), ...Object.keys(OPS).map(familyOf)])].sort();
+    const low = [];
+    for (const f of fams) {
+        const ids = byFamily.get(f) || [];
+        if (WANT_FAMILIES.includes(f) && ids.length < 2) low.push(f);
+        lines.push(`  ${f.padEnd(15)} ${String(ids.length).padStart(3)}  ${ids.slice(0, 8).join(", ")}${ids.length > 8 ? ", ..." : ""}`);
+    }
+    const without = Object.keys(OPS).filter(op => !used.has(op));
+    const grouped = new Map();
+    for (const op of without) grouped.set(familyOf(op), [...(grouped.get(familyOf(op)) || []), op]);
+    lines.push("", `Ops without an eval request (${without.length}):`, ...[...grouped].sort().map(([f, ops]) => `  ${f}: ${ops.join(", ")}`));
+    if (unknown.length) lines.push("", `UNKNOWN ops in requests (not in the catalogue): ${unknown.join("; ")}`);
+    if (low.length) lines.push("", `LOW (fewer than 2 requests): ${low.join(", ")}`);
+    return { text: lines.join("\n"), low, unknown };
+}
+
 function main() {
     const a = args(process.argv.slice(2));
+    if (a.coverage) {
+        const c = coverage(JSON.parse(fs.readFileSync(path.join(__dirname, "requests.json"), "utf8")));
+        console.log(c.text);
+        process.exitCode = c.low.length || c.unknown.length ? 1 : 0;
+        return;
+    }
     if (!a.project) throw new Error("--project <app.mpr> is required");
     const spec = JSON.parse(fs.readFileSync(path.join(__dirname, "requests.json"), "utf8"));
     const only = a.only ? String(a.only).split(",") : null;

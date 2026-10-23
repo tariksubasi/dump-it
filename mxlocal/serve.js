@@ -59,6 +59,8 @@ function tools(allowApply) {
             inputSchema: { type: "object", properties: {} } },
         { name: "clean", description: "Files outside edits/ that the export did not write (helper scripts, notes, edited export files). Read-only list; the user moves them with python mx.py clean --move. Never create such files: change files go through plan only.",
             inputSchema: { type: "object", properties: {} } },
+        { name: "undoplan", description: "Selective undo: the inverse ops of the last applied change (or the given backup), or only of some of its ops, saved as edits/undo-<backup>.json and dry-run (approval code). Later work stays. Lists the ops that cannot be inverted (only a full undo/restore brings those back).",
+            inputSchema: { type: "object", properties: { backup: str("optional backup name (the apply's 'Backup:' folder name; default the last apply)"), ops: str("optional op numbers of that change, e.g. \"2,5\" (default all)") } } },
         { name: "gap", description: "Record a change that no operation can do yet (edits/gaps.jsonl). Then give the user Studio Pro steps.",
             inputSchema: { type: "object", properties: { need: str("what the user wants, in one sentence") }, required: ["need"] } }
     ];
@@ -220,6 +222,20 @@ class Server {
                     if (!fs.existsSync(file)) throw new Error(`No change file '${f}' in edits/. Use the plan tool to write one.`);
                     await this.dryrun(file, a.check);
                     lines.push(require("./stray").warning(path.dirname(this.edits)));
+                    break;
+                }
+                case "undoplan": {
+                    const u = await require("./undo").undoPlan(this.mpr, a.backup || null, a.ops || null);
+                    lines.push(`UNDO ${u.name} (${u.count} op(s)): the inverse ops, last op first:`, ...u.lines);
+                    if (u.left.length) lines.push(`NOT INVERTIBLE (only a full undo of ${u.name} brings these back):`, ...u.left);
+                    if (!u.plan.ops.length) {
+                        lines.push("Nothing to undo with ops. No approval code.");
+                        break;
+                    }
+                    fs.mkdirSync(this.edits, { recursive: true });
+                    file = path.join(this.edits, `undo-${u.name}.json`);
+                    fs.writeFileSync(file, JSON.stringify(u.plan, null, 1) + "\n");
+                    await this.dryrun(file);
                     break;
                 }
                 case "mergecheck":

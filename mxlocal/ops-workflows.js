@@ -30,6 +30,12 @@ const SYSTEM_ASSOCIATIONS = {
     "System.UserRoles": ["System.User", "System.UserRole", true]
 };
 
+// A timeout (Studio Pro: timer boundary event, Mendix 10.20+) on a user task, call microflow, call workflow or
+// notification wait. This is the error handling workflows model: a microflow that fails has no error path in a
+// workflow (the instance goes to Failed; an admin retries it, changeWorkflowState retry).
+const TIMEOUT_FIELD = "optional { \"after\": \"DateTime expression\", \"steps\": [ steps ], \"interrupting\": true/false (default true: stop the activity), \"every\": \"Minute | Hour | Day | Week | Month | Year\" + \"interval\": n + \"times\": n (repeat, non-interrupting only), \"caption\": text } (Mendix 10.20+; a list of them for several)";
+const TIMEOUT_KEYS = ["after", "steps", "interrupting", "every", "interval", "times", "caption"];
+
 const STEP_FIELDS = {
     userTask: {
         doc: "a task for a user: the task page opens it, an outcome button finishes it",
@@ -38,16 +44,17 @@ const STEP_FIELDS = {
             outcomes: "R [ \"Approve\", \"Reject\" ] or { \"Approve\": [ steps ], \"Reject\": [ steps ] } (one outcome: no steps of its own; the workflow continues after the task)",
             assignee: "optional { \"userRoles\": [ \"UserRole\" ] } | { \"xpath\": \"[...]\" } on the user entity | { \"microflow\": \"Module.Flow\" } returning a list of users (default: every user may pick it up)",
             taskName: "optional task name shown in the task inbox (default the caption)", description: "optional task description", dueDate: "optional DateTime expression, e.g. addDays([%CurrentDateTime%], 3)",
-            onCreated: "optional Module.Microflow run when the task is created", autoAssign: "optional true: assign the task when exactly one user is targeted"
+            onCreated: "optional Module.Microflow run when the task is created", autoAssign: "optional true: assign the task when exactly one user is targeted",
+            timeout: TIMEOUT_FIELD
         }
     },
     decision: { doc: "branch on an expression of the context", fields: { caption: "optional text (default: the condition)", condition: "R Boolean or enumeration expression, e.g. $WorkflowContext/Amount > 1000", outcomes: "R { \"true\": [ steps ], \"false\": [ steps ] } or { \"Module.Enum.Value\": [ steps ], \"\": [ steps for no value ] }" } },
     parallelSplit: { doc: "run paths at the same time; the workflow continues when all are done", fields: { caption: "optional text (default: Parallel split)", paths: "R [ [ steps ], [ steps ] ] two or more" } },
-    callMicroflow: { doc: "run a microflow", fields: { caption: "optional text (default: Call microflow)", microflow: "R Module.Microflow", args: "optional { \"Param\": \"expression\" } (default: the parameter of the context entity gets $WorkflowContext)", outcomes: "optional, when the microflow returns a Boolean or enumeration: { \"true\": [ steps ], \"false\": [ steps ] } / { \"Module.Enum.Value\": [ steps ], \"\": [ steps ] }" } },
-    callWorkflow: { doc: "start another workflow and wait for it", fields: { caption: "optional text (default: Call workflow)", workflow: "R Module.Workflow", context: "optional expression for its context (default $WorkflowContext)", async: "optional true: do not wait" } },
+    callMicroflow: { doc: "run a microflow", fields: { caption: "optional text (default: Call microflow)", microflow: "R Module.Microflow", args: "optional { \"Param\": \"expression\" } (default: the parameter of the context entity gets $WorkflowContext)", outcomes: "optional, when the microflow returns a Boolean or enumeration: { \"true\": [ steps ], \"false\": [ steps ] } / { \"Module.Enum.Value\": [ steps ], \"\": [ steps ] }", timeout: TIMEOUT_FIELD } },
+    callWorkflow: { doc: "start another workflow and wait for it", fields: { caption: "optional text (default: Call workflow)", workflow: "R Module.Workflow", context: "optional expression for its context (default $WorkflowContext)", async: "optional true: do not wait", timeout: TIMEOUT_FIELD } },
     jumpTo: { doc: "go back (or forward) to an activity; ends its path", fields: { caption: "optional text (default: Jump)", target: "R name of an activity of this workflow, e.g. userTask1" } },
     waitForTimer: { doc: "wait until a moment (Mendix 10.6+)", fields: { caption: "optional text (default: Timer)", delay: "R DateTime expression, e.g. addHours([%CurrentDateTime%], 4)" } },
-    waitForNotification: { doc: "wait until a microflow notifies the workflow (notifyWorkflow)", fields: { caption: "optional text (default: Wait for notification)" } },
+    waitForNotification: { doc: "wait until a microflow notifies the workflow (notifyWorkflow)", fields: { caption: "optional text (default: Wait for notification)", timeout: TIMEOUT_FIELD } },
     end: { doc: "end the whole workflow here (last step of a user task outcome or decision branch; not in a parallel path)", fields: { caption: "optional text (default: End)" } }
 };
 const STEP_COMMON = { step: "R the step kind", name: "optional activity name (default Studio Pro style: userTask1, decision1, ...); jumpTo targets it" };
@@ -62,7 +69,37 @@ const WORKFLOW_OPS = {
             adminPage: "optional Module.Page with a System.Workflow parameter (the workflow admin page)",
             roles: "optional [ \"Module.Role\" ] may open the task pages and the admin page", folder: "optional folder path"
         }
+    },
+    changeWorkflow: {
+        doc: "Change a workflow (in this order: add, move, change, remove): add, remove or move activities, change an activity (user task page, assignee, due date, outcomes, timeout; decision condition; called microflow; timer delay; jump target), change title/description/due date. Activity names: the workflows export (userTask1, decision1, ...).",
+        fields: {
+            workflow: "R Module.Workflow",
+            add: "optional [ { \"after\": \"activity name\" or \"start\", \"steps\": [ steps ] } | { \"before\": \"activity name\", \"steps\": [...] } | { \"into\": \"activity name\", \"outcome\": \"Approve\" / \"true\" / \"Module.Enum.Value\" / \"\" / path number of a parallel split (one more: a new path) / \"timeout\", \"steps\": [...] } ] (steps as in createWorkflow; ops userTask)",
+            remove: "optional [ \"activity name\" ] removes the activity and the steps in its outcomes",
+            move: "optional [ { \"activity\": \"name\", \"after\" | \"before\" | \"into\" + \"outcome\": ... } ] (with the steps in its outcomes)",
+            change: "optional { \"activity name\": { field: value } }: caption; userTask: page, assignee (null: everyone), dueDate, taskName, description, onCreated (\"\": none), autoAssign, outcomes { \"add\": [ \"Escalate\" ] or { \"Escalate\": [ steps ] }, \"remove\": [ \"Reject\" ], \"rename\": { \"Approve\": \"Accept\" } } (task page buttons follow), timeout (null: none); decision: condition; callMicroflow: microflow, args, timeout; callWorkflow: context, async, timeout; waitForTimer: delay; waitForNotification: timeout; jumpTo: target",
+            title: "optional new display name", description: "optional new description", dueDate: "optional DateTime expression (\"\": none)"
+        }
+    },
+    deleteWorkflowActivity: {
+        doc: "Delete one activity of a workflow (and the steps in its outcomes). Refused for start/end of the main flow and for a jump target still in use.",
+        fields: { workflow: "R Module.Workflow", activity: "R activity name, e.g. userTask2" }
     }
+};
+
+// Fields changeWorkflow "change" takes per activity kind.
+const CHANGE_FIELDS = {
+    SingleUserTaskActivity: ["caption", "page", "assignee", "dueDate", "taskName", "description", "onCreated", "autoAssign", "outcomes", "timeout"],
+    MultiUserTaskActivity: ["caption", "page", "dueDate", "taskName", "description", "outcomes", "timeout"],
+    ExclusiveSplitActivity: ["caption", "condition"],
+    CallMicroflowTask: ["caption", "microflow", "args", "timeout"],
+    CallMicroflowActivity: ["caption", "microflow", "args", "timeout"],
+    CallWorkflowActivity: ["caption", "context", "async", "timeout"],
+    WaitForTimerActivity: ["caption", "delay"],
+    WaitForNotificationActivity: ["caption", "timeout"],
+    JumpToActivity: ["caption", "target"],
+    ParallelSplitActivity: ["caption"],
+    EndWorkflowActivity: ["caption"]
 };
 
 const USER_TASK_PAGE_FIELDS = {
@@ -379,6 +416,7 @@ function makeWorkflows(h) {
         const out = [];
         if (s.outcomes && typeof s.outcomes === "object" && !Array.isArray(s.outcomes)) out.push(...Object.values(s.outcomes).filter(Array.isArray));
         if (Array.isArray(s.paths)) out.push(...s.paths.filter(Array.isArray));
+        for (const t of s.timeout && typeof s.timeout === "object" ? [].concat(s.timeout) : []) if (t && Array.isArray(t.steps)) out.push(t.steps);
         return out;
     };
 
@@ -512,6 +550,7 @@ function makeWorkflows(h) {
                 oc.value = String(k);
                 await steps(st, oc.flow, outs[k] || [], `${where} outcome ${k}`, { ...ctx, branch: true, main: false });
             }
+            await timeouts(st, ut, s.timeout, where, ctx);
         },
         async decision(st, flow, s, where, ctx) {
             const a = activity(st, flow, wf.ExclusiveSplitActivity, "decision", s.caption === undefined ? String(s.condition) : String(s.caption), s.name);
@@ -559,6 +598,7 @@ function makeWorkflows(h) {
                 const keys = ret instanceof datatypes.BooleanType ? ["true", "false"] : [...(await load(ret.enumeration)).values].map(v => `${ret.enumerationQualifiedName}.${v.name}`).concat("");
                 await conditionOutcomes(st, a, s, Object.fromEntries(keys.map(k => [k, []])), { ...ctx, main: false }, where);
             }
+            await timeouts(st, a, s.timeout, where, ctx);
         },
         async callWorkflow(st, flow, s, where, ctx) {
             const target = await workflowDoc(h, s.workflow, where);
@@ -570,6 +610,7 @@ function makeWorkflows(h) {
             a.parameterMappings.push(pm);
             pm.parameter = target.parameter;
             pm.expression = checkExpr(st, s.context === undefined ? "$WorkflowContext" : s.context, `${where} context`);
+            await timeouts(st, a, s.timeout, where, ctx);
         },
         async jumpTo(st, flow, s, where) {
             const a = activity(st, flow, wf.JumpToActivity, "jumpTo", s.caption === undefined ? STEP_CAPTION.jumpTo : String(s.caption), s.name);
@@ -580,13 +621,51 @@ function makeWorkflows(h) {
             const a = activity(st, flow, wf.WaitForTimerActivity, "waitForTimer", s.caption === undefined ? STEP_CAPTION.waitForTimer : String(s.caption), s.name);
             a.delay = checkExpr(st, s.delay, `${where} delay`);
         },
-        async waitForNotification(st, flow, s, where) {
-            activity(st, flow, wf.WaitForNotificationActivity, "waitForNotification", s.caption === undefined ? STEP_CAPTION.waitForNotification : String(s.caption), s.name);
+        async waitForNotification(st, flow, s, where, ctx) {
+            const a = activity(st, flow, wf.WaitForNotificationActivity, "waitForNotification", s.caption === undefined ? STEP_CAPTION.waitForNotification : String(s.caption), s.name);
+            await timeouts(st, a, s.timeout, where, ctx);
         },
         async end(st, flow, s, where) {
             activity(st, flow, wf.EndWorkflowActivity, "end", s.caption === undefined ? STEP_CAPTION.end : String(s.caption), s.name);
         }
     };
+
+    // Timer boundary events of an activity (spec: one timeout object, a list of them, or null/undefined for none).
+    // Interrupting: the activity stops and its path runs. Non-interrupting: the path runs beside the activity, also
+    // repeated (every/interval/times); it cannot end the workflow or jump.
+    async function timeouts(st, a, spec, where, ctx) {
+        if (spec === undefined || spec === null) return 0;
+        if (!atLeast("10.20.0")) throw new Error(`${where}: a timeout (timer boundary event) needs Mendix 10.20 (this project is ${version})`);
+        const list = [].concat(spec);
+        for (const [i, t] of list.entries()) {
+            const at = `${where} timeout${list.length > 1 ? " " + (i + 1) : ""}`;
+            if (!t || typeof t !== "object" || Array.isArray(t)) throw new Error(`${at}: timeout is { "after": "addDays([%CurrentDateTime%], 3)", "steps": [ ... ] }`);
+            for (const k of Object.keys(t)) if (!TIMEOUT_KEYS.includes(k)) fail(`${at}: unknown field '${k}'`, k, TIMEOUT_KEYS);
+            if (t.after === undefined || String(t.after).trim() === "") throw new Error(`${at}: needs 'after' (a DateTime expression, e.g. addDays([%CurrentDateTime%], 3))`);
+            const interrupting = bool(t.interrupting, true);
+            const repeat = t.every !== undefined || t.interval !== undefined || t.times !== undefined;
+            if (repeat && interrupting) throw new Error(`${at}: every/interval/times repeat a non-interrupting timeout; add "interrupting": false`);
+            const be = (interrupting ? wf.InterruptingTimerBoundaryEvent : wf.NonInterruptingTimerBoundaryEvent).create(model);
+            a.boundaryEvents.push(be);
+            be.caption = t.caption === undefined ? (interrupting ? "Timeout" : "Reminder") : String(t.caption);
+            be.firstExecutionTime = checkExpr(st, t.after, `${at} after`);
+            if (repeat) {
+                const types = ["Second", "Minute", "Hour", "Day", "Week", "Month", "Year"];
+                const every = types.find(x => x.toLowerCase() === String(t.every || "Day").toLowerCase());
+                if (!every) fail(`${at}: every '${t.every}' is not one of ${types.join(" | ")}`, t.every, types);
+                const r = wf.LinearRecurrence.createIn(be);
+                r.intervalType = sdk.scheduledevents.IntervalType[every];
+                r.interval = Number(t.interval === undefined ? 1 : t.interval);
+                r.maxExecutions = Number(t.times === undefined ? 0 : t.times);
+                if (!Number.isInteger(r.interval) || r.interval < 1 || !Number.isInteger(r.maxExecutions) || r.maxExecutions < 0) throw new Error(`${at}: interval is a whole number >= 1, times a whole number >= 0 (0: no limit)`);
+            }
+            const path = t.steps === undefined ? [] : t.steps;
+            if (!interrupting) for (const s of [].concat(path)) if (s && ["end", "jumpTo"].includes(String(s.step))) throw new Error(`${at}: a non-interrupting timeout path runs beside the activity; it cannot ${s.step === "end" ? "end the workflow" : "jump"} (use "interrupting": true)`);
+            await steps(st, be.flow, path, `${at} path`, { ...ctx, main: false, branch: true, boundary: true });
+            st.count.timeout = (st.count.timeout || 0) + 1;
+        }
+        return list.length;
+    }
 
     // Who sees the task: user roles (an XPath on the user entity), an XPath, a microflow, or everyone.
     async function assignee(st, ut, spec, where) {
@@ -721,9 +800,470 @@ function makeWorkflows(h) {
         return `${where} (user task page: parameter WorkflowUserTask, buttons ${caps.join(", ")}${ds ? `, context ${o.entity} from ${ds}` : ""})` + made.replace(/^[^\n]*/, "");
     }
 
+    // ------------------------------------------------ changeWorkflow / deleteWorkflowActivity
+
+    const typeOf = a => a.structureTypeName.split("$")[1];
+    const label = a => `${a.name} (${typeOf(a).replace(/Activity$|Task$/, "")}${a.caption && a.caption !== a.name ? ` "${a.caption}"` : ""})`;
+    const isStart = a => !!wf.StartWorkflowActivity && a instanceof wf.StartWorkflowActivity;
+    const closes = a => a instanceof wf.EndWorkflowActivity || a instanceof wf.JumpToActivity;
+    const subtree = a => {
+        const out = [];
+        a.traverse(x => x instanceof wf.WorkflowActivity && out.push(x));
+        return out;
+    };
+
+    // An existing workflow as createWorkflow's build state: names in use, every activity (jump targets), the context.
+    async function openState(qn, where) {
+        const d = await workflowDoc(h, qn, where);
+        const ctxEnt = await h.entity(contextOf(d));
+        await h.loadParents(ctxEnt);
+        const st = { qn, d, ctxEnt, used: new Set(), jumps: [], all: [], pages: new Set(), count: {}, userRoles: null, lines: [] };
+        d.traverse(x => {
+            if (x instanceof wf.WorkflowActivity) {
+                st.all.push(x);
+                st.used.add(x.name);
+            }
+        });
+        return st;
+    }
+
+    function find(st, name, where) {
+        const a = st.all.find(x => x.name === String(name) && !x.isDeleted && x.containerAsFlow !== undefined && alive(st, x));
+        if (!a) fail(`${where}: ${st.qn} has no activity '${name}'`, String(name), st.all.filter(x => alive(st, x)).map(x => x.name));
+        return a;
+    }
+    // still in the workflow (not removed earlier in this op)
+    const alive = (st, x) => {
+        for (let c = x; c; c = c.container) if (c === st.d) return true;
+        return false;
+    };
+
+    // Context of a flow (main flow, inside a parallel path, a timeout path).
+    function flowCtx(st, flow) {
+        const ctx = { main: flow === st.d.flow, parallel: false, branch: flow !== st.d.flow, nonInterrupting: false };
+        for (let c = flow.container; c && c !== st.d; c = c.container) {
+            if (c instanceof wf.ParallelSplitOutcome) ctx.parallel = true;
+            if (c instanceof wf.NonInterruptingTimerBoundaryEvent) ctx.nonInterrupting = true;
+        }
+        return ctx;
+    }
+
+    // The outcome flow of an activity: user task outcome, condition outcome (true/false/enum value/""), parallel path
+    // number (one past the last: a new path), or "timeout" (its first timer boundary event).
+    function outcomeFlow(st, a, key, where, create) {
+        const k = key === undefined || key === null ? undefined : String(key);
+        if (k !== undefined && /^timeout$/i.test(k)) {
+            const be = [...(a.boundaryEvents || [])][0];
+            if (!be) throw new Error(`${where}: ${a.name} has no timeout; add one with change { "${a.name}": { "timeout": { "after": ... } } }`);
+            return be.flow;
+        }
+        const outs = a.outcomes ? [...a.outcomes] : [];
+        if (a instanceof wf.ParallelSplitActivity) {
+            const n = Number(k);
+            if (!Number.isInteger(n) || n < 1 || n > outs.length + 1) throw new Error(`${where}: ${a.name} is a parallel split; outcome is a path number 1..${outs.length} (${outs.length + 1}: a new path)`);
+            if (n === outs.length + 1) {
+                if (!create) throw new Error(`${where}: ${a.name} has no path ${n}`);
+                return wf.ParallelSplitOutcome.createIn(a).flow;
+            }
+            return outs[n - 1].flow;
+        }
+        if (!outs.length) throw new Error(`${where}: ${a.name} (${typeOf(a)}) has no outcomes; use "after": "${a.name}"`);
+        const names = outs.map(outcomeKey);
+        if (k === undefined) fail(`${where}: into ${a.name} needs "outcome": one of ${names.map(n => JSON.stringify(n)).join(", ")}`, "", names);
+        const hit = outs.find(o => outcomeKey(o) === k) || outs.find(o => outcomeKey(o).toLowerCase() === k.toLowerCase()) ||
+            outs.find(o => o instanceof wf.EnumerationValueConditionOutcome && outcomeKey(o).split(".").pop() === k);
+        if (!hit) fail(`${where}: ${a.name} has no outcome '${k}' (outcomes: ${names.map(n => JSON.stringify(n)).join(", ")})`, k, names);
+        return hit.flow;
+    }
+    function outcomeKey(o) {
+        if (o instanceof wf.UserTaskOutcome) return String(o.value);
+        if (o instanceof wf.BooleanConditionOutcome) return String(o.value);
+        if (o instanceof wf.EnumerationValueConditionOutcome) return o.valueQualifiedName || "";
+        if (o instanceof wf.VoidConditionOutcome) return "";
+        return "?";
+    }
+
+    // Where a position spec ({ after | before | into + outcome }) points: { flow, index, text }.
+    function position(st, p, where, create = true) {
+        const given = ["after", "before", "into"].filter(k => p[k] !== undefined);
+        if (given.length !== 1) throw new Error(`${where}: give one of "after", "before" or "into" (+ "outcome")`);
+        if (p.outcome !== undefined && p.into === undefined) throw new Error(`${where}: "outcome" goes with "into": the activity whose outcome it is`);
+        if (p.after !== undefined && String(p.after).toLowerCase() === "start") {
+            const first = st.d.flow.activities[0];
+            return { flow: st.d.flow, index: first && isStart(first) ? 1 : 0, text: "at the start" };
+        }
+        if (p.into !== undefined) {
+            const a = find(st, p.into, where);
+            return { flow: outcomeFlow(st, a, p.outcome, where, create), index: 0, text: `into ${a.name} ${/^timeout$/i.test(String(p.outcome)) ? "timeout" : `outcome ${JSON.stringify(String(p.outcome === undefined ? "" : p.outcome))}`}` };
+        }
+        const a = find(st, p.after !== undefined ? p.after : p.before, where);
+        const flow = a.containerAsFlow;
+        const i = flow.activities.indexOf(a);
+        if (p.after !== undefined) {
+            if (closes(a)) throw new Error(`${where}: ${a.name} ends its path; nothing can follow it (Studio Pro CE6671). Use "before": "${a.name}"`);
+            return { flow, index: i + 1, text: `after ${a.name}` };
+        }
+        if (isStart(a)) throw new Error(`${where}: nothing goes before the start; use "after": "start"`);
+        return { flow, index: i, text: `before ${a.name}` };
+    }
+
+    // Builds steps into a flow at an index (createWorkflow's builders append; the new top-level ones move to index).
+    async function insertSteps(st, pos, list, where) {
+        if (!Array.isArray(list) || !list.length) throw new Error(`${where}: steps is a non-empty list [ { "step": ... } ]`);
+        const ctx = flowCtx(st, pos.flow);
+        const lastKind = String((list[list.length - 1] || {}).step || "");
+        if (["end", "jumpTo"].includes(lastKind) && pos.index < pos.flow.activities.length) throw new Error(`${where}: ${lastKind} ends its path, but activities follow ${pos.text} (Studio Pro CE6671)`);
+        if (ctx.nonInterrupting && list.some(s => s && ["end", "jumpTo"].includes(String(s.step)))) throw new Error(`${where}: a non-interrupting timeout path cannot end the workflow or jump`);
+        const reserve = l => {
+            for (const s of l || []) {
+                if (!s || typeof s !== "object") continue;
+                if (s.name !== undefined) {
+                    validName(s.name, "activity name");
+                    if (st.used.has(s.name)) throw new Error(`${where}: the name '${s.name}' is already used in ${st.qn} (Studio Pro CE0495)`);
+                    st.used.add(s.name);
+                }
+                for (const sub of nestedOf(s)) reserve(sub);
+            }
+        };
+        reserve(list);
+        const before = pos.flow.activities.length;
+        const firstNew = st.all.length;
+        await steps(st, pos.flow, list, where, ctx);
+        const fresh = pos.flow.activities.slice(before);
+        fresh.forEach((a, i) => {
+            a.detach();
+            pos.flow.activities.splice(pos.index + i, 0, a);
+        });
+        return st.all.slice(firstNew);
+    }
+
+    function resolveJumps(st) {
+        for (const j of st.jumps) {
+            const target = st.all.find(x => x.name === j.target && alive(st, x));
+            if (!target) fail(`${j.where}: jumpTo target '${j.target}' is no activity of ${st.qn}`, j.target, st.all.filter(x => alive(st, x) && !closes(x)).map(x => x.name));
+            if (closes(target) || isStart(target)) throw new Error(`${j.where}: cannot jump to ${j.target}, an end/jumpTo/start activity (Studio Pro CE6681)`);
+            j.act.targetActivity = target;
+        }
+        st.jumps = [];
+    }
+
+    // Jumps outside these activities that target one of them.
+    function jumpsInto(st, acts) {
+        const set = new Set(acts);
+        const out = [];
+        st.d.traverse(x => x instanceof wf.JumpToActivity && !set.has(x) && x.targetActivity && set.has(x.targetActivity) && out.push(x));
+        return out;
+    }
+
+    function removeActivity(st, a, where) {
+        if (isStart(a) || (a instanceof wf.EndWorkflowActivity && a.container === st.d.flow)) throw new Error(`${where}: ${a.name} is the ${isStart(a) ? "start" : "end"} of the main flow; it cannot be removed`);
+        const gone = subtree(a);
+        const jumps = jumpsInto(st, gone);
+        if (jumps.length) throw new Error(`${where}: ${jumps.map(j => j.name).join(", ")} jump${jumps.length > 1 ? "" : "s"} to ${[...new Set(jumps.map(j => j.targetActivity.name))].join(", ")}; change the jump target or remove the jump first`);
+        const inner = gone.length - 1;
+        const waits = gone.filter(x => x instanceof wf.WaitForNotificationActivity).map(x => x.name);
+        a.delete();
+        return `- ${label(a)}${inner ? ` with ${inner} activit${inner > 1 ? "ies" : "y"} in its outcomes: ${gone.slice(1).map(x => x.name).join(", ")}` : ""}` +
+            (waits.length ? ` (NOTE: microflows that notify ${waits.join(", ")} (notifyWorkflow) now fail; change them)` : "");
+    }
+
+    // The rules createWorkflow enforces, on the whole changed workflow.
+    function validateFlows(st) {
+        const errs = [];
+        const main = [...st.d.flow.activities];
+        if (!main.length || !(main[main.length - 1] instanceof wf.EndWorkflowActivity)) errs.push("the main flow must end with its end activity");
+        st.d.traverse(x => {
+            if (!(x instanceof wf.Flow)) return;
+            const acts = [...x.activities];
+            acts.forEach((a, i) => {
+                if (closes(a) && i !== acts.length - 1 && x !== st.d.flow) errs.push(`${a.name} ends its path but ${acts[i + 1].name} follows it (CE6671)`);
+                if (a instanceof wf.JumpToActivity && x === st.d.flow) errs.push(`${a.name}: a jump cannot be in the main flow (CE6679)`);
+                if (a instanceof wf.EndWorkflowActivity && x === st.d.flow && i !== acts.length - 1) errs.push(`${a.name}: an end in the middle of the main flow (CE6679)`);
+                if (a instanceof wf.EndWorkflowActivity && flowCtx(st, x).parallel) errs.push(`${a.name}: a parallel path cannot end the workflow (CE1844)`);
+            });
+        });
+        st.d.traverse(x => {
+            if (x instanceof wf.UserTaskActivity && x.outcomes.length === 1 && x.outcomes[0].flow.activities.length) errs.push(`${x.name}: a user task with one outcome has no steps of its own (CE1876)`);
+            if (x instanceof wf.UserTaskActivity && !x.outcomes.length) errs.push(`${x.name}: a user task needs an outcome`);
+        });
+        const inner = main.slice(0, -1);
+        if (endsAll({ activities: inner.length ? inner : main })) errs.push("every path ends (end/jumpTo), so the workflow end is never reached (CE6689)");
+        if (errs.length) throw new Error(`${st.qn}: ${[...new Set(errs)].join("; ")}`);
+    }
+
+    // Outcome buttons (Complete user task) of a task page: rename, remove or add one for an outcome.
+    async function taskPageButtons(st, ut, change) {
+        const page = ut.taskPage && ut.taskPage.page;
+        if (!page) return "";
+        const p = await load(page);
+        const buttons = [];
+        p.traverse(x => x instanceof pages.SetTaskOutcomeClientAction && buttons.push(x));
+        if (!buttons.length) return ` (${p.qualifiedName} has no outcome buttons to change)`;
+        if (change.rename) {
+            for (const act of buttons.filter(b => b.outcomeValue === change.rename[0])) {
+                act.outcomeValue = change.rename[1];
+                const b = act.container;
+                const cap = b.caption && b.caption.template && [...b.caption.template.translations].map(t => t.text);
+                if (cap && cap.every(t => t === change.rename[0])) await h.textAll(b, "caption", change.rename[1]);
+            }
+            return ` (buttons on ${p.qualifiedName} follow)`;
+        }
+        if (change.remove) {
+            const hit = buttons.filter(b => b.outcomeValue === change.remove);
+            for (const act of hit) act.container.delete();
+            return hit.length ? ` (its button removed from ${p.qualifiedName})` : "";
+        }
+        if (change.add) {
+            if (buttons.some(b => b.outcomeValue === change.add)) return "";
+            const model0 = buttons[buttons.length - 1].container;
+            const list = model0.container;
+            const copy = model0.deepCopy(model);
+            const used = new Set();
+            p.traverse(x => x instanceof pages.Widget && used.add(x.name));
+            let n = 1;
+            while (used.has(`outcome${n}Button`)) n++;
+            const arr = list && (list.footerWidgets && list.footerWidgets.includes(model0) ? list.footerWidgets : list.widgets && list.widgets.includes(model0) ? list.widgets : null);
+            if (!arr) return ` (add a button for ${change.add} to ${p.qualifiedName} in Studio Pro)`;
+            arr.splice(arr.indexOf(model0) + 1, 0, copy);
+            copy.name = `outcome${n}Button`;
+            copy.buttonStyle = pages.ButtonStyle.Default;
+            copy.action.outcomeValue = change.add;
+            await h.textAll(copy, "caption", change.add);
+            return ` (button ${copy.name} added to ${p.qualifiedName})`;
+        }
+        return "";
+    }
+
+    async function changeUserTaskOutcomes(st, ut, spec, where) {
+        if (!spec || typeof spec !== "object" || Array.isArray(spec)) throw new Error(`${where}: outcomes is { "add": [...], "remove": [...], "rename": { "Old": "New" } }`);
+        for (const k of Object.keys(spec)) if (!["add", "remove", "rename"].includes(k)) fail(`${where}: outcomes takes add, remove, rename, not '${k}'`, k, ["add", "remove", "rename"]);
+        const out = [];
+        const has = v => [...ut.outcomes].find(o => o.value === v);
+        for (const [from, to] of Object.entries(spec.rename || {})) {
+            const oc = has(from);
+            if (!oc) fail(`${where}: ${ut.name} has no outcome '${from}'`, from, [...ut.outcomes].map(o => o.value));
+            if (!String(to).trim() || has(String(to))) throw new Error(`${where}: outcome '${to}' is empty or exists already`);
+            oc.value = String(to);
+            out.push(`outcome ${from} -> ${to}${await taskPageButtons(st, ut, { rename: [from, String(to)] })}`);
+        }
+        for (const v of [].concat(spec.remove || [])) {
+            const oc = has(String(v));
+            if (!oc) fail(`${where}: ${ut.name} has no outcome '${v}'`, String(v), [...ut.outcomes].map(o => o.value));
+            const gone = subtree(oc).filter(x => x !== oc);
+            const jumps = jumpsInto(st, gone);
+            if (jumps.length) throw new Error(`${where}: ${jumps.map(j => j.name).join(", ")} jump into outcome ${v}; change those jumps first`);
+            oc.delete();
+            out.push(`outcome ${v} removed${gone.length ? ` with ${gone.map(x => x.name).join(", ")}` : ""}${await taskPageButtons(st, ut, { remove: String(v) })}`);
+        }
+        const add = spec.add === undefined ? {} : Array.isArray(spec.add) ? Object.fromEntries(spec.add.map(x => [x, []])) : spec.add;
+        if (typeof add !== "object") throw new Error(`${where}: outcomes add is [ "Name" ] or { "Name": [ steps ] }`);
+        for (const [v, list] of Object.entries(add)) {
+            if (!String(v).trim() || has(String(v))) throw new Error(`${where}: outcome '${v}' is empty or exists already`);
+            const oc = wf.UserTaskOutcome.createInUserTaskActivityUnderOutcomes(ut);
+            oc.value = String(v);
+            if ((list || []).length) await steps(st, oc.flow, list, `${where} outcome ${v}`, { ...flowCtx(st, ut.containerAsFlow), main: false, branch: true });
+            out.push(`outcome ${v} added${await taskPageButtons(st, ut, { add: String(v) })}`);
+        }
+        if (!ut.outcomes.length) throw new Error(`${where}: ${ut.name} would have no outcome left`);
+        return out;
+    }
+
+    async function changeActivity(st, a, spec, where) {
+        if (!spec || typeof spec !== "object" || Array.isArray(spec)) throw new Error(`${where}: change is { "${a.name}": { "caption": ... } }`);
+        const allowed = CHANGE_FIELDS[typeOf(a)] || ["caption"];
+        for (const k of Object.keys(spec)) if (!allowed.includes(k)) fail(`${where}: ${typeOf(a)} ${a.name} has no field '${k}' to change (fields: ${allowed.join(", ")})`, k, allowed);
+        const done = [];
+        const ctx = flowCtx(st, a.containerAsFlow);
+        if (spec.caption !== undefined) {
+            a.caption = String(spec.caption);
+            done.push("caption");
+        }
+        if (a instanceof wf.UserTaskActivity) {
+            if (spec.page !== undefined) {
+                a.taskPage.page = await pageOf(spec.page, "System.WorkflowUserTask", where);
+                done.push(`page ${spec.page}`);
+            }
+            if ("assignee" in spec) {
+                await assignee(st, a, spec.assignee === null ? undefined : spec.assignee, where);
+                done.push(spec.assignee === null ? "assignee: everyone" : `assignee ${Object.keys(spec.assignee)[0]}`);
+            }
+            if (spec.dueDate !== undefined) {
+                a.dueDate = String(spec.dueDate) === "" ? "" : checkExpr(st, spec.dueDate, `${where} dueDate`);
+                done.push(`dueDate ${a.dueDate || "(none)"}`);
+            }
+            if (spec.taskName !== undefined) (a.taskName.text = String(spec.taskName), done.push("taskName"));
+            if (spec.description !== undefined) (a.taskDescription.text = String(spec.description), done.push("description"));
+            if (spec.autoAssign !== undefined) (a.autoAssignSingleTargetUser = bool(spec.autoAssign, false), done.push("autoAssign"));
+            if (spec.onCreated !== undefined) {
+                if (!spec.onCreated) wf.NoEvent.createInUserTaskActivityUnderOnCreatedEvent(a);
+                else {
+                    const m = await get(spec.onCreated).catch(() => fail(`${where}: no microflow ${spec.onCreated}`, spec.onCreated, model.allMicroflows().map(x => x.qualifiedName)));
+                    if (!(m instanceof mf.Microflow)) throw new Error(`${where}: onCreated ${spec.onCreated} is not a microflow`);
+                    wf.MicroflowBasedEvent.createInUserTaskActivityUnderOnCreatedEvent(a).microflow = m;
+                }
+                done.push(`onCreated ${spec.onCreated || "(none)"}`);
+            }
+            if (spec.outcomes !== undefined) done.push(...(await changeUserTaskOutcomes(st, a, spec.outcomes, where)));
+        }
+        if (a instanceof wf.ExclusiveSplitActivity && spec.condition !== undefined) {
+            const keys = [...a.outcomes].map(outcomeKey);
+            const enumOut = keys.some(k => k.split(".").length === 3);
+            if (enumOut && /\s(=|!=|>|<|and|or)\s|^(true|false)$/.test(String(spec.condition))) throw new Error(`${where}: ${a.name} decides on an enumeration (outcomes ${keys.filter(Boolean).join(", ")}); a Boolean condition needs a new decision (remove this one and add a decision)`);
+            a.expression = checkExpr(st, spec.condition, `${where} condition`);
+            done.push(`condition ${a.expression}`);
+        }
+        if ((a instanceof wf.CallMicroflowTask || (wf.CallMicroflowActivity && a instanceof wf.CallMicroflowActivity)) && (spec.microflow !== undefined || spec.args !== undefined)) {
+            const name = spec.microflow === undefined ? a.microflowQualifiedName : spec.microflow;
+            const m = await get(name).catch(() => fail(`${where}: no microflow ${name}`, name, model.allMicroflows().map(x => x.qualifiedName)));
+            if (!(m instanceof mf.Microflow)) throw new Error(`${where}: ${name} is not a microflow`);
+            const kind = t => (t instanceof datatypes.BooleanType ? "Boolean" : t instanceof datatypes.EnumerationType ? `Enum(${t.enumerationQualifiedName})` : "other");
+            const old = a.microflow ? await load(a.microflow) : null;
+            if (old && old !== m && kind(old.microflowReturnType) !== kind(m.microflowReturnType) && a.outcomes.length) throw new Error(`${where}: ${name} returns ${kind(m.microflowReturnType)}, ${a.microflowQualifiedName} returns ${kind(old.microflowReturnType)}: the outcomes differ; remove ${a.name} and add a new callMicroflow`);
+            a.microflow = m;
+            for (const pm of [...a.parameterMappings]) pm.delete();
+            const params = m.objectCollection.objects.filter(x => x instanceof mf.MicroflowParameterObject);
+            const args = spec.args || {};
+            for (const k of Object.keys(args)) if (!params.some(p => p.name === k)) fail(`${where}: ${name} has no parameter '${k}'`, k, params.map(p => p.name));
+            for (const p of params) {
+                let e = args[p.name];
+                if (e === undefined && entityOfType(p.variableType) === st.ctxEnt.qualifiedName && !(p.variableType instanceof datatypes.ListType)) e = "$WorkflowContext";
+                if (e === undefined && entityOfType(p.variableType) === "System.Workflow") e = "$Workflow";
+                if (e === undefined) throw new Error(`${where}: ${name} parameter '${p.name}' needs a value in args (an expression)`);
+                const pm = atLeast("11.9.0") ? wf.MicroflowCallParameterMapping.createInMicroflowBasedActivityUnderParameterMappings(a) : wf.MicroflowCallParameterMapping.createInCallMicroflowTaskUnderParameterMappings(a);
+                pm.parameter = p;
+                pm.expression = checkExpr(st, e, `${where} ${p.name}`);
+            }
+            done.push(`microflow ${name}${spec.args ? " with args" : ""}`);
+        }
+        if (a instanceof wf.CallWorkflowActivity) {
+            if (spec.context !== undefined) {
+                const pm = a.parameterMappings[0];
+                if (pm) pm.expression = checkExpr(st, spec.context, `${where} context`);
+                done.push("context");
+            }
+            if (spec.async !== undefined) (a.executeAsync = bool(spec.async, false), done.push(`async ${a.executeAsync}`));
+        }
+        if (a instanceof wf.WaitForTimerActivity && spec.delay !== undefined) (a.delay = checkExpr(st, spec.delay, `${where} delay`), done.push(`delay ${a.delay}`));
+        if (a instanceof wf.JumpToActivity && spec.target !== undefined) {
+            st.jumps.push({ act: a, target: String(spec.target), where });
+            done.push(`target ${spec.target}`);
+        }
+        if ("timeout" in spec) {
+            const old = [...a.boundaryEvents];
+            const gone = old.flatMap(be => subtree(be));
+            const jumps = jumpsInto(st, gone);
+            if (jumps.length) throw new Error(`${where}: ${jumps.map(j => j.name).join(", ")} jump into the old timeout path; change those jumps first`);
+            old.forEach(be => be.delete());
+            const n = await timeouts(st, a, spec.timeout, where, ctx);
+            done.push(n ? `timeout ${[].concat(spec.timeout).map(t => t.after).join(", ")}${old.length ? " (replaces the old one)" : ""}` : old.length ? `timeout removed${gone.length ? ` (with ${gone.map(x => x.name).join(", ")})` : ""}` : "no timeout");
+        }
+        return `~ ${a.name}: ${done.join("; ") || "nothing"}`;
+    }
+    async function changeWorkflow(o) {
+        const where = `changeWorkflow ${o.workflow}`;
+        const st = await openState(o.workflow, where);
+        const lines = [];
+        if (!["add", "remove", "move", "change", "title", "description", "dueDate"].some(k => o[k] !== undefined)) throw new Error(`${where}: nothing to change; give add, remove, move, change, title, description or dueDate`);
+        if (o.title !== undefined) {
+            st.d.title = String(o.title);
+            st.d.workflowName.text = st.d.title;
+            lines.push(`~ title ${st.d.title}`);
+        }
+        if (o.description !== undefined) (st.d.workflowDescription.text = String(o.description), lines.push("~ description"));
+        if (o.dueDate !== undefined) (st.d.dueDate = String(o.dueDate) === "" ? "" : checkExpr(st, o.dueDate, `${where} dueDate`), lines.push(`~ dueDate ${st.d.dueDate || "(none)"}`));
+        for (const [i, add] of [].concat(o.add || []).entries()) {
+            const at = `${where} add ${i + 1}`;
+            if (!add || typeof add !== "object" || Array.isArray(add)) throw new Error(`${at}: add is { "after": "activity name", "steps": [ ... ] }`);
+            for (const k of Object.keys(add)) if (!["after", "before", "into", "outcome", "steps"].includes(k)) fail(`${at}: unknown field '${k}'`, k, ["after", "before", "into", "outcome", "steps"]);
+            const pos = position(st, add, at);
+            const made = await insertSteps(st, pos, add.steps, at);
+            const top = made.filter(x => x.containerAsFlow === pos.flow);
+            lines.push(`+ ${top.map(label).join(", ")} ${pos.text}${made.length > top.length ? ` (with ${made.length - top.length} activit${made.length - top.length > 1 ? "ies" : "y"} in their outcomes)` : ""}`);
+        }
+        for (const [i, m] of [].concat(o.move || []).entries()) {
+            const at = `${where} move ${i + 1}`;
+            if (!m || typeof m !== "object" || m.activity === undefined) throw new Error(`${at}: move is { "activity": "name", "after": "name" }`);
+            for (const k of Object.keys(m)) if (!["activity", "after", "before", "into", "outcome"].includes(k)) fail(`${at}: unknown field '${k}'`, k, ["activity", "after", "before", "into", "outcome"]);
+            const a = find(st, m.activity, at);
+            if (isStart(a) || (a instanceof wf.EndWorkflowActivity && a.container === st.d.flow)) throw new Error(`${at}: ${a.name} is the start or end of the main flow; it does not move`);
+            const pos = position(st, m, at);
+            const inside = subtree(a);
+            for (let c = pos.flow; c; c = c.container) if (inside.includes(c)) throw new Error(`${at}: cannot move ${a.name} into its own outcomes`);
+            let index = pos.index;
+            if (pos.flow === a.containerAsFlow && pos.flow.activities.indexOf(a) < index) index--;
+            a.detach();
+            pos.flow.activities.splice(index, 0, a);
+            const ctx = flowCtx(st, pos.flow);
+            if (ctx.nonInterrupting && inside.some(closes)) throw new Error(`${at}: a non-interrupting timeout path cannot end the workflow or jump`);
+            lines.push(`> ${label(a)} moved ${pos.text}`);
+        }
+        if (o.change !== undefined) {
+            if (!o.change || typeof o.change !== "object" || Array.isArray(o.change)) throw new Error(`${where}: change is { "activity name": { "field": value } }`);
+            for (const [name, spec] of Object.entries(o.change)) lines.push(await changeActivity(st, find(st, name, `${where} change`), spec, `${where} change ${name}`));
+        }
+        for (const [i, name] of [].concat(o.remove || []).entries()) lines.push(removeActivity(st, find(st, name, `${where} remove ${i + 1}`), `${where} remove ${i + 1}`));
+        resolveJumps(st);
+        validateFlows(st);
+        if (st.pages.size && o.roles) for (const p of st.pages) await h.grantAccess({ document: p, roles: o.roles });
+        return `${o.workflow}: ${lines.length} change(s)\n      ${lines.join("\n      ")}`;
+    }
+
+    async function deleteWorkflowActivity(o) {
+        const where = `deleteWorkflowActivity ${o.workflow}`;
+        const st = await openState(o.workflow, where);
+        const line = removeActivity(st, find(st, o.activity, where), where);
+        validateFlows(st);
+        return `${o.workflow}: ${line}`;
+    }
+
     // ------------------------------------------------ checks
 
     const checks = {
+        async changeWorkflow(o) {
+            const d = await get(o.workflow);
+            const names = new Set();
+            d.traverse(x => x instanceof wf.WorkflowActivity && names.add(x.name));
+            const r = [];
+            for (const n of [].concat(o.remove || [])) if (names.has(String(n))) r.push(`${o.workflow}: ${n} still exists`);
+            const named = l => (l || []).flatMap(s => (s && typeof s === "object" ? [...(s.name ? [s.name] : []), ...nestedOf(s).flatMap(named)] : []));
+            for (const add of [].concat(o.add || [])) for (const n of named(add && add.steps)) if (!names.has(n)) r.push(`${o.workflow}: added ${n} missing`);
+            for (const [n, spec] of Object.entries(o.change || {})) {
+                let a = null;
+                d.traverse(x => x instanceof wf.WorkflowActivity && x.name === n && (a = x));
+                if (!a) {
+                    r.push(`${o.workflow}: ${n} missing`);
+                    continue;
+                }
+                if (spec.caption !== undefined && a.caption !== String(spec.caption)) r.push(`${n} caption is '${a.caption}'`);
+                if (spec.dueDate !== undefined && a.dueDate !== String(spec.dueDate)) r.push(`${n} dueDate is '${a.dueDate}'`);
+                if (spec.page !== undefined && a.taskPage && a.taskPage.pageQualifiedName !== spec.page) r.push(`${n} page is ${a.taskPage.pageQualifiedName}`);
+                if (spec.timeout === null && a.boundaryEvents.length) r.push(`${n} still has a timeout`);
+                if (spec.timeout && a.boundaryEvents.length !== [].concat(spec.timeout).length) r.push(`${n} has ${a.boundaryEvents.length} timeout(s)`);
+                const oc = spec.outcomes || {};
+                const vals = a.outcomes ? [...a.outcomes].map(x => x.value) : [];
+                for (const v of [].concat(oc.remove || [])) if (vals.includes(v)) r.push(`${n} still has outcome ${v}`);
+                for (const v of Array.isArray(oc.add) ? oc.add : Object.keys(oc.add || {})) if (!vals.includes(v)) r.push(`${n} lacks outcome ${v}`);
+                for (const v of Object.values(oc.rename || {})) if (!vals.includes(v)) r.push(`${n} lacks outcome ${v}`);
+            }
+            for (const m of [].concat(o.move || [])) {
+                let a = null;
+                d.traverse(x => x instanceof wf.WorkflowActivity && x.name === m.activity && (a = x));
+                if (!a) r.push(`${m.activity} missing`);
+                else if (m.after !== undefined && String(m.after) !== "start") {
+                    const acts = [...a.containerAsFlow.activities];
+                    const i = acts.indexOf(a);
+                    if (!i || acts[i - 1].name !== String(m.after)) r.push(`${m.activity} is not after ${m.after}`);
+                }
+            }
+            if (o.title !== undefined && d.title !== String(o.title)) r.push(`${o.workflow} title is '${d.title}'`);
+            return r;
+        },
+        async deleteWorkflowActivity(o) {
+            const d = await get(o.workflow);
+            let hit = false;
+            d.traverse(x => x instanceof wf.WorkflowActivity && x.name === o.activity && (hit = true));
+            return hit ? [`${o.workflow}: ${o.activity} still exists`] : [];
+        },
         async createWorkflow(o) {
             const d = await get(`${o.module}.${o.name}`);
             if (!(d instanceof wf.Workflow)) return [`${o.module}.${o.name} is not a workflow`];
@@ -753,7 +1293,13 @@ function makeWorkflows(h) {
         }
     };
 
-    return { impl: { createWorkflow }, userTaskPage, checks };
+    return { impl: { createWorkflow, changeWorkflow, deleteWorkflowActivity }, userTaskPage, checks };
 }
 
-module.exports = { makeWorkflows, WORKFLOW_OPS, WORKFLOW_ACTIONS, STEP_FIELDS, STEP_COMMON, USER_TASK_PAGE_FIELDS, SYSTEM_ENTITIES, SYSTEM_ASSOCIATIONS };
+// A later op of the plan changes this workflow again: check only the final state (checkPlan).
+function workflowChangedLater(name, o, rest) {
+    const qn = name === "createWorkflow" ? `${o.module}.${o.name}` : ["changeWorkflow", "deleteWorkflowActivity"].includes(name) ? o.workflow : null;
+    return !!qn && rest.some(x => ["changeWorkflow", "deleteWorkflowActivity"].includes(x.op) && x.workflow === qn);
+}
+
+module.exports = { makeWorkflows, workflowChangedLater, WORKFLOW_OPS, WORKFLOW_ACTIONS, STEP_FIELDS, STEP_COMMON, USER_TASK_PAGE_FIELDS, SYSTEM_ENTITIES, SYSTEM_ASSOCIATIONS };

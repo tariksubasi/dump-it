@@ -20,10 +20,20 @@ const CODE_FIELDS = (kind, extra) => ({
     documentation: "optional text", exposed: "optional { \"caption\": ..., \"category\": ... }: show it in the toolbox as an action"
 });
 
+const JAVA_CODE_FIELDS = {
+    code: "optional Java statements of executeAction (between BEGIN USER CODE and END USER CODE), e.g. \"return input.length() > 3;\"; parameters are fields of the same name",
+    imports: "optional [ \"java.util.List\" ] extra imports", extra: "optional Java members between BEGIN EXTRA CODE and END EXTRA CODE (helper methods)",
+    compile: "optional false: skip the JAVA CHECK (javac with userlib/vendorlib and the Mendix runtime jars; skipped with a note when no JDK or runtime jars are found)"
+};
+
 const CODE_OPS = {
     createJavaAction: {
-        doc: "Create a Java action and its Java file (javasource/<module>/actions/<Name>.java) as Studio Pro generates it; write the code between BEGIN USER CODE and END USER CODE.",
-        fields: CODE_FIELDS("Java action", "Microflow")
+        doc: "Create a Java action and its Java file (javasource/<module>/actions/<Name>.java) as Studio Pro generates it; the code between BEGIN USER CODE and END USER CODE from 'code' (JAVA CHECK compiles it when a JDK and the runtime jars are there).",
+        fields: { ...CODE_FIELDS("Java action", "Microflow"), ...JAVA_CODE_FIELDS }
+    },
+    setJavaActionCode: {
+        doc: "Replace the code of an existing Java action (its file between BEGIN USER CODE and END USER CODE), with JAVA CHECK (javac) when a JDK and the Mendix runtime jars are found.",
+        fields: { javaAction: "R Module.JavaAction", code: "R Java statements of executeAction", imports: JAVA_CODE_FIELDS.imports, extra: "optional Java members between BEGIN EXTRA CODE and END EXTRA CODE (replaces them)", compile: JAVA_CODE_FIELDS.compile }
     },
     createJavaScriptAction: {
         doc: "Create a JavaScript action (for nanoflows) and its file (javascriptsource/<module>/actions/<Name>.js) as Studio Pro generates it.",
@@ -144,6 +154,75 @@ function jsSource(name, params, ret, doc, keep) {
     out += keep ? keep.user : "\tthrow new Error(\"JavaScript action was not implemented\");\n";
     out += "\t// END USER CODE\n}\n";
     return CRLF(out);
+}
+
+// ------------------------------------------------ JAVA CHECK (javac)
+
+// The user code as it sits in the file: CRLF later, two tabs in, ending with a newline.
+const userCode = code => String(code).replace(/\r\n/g, "\n").replace(/\s+$/, "").split("\n").map(l => (l.trim() ? "\t\t" + l.replace(/^\t\t/, "") : "")).join("\n") + "\n";
+const extraCode = code => String(code).replace(/\r\n/g, "\n").replace(/\s+$/, "").split("\n").map(l => (l.trim() ? "\t" + l.replace(/^\t/, "") : "")).join("\n") + "\n";
+
+// Jars javac needs: the Mendix runtime (MXLOCAL_RUNTIME_JARS: folders or jars separated by the path delimiter; else
+// <mx install>/runtime/bundles of the mx the project uses), then the project's userlib and vendorlib.
+function javaClasspath(dir, mpr) {
+    const jarsIn = d => {
+        try {
+            return fs.statSync(d).isDirectory() ? fs.readdirSync(d).filter(f => f.endsWith(".jar")).map(f => path.join(d, f)) : d.endsWith(".jar") && fs.existsSync(d) ? [d] : [];
+        } catch {
+            return [];
+        }
+    };
+    let runtime = [];
+    let from = "";
+    if (process.env.MXLOCAL_RUNTIME_JARS) {
+        runtime = process.env.MXLOCAL_RUNTIME_JARS.split(path.delimiter).filter(Boolean).flatMap(jarsIn);
+        from = "MXLOCAL_RUNTIME_JARS";
+    } else {
+        try {
+            const l = require("./mxcheck").locate(mpr);
+            if (l.found && l.found.mx) {
+                const install = path.dirname(path.dirname(fs.realpathSync(l.found.mx)));
+                runtime = jarsIn(path.join(install, "runtime", "bundles"));
+                from = path.join(install, "runtime", "bundles");
+            }
+        } catch {
+            // no mx: no runtime jars
+        }
+    }
+    return { runtime, from, libs: [...jarsIn(path.join(dir, "userlib")), ...jarsIn(path.join(dir, "vendorlib"))] };
+}
+
+function javacPath() {
+    const exe = process.platform === "win32" ? "javac.exe" : "javac";
+    const dirs = [process.env.JAVA_HOME && path.join(process.env.JAVA_HOME, "bin"), ...String(process.env.PATH || "").split(path.delimiter)].filter(Boolean);
+    for (const d of dirs) if (fs.existsSync(path.join(d, exe))) return path.join(d, exe);
+    return null;
+}
+
+// Compiles one generated Java action file against the project. Returns { skipped } with the reason, or { errors,
+// generated } (errors about classes Mendix generates on deploy, the proxies, are listed apart: not the code's fault).
+function javaCheck(client, rel, content) {
+    const dir = client.project.dir;
+    const javac = javacPath();
+    if (!javac) return { skipped: "no JDK (javac) on PATH or JAVA_HOME" };
+    const cp = javaClasspath(dir, client.project.mpr);
+    if (!cp.runtime.length) return { skipped: "no Mendix runtime jars (set MXLOCAL_RUNTIME_JARS to <Studio Pro>/runtime/bundles, or MX_PATH to the project's mx)" };
+    const tmp = fs.mkdtempSync(path.join(require("os").tmpdir(), "mxlocal-javac-"));
+    try {
+        const file = path.join(tmp, "src", rel.replace(/^javasource\//, ""));
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.writeFileSync(file, content);
+        fs.mkdirSync(path.join(tmp, "out"));
+        const argv = ["-proc:none", "-nowarn", "-encoding", "UTF-8", "-Xmaxerrs", "50", "-d", path.join(tmp, "out"), "-cp", [...cp.runtime, ...cp.libs].join(path.delimiter),
+            "-sourcepath", [path.join(tmp, "src"), path.join(dir, "javasource")].join(path.delimiter), "-implicit:none", file];
+        const r = require("child_process").spawnSync(javac, argv, { encoding: "utf8", timeout: 120000, env: { ...process.env, JAVA_TOOL_OPTIONS: "" } });
+        if (r.error) return { skipped: `javac did not run: ${r.error.message}` };
+        const lines = String(r.stderr || "").split(/\r?\n/).filter(l => /: error: /.test(l)).map(l => l.replace(/^.*?([^\\/]+\.java):/, "$1:"));
+        const generated = lines.filter(l => /package [\w.]*proxies does not exist|cannot find symbol.*proxies|package [\w.]+\.proxies/.test(l));
+        return { errors: lines.filter(l => !generated.includes(l)), generated, jars: cp.runtime.length + cp.libs.length, from: cp.from };
+    } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+    }
 }
 
 function makeCode(h) {
@@ -298,8 +377,66 @@ function makeCode(h) {
         }
         const dir = o.module.toLowerCase();
         const rel = js ? `javascriptsource/${dir}/actions/${o.name}.js` : `javasource/${dir}/actions/${o.name}.java`;
-        const kept = addFile(rel, keep => (js ? jsSource(o.name, params, ret, doc, keep) : javaSource(o.module, o.name, params, ret, doc, keep)), js, qn);
-        return `${qn} (${params.length} parameter(s)) + file ${rel}${kept}`;
+        const withCode = keep => {
+            if (js || (o.code === undefined && o.imports === undefined && o.extra === undefined)) return keep;
+            const k = keep ? { ...keep } : { imports: [], user: "\t\tthrow new com.mendix.systemwideinterfaces.MendixRuntimeException(\"Java action was not implemented\");\n", extra: "" };
+            return withJava(k, o, qn);
+        };
+        const kept = addFile(rel, keep => (js ? jsSource(o.name, params, ret, doc, keep) : javaSource(o.module, o.name, params, ret, doc, withCode(keep))), js, qn);
+        const check = js ? "" : compileNote(o, rel, qn);
+        return `${qn} (${params.length} parameter(s)) + file ${rel}${kept}${check}`;
+    }
+
+    // keep (imports, user, extra) with the change's code, imports and extra code
+    function withJava(keep, o, where) {
+        const k = { ...keep, imports: [...(keep.imports || [])] };
+        if (o.code !== undefined) {
+            if (typeof o.code !== "string" || !o.code.trim()) throw new Error(`${where}: code is the Java statements as one text, e.g. "return true;"`);
+            if (/BEGIN USER CODE|END USER CODE|BEGIN EXTRA CODE|END EXTRA CODE/.test(o.code)) throw new Error(`${where}: code is only what goes between the markers; leave out the BEGIN/END comments`);
+            k.user = userCode(o.code);
+        }
+        if (o.extra !== undefined) k.extra = String(o.extra).trim() ? extraCode(o.extra) : "";
+        for (const i of [].concat(o.imports || [])) {
+            const name = String(i).replace(/^import\s+/, "").replace(/;\s*$/, "").trim();
+            if (!/^[\w.]+(\.\*)?$/.test(name)) throw new Error(`${where}: import '${i}' is not a Java class name like java.util.List`);
+            const line = `import ${name};`;
+            if (!k.imports.includes(line)) k.imports.push(line);
+        }
+        return k;
+    }
+
+    // JAVA CHECK of a file the change writes: errors refuse the op (unless compile: false), a missing JDK/runtime is a note.
+    function compileNote(o, rel, where) {
+        if (o.compile === false || o.compile === "false") return "\n      JAVA CHECK: skipped (compile: false)";
+        if (o.code === undefined && o.extra === undefined && o.imports === undefined) return "";
+        const r = javaCheck(client, rel, files().get(rel).content);
+        if (r.skipped) {
+            client.warn(`JAVA CHECK skipped for ${rel}: ${r.skipped}`);
+            return `\n      JAVA CHECK: skipped - ${r.skipped}`;
+        }
+        if (r.errors.length) throw new Error(`${where}: JAVA CHECK: javac found ${r.errors.length} error(s):\n  ${r.errors.slice(0, 8).join("\n  ")}${r.errors.length > 8 ? `\n  ... ${r.errors.length - 8} more` : ""}\nFix the code (or "compile": false to write it unchecked)`);
+        return `\n      JAVA CHECK: compiles (javac, ${r.jars} jar(s))${r.generated.length ? `; ${r.generated.length} error(s) about generated proxies ignored (Studio Pro makes them on deploy)` : ""}`;
+    }
+
+    async function setJavaActionCode(o) {
+        const a = await get(o.javaAction);
+        if (!(a instanceof javaactions.JavaAction)) throw new Error(`'${o.javaAction}' is not a Java action`);
+        const [module, name] = o.javaAction.split(".");
+        const rel = `javasource/${module.toLowerCase()}/actions/${name}.java`;
+        const full = path.join(client.project.dir, rel);
+        const pendingFile = files().get(rel);
+        const text = pendingFile ? pendingFile.content.toString("utf8") : fs.existsSync(full) ? fs.readFileSync(full, "utf8") : null;
+        if (text === null) throw new Error(`${o.javaAction}: ${rel} does not exist yet; Studio Pro writes it on the next deploy (or create the action with createJavaAction "code")`);
+        const keep = retained(text, false);
+        if (!keep) throw new Error(`${o.javaAction}: ${rel} has no BEGIN/END USER CODE and EXTRA CODE markers; ops does not overwrite it`);
+        const k = withJava(keep, o, o.javaAction);
+        const t = text.replace(/\r\n/g, "\n");
+        let out = t.replace(/(\/\/ BEGIN USER CODE\n)[\s\S]*?([ \t]*\/\/ END USER CODE)/, (m, b, e) => b + k.user + e).replace(/(\/\/ BEGIN EXTRA CODE\n)[\s\S]*?([ \t]*\/\/ END EXTRA CODE)/, (m, b, e) => b + k.extra + e);
+        const missing = k.imports.filter(i => !keep.imports.includes(i));
+        if (missing.length) out = out.replace(/(\npackage [^\n]*\n\n)/, `$1${missing.join("\n")}\n`);
+        const before = pendingFile ? pendingFile.before : crypto.createHash("sha256").update(fs.readFileSync(full)).digest("hex");
+        files().set(rel, { content: Buffer.from(CRLF(out), "utf8"), before });
+        return `${o.javaAction}: file ${rel} (user code${o.extra !== undefined ? ", extra code" : ""}${missing.length ? `, ${missing.length} import(s)` : ""})${compileNote(o, rel, o.javaAction)}`;
     }
 
     function enumOf(cls, v, field) {
@@ -311,6 +448,7 @@ function makeCode(h) {
     const impl = {
         createJavaAction: o => createCode(o, false),
         createJavaScriptAction: o => createCode(o, true),
+        setJavaActionCode,
         async createRule(o) {
             validName(o.name, "rule name");
             const qn = `${o.module}.${o.name}`;
@@ -333,12 +471,21 @@ function makeCode(h) {
             const a = await get(`${o.module}.${o.name}`);
             const r = a instanceof javaactions.JavaAction ? [] : [`${o.module}.${o.name} is not a Java action`];
             if (a.actionParameters && a.actionParameters.length !== (o.parameters || []).length) r.push(`${o.module}.${o.name} has ${a.actionParameters.length} parameters`);
-            return [...r, ...fileCheck(o, false)];
+            const code = o.code === undefined ? [] : fs.readFileSync(path.join(client.project.dir, `javasource/${o.module.toLowerCase()}/actions/${o.name}.java`), "utf8").replace(/\r\n/g, "\n").includes(userCode(o.code).trim()) ? [] : [`${o.module}.${o.name}: the file does not hold the code`];
+            return [...r, ...fileCheck(o, false), ...code];
         },
         async createJavaScriptAction(o) {
             const a = await get(`${o.module}.${o.name}`);
             const r = a instanceof javascriptactions.JavaScriptAction ? [] : [`${o.module}.${o.name} is not a JavaScript action`];
             return [...r, ...fileCheck(o, true)];
+        },
+        async setJavaActionCode(o) {
+            const [module, name] = o.javaAction.split(".");
+            const rel = `javasource/${module.toLowerCase()}/actions/${name}.java`;
+            const full = path.join(client.project.dir, rel);
+            if (!fs.existsSync(full)) return [`${rel} missing`];
+            const want = userCode(o.code).trim();
+            return fs.readFileSync(full, "utf8").replace(/\r\n/g, "\n").includes(want) ? [] : [`${rel} does not hold the new code`];
         },
         async createRule(o) {
             const r = await get(`${o.module}.${o.name}`);
@@ -348,4 +495,4 @@ function makeCode(h) {
     return { impl, checks };
 }
 
-module.exports = { makeCode, CODE_OPS, javaSource, jsSource, retained };
+module.exports = { makeCode, CODE_OPS, javaSource, jsSource, retained, javaCheck };
