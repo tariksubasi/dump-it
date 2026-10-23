@@ -43,14 +43,14 @@ const MAPPING_OPS = {
     updateImportMapping: { doc: "Bring an import mapping in step with its changed JSON structure, XML schema or message definition: new values map to attributes of the same name, new objects to entities; mapped paths that are gone are refused unless prune: true.", fields: {} },
     updateExportMapping: { doc: "Bring an export mapping in step with its changed JSON structure, XML schema or message definition (like updateImportMapping, no keys).", fields: {} },
     changeMapping: {
-        doc: "Change one element of an import/export mapping (key attributes, how the object is found or created, if no object is found, a custom microflow, a value transform microflow, the attribute, the association) or the import mapping's parameter.",
+        doc: "Change one element of an import/export mapping (key attributes, how the object is found or created, if no object is found, a value transform microflow, the attribute, the association) or the import mapping's parameter.",
         fields: {
             mapping: "R Module.ImportMapping or Module.ExportMapping",
             element: "path of the element, as in createImportMapping (\"\" = the root); needed for every field but parameter",
             keys: "import object: [ \"value path or name\" ] values that identify the object ([] = none); sets objectHandling find when it was create",
-            objectHandling: "import object: create | find | findOrCreate | custom | parameter (parameter: the root, when the mapping parameter is its entity)",
+            objectHandling: "import object: create | find | findOrCreate | parameter (parameter: the root, when the mapping parameter is its entity)",
             ifNotFound: "import object with find: create | ignore | error (default with find: error)",
-            microflow: "with objectHandling custom: Module.Microflow that returns the object; its parameters: a value of this object by name, or an object of a parent element's entity",
+            microflow: "refused (with objectHandling custom): Studio Pro 10.24 / 11.12 cannot load the custom handler this tool would store; set it in Studio Pro",
             transform: "value: Module.Microflow that converts the value (one parameter; import: returns the attribute type; export: takes it), \"\" removes it",
             attribute: "value: another attribute of the object's entity",
             association: "object (not the root): Module.Association between its entity and the parent's",
@@ -883,34 +883,16 @@ function makeMappings(h) {
                     if (up.length) throw new Error(`${where}: only the root can be the mapping parameter`);
                     if (!(t instanceof datatypes.ObjectType) || t.entityQualifiedName !== el.entityQualifiedName) throw new Error(`${where}: the root is the parameter only when the mapping parameter is ${el.entityQualifiedName}; first set "parameter": "${el.entityQualifiedName}" (now: ${describeParam(t)})`);
                 }
-                if (hnd[0] === "Custom" && o.microflow === undefined && !el.mappingMicroflowCall) throw new Error(`${where}: objectHandling custom needs "microflow": a microflow that returns ${el.entityQualifiedName}`);
             }
+            // custom object handler: the SDK writes Mappings$MappingMicroflowCall with Mappings$MappingMicroflowParameter,
+            // which mx check of Studio Pro 10.24 and 11.12 cannot load (unknown type); no Studio Pro sample shows the stored names
+            if (o.microflow !== undefined || (hnd && hnd[0] === "Custom")) throw new Error(`${where}: a custom object handler (objectHandling custom, microflow) is not written: Studio Pro 10.24 / 11.12 cannot load the type this tool would store; use find / findOrCreate with keys, or set the custom microflow in Studio Pro (Object handling: Custom)`);
             const finalHandling = hnd ? hnd[0] : chosen && chosen.length && el.objectHandling.name === "Create" ? "Find" : el.objectHandling.name;
             const finalKeys = chosen || values.filter(v => v.isKey);
             const backup = o.ifNotFound === undefined ? null : { create: "Create", ignore: "Ignore", error: "Error" }[lc(o.ifNotFound)];
             if (o.ifNotFound !== undefined && !backup) fail(`${where}: ifNotFound '${o.ifNotFound}' is not create | ignore | error`, o.ifNotFound, ["create", "ignore", "error"]);
             if (backup && finalHandling !== "Find") throw new Error(`${where}: ifNotFound applies when the object is found by keys; set "objectHandling": "find" (now ${finalHandling.toLowerCase()})`);
             if (imp && finalHandling === "Find" && !finalKeys.length) throw new Error(`${where}: '${p}' is found by keys but none of its values is a key; give "keys": [ "${values.length ? userPath(elKey(values[0])).split("/").pop() : "name"}" ]`);
-            if (o.microflow !== undefined && finalHandling !== "Custom") throw new Error(`${where}: microflow goes with "objectHandling": "custom"`);
-            let handler = null;
-            if (o.microflow !== undefined) {
-                const m = await microflowNamed(o.microflow, where);
-                const ret = m.microflowReturnType;
-                if (!(ret instanceof datatypes.ObjectType) || ret.entityQualifiedName !== el.entityQualifiedName) throw new Error(`${where}: ${o.microflow} must return a ${el.entityQualifiedName} object (it returns ${ret instanceof datatypes.ObjectType ? ret.entityQualifiedName : typeName(ret)})`);
-                handler = { m, params: [] };
-                for (const prm of flowParams(m)) {
-                    const t = prm.variableType;
-                    if (t instanceof datatypes.ObjectType) {
-                        const level = up.findIndex(x => x.entityQualifiedName === t.entityQualifiedName);
-                        if (level < 0) throw new Error(`${where}: parameter ${prm.name} of ${o.microflow} is a ${t.entityQualifiedName}, which is not the entity of a parent element of '${p}'`);
-                        handler.params.push({ prm, level: level + 1, text: `${prm.name} = parent ${t.entityQualifiedName}` });
-                    } else {
-                        const v = values.find(x => lc(userPath(elKey(x)).split("/").pop()) === lc(prm.name) || lc(x.exposedName) === lc(prm.name) || lc(String(x.attributeQualifiedName).split(".").pop()) === lc(prm.name));
-                        if (!v) fail(`${where}: parameter ${prm.name} of ${o.microflow} matches no value of '${p}' (name it like one of them)`, prm.name, values.map(x => userPath(elKey(x)).split("/").pop()));
-                        handler.params.push({ prm, level: -1, v, text: `${prm.name} = ${userPath(elKey(v))}` });
-                    }
-                }
-            }
             let assoc = null;
             if (o.association !== undefined) {
                 if (!owner) throw new Error(`${where}: the root has no association`);
@@ -934,22 +916,6 @@ function makeMappings(h) {
             if (backup) {
                 el.objectHandlingBackup = mp.ObjectHandlingBackupEnum[backup];
                 lines.push(`if no object is found: ${backup.toLowerCase()}`);
-            }
-            if (handler) {
-                if (el.mappingMicroflowCall) el.mappingMicroflowCall.delete();
-                const call = mp.MappingMicroflowCall.createIn(el);
-                call.microflow = handler.m;
-                for (const x of handler.params) {
-                    const pm = mp.MappingMicroflowParameter.createIn(call);
-                    pm.parameter = x.prm;
-                    pm.levelOfParent = x.level;
-                    if (x.v) {
-                        pm.jsonValueElementPath = x.v.jsonPath;
-                        pm.xmlValueElementPath = x.v.xmlPath;
-                    }
-                }
-                warn(`Mappings$MappingMicroflowCall first use by ops (no Studio Pro sample of a custom object handler in the test projects): check ${o.mapping} in Studio Pro`);
-                lines.push(`custom microflow ${o.microflow}(${handler.params.map(x => x.text).join(", ")})`);
             }
             if (assoc) {
                 el.association = assoc;

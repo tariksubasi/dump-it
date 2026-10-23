@@ -323,7 +323,7 @@ function odataProblems(project, T, version) {
 
 // A structure and mappings onto existing entities (attribute names matched loosely), then a new snippet: the mappings
 // follow it (new values, a new object with its entity, a removed and a retyped value), element settings (keys, find
-// with ignore, a custom microflow, a value transform, the root as the mapping parameter), an import step passing the
+// with ignore, a value transform; a custom microflow handler is refused, the root as the mapping parameter), an import step passing the
 // parameter, and the error-handler recipe (callRest whose handler parses $latestHttpResponse with an import mapping).
 function changePlan(mod, T, dir, version) {
     const E = `${mod}.${T}`;
@@ -349,7 +349,6 @@ function changePlan(mod, T, dir, version) {
             { op: "createMicroflow", module: mod, name: `${T}_ChConv`, folder: "ZzChange", parameters: [{ name: "Value", type: "String" }], returns: "Decimal", returnValue: "parseDecimal($Value)" },
             { op: "changeMapping", mapping: `${E}_ChImm`, element: "total", transform: `${E}_ChConv` },
             { op: "createMicroflow", module: mod, name: `${T}_ChFindCust`, folder: "ZzChange", parameters: [{ name: "Name", type: "String" }, { name: "Order", type: `${E}ChOrder` }], returns: `${E}ChCust`, returnValue: "empty" },
-            { op: "changeMapping", mapping: `${E}_ChImm`, element: "customer", objectHandling: "custom", microflow: `${E}_ChFindCust` },
             { op: "changeMapping", mapping: `${E}_ChImm`, parameter: `${E}ChOrder` },
             { op: "changeMapping", mapping: `${E}_ChImm`, element: "", objectHandling: "parameter" },
             { op: "changeMapping", mapping: `${E}_ChExm`, element: "lines", association: `${E}ChLine_${T}ChOrder` },
@@ -386,6 +385,7 @@ function changePlan(mod, T, dir, version) {
             { op: { op: "changeMapping", mapping: `${E}_ChImm`, element: "total", keys: ["total"] }, expect: /'keys' is for an object/ },
             { op: { op: "changeMapping", mapping: `${E}_ChExm`, element: "lines", objectHandling: "find" }, expect: /import mapping setting/ },
             { op: { op: "changeMapping", mapping: `${E}_ChImm`, element: "total", transform: `${E}_ChFindCust` }, expect: /takes one value and returns one/ },
+            { op: { op: "changeMapping", mapping: `${E}_ChImm`, element: "customer", objectHandling: "custom", microflow: `${E}_ChFindCust` }, expect: /custom object handler .*not written: Studio Pro 10.24 \/ 11.12 cannot load/ },
             { op: { op: "changeMapping", mapping: `${E}_ChImm`, element: "lines", objectHandling: "find", keys: [] }, expect: /none of its values is a key/ },
             { op: { op: "createImportMapping", module: mod, name: `${T}_ChBad`, jsonStructure: `${E}_ChJson`, entity: `${E}ChOrder` }, expect: /no entity .*Lines.*create/ },
             { op: { op: "deleteRestOperation", operation: `${api}.GetOrdr` }, expect: /no operation 'GetOrdr'.*Did you mean: GetOrder/ },
@@ -424,7 +424,7 @@ function changeProblems(project, T, version) {
     const line = els["(Object)|lines|(Object)"];
     if (!line || line.ObjectHandling !== "Find" || line.ObjectHandlingBackup !== "Ignore" || !els["(Object)|lines|(Object)|sku"].IsKey) r.push("lines: not found by sku / ignore");
     const cust = els["(Object)|customer"];
-    if (!cust || !/ChCust$/.test(cust.Entity) || cust.ObjectHandling !== "Custom" || !cust.CustomHandlerCall || cust.CustomHandlerCall.ParameterMappings.length !== 2) r.push("customer: custom handler with 2 parameters missing");
+    if (!cust || !/ChCust$/.test(cust.Entity) || cust.ObjectHandling === "Custom" || cust.CustomHandlerCall) r.push("customer: missing, or a custom handler was written (refused: Studio Pro cannot load it)");
     if (!els["(Object)|total"] || !/_ChConv$/.test(els["(Object)|total"].Converter) || els["(Object)|total"].XmlPrimitiveType !== "String") r.push("total: transform or retype missing");
     const order = root.Children.map(c => c.JsonPath);
     if (order.join() !== ["(Object)|order_id", "(Object)|total", "(Object)|status", "(Object)|lines|(Object)", "(Object)|customer"].join()) r.push(`import children order ${order.join(", ")}`);
