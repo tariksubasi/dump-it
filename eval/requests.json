@@ -823,6 +823,107 @@
           "Order_List\\.txt$": "(?s)Kart stili: Yükseltilmiş.*Siparişler|Siparişler.*Kart stili: Yükseltilmiş"
         }
       }
+    },
+    {
+      "id": "gridcolumns",
+      "text": "Order_Board sayfası yap: siparişleri Data grid 2 ile listele; ilk kolon Number ve Note'u '{Number} - {Note}' şeklinde birlikte gösteren dinamik metin olsun, sonra Total, en sonda her satırda siparişi silen bir buton olan özel içerik kolonu. Sayfalama 'daha fazla yükle' olsun, sayfa başına 25 satır, liste boşsa 'Sipariş yok' yazsın.",
+      "checks": {
+        "find": [
+          "MyFirstModule.Order_Board"
+        ],
+        "files": {
+          "Order_Board\\.txt$": "(?s)^(?=.*Data grid 2)(?=.*showContentAs: dynamicText)(?=.*showContentAs: customContent)(?=.*pagination: loadMore)(?=.*pageSize: 25)(?=.*'?Sipariş yok)"
+        }
+      }
+    },
+    {
+      "id": "gridconvert",
+      "setup": [
+        {
+          "op": "createPage",
+          "module": "MyFirstModule",
+          "name": "Order_NewEdit",
+          "entity": "MyFirstModule.Order"
+        },
+        {
+          "op": "createPage",
+          "module": "MyFirstModule",
+          "name": "Order_Classic",
+          "widgets": [
+            {
+              "widget": "dataGrid",
+              "kind": "classic",
+              "name": "grid1",
+              "entity": "MyFirstModule.Order",
+              "columns": [
+                "Number",
+                "Total",
+                "Note"
+              ],
+              "buttons": [
+                {
+                  "action": "new",
+                  "page": "MyFirstModule.Order_NewEdit"
+                },
+                {
+                  "action": "edit",
+                  "page": "MyFirstModule.Order_NewEdit"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "text": "Order_Classic sayfasındaki klasik grid1'i Data grid 2'ye çevir; butonlar ve arama alanları da taşınsın. Sonra Total kolonunu en başa al.",
+      "checks": {
+        "find": [
+          "MyFirstModule.Order_Classic"
+        ],
+        "files": {
+          "Order_Classic\\.txt$": "(?s)^(?=.*Data grid 2)(?=.*grid1)(?!.*Forms\\$DataGrid\\b)"
+        }
+      }
+    },
+    {
+      "id": "gridsource",
+      "setup": [
+        {
+          "op": "createMicroflow",
+          "module": "MyFirstModule",
+          "name": "DS_UnpaidOrders",
+          "returns": "List(MyFirstModule.Order)",
+          "actions": [
+            {
+              "action": "retrieve",
+              "entity": "MyFirstModule.Order",
+              "xpath": "[Paid = false()]",
+              "variable": "L"
+            }
+          ],
+          "returnValue": "$L"
+        },
+        {
+          "op": "createPage",
+          "module": "MyFirstModule",
+          "name": "Order_Gallery",
+          "widgets": [
+            {
+              "widget": "gallery",
+              "name": "gallery1",
+              "entity": "MyFirstModule.Order"
+            }
+          ]
+        }
+      ],
+      "text": "Order_Gallery sayfasındaki gallery1 siparişleri DS_UnpaidOrders microflow'undan alsın; her kartta sadece '{Number}: {Total}' yazsın; masaüstünde 3, tablette 2, telefonda 1 kolon olsun.",
+      "checks": {
+        "find": [
+          "MyFirstModule.Order_Gallery"
+        ],
+        "files": {
+          "Order_Gallery\\.txt$": "(?s)^(?=.*DS_UnpaidOrders)(?=.*desktopItems: 3)(?=.*tabletItems: 2)"
+        }
+      }
     }
   ]
 }
