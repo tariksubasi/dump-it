@@ -1180,6 +1180,7 @@ function changedLater(name, o, rest) {
     if (name === "createEntity" && rest.some(x => x.op === "changeEntity" && x.entity === `${o.module}.${o.name}`)) return true;
     if (name === "changeEntity" && rest.some(x => x.op === "changeEntity" && x.entity === o.entity)) return true;
     if (["addLanguage", "changeLanguage"].includes(name) && rest.some(x => ["changeLanguage", "deleteLanguage"].includes(x.op) && String(x.code).toLowerCase() === String(o.code).toLowerCase())) return true;
+    if (["renameFolder", "moveFolder"].includes(name) && rest.some(x => ["moveFolder", "deleteFolder", "renameFolder"].includes(x.op) && x.module === o.module)) return true;
     if (name === "changeUserRole" && rest.some(x => x.op === "changeUserRole" && x.role === o.role)) return true;
     if (name === "addAccessRule" || name === "changeAccessRule") {
         const roles = [].concat(o.setRoles || o.roles || []).sort().join();

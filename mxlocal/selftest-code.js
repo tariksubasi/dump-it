@@ -23,7 +23,7 @@ function domainOf(p, m) {
 function moduleOf(p, id) {
     for (let c = id; c && p.units.has(c); c = p.units.get(c).containerId) {
         const u = p.read(c);
-        if (/^Projects\$Module/.test(u.$Type)) return u.Name;
+        if (/^Projects\$Module(Impl)?$/.test(u.$Type)) return u.Name;
     }
     return null;
 }
@@ -224,7 +224,7 @@ async function codePhase(x) {
         const usage = await dry({ ops: [
             { op: "createMicroflow", module: C, name: "Lines_Of", parameters: [{ name: "Order", type: `${C}.Order` }], actions: [{ action: "retrieve", variable: "Lines", from: "Order", association: `${C}.Line_Order` }] },
             { op: "changeAssociation", association: `${C}.Line_Order`, to: `${C}.Invoice` }] });
-        if (!/Line_Order -> Order became .*Line -> .*Invoice/.test(usage) || !/CHECK these places[^\n]*Lines_Of/.test(usage) || !/DATA LOSS: existing .*Line_Order links/.test(usage)) problems.push(`re-point summary lacks the ends, the usage of Lines_Of or DATA LOSS: ${usage.slice(0, 300)}`);
+        if (!/Line_Order -> Order became .*Line -> .*Invoice/.test(usage) || !/CHECK these places[^\n]*Lines_Of/.test(usage) || !/DATA LOSS: existing .*Line_Order links/.test(usage)) problems.push(`re-point summary lacks the ends, the usage of Lines_Of or DATA LOSS: ${usage.slice(200, 900)}`);
         await refuse({ ops: [{ op: "changeAssociation", association: `${C}.Line_Order`, to: `${C}X.Far` }] }, /REFUSED: .*cross-module association/, "re-pointing to an entity of another module");
         await refuse({ ops: [{ op: "changeAssociation", association: `${C}.Line_Order`, from: `${C}X.Far` }] }, /REFUSED: .*would move it/, "a new owner in another module");
         await refuse({ ops: [{ op: "changeAssociation", association: `${C}.Line_Order`, parent: `${C}.Tag` }] }, /write it as "from"/, "parent synonym");
@@ -416,7 +416,7 @@ async function codePhase(x) {
     }
     // ---- N-9 enumeration value images (create, add, change)
     if (want("N9")) {
-        await refuse({ ops: [{ op: "createEnumeration", module: C, name: "Bad", values: [{ name: "A", image: `${C}.Icons.Dott` }] }] }, /Icons\.Dot/, "an enumeration value with a missing image");
+        await refuse({ ops: [{ op: "createEnumeration", module: C, name: "Bad", values: [{ name: "A", image: `${C}.Icons.Dott` }] }] }, /no image 'Dott'[\s\S]*Did you mean: Dot/, "an enumeration value with a missing image");
         await block("N-9 enumeration value images: createEnumeration values with image, addEnumerationValue image, changeEnumerationValue image (and \"\" = none)", { ops: [
             ...(want("E7") ? [] : [{ op: "createImageCollection", module: C, name: "Icons" }, { op: "addImage", collection: `${C}.Icons`, file: "edits/zz-code.svg", name: "Dot" }]),
             { op: "createEnumeration", module: C, name: "Level", values: [{ name: "Low", caption: "Low", image: `${C}.Icons.Dot` }, "High"] },
@@ -517,7 +517,7 @@ async function codePhase(x) {
             for (const id of p.units.keys()) {
                 const u = p.read(id);
                 if (u.$Type !== "Settings$ProjectSettings") continue;
-                const rs = (u.Settings || []).find(x => x.$Type === "Settings$RuntimeSettings") || {};
+                const rs = (u.Settings || []).find(x => x.$Type === "Settings$ModelSettings") || {};
                 if (rs.AllowUserMultipleSessions !== false || rs.ScheduledEventTimeZoneCode !== "Europe/Istanbul") out.push(`runtime settings stored as ${rs.AllowUserMultipleSessions} ${rs.ScheduledEventTimeZoneCode}`);
                 const cs = (u.Settings || []).find(x => x.$Type === "Settings$CertificateSettings") || {};
                 if (cert && !(cs.Certificates || []).some(c => c.Type === "Authority" && c.Data)) out.push("certificate not stored");

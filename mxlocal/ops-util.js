@@ -98,6 +98,12 @@ function reorder(list, item, o, where, nameOf = y => y.name) {
     if ([...list].indexOf(item) === index) return `stays at position ${index + 1}`;
     item.detach();
     list.splice(index, 0, item);
+    // detach drops the element from the SDK's qualified name index; a rename puts it back
+    if (typeof item.name === "string" && item.name) {
+        const n = item.name;
+        item.name = `${n}_zzReorder`;
+        item.name = n;
+    }
     return `position ${index + 1} of ${names.length}`;
 }
 

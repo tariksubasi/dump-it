@@ -44,6 +44,7 @@ async function runPhase(env, s, plan, verify) {
     problems.push(...lint);
     await s.model.flushChanges();
     const enc = s.client.encode();
+    enc.plainFiles = require("./files").encode(s.client); // files ops stage (theme, packages), as apply writes them
     problems.push(...lostProperties(s.client, s.model, enc));
     problems.push(...layoutProblems(layout, enc).problems.slice(0, 4));
     const firstUse = [...new Set(s.client.summary().warnings.filter(w => /first use|never occurs/.test(w)).map(w => w.split(" ")[0]))];
