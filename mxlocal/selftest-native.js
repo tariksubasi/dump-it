@@ -83,6 +83,10 @@ function nativeTargets(s, mod) {
     if (me && !me.fromAppStore) x.own = mod;
     const mk = m.find(z => z.fromAppStore);
     if (mk) x.market = mk.name;
+    // a JavaScript action called by its name alone (N9): NanoflowCommons.GetPlatform when the app has it
+    const js = s.model.allJavaScriptActions().filter(a => a.name === "GetPlatform");
+    x.getPlatform = js.length === 1 ? js[0].qualifiedName : null;
+    x.biometric = s.model.allJavaScriptActions().some(a => a.name === "BiometricAuthentication");
     // pluggable widgets of widgets/*.mpk: a native one (com.mendix.widget.native.*) and a web one
     const pl = [...require("./pluggable").installed(project.dir).keys()];
     x.nativePl = pl.find(id => /^com\.mendix\.widget\.native\./.test(id)) || null;
@@ -138,6 +142,8 @@ function nativePlan(mod, T, x) {
         );
         if (x.market) refuse.push([{ op: "addNativeStyle", module: x.market, name: `${card}X`, style: { container: { opacity: 0.5 } } }, /Marketplace module/]);
     }
+    if (x.getPlatform) ops.push({ op: "createNanoflow", module: mod, name: `${T}_NatPlatform`, folder: "ZzNative", actions: [{ action: "callJavaScript", jsAction: "GetPlatform", variable: "Platform" }] });
+    if (!x.biometric) refuse.push([{ op: "createNanoflow", module: mod, name: `${T}_NatBio`, actions: [{ action: "callJavaScript", jsAction: "BiometricAuthentication", variable: "Ok" }] }, /JavaScript action of the NativeMobileResources module, which this app does not have/]);
     refuse.push(
         [{ op: "setNativeVariables", variables: { "brand.primry": "#000000" } }, /Did you mean: brand\.primary/],
         [{ op: "setNativeVariables", variables: { "brand.primary": "12" } }, /is a colour/],
@@ -247,6 +253,14 @@ function nativeProblems(project, mod, T, x, plan) {
             r.push(`${rel}/design-properties.json is not JSON`);
         }
         say((j.DivContainer || []).some(p => p.name === plan.dp && p.options.map(o => o.class).join() === `${plan.flat},${plan.card}`), "native design property not in design-properties.json");
+    }
+    if (x.getPlatform) {
+        let nf = null;
+        for (const id of project.units.keys()) {
+            const p = project.read(id);
+            if (p.$Type === "Microflows$Nanoflow" && p.Name === `${T}_NatPlatform`) nf = p;
+        }
+        say(nf && JSON.stringify(nf).includes(`"JavaScriptAction":"${x.getPlatform}"`), `callJavaScript by name: ${x.getPlatform} not called`);
     }
     if (plan.page) {
         let u = null;
@@ -368,7 +382,7 @@ async function nativePhase({ s2, reopen, copy, src, mod, T, layout, layoutProble
         x.own && "addNativeStyle (elevation level, theme variables, button)", x.own && "addNativeDesignProperty", plan.page && "native page with classes" + (x.own ? " + native design (createPage, changeWidget)" : ""),
         plan.page && "every core native widget kind (text area, drop-down, radio buttons, date picker, check box with visibility, reference selector, tab container, layout grid)",
         plan.page && `addWidgets / moveWidget / deleteWidget on a native page${x.nativePl ? `, native pluggable ${x.nativePl.split(".").pop()}` : ""}${x.popup ? ", native pop-up page" : ""}, native snippet + snippet call, native bottom bar (icon, place) + home page`,
-        plan.page && "NATIVE STYLE CHECK", `${plan.refuse.length} refusals (web CSS, web-only widgets and actions, native / web page mix)`].filter(Boolean);
+        x.getPlatform && "callJavaScript by action name (GetPlatform)", plan.page && "NATIVE STYLE CHECK", `${plan.refuse.length} refusals (web CSS, web-only widgets and actions, native / web page mix)`].filter(Boolean);
     if (plan.page && !x.nativePl) results.push("SKIP native: native pluggable widget: no com.mendix.widget.native.* in widgets/");
     if (made) results.push("NOTE native: no native theme in this project; an empty theme/native/custom-variables.js was made in the copy");
     else if (!copied) results.push("NOTE native: no native theme files copied (already in the copy)");

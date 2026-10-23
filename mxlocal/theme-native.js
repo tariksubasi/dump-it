@@ -1016,6 +1016,9 @@ function nativeStyleLint(client) {
                 for (const c of String(ap.Class || "").split(/\s+/).filter(Boolean)) if (!classes.has(c)) out.push(`${at}: class '${c}' is not a native style class (no native main.js exports it${suggest(c, [...classes.keys()]).length ? `; did you mean ${suggest(c, [...classes.keys()]).join(", ")}?` : ""}); add it with addNativeStyle`);
                 if (String(ap.Style || "").trim()) out.push(`${at}: inline style "${String(ap.Style).slice(0, 40)}" does nothing on a native page; use a style class (addNativeStyle + "class")`);
             }
+            // offline-first: a native app runs without a connection; microflows run on the server
+            if (t === "Forms$MicroflowSource") out.push(`${at}: the data comes from a microflow (server): the page shows nothing without a connection; use a database source (synchronized objects) or a nanoflow source`);
+            if (t === "Forms$MicroflowAction") out.push(`${at}: the action calls a microflow (server): it fails without a connection; call a nanoflow, and the microflow from it only when online`);
             const scrolls = /^Forms\$(ListView|ScrollContainer)$/.test(t) || (t === "CustomWidgets$CustomWidget" && /gallery|listviewswipe|carousel/i.test(JSON.stringify(o.Type || "").slice(0, 400)));
             const clickable = (t === "Forms$DivContainer" && o.OnClickAction && o.OnClickAction.$Type && o.OnClickAction.$Type !== "Forms$NoAction") || (t === "Forms$ListView" && o.ClickAction && o.ClickAction.$Type && o.ClickAction.$Type !== "Forms$NoAction");
             if (scrolls && scroll) out.push(`${at}: a scrolling ${t.split("$")[1]} inside ${scroll}: nested scrolling breaks on phones (the inner list does not scroll or renders every item); use one list per page, or paging / a separate page`);

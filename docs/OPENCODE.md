@@ -1386,6 +1386,10 @@ Native pages:
 - Native navigation: `addMenuItem` with a native page adds a bottom bar item; it takes `icon` (a glyph code number,
   `Module.IconCollection.icon` or `Module.Images.image`) and `after` / `before` (the caption of another bottom bar
   item). `setHomePage` with a native page or nanoflow sets the native home page (with `roles`: per user role).
+- Phone features (camera, location, biometrics, notifications, vibrate, share, ...) are JavaScript actions of the
+  Marketplace modules NativeMobileResources and NanoflowCommons. Call them in a nanoflow with `callJavaScript`; the
+  name alone is enough when one module has it: `{ "action": "callJavaScript", "jsAction": "TakePicture", "args": {...} }`.
+  When the module is missing, the error names it: the user adds it from the Marketplace.
 - Native snippets: `createSnippet` with `"native": true`. A native page shows only native snippets (`snippetCall`),
   a web page only web snippets.
 - `"class"` and `"design"` on its widgets: design properties come from the `native/design-properties.json` files.
@@ -1393,7 +1397,8 @@ Native pages:
 The dry run shows **NATIVE STYLE CHECK** lines (warnings): a changed JS file that does not parse, a style key React
 Native does not know, a class on a native widget that no native `main.js` exports, a scrolling list inside another
 list or scroll container (nested scrolling), a list or button inside a clickable container (taps and scrolling
-conflict). Fix them before the user applies.
+conflict), a microflow data source or microflow action on a native page (it fails without a connection; use a
+nanoflow). Fix them before the user applies.
 
 Brand colour, spacing and dark mode for the native app:
 

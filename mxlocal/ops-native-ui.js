@@ -94,4 +94,23 @@ async function iconOf(h, model, v, where) {
     throw new Error(`${where}: '${parts.slice(0, 2).join(".")}' is neither an icon collection nor an image collection`);
 }
 
-module.exports = { iconOf, NATIVE_KINDS, INSTEAD, checkNativeNodes, checkAction, isNativePageQn };
+// JavaScript actions of the Marketplace modules for native apps (N9): name -> module (for the hint when it is missing)
+const NATIVE_JS = {
+    NativeMobileResources: "TakePicture TakePictureAdvanced SaveToPictureLibrary BiometricAuthentication IsBiometricAuthenticationSupported Vibrate PlaySound DisplayNotification ScheduleNotification CancelScheduledNotification CancelAllScheduledNotifications ClearAllDeliveredNotifications GetPushNotificationToken RequestNotificationPermission HasNotificationPermission SetBadgeNumber IsConnected IsWifiConnection IsCellularConnection GetDeviceInfo ChangeStatusBar HideKeyboard GetClipboardContent SetClipboardContent OpenInAppBrowser RegisterDeepLink ParseUrlToObject".split(" "),
+    NanoflowCommons: "GetCurrentLocation RequestLocationPermission Geocode ReverseGeocode OpenMap Share CallPhoneNumber SendTextMessage DraftEmail OpenURL NavigateTo ShowConfirmation ShowProgress HideProgress GetPlatform Wait SignIn SignOut ToggleSidebar GenerateUniqueID GetGuid GetObjectByGuid RefreshEntity RefreshObject GetStorageItemString SetStorageItemString GetStorageItemObject SetStorageItemObject GetStorageItemObjectList SetStorageItemObjectList RemoveStorageItem StorageItemExists".split(" ")
+};
+// "Module.Action" as given, or the qualified name of the project's only JavaScript action named like that
+function jsActionName(model, name, where) {
+    const s = String(name);
+    if (s.includes(".")) return s;
+    const { fail } = require("./ops-util");
+    const all = model.allJavaScriptActions ? model.allJavaScriptActions() : [];
+    const hits = all.filter(a => a.name.toLowerCase() === s.toLowerCase());
+    if (hits.length === 1) return hits[0].qualifiedName;
+    if (hits.length > 1) throw new Error(`${where}: several JavaScript actions are named ${s} (${hits.map(a => a.qualifiedName).join(", ")}); give Module.${s}`);
+    const mod = Object.keys(NATIVE_JS).find(m => NATIVE_JS[m].some(n => n.toLowerCase() === s.toLowerCase()));
+    if (mod) throw new Error(`${where}: ${s} is a JavaScript action of the ${mod} module, which this app does not have; add ${mod} from the Marketplace in Studio Pro (or importModulePackage with its .mpk), then run this again`);
+    return fail(`${where}: no JavaScript action named '${s}' (give Module.Action)`, s, [...all.map(a => a.name), ...Object.values(NATIVE_JS).flat()]);
+}
+
+module.exports = { iconOf, jsActionName, NATIVE_JS, NATIVE_KINDS, INSTEAD, checkNativeNodes, checkAction, isNativePageQn };
