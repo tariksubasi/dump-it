@@ -20,7 +20,8 @@ const SCAFFOLD_OPS = {
             parameters: "optional [ { \"name\": \"Order\", \"entity\": \"Module.Entity\" } ] object parameters (a page passes them in snippetCall \"params\", or the objects around it)",
             entity: "optional Module.Entity: shorthand for one parameter of it (named like the entity); without widgets: a data view form of it (inputs for its attributes, no buttons)",
             fields: "optional with entity and no widgets: [ \"Attribute\", ... ] inputs of the form (default all)",
-            widgets: "optional [ { \"widget\": \"<kind>\", ... } ] as in createPage (ops createPage); a data view on a parameter: { \"widget\": \"dataView\", \"source\": \"parameter\", \"entity\": ..., \"widgets\": [...] } (no Save/Cancel unless \"buttons\": true)"
+            widgets: "optional [ { \"widget\": \"<kind>\", ... } ] as in createPage (ops createPage); a data view on a parameter: { \"widget\": \"dataView\", \"source\": \"parameter\", \"entity\": ..., \"widgets\": [...] } (no Save/Cancel unless \"buttons\": true)",
+            native: "optional true: a native snippet (for native pages; its widgets as on a native page)"
         }
     },
     createCrud: {
@@ -42,7 +43,7 @@ const SCAFFOLD_SYNONYMS = {
 
 // x: { model, client, get, exists, entity, folder, impl: () => ops impl, pageOps, pageEdit }
 function makeScaffold(x) {
-    const { model } = x;
+    const { model, client } = x;
     const I = () => x.pageOps.internals;
 
     async function createSnippet(o) {
@@ -70,8 +71,18 @@ function makeScaffold(x) {
             if (ents.some(q => q.ent === e)) throw new Error(`createSnippet ${qn}: two parameters of ${e.qualifiedName}; data views and inputs could not tell them apart`);
             ents.push({ name: p.name, ent: e });
         }
+        const native = o.native !== undefined && require("./ops-util").bool(o.native, false);
         const sn = pages.Snippet.createIn(x.folder(o.module, o.folder));
         sn.name = o.name;
+        if (native) {
+            // Forms$Snippet Type Native (G20; no Studio Pro sample of a native snippet in the test projects)
+            if (!pages.SnippetType || !pages.SnippetType.Native || !("type" in sn)) {
+                sn.delete();
+                throw new Error(`createSnippet ${qn}: this Mendix version has no native snippets`);
+            }
+            sn.type = pages.SnippetType.Native;
+            client.warnFirst(`Forms$Snippet Type Native: first use by ops (no Studio Pro-saved native snippet in the test projects): check ${qn} in Studio Pro`);
+        }
         for (const p of ents) {
             const sp = pages.SnippetParameter.createIn(sn);
             sp.name = p.name;
@@ -82,7 +93,7 @@ function makeScaffold(x) {
         let widgets = o.widgets;
         if (widgets === undefined && o.entity !== undefined) widgets = [{ widget: "dataView", source: "parameter", entity: String(o.entity), buttons: false, ...(o.fields !== undefined ? { fields: o.fields } : {}) }];
         if (Array.isArray(widgets)) widgets = widgets.map(w => (w && typeof w === "object" && /^dataview$/i.test(String(w.widget)) && w.source === "parameter" && w.buttons === undefined ? { ...w, buttons: false } : w));
-        const bits = [`${ents.length ? `parameters ${ents.map(p => `${p.name} (${p.ent.qualifiedName})`).join(", ")}` : "no parameters"}`];
+        const bits = [`${native ? "native, " : ""}${ents.length ? `parameters ${ents.map(p => `${p.name} (${p.ent.qualifiedName})`).join(", ")}` : "no parameters"}`];
         if (widgets !== undefined) {
             if (!Array.isArray(widgets) || !widgets.length) throw new Error(`createSnippet ${qn}: widgets is a list [ { "widget": "<kind>", ... } ]`);
             try {

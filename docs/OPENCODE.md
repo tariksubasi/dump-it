@@ -493,7 +493,7 @@ FLOW CHECK (dry run, for new or changed steps; `steps`, for the whole flow) give
 | Op | Fields | Notes |
 |---|---|---|
 | `createPage` | **module**, **name**, title, entity, fields `["Attr"]`, buttons (default true), widgets, arrange, menu, layout, folder, roles, url, popupWidth, popupHeight, popupResizable, from, native, variables, design, class, style | `class` / `style`: CSS class(es) and inline CSS of the page itself. `variables` (Mendix 10+): page variables `[{"name": "Search", "type": "String", "default": "''"}]` (types Boolean, Integer, Long, Decimal, String, DateTime, `Enum(Module.E)`; `default` is an expression): an input takes `"variable": "Search"` instead of an attribute (anywhere on the page), expressions, XPath and flow `params` use `$Search`. `design`: design properties of the page itself (Atlas `Form orientation`, `Label width` where the theme has them). `from`: a page template or building block of the project (`"Dashboard_Action_Center"`, its display name or `Module.Name`): its widgets are copied first, data widgets in it stay unconfigured (the dry run lists them), then `widgets`. `native: true`: a native mobile page on the project's NativePhone layout (text, container, actionButton, dataView, listView, inputs; refused without a native layout). `layout` may also be a layout no page uses yet (its placeholder `Main`). Without `widgets`: with `entity` an edit form (page parameter, data view, an input per attribute, Save/Cancel), without `entity` an empty page. With `widgets`: the page content from the widget list below; `entity` is then the default entity of grids and data views. `menu` (`"Responsive"` or `{profile, caption, parent}`) adds a menu item, `roles` lets module roles open the page. The layout is the one the project's own pages use most |
-| `createLayout` | **module**, **name**, from (a layout to copy), folder; without from: type, preset, placeholders, header, sidebar, footer, menu, brand, class | With `from`: a copy of an existing layout. Without it: a new layout (see [Design system](#building-blocks-page-templates-layouts-kits)). `createPage` takes it in `layout` (the content goes in its placeholder `Main`, or its only one). Its own widgets (header, sidebar, menu bar) change with `addWidgets` / `changeWidget` / `moveWidget` / `deleteWidget` and `"page": "Module.Layout"` (`widgets Module.Layout` lists them and its placeholders); a placeholder that pages fill cannot be deleted or renamed (the error lists the pages) |
+| `createLayout` | **module**, **name**, from (a layout to copy), folder, bottomBar / sidebar (true/false) / popup (a copy of a native layout); without from: type, preset, placeholders, header, sidebar, footer, menu, brand, class | With `from`: a copy of an existing layout. Without it: a new layout (see [Design system](#building-blocks-page-templates-layouts-kits)). `createPage` takes it in `layout` (the content goes in its placeholder `Main`, or its only one). Its own widgets (header, sidebar, menu bar) change with `addWidgets` / `changeWidget` / `moveWidget` / `deleteWidget` and `"page": "Module.Layout"` (`widgets Module.Layout` lists them and its placeholders); a placeholder that pages fill cannot be deleted or renamed (the error lists the pages) |
 | `createSnippet` | **module**, **name**, folder, parameters `[{"name":"Order","entity":"Sales.Order"}]`, entity (shorthand: one parameter of it; without widgets a form of it, fields), widgets | Widgets as in `createPage`; a data view with `"source": "parameter"` shows a snippet parameter (no Save/Cancel unless `"buttons": true`). Pages show it with `snippetCall` (parameters from `params` or the objects around it). `addWidgets`/`changeWidget` work on snippets too. A data view on a snippet parameter: first use, check it in Studio Pro |
 | `createCrud` | **entity**, module, folder, grid (`auto`/`datagrid2`/`classic`), columns, fields, overview, edit, menu, roles, access | Studio Pro's "Generate overview pages": `<Entity>_NewEdit` (form, Save/Cancel) and `<Entity>_Overview` (a New button + Data grid 2 with Edit/Delete per row when the project can build one, else a classic grid with New/Edit/Delete). `roles` may open both pages and get an access rule on the entity when they have none (`access`: `ReadWrite` default with create/delete, `ReadOnly`, `none`). `menu` adds a menu item to the overview |
 | `addMenuItem` | **page** or **microflow**, profile (default Responsive) or menu (a menu document `Module.Menu`), caption (default: the page title), parent (caption or path of an existing item), after / before (a sibling caption), icon | Only pages without parameters. A page is in a menu once. New items go at the end unless after/before. A menu item has no roles of its own: it shows for the user roles that may open the page (change that with `grantAccess` / `revokeAccess` on the page, or `changeMenuItem` roles). The dry-run line ends with `seen by: <user roles>`. `icon`: an icon collection icon `"Atlas_Core.Atlas_Filled.home"`, an image `"Module.Images.Logo"`, a glyph code number (`57377`). With `action` instead of `page`/`microflow`: what the item does, as on `actionButton` (`"signOut"`, `{"action": "openLink", "url": ...}`, `{"action": "callMicroflow", ...}` without object parameters, `create`, `sync` in an offline profile); needs `caption`. A native page (or `"profile": "Native"`) becomes a bottom bar item of the native profile (refused when the project has none: add one in Studio Pro). |
@@ -893,7 +893,7 @@ Data grid 2 export (G12) and native navigation (G13; only when the project has a
 ```
 
 What pages cannot do yet (use Studio Pro, and `python mx.py gap "<what>"`):
-- Layouts: no native layouts; a new layout has the Atlas regions only (no other scroll container shapes). Data widgets
+- Layouts: native layouts only as a copy (with bottomBar / sidebar / popup); a new web layout has the Atlas regions only (no other scroll container shapes). Data widgets
   copied from building blocks / page templates stay unconfigured (set them in Studio Pro). Custom icon collections:
   Studio Pro (they hold a font made from the SVG files).
 - `changeWidget`: no change of a data view's data source (lists: `source`), an input's attribute, or a pluggable widget's other
@@ -1713,6 +1713,116 @@ Example: your own building block with an unconfigured form, and a page that uses
 ] }
 ```
 
+### Native mobile
+
+Native mobile pages (React Native) are styled with JavaScript files, not SCSS:
+- `theme/native/custom-variables.js`: the theme variables (brand colours, fonts, spacing, radius). Atlas merges each
+  group, so a file may hold only the keys you change.
+- `themesource/<module>/native/main.js`: style classes. A native widget's `"class"` is the name of an export there.
+- `themesource/<module>/native/design-properties.json`: native design properties.
+
+Rules for native styles:
+- Names are camelCase (`backgroundColor`, not `background-color`). Class names are JavaScript names (`cardRaised`, no dashes).
+- Sizes are numbers without a unit (`16`, not `"16px"`). `"50%"` and `"auto"` are allowed for widths, margins, paddings.
+- A shadow is `elevation` (Android) plus `shadowColor`, `shadowOffset`, `shadowOpacity`, `shadowRadius` (iOS). There is no `box-shadow`.
+- A style class has one object per element of the widget: a button has `container`, `icon`, `caption`; a text has `container`, `text`; a text box has `container`, `label`, `input`, `validationMessage`.
+- `"$spacing.regular"` uses a theme variable. `{ "light": "#FFFFFF", "dark": "#0A1325" }` follows the phone's dark mode.
+- A native widget has no inline CSS: `"style"` is refused. Use `"class"` or `"design"`.
+- Only your own module gets files. Marketplace modules (Atlas_Core, ...) are refused.
+
+| Op | Fields | Notes |
+|---|---|---|
+| `setNativeVariables` | **variables** `{"brand.primary": "#0B5FFF", "spacing.regular": 16, "border.radiusLarge": 12, "background.primary": {"light": "#FFFFFF", "dark": "#0A1325"}}`, file, new | Sets Atlas native variables (`group.key`, nested objects allowed). A value already in the file is changed in place; a missing one is added. Colours and numbers are checked; `"16px"` is refused with the number to use. `"$border.radiusLarge"` refers to another variable. Unknown names: `Did you mean` (`"new": true` for your own) |
+| `setNativeTokens` | **tokens** (`colors`, `spacing`, `radius`, `typography`, `elevation`, `dark`), file | The same token JSON as the web theme, mapped to Atlas native: `colors.primary/success/warning/danger/info` (a colour or a scale `{"50": ..., "500": ...}`) to `brand.*`; `background`, `surface`, `text`, `textMuted`, `border` (+ `dark`) to the background, font and border colours with dark mode; `spacing xs..xl`; `radius sm/md/full`; `typography fontFamily, fontSize (+ lineHeight ratio)`; `elevation` levels (CSS shadow text or React Native keys) to `elevation.level1, ...`. Tokens without a native place are listed |
+| `addNativeStyle` | **name**, **style** `{"container": {...}, "caption": {...}}`, widgetType, module, replace | Adds `export const <name> = {...}` to `themesource/<module>/native/main.js` (made when missing) and imports the variables it uses. `"use": "$elevation.level2"` in an element includes an elevation level. Refused: web CSS (with the React Native way), units, unknown properties or elements (`Did you mean`), a class the module already has (`"replace": true`) |
+| `addNativeDesignProperty` | **widgetType**, **name**, **type** (`Toggle`, `Dropdown`, `ToggleButtonGroup`), options `[{"name", "class", "style"}]`, class + style (Toggle), multiSelect, description, category, module | A native design property in `themesource/<module>/native/design-properties.json`; an option with `"style"` also gets its class in `main.js`. Widgets on native pages then take it in `"design"` (later ops of the same change too). `ColorPicker` is refused (it needs CSS) |
+
+Native pages:
+- `createPage` with `"native": true`. For another kind of native page give `"native": "popup"` (a pop-up page),
+  `"fullPage"`, `"topBarOnly"`, `"sideMenu"` or `"default"`: the project's native layout of that kind is used.
+- Widgets of a native page: `text`, `container`, `actionButton`, `dataView`, `listView`, `textBox`, `textArea`,
+  `checkBox`, `datePicker`, `radioButtons`, `dropDown`, `referenceSelector`, `image`, `tabContainer`, `layoutGrid`,
+  `snippetCall`, and native pluggable widgets (`"widget": "pluggable"` with a `com.mendix.widget.native.*` widget from
+  `widgets/*.mpk`; `widgettype` lists them).
+- Refused on a native page, with what to use instead: `dataGrid`, `templateGrid`, `gallery` (use `listView`),
+  `comboBox` (use `dropDown` or `referenceSelector`), `referenceSetSelector`, `fileManager`, `imageUploader`,
+  `groupBox`, `dropDownButton`, web pluggable widgets, the `callWorkflow` action.
+- `showPage` on a native page opens only native pages; a web page cannot open a native page.
+- `callMicroflow` on a native page gives a warning: it needs a connection. Prefer `callNanoflow`.
+- `addWidgets`, `changeWidget`, `moveWidget`, `deleteWidget` work on native pages as on web pages.
+- Native navigation: `addMenuItem` with a native page adds a bottom bar item; it takes `icon` (a glyph code number,
+  `Module.IconCollection.icon` or `Module.Images.image`) and `after` / `before` (the caption of another bottom bar
+  item). `setHomePage` with a native page or nanoflow sets the native home page (with `roles`: per user role).
+- Phone features (camera, location, biometrics, notifications, vibrate, share, ...) are JavaScript actions of the
+  Marketplace modules NativeMobileResources and NanoflowCommons. Call them in a nanoflow with `callJavaScript`; the
+  name alone is enough when one module has it: `{ "action": "callJavaScript", "jsAction": "TakePicture", "args": {...} }`.
+  When the module is missing, the error names it: the user adds it from the Marketplace.
+- Native layouts: `createLayout` copies a native layout (`"from": "Atlas_Core.NativePhone_Default"`); the copy takes
+  `bottomBar` (true/false), `sidebar` (true/false) and `popup` (true: pages on it open as a modal). A layout from
+  nothing is not supported: copy one.
+- Native snippets: `createSnippet` with `"native": true`.
+- App events (online / offline, resume, timers): the native App events pluggable widget
+  (`com.mendix.widget.native.appevents.AppEvents`) on a native page, with its nanoflows in `properties`, when its
+  .mpk is in `widgets/`.
+- Deep links and push notifications: the JavaScript actions `RegisterDeepLink`, `RequestNotificationPermission`,
+  `GetPushNotificationToken`, `DisplayNotification`, `ScheduleNotification` (NativeMobileResources) in nanoflows.
+  Setting up the push service (Firebase / APNs keys, the PushNotifications module, the native app build) is done in
+  Studio Pro and the Native Builder: give the user those steps. A native page shows only native snippets (`snippetCall`),
+  a web page only web snippets.
+- `"class"` and `"design"` on its widgets: design properties come from the `native/design-properties.json` files.
+
+The dry run shows **NATIVE STYLE CHECK** lines (warnings): a changed JS file that does not parse, a style key React
+Native does not know, a class on a native widget that no native `main.js` exports, a scrolling list inside another
+list or scroll container (nested scrolling), a list or button inside a clickable container (taps and scrolling
+conflict), a microflow data source or microflow action on a native page (it fails without a connection; use a
+nanoflow). Fix them before the user applies.
+
+Brand colour, spacing and dark mode for the native app:
+
+```json
+{ "ops": [
+  { "op": "setNativeVariables", "variables": { "brand.primary": "#0B5FFF", "spacing.regular": 16, "background.primary": { "light": "#FFFFFF", "dark": "#0A1325" } } } ] }
+```
+
+Company tokens on native:
+
+```json
+{ "ops": [
+  { "op": "setNativeTokens", "tokens": { "colors": { "primary": { "50": "#EEF4FF", "500": "#0B5FFF" }, "surface": "#F6F7F9", "text": "#111827", "border": "#D1D5DB" },
+    "spacing": { "xs": 4, "sm": 8, "md": 16, "lg": 24 }, "radius": { "sm": 4, "md": 8, "full": 9999 },
+    "elevation": { "1": "0 1px 2px rgba(0,0,0,0.15)", "2": "0 4px 8px rgba(0,0,0,0.2)" },
+    "dark": { "surface": "#161F30", "text": "#F9FAFB", "border": "#3B4251" } } } ] }
+```
+
+A card class and a native page that uses it:
+
+```json
+{ "ops": [
+  { "op": "addNativeStyle", "module": "Sales", "name": "cardRaised", "widgetType": "Container",
+    "style": { "container": { "use": "$elevation.level2", "backgroundColor": "$background.primary", "borderRadius": 8, "padding": "$spacing.regular" } } },
+  { "op": "createPage", "module": "Sales", "name": "Home_Native", "native": true,
+    "widgets": [ { "widget": "container", "class": "cardRaised", "widgets": [ { "widget": "text", "text": "Orders" } ] } ] } ] }
+```
+
+A native pop-up page and a native pluggable widget:
+
+```json
+{ "ops": [
+  { "op": "createPage", "module": "Sales", "name": "Order_EditPopup", "native": "popup", "entity": "Sales.Order" },
+  { "op": "addWidgets", "page": "Sales.Home_Native", "widgets": [ { "widget": "pluggable", "type": "com.mendix.widget.native.feedback.Feedback", "properties": {} } ] } ] }
+```
+
+A native design property with two looks:
+
+```json
+{ "ops": [
+  { "op": "addNativeDesignProperty", "module": "Sales", "widgetType": "DivContainer", "name": "Card look", "type": "Dropdown",
+    "options": [ { "name": "Flat", "class": "cardFlat", "style": { "container": { "elevation": 0 } } },
+                 { "name": "Raised", "class": "cardRaised" } ] },
+  { "op": "changeWidget", "page": "Sales.Home_Native", "widget": "container1", "design": { "Card look": "Flat" } } ] }
+```
+
+---
 
 ## 8. When no operation fits: gap, Studio Pro steps, or (if allowed) SDK scripts
 
@@ -1812,6 +1922,7 @@ A11Y CHECK (...)                                           <- accessibility of n
 STYLE CHECK (...)                                          <- theme compiled + classes, inline styles, contrast
   ! the theme would not compile: themesource/companydesign/web/atoms/_button.scss:3: Undefined variable. ($co-spce-2)
   ! (warning) Sales.Order_Edit container1: class 'co-crad' (class) is defined by no theme SCSS; did you mean co-card?
+NATIVE STYLE CHECK (...)                                   <- native styles, classes and native pages of the change (warnings)
       DATA LOSS: the column A and its values are dropped ...  <- deleting/retyping stored data: tell the user first
 Warnings:
   > Module.Doc -> Module/Folder                              <- a document moved to another folder
@@ -1846,6 +1957,9 @@ WCAG AA contrast (4.5:1) in the tokens or the Atlas variables. With `"strict": t
 Sass deprecation warnings (Studio Pro shows them too; harmless), classes of the design module no widget uses yet.
 Without `theme/web/main.scss` the compile is skipped. `"styleCheck": "warn"` in the change file turns a compile error
 into a warning: only when the user says the check is wrong.
+NATIVE STYLE CHECK lines (never a reason to refuse): a native JS file that does not parse, an unknown React Native
+style key, a class that no native `main.js` exports, nested scrolling, a list or button inside a clickable container.
+See "Native mobile" under "Design system".
 
 ### XPATH CHECK and EXPRESSION CHECK
 

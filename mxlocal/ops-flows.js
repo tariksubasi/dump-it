@@ -38,7 +38,7 @@ const ACTIONS = {
     },
     callJavaScript: {
         doc: "Call a JavaScript action (nanoflows only).",
-        fields: { jsAction: "R Module.JavaScriptAction", args: "optional { \"Param\": \"expression\" } (every required parameter needs one; an entity type parameter takes \"Module.Entity\")", variable: "optional result variable name (when the action returns something)" }
+        fields: { jsAction: "R Module.JavaScriptAction, or the name alone when one module has it (e.g. \"TakePicture\", \"GetCurrentLocation\", \"Vibrate\": NativeMobileResources / NanoflowCommons)", args: "optional { \"Param\": \"expression\" } (every required parameter needs one; an entity type parameter takes \"Module.Entity\")", variable: "optional result variable name (when the action returns something)" }
     },
     validationFeedback: {
         doc: "Show a validation message below the input of an attribute or association of an object.",
@@ -550,7 +550,9 @@ function makeFlows(h) {
 
     // Java action (microflows) or JavaScript action (nanoflows) call: one mapping per parameter, in parameter order.
     async function codeCall(f, act, spec, where, js) {
-        const qn = js ? spec.jsAction : spec.javaAction;
+        // a JavaScript action by its name alone ("TakePicture"): the project's only one of that name (NativeMobileResources,
+        // NanoflowCommons, ...; ops-native-ui.js)
+        const qn = js ? require("./ops-native-ui").jsActionName(model, spec.jsAction, where) : spec.javaAction;
         const target = await h.get(qn);
         const [want, other] = js ? [javascriptactions.JavaScriptAction, javaactions.JavaAction] : [javaactions.JavaAction, javascriptactions.JavaScriptAction];
         if (!(target instanceof want)) throw new Error(`${where}: '${qn}' is not a ${js ? "JavaScript" : "Java"} action` + (target instanceof other ? ` but a ${js ? "Java action: use callJava in a microflow" : "JavaScript action: use callJavaScript in a nanoflow"}` : ""));

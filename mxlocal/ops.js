@@ -19,6 +19,7 @@ const { makeTexts, TEXT_OPS } = require("./ops-texts");
 const { makeNav, NAV_OPS, MENU_EXTRA, extendedMenuItem } = require("./ops-nav");
 const { makeTheme, THEME_OPS } = require("./theme");
 const { makeDsTheme, DS_THEME_OPS } = require("./ds-theme");
+const { makeNativeTheme, NATIVE_OPS, nativeChangedLater } = require("./theme-native");
 const { makeMarket, MARKET_OPS } = require("./marketplace");
 const { makeCode, CODE_OPS } = require("./ops-code");
 const { makeFlowEdit, FLOW_EDIT_OPS } = require("./ops-flow-edit");
@@ -122,9 +123,9 @@ const OPS = {
         fields: { module: "R module name", name: "R layout name", from: "optional Module.Layout to copy (e.g. Atlas_Core.Atlas_Default); without it a new layout is built", folder: "optional folder path",
             type: "optional Responsive | Popup | ModalPopup | Tablet | Phone (default Responsive)", preset: "optional sidebar | topbar | blank (default sidebar; blank for pop-ups and Phone)",
             placeholders: "optional [ \"Main\", ... ] placeholder names in the content region (default [ \"Main\" ])",
-            header: "optional [ widgets ] in the top bar, after the side bar toggle and brand (createPage kinds)", sidebar: "optional [ widgets ] in the side bar, below the menu (sidebar / topbar)", footer: "optional [ widgets ] in a footer region at the bottom",
+            header: "optional [ widgets ] in the top bar, after the side bar toggle and brand (createPage kinds)", sidebar: "optional [ widgets ] in the side bar, below the menu (sidebar / topbar); native copy (from a native layout): true/false has a side menu", footer: "optional [ widgets ] in a footer region at the bottom",
             menu: "optional what the menu shows: a navigation profile (default \"Responsive\"), a menu document Module.Menu, or false (no menu); sidebar: a navigation tree, topbar: a menu bar (and a navigation tree for phones)",
-            brand: "optional text or Module.Images.Logo at the start of the top bar (default: the module name; \"\" = none)", class: "optional CSS class(es) of the layout (default Atlas's: layout-atlas layout-atlas-responsive-default / -topbar)" } },
+            brand: "optional text or Module.Images.Logo at the start of the top bar (default: the module name; \"\" = none)", bottomBar: "optional native copy: true/false shows the native bottom bar", popup: "optional native copy: true = a pop-up layout (pages open as a modal), false = a normal one", class: "optional CSS class(es) of the layout (default Atlas's: layout-atlas layout-atlas-responsive-default / -topbar)" } },
     createPage: { doc: "Create a page (or with kind userTaskPage a workflow user task page): an edit form for an entity (inputs by attribute type, Save/Cancel), an empty page, or a page from widgets (layout grids, containers, texts, data grids (classic, or a Data grid 2 built from widgets/*.mpk), data views that listen to a grid, list views, buttons, inputs), optionally with a menu item. Uses the layout the project's other pages use.", fields: { ...PAGE_FIELDS, ...USER_TASK_PAGE_FIELDS } },
     ...PAGE_EDIT_OPS,
     addMenuItem: { doc: "Add a menu item that opens a page, runs a microflow or another action (sign out, open a link, call a flow) to a navigation profile's menu or a menu document; a native page becomes a bottom bar item of the native profile.", fields: { ...MENU_FIELDS, ...MENU_EXTRA } },
@@ -132,6 +133,7 @@ const OPS = {
     ...NAV_OPS,
     ...THEME_OPS,
     ...DS_THEME_OPS,
+    ...NATIVE_OPS,
     ...MARKET_OPS,
     ...MAPPING_OPS,
     ...REST_OPS,
@@ -471,8 +473,11 @@ function bind(model, client) {
     const refOps = makeRefOps({ model, client, get, exists, dataType, folder, entity }, flows);
     const copyOps = makeCopy({ model, client, get, folder });
     const entityOps = makeEntity({ model, client, get, entity, persistable, isFresh: qn => isFresh(qn) });
+    // a native bottom bar item (page of a native layout, or "profile": "Native"): built by ops-pages also with icon / after / before
+    const nativeMenuItem = o => o.menu === undefined && o.microflow === undefined && (/^native/i.test(String(o.profile || "")) || (o.page !== undefined && require("./ops-native-ui").isNativePageQn(client, model, String(o.page)) === true));
     const themeOps = makeTheme({ client });
     const dsTheme = makeDsTheme({ model, client, impl: () => impl, theme: themeOps });
+    const nativeTheme = makeNativeTheme({ client });
     const marketOps = makeMarket({ client, model });
     const navOps = makeNav({ model, client, get, exists, text, translationsOf, folder, grantAccess: o => impl.grantAccess(o) }, pageOps.internals);
     const mappingOps = makeMappings({ model, client, get, exists, entity, folder, attributeChain, loadParents, impl: () => impl, xml: () => xmlOps.internals });
@@ -882,14 +887,15 @@ function bind(model, client) {
         moveWidget: o => pageEdit.moveWidget(o),
         changePage: o => pageEdit.changePage(o),
         convertGrid: o => pageEdit.convertGrid(o),
-        addMenuItem: o => (extendedMenuItem(o) ? navOps.addMenuItem(o) : pageOps.addMenuItem(o)),
+        addMenuItem: o => (extendedMenuItem(o) && !nativeMenuItem(o) ? navOps.addMenuItem(o) : pageOps.addMenuItem(o)),
         ...navOps.impl,
         ...themeOps.impl,
         ...dsTheme.impl,
+        ...nativeTheme.impl,
         ...marketOps.impl,
         async createLayout(o) {
             if (o.from === undefined) return compositeOps.createLayoutFresh(o);
-            const extra = compositeOps.LAYOUT_FROM_ONLY.filter(k => o[k] !== undefined);
+            const extra = compositeOps.LAYOUT_FROM_ONLY.filter(k => o[k] !== undefined && !(k === "sidebar" && typeof o.sidebar === "boolean")); // sidebar true/false: the native copy option
             if (extra.length) throw new Error(`createLayout ${o.module}.${o.name}: "from" copies ${o.from} as it is; ${extra.join(", ")} build a new layout (leave out "from"), or change the copy afterwards with addWidgets / changeWidget (page = ${o.module}.${o.name})`);
             validName(o.name, "layout name");
             const qn = `${o.module}.${o.name}`;
@@ -900,6 +906,15 @@ function bind(model, client) {
             l.name = o.name;
             for (const k of ["canvasWidth", "canvasHeight"]) if (l[k] !== src[k]) l[k] = src[k];
             l.content = src.content.deepCopy(model);
+            // native layout options (G20 / N3)
+            const nat = ["bottomBar", "sidebar", "popup"].filter(k => o[k] !== undefined);
+            if (nat.length && !(l.content instanceof pages.NativeLayoutContent)) {
+                l.delete();
+                throw new Error(`createLayout ${qn}: ${nat.join(", ")} ${nat.length > 1 ? "go" : "goes"} with a native layout; ${src.qualifiedName} is a web layout (copy a NativePhone_* layout)`);
+            }
+            if (o.bottomBar !== undefined) l.content.showBottomBar = bool(o.bottomBar);
+            if (o.sidebar !== undefined) l.content.sidebar = bool(o.sidebar);
+            if (o.popup !== undefined) l.content.layoutType = bool(o.popup) ? pages.NativeLayoutType.Popup : pages.NativeLayoutType.Default;
             if (src.appearance) l.appearance = src.appearance.deepCopy(model);
             const phs = [];
             l.traverse(el => el instanceof pages.Placeholder && phs.push(el.name));
@@ -1095,9 +1110,10 @@ function bind(model, client) {
         ...pageEdit.checks,
         setHomePage: o => pageOps.checks.setHomePage(o),
         ...navOps.checks,
-        addMenuItem: o => (extendedMenuItem(o) ? navOps.checks.addMenuItem(o) : pageOps.checks.addMenuItem(o)),
+        addMenuItem: o => (extendedMenuItem(o) && !nativeMenuItem(o) ? navOps.checks.addMenuItem(o) : pageOps.checks.addMenuItem(o)),
         ...themeOps.checks,
         ...dsTheme.checks,
+        ...nativeTheme.checks,
         ...marketOps.checks,
         async moveDocument(o) {
             const doc = await get(o.document);
@@ -1193,7 +1209,7 @@ function bind(model, client) {
             const mine = PAGE_EDIT_NAMES.includes(name) ? pageEdit.touched(o) : [];
             const undoes = x => ["deleteWidget", "moveWidget"].includes(x.op) || (x.op === "changeWidget" && (x.name !== undefined || name === "changeWidget"));
             const reworked = mine.length && rest.some(x => x.page === o.page && undoes(x) && pageEdit.touched(x).some(n => mine.includes(n)));
-            if ((later && name !== "rename" && name !== "delete") || edited || undone || reworked || changedLater(name, o, rest) || smallChangedLater(name, o, rest) || workflowChangedLater(name, o, rest) || integChangedLater(name, o, rest)) continue;
+            if ((later && name !== "rename" && name !== "delete") || edited || undone || reworked || changedLater(name, o, rest) || smallChangedLater(name, o, rest) || workflowChangedLater(name, o, rest) || integChangedLater(name, o, rest) || nativeChangedLater(name, o, rest)) continue;
             try {
                 failed.push(...(await checks[name](name === "setTranslations" ? o : await textOps.prepare(o, false))).map(f => `${i + 1}. ${name}: ${f}`));
             } catch (e) {
