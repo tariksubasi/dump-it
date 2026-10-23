@@ -2908,8 +2908,10 @@ function makePages(h) {
         for (const p of obj.properties) {
             const vt = p.type.valueType, v = p.value, t = vt.type.name;
             if (!vt.required || vt.isLinked) continue;
+            // an action is never empty: "Do nothing" (Forms$NoAction) is the value Studio Pro stores for a required one
+            // (Studio Pro sample: TreeView Home_Web progressCircle2, Progress Circle 3.3.1 onClick required=true)
             const empty = { Attribute: !v.attributeRef, Association: !v.entityRef, Entity: !v.entityRef, DataSource: !v.dataSource, Image: !v.imageQualifiedName,
-                Expression: !v.expression, TextTemplate: !v.textTemplate || !v.textTemplate.template.translations.some(x => x.text), Object: vt.isList && !v.objects.length, Action: v.action instanceof pages.NoClientAction }[t];
+                Expression: !v.expression, TextTemplate: !v.textTemplate || !v.textTemplate.template.translations.some(x => x.text), Object: vt.isList && !v.objects.length }[t];
             if (empty) miss.push(p.type.key);
         }
         return miss;
