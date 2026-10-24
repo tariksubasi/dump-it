@@ -220,14 +220,14 @@ function plainScopes(unit) {
 }
 
 // $latestError / $latestSoapFault / $latestHttpResponse: the ids where each one has a value (plain unit).
-const HTTP_ACTIONS = /^Microflows\$(RestCallAction|RestOperationCallAction|WebServiceCallAction|SendRestRequestAction)$/;
+const HTTP_ACTIONS = /^Microflows\$(RestCallAction|RestOperationCallAction|WebServiceCallAction|CallWebServiceAction|SendRestRequestAction)$/; // CallWebServiceAction: the storage name of WebServiceCallAction
 function latestScopes(unit) {
     const s = plainScopes(unit);
     const typeOf = id => {
         const o = (s.nodes.get(id) || {}).obj;
         return o && o.Action ? o.Action.$Type : o ? o.$Type : "";
     };
-    const soapFrom = s.errorFlows.filter(f => typeOf(f.from) === "Microflows$WebServiceCallAction").map(f => f.to);
+    const soapFrom = s.errorFlows.filter(f => /^Microflows\$(WebServiceCallAction|CallWebServiceAction)$/.test(typeOf(f.from))).map(f => f.to);
     const http = new Set([...s.nodes.keys()].filter(id => HTTP_ACTIONS.test(typeOf(id))));
     const httpAfter = s.after(http);
     // a REST call inside a loop: the whole loop body (the next tries) has the response too

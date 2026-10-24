@@ -1921,6 +1921,292 @@
           "Mobile_Tasks\\.txt$": "(?s)Görevler.*Title"
         }
       }
+    },
+    {
+      "id": "wfconcurrency",
+      "setup": [
+        {
+          "op": "createMicroflow",
+          "module": "MyFirstModule",
+          "name": "ACT_Order_Approve",
+          "parameters": [
+            {
+              "name": "Order",
+              "type": "MyFirstModule.Order"
+            }
+          ],
+          "actions": [
+            {
+              "action": "change",
+              "variable": "Order",
+              "set": {
+                "Paid": "true"
+              },
+              "commit": true
+            }
+          ]
+        }
+      ],
+      "text": "ACT_Order_Approve microflow'u aynı anda iki kez çalışmasın; ikinci çağrıda kullanıcıya 'Sipariş zaten onaylanıyor' mesajı gösterilsin. Ayrıca bu microflow'da entity erişim kuralları uygulansın.",
+      "ops": [
+        "changeMicroflow"
+      ],
+      "families": [
+        "flows"
+      ],
+      "checks": {
+        "files": {
+          "ACT_Order_Approve\\.txt$": "(?s)APPLY ENTITY ACCESS: yes.*CONCURRENT EXECUTION: disallowed"
+        }
+      }
+    },
+    {
+      "id": "wfdelbranch",
+      "setup": [
+        {
+          "op": "createMicroflow",
+          "module": "MyFirstModule",
+          "name": "ACT_Order_Check",
+          "parameters": [
+            {
+              "name": "Order",
+              "type": "MyFirstModule.Order"
+            }
+          ],
+          "actions": [
+            {
+              "action": "if",
+              "condition": "$Order/Paid",
+              "caption": "Paid?",
+              "then": [
+                {
+                  "action": "log",
+                  "message": "paid order"
+                }
+              ],
+              "else": [
+                {
+                  "action": "log",
+                  "message": "unpaid order"
+                },
+                {
+                  "action": "log",
+                  "message": "send reminder"
+                }
+              ]
+            },
+            {
+              "action": "log",
+              "message": "check done"
+            }
+          ]
+        }
+      ],
+      "text": "ACT_Order_Check microflow'undaki 'Paid?' kararının false (ödenmemiş) dalını içindeki adımlarla birlikte sil; ödenmiş yolu doğrudan ana hat olsun.",
+      "ops": [
+        "deleteBranch"
+      ],
+      "families": [
+        "flows"
+      ],
+      "checks": {
+        "files": {
+          "ACT_Order_Check\\.txt$": "^(?![\\s\\S]*(unpaid order|send reminder))[\\s\\S]*paid order[\\s\\S]*check done"
+        }
+      }
+    },
+    {
+      "id": "wfreroute",
+      "setup": [
+        {
+          "op": "createMicroflow",
+          "module": "MyFirstModule",
+          "name": "ACT_Order_Route",
+          "parameters": [
+            {
+              "name": "Order",
+              "type": "MyFirstModule.Order"
+            }
+          ],
+          "actions": [
+            {
+              "action": "if",
+              "condition": "$Order/Paid",
+              "caption": "Paid?",
+              "then": [
+                {
+                  "action": "log",
+                  "message": "paid order"
+                }
+              ],
+              "else": [
+                {
+                  "action": "log",
+                  "message": "remind customer"
+                }
+              ]
+            },
+            {
+              "action": "log",
+              "message": "archive order"
+            },
+            {
+              "action": "log",
+              "message": "route done"
+            }
+          ]
+        }
+      ],
+      "text": "ACT_Order_Route'ta 'Paid?' kararının false dalı 'remind customer' adımına gitmesin, doğrudan 'route done' log adımına bağlansın; artık hiçbir yoldan ulaşılmayan adım silinsin.",
+      "ops": [
+        "rerouteBranch"
+      ],
+      "families": [
+        "flows"
+      ],
+      "checks": {
+        "files": {
+          "ACT_Order_Route\\.txt$": "^(?![\\s\\S]*remind customer)[\\s\\S]*route done"
+        }
+      }
+    },
+    {
+      "id": "wfemail",
+      "setup": [
+        {
+          "op": "createMicroflow",
+          "module": "MyFirstModule",
+          "name": "ACT_Order_Ship",
+          "parameters": [
+            {
+              "name": "Customer",
+              "type": "MyFirstModule.Customer"
+            }
+          ],
+          "actions": [
+            {
+              "action": "log",
+              "message": "shipping"
+            }
+          ]
+        }
+      ],
+      "text": "ACT_Order_Ship microflow'unun sonuna müşteriye ($Customer/Email) 'Siparişiniz kargoda' konulu bir e-posta gönderen adım ekle. SMTP sunucusu smtp.example.com, port 587, TLS; gönderen shop@example.com.",
+      "ops": [
+        "addActions"
+      ],
+      "families": [
+        "flows"
+      ],
+      "checks": {
+        "files": {
+          "ACT_Order_Ship\\.txt$": "SendEmail|SENDEMAIL|SEND EMAIL"
+        }
+      }
+    },
+    {
+      "id": "wfunlock",
+      "setup": [
+        {
+          "op": "createPage",
+          "kind": "userTaskPage",
+          "module": "MyFirstModule",
+          "name": "Order_Review_Task",
+          "outcomes": [
+            "Approve",
+            "Reject"
+          ]
+        },
+        {
+          "op": "createWorkflow",
+          "module": "MyFirstModule",
+          "name": "WF_Order",
+          "context": "MyFirstModule.Order",
+          "steps": [
+            {
+              "step": "userTask",
+              "name": "review",
+              "caption": "Review order",
+              "page": "MyFirstModule.Order_Review_Task",
+              "outcomes": [
+                "Approve",
+                "Reject"
+              ]
+            }
+          ]
+        }
+      ],
+      "text": "WF_Order workflow'unun kilidini açan ACT_WF_Order_Unlock adında bir microflow yaz; kilitliyken duraklatılan örnekler de devam etsin.",
+      "ops": [
+        "createMicroflow"
+      ],
+      "families": [
+        "workflows"
+      ],
+      "checks": {
+        "files": {
+          "ACT_WF_Order_Unlock\\.txt$": "RESUME WORKFLOWS[\\s\\S]*WF_Order"
+        }
+      }
+    },
+    {
+      "id": "wfsplitmove",
+      "setup": [
+        {
+          "op": "createMicroflow",
+          "module": "MyFirstModule",
+          "name": "ACT_Order_Sync",
+          "parameters": [
+            {
+              "name": "Order",
+              "type": "MyFirstModule.Order"
+            }
+          ],
+          "actions": [
+            {
+              "action": "log",
+              "message": "start sync"
+            },
+            {
+              "action": "commit",
+              "variable": "Order",
+              "onError": {
+                "actions": [
+                  {
+                    "action": "log",
+                    "message": "commit failed",
+                    "level": "Error"
+                  },
+                  {
+                    "action": "error"
+                  }
+                ]
+              }
+            },
+            {
+              "action": "log",
+              "message": "notify"
+            },
+            {
+              "action": "log",
+              "message": "sync done"
+            }
+          ]
+        }
+      ],
+      "text": "ACT_Order_Sync microflow'unda Order'ı commit eden adımı (hata işleyicisiyle birlikte) 'notify' log adımından sonraya taşı.",
+      "ops": [
+        "moveAction"
+      ],
+      "families": [
+        "flows",
+        "error handling"
+      ],
+      "checks": {
+        "files": {
+          "ACT_Order_Sync\\.txt$": "(?s)notify.*COMMIT.*commit failed"
+        }
+      }
     }
   ]
 }
