@@ -46,6 +46,16 @@ function defaultsOf(schema, type, cache) {
     return props;
 }
 
+// A qualified name after the renames of this change ("Old.Name -> New.Name (n references)" in client.renames).
+function renamed(client, v) {
+    let out = v;
+    for (const r of client.renames || []) {
+        const m = /^(\S+) -> (\S+) \(/.exec(r);
+        if (m && (out === m[1] || out.startsWith(m[1] + "."))) out = m[2] + out.slice(m[1].length);
+    }
+    return out;
+}
+
 // enc: Project.encode() result. Returns ["<Module.Doc>: <Type>.<prop> = <value> was not stored", ...].
 function lostProperties(client, model, enc) {
     const out = [];
@@ -72,6 +82,7 @@ function lostProperties(client, model, enc) {
             for (const [k, v] of Object.entries(w.props)) {
                 if (same(g.props[k], v)) continue;
                 if (b && k in b.props && same(b.props[k], v)) continue; // untouched by the script
+                if (typeof v === "string" && renamed(client, v) === g.props[k]) continue; // a name set, then renamed by the same change
                 if (!(k in g.props)) {
                     // this Mendix version does not store k: fine while the script left it at the SDK default
                     if (defaults && same(defaults[k], v)) continue;

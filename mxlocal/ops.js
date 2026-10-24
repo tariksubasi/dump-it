@@ -13,12 +13,14 @@ const { ATTRIBUTE_TYPES, DATA_TYPES, suggest, fail, validate, bool, noDollar, en
 const { makeFlows, ACTIONS, CONTROL, COMMON, CREATES } = require("./ops-flows");
 const { makePages, PAGE_FIELDS, MENU_FIELDS, HOME_FIELDS, widgetFields, NO_MENU_ROLES } = require("./ops-pages");
 const { makePageEdit, PAGE_EDIT_OPS, PAGE_EDIT_NAMES, FIELD_SYNONYMS } = require("./ops-page-edit");
+const { WIDGET_EDIT_OPS, WIDGET_EDIT_SYNONYMS } = require("./widget-edit");
 const { makeSecurity, SECURITY_OPS } = require("./ops-security");
-const { makeMappings, MAPPING_OPS } = require("./ops-mappings");
+const { makeMappings, MAPPING_OPS, integChangedLater } = require("./ops-mappings");
 const { makeTexts, TEXT_OPS } = require("./ops-texts");
 const { makeNav, NAV_OPS, MENU_EXTRA, extendedMenuItem } = require("./ops-nav");
 const { makeTheme, THEME_OPS } = require("./theme");
 const { makeDsTheme, DS_THEME_OPS } = require("./ds-theme");
+const { makeNativeTheme, NATIVE_OPS, nativeChangedLater } = require("./theme-native");
 const { makeMarket, MARKET_OPS } = require("./marketplace");
 const { makeCode, CODE_OPS } = require("./ops-code");
 const { makeFlowEdit, FLOW_EDIT_OPS } = require("./ops-flow-edit");
@@ -36,6 +38,8 @@ const { makeOffline, OFFLINE_OPS } = require("./ops-offline");
 const { makeDmLayout, DMLAYOUT_OPS } = require("./ops-dmlayout");
 const { makeComposite, COMPOSITE_OPS, COMPOSITE_SYNONYMS } = require("./ops-composite");
 const { makeGeneral, GENERAL_OPS } = require("./ops-general");
+const { makeDocs, DOCS_OPS, DOCS_SYNONYMS, docsChangedLater } = require("./ops-docs");
+const { makeServices, SERVICE_OPS, SERVICE_SYNONYMS, servicesChangedLater } = require("./ops-services");
 const { makeFolders, FOLDER_OPS, FOLDER_SYNONYMS } = require("./ops-folders");
 const { makeApp, APP_OPS, APP_SYNONYMS } = require("./ops-app");
 
@@ -82,7 +86,7 @@ const OPS = {
         fields: { microflow: "R Module.Microflow or Module.Nanoflow", after: "optional \"start\", the variable name an existing step creates, or a step id (see: steps)", branch: "with after = a decision: which outgoing flow, e.g. \"true\" or an enumeration value", handlerOf: "optional step id: put the actions at the start of that step's custom error handler (instead of after; later in a handler: after = a step id inside it)", actions: "R [ actions ]" }
     },
     changeAction: {
-        doc: "Change one existing step. Get its id with: steps Module.Flow. Give only the fields to change.",
+        doc: "Change one existing step. Get its id with: steps Module.Flow. Give only the fields to change (sendRestRequest, sendEmail, callWebService, ...: an object field like args merges with the stored one, null removes a field).",
         fields: {
             microflow: "R Module.Microflow or Module.Nanoflow", id: "R step id from 'steps', e.g. 3f2a9c1b",
             xpath: "retrieve: new XPath", first: "retrieve: true/false", entity: "retrieve: Module.Entity",
@@ -100,6 +104,7 @@ const OPS = {
             headers: "callRest: { \"Name\": \"expression\" } (replaces all)", timeout: "callRest: seconds", body: "callRest: body text", bodyArgs: "callRest: [\"expression\"]",
             auth: "callRest: { \"user\": \"expression\", \"password\": \"expression\" } or \"none\"", proxy: "callRest: default | none | { host, port, user, password }", errorBody: "callRest: true/false",
             initial: "aggregateList reduce: initial value expression",
+            queue: "call/callJava (microflows): Module.Queue to run it in a task queue, \"none\" to run it directly", retry: "call/callJava in a queue: { \"retries\": 3, \"interval\": 10, \"unit\": \"Seconds\" } or { \"retries\", \"initialInterval\", \"maximumInterval\", \"unit\" }, \"none\" = no retry",
             onError: "action or loop: \"continue\" | \"rollback\" / \"abort\" (default; removes a custom handler) | \"logAndShow\" | \"rethrow\" | { \"pattern\": ..., ... } | { \"rollback\": true/false, \"actions\": [ ... ] }: replaces the error handling (the old custom handler and its steps go)"
         }
     },
@@ -129,16 +134,18 @@ const OPS = {
         fields: { module: "R module name", name: "R layout name", from: "optional Module.Layout to copy (e.g. Atlas_Core.Atlas_Default); without it a new layout is built", folder: "optional folder path",
             type: "optional Responsive | Popup | ModalPopup | Tablet | Phone (default Responsive)", preset: "optional sidebar | topbar | blank (default sidebar; blank for pop-ups and Phone)",
             placeholders: "optional [ \"Main\", ... ] placeholder names in the content region (default [ \"Main\" ])",
-            header: "optional [ widgets ] in the top bar, after the side bar toggle and brand (createPage kinds)", sidebar: "optional [ widgets ] in the side bar, below the menu (sidebar / topbar)", footer: "optional [ widgets ] in a footer region at the bottom",
+            header: "optional [ widgets ] in the top bar, after the side bar toggle and brand (createPage kinds)", sidebar: "optional [ widgets ] in the side bar, below the menu (sidebar / topbar); native copy (from a native layout): true/false has a side menu", footer: "optional [ widgets ] in a footer region at the bottom",
             menu: "optional what the menu shows: a navigation profile (default \"Responsive\"), a menu document Module.Menu, or false (no menu); sidebar: a navigation tree, topbar: a menu bar (and a navigation tree for phones)",
-            brand: "optional text or Module.Images.Logo at the start of the top bar (default: the module name; \"\" = none)", class: "optional CSS class(es) of the layout (default Atlas's: layout-atlas layout-atlas-responsive-default / -topbar)" } },
+            brand: "optional text or Module.Images.Logo at the start of the top bar (default: the module name; \"\" = none)", bottomBar: "optional native copy: true/false shows the native bottom bar", popup: "optional native copy: true = a pop-up layout (pages open as a modal), false = a normal one", class: "optional CSS class(es) of the layout (default Atlas's: layout-atlas layout-atlas-responsive-default / -topbar)" } },
     createPage: { doc: "Create a page (or with kind userTaskPage a workflow user task page): an edit form for an entity (inputs by attribute type, Save/Cancel), an empty page, or a page from widgets (layout grids, containers, texts, data grids (classic, or a Data grid 2 built from widgets/*.mpk), data views that listen to a grid, list views, buttons, inputs), optionally with a menu item. Uses the layout the project's other pages use.", fields: { ...PAGE_FIELDS, ...USER_TASK_PAGE_FIELDS } },
     ...PAGE_EDIT_OPS,
+    ...WIDGET_EDIT_OPS,
     addMenuItem: { doc: "Add a menu item that opens a page, runs a microflow or another action (sign out, open a link, call a flow) to a navigation profile's menu or a menu document; a native page becomes a bottom bar item of the native profile.", fields: { ...MENU_FIELDS, ...MENU_EXTRA } },
     setHomePage: { doc: "Set the home page (or home microflow) of a navigation profile, for everyone or for some user roles (native profile: a native page or nanoflow).", fields: HOME_FIELDS },
     ...NAV_OPS,
     ...THEME_OPS,
     ...DS_THEME_OPS,
+    ...NATIVE_OPS,
     ...MARKET_OPS,
     ...MAPPING_OPS,
     ...REST_OPS,
@@ -151,12 +158,22 @@ const OPS = {
     ...OFFLINE_OPS,
     ...DMLAYOUT_OPS,
     ...GENERAL_OPS,
+    ...DOCS_OPS,
+    ...SERVICE_OPS,
     ...FOLDER_OPS,
     ...APP_OPS,
     moveDocument: { doc: "Move a document to another folder of the same module.", fields: { document: "R Module.Document", folder: "optional folder path, e.g. Orders/Actions (missing or \"\" = the module root)" } },
     rename: { doc: "Rename a module, document, entity, attribute, association or enumeration value. Updates references, reports names left in expressions/XPath/Java.", fields: { target: "R qualified name, e.g. Module.Entity.Attribute", newName: "R new short name" } },
     delete: { doc: "Delete a document, entity, attribute, association, enumeration value or module role. Lists what still uses it. (Validation rules, event handlers, indexes: deleteValidationRule, deleteEventHandler, deleteIndex; access rules: deleteAccessRule; widgets: deleteWidget; flow steps: deleteAction.)", fields: { target: "R qualified name" } }
 };
+// changeAction also changes the fields of the actions that can give their stored fields back (spec): sendRestRequest,
+// sendEmail, callWebService, ...; it builds them again with the new fields (ops-flows.js rebuildExtra)
+{
+    const byField = {};
+    for (const [n, x] of Object.entries(ACTIONS)) if (x.spec) for (const k of Object.keys(x.fields)) (byField[k] = byField[k] || []).push(n);
+    const f = OPS.changeAction.fields;
+    for (const [k, names] of Object.entries(byField)) f[k] = `${f[k] ? f[k] + "; " : ""}${names.join(", ")}: as in ops <action>`;
+}
 
 // Without a name: one line per operation (short, so a small model reads it every time). With a name: the fields of
 // that operation, action or flow control kind.
@@ -477,14 +494,17 @@ function bind(model, client) {
     const pageOps = makePages({ model, client, get, exists, entity, text, translationsOf, folder, attributeChain, loadParents, persistable, dataType, grantAccess: o => impl.grantAccess(o), createNanoflow: o => createFlowOp(o, true) });
     const pageEdit = makePageEdit({ model, client, get, text, translationsOf, attributeChain, persistable }, pageOps.internals);
     const securityOps = makeSecurity({ model, get, client });
-    const refOps = makeRefOps({ model, client, get, exists, dataType, folder, entity }, flows);
+    const refOps = makeRefOps({ model, client, get, exists, dataType, folder, entity, text }, flows);
     const copyOps = makeCopy({ model, client, get, folder });
     const entityOps = makeEntity({ model, client, get, entity, persistable, isFresh: qn => isFresh(qn) });
+    // a native bottom bar item (page of a native layout, or "profile": "Native"): built by ops-pages also with icon / after / before
+    const nativeMenuItem = o => o.menu === undefined && o.microflow === undefined && (/^native/i.test(String(o.profile || "")) || (o.page !== undefined && require("./ops-native-ui").isNativePageQn(client, model, String(o.page)) === true));
     const themeOps = makeTheme({ client });
     const dsTheme = makeDsTheme({ model, client, impl: () => impl, theme: themeOps });
+    const nativeTheme = makeNativeTheme({ client });
     const marketOps = makeMarket({ client, model });
     const navOps = makeNav({ model, client, get, exists, text, translationsOf, folder, grantAccess: o => impl.grantAccess(o) }, pageOps.internals);
-    const mappingOps = makeMappings({ model, get, exists, entity, folder, attributeChain, loadParents, impl: () => impl });
+    const mappingOps = makeMappings({ model, client, get, exists, entity, folder, attributeChain, loadParents, impl: () => impl, xml: () => xmlOps.internals });
     const domainOps = makeDomain({ model, client, get, exists, entity, folder, text, attributeType, loadParents, persistable, domainModel, isFresh: qn => isFresh(qn), markFresh: qn => fresh.add(qn) });
     // a parent: a project entity, or a System entity (by name, as Studio Pro stores it)
     async function setParent(e, qn) {
@@ -495,6 +515,8 @@ function bind(model, client) {
     const version = client.project.version;
     const restOps = makeRest({ model, client, get, exists, folder, version, mappingInternals: mappingOps.internals, impl: () => impl });
     const odataOps = makeOData({ model, client, get, exists, entity, folder, version, persistable, attributeChain, loadParents });
+    const docsOps = makeDocs({ model, client, get, exists, entity, folder, version, text, attributeChain, loadParents, dataType });
+    const serviceOps = makeServices({ model, client, get, exists, entity, folder, version, attributeChain, loadParents });
     const xmlOps = makeXml({ model, client, get, exists, entity, folder, version, attributeChain, loadParents, mappingInternals: mappingOps.internals });
     const workflowOps = makeWorkflows({ model, client, get, exists, entity, folder, version, persistable, attributeChain, loadParents, grantAccess: o => impl.grantAccess(o), impl: () => impl,
         textAll: (owner, prop, value) => pageOps.internals.templateAll(owner, prop, value, null, "", true) });
@@ -788,9 +810,8 @@ function bind(model, client) {
                 info.typeOfRange = o.min !== undefined && o.max !== undefined ? dm.RangeType.Between : o.min !== undefined ? dm.RangeType.GreaterThanOrEqualTo : dm.RangeType.SmallerThanOrEqualTo;
             }
             if (kind === "regex") {
-                const re = await get(o.regex);
-                if (!(re instanceof sdk.regularexpressions.RegularExpression)) throw new Error(`'${o.regex}' is not a regular expression document`);
-                info.regularExpression = re;
+                if (!(attr.type instanceof dm.StringAttributeType)) throw new Error(`addValidationRule regex: ${o.entity}.${o.attribute} is not a String attribute`);
+                info.regularExpression = await docsOps.regexDoc(o.regex, `addValidationRule ${o.entity}.${o.attribute}`);
             }
             if (kind === "equals") {
                 info.useValue = true;
@@ -921,14 +942,18 @@ function bind(model, client) {
         deleteWidget: o => pageEdit.deleteWidget(o),
         moveWidget: o => pageEdit.moveWidget(o),
         changePage: o => pageEdit.changePage(o),
-        addMenuItem: o => (extendedMenuItem(o) ? navOps.addMenuItem(o) : pageOps.addMenuItem(o)),
+        convertGrid: o => pageEdit.convertGrid(o),
+        convertWidget: o => pageEdit.convertWidget(o),
+        createLoginPage: o => pageEdit.createLoginPage(o, impl),
+        addMenuItem: o => (extendedMenuItem(o) && !nativeMenuItem(o) ? navOps.addMenuItem(o) : pageOps.addMenuItem(o)),
         ...navOps.impl,
         ...themeOps.impl,
         ...dsTheme.impl,
+        ...nativeTheme.impl,
         ...marketOps.impl,
         async createLayout(o) {
             if (o.from === undefined) return compositeOps.createLayoutFresh(o);
-            const extra = compositeOps.LAYOUT_FROM_ONLY.filter(k => o[k] !== undefined);
+            const extra = compositeOps.LAYOUT_FROM_ONLY.filter(k => o[k] !== undefined && !(k === "sidebar" && typeof o.sidebar === "boolean")); // sidebar true/false: the native copy option
             if (extra.length) throw new Error(`createLayout ${o.module}.${o.name}: "from" copies ${o.from} as it is; ${extra.join(", ")} build a new layout (leave out "from"), or change the copy afterwards with addWidgets / changeWidget (page = ${o.module}.${o.name})`);
             validName(o.name, "layout name");
             const qn = `${o.module}.${o.name}`;
@@ -939,6 +964,15 @@ function bind(model, client) {
             l.name = o.name;
             for (const k of ["canvasWidth", "canvasHeight"]) if (l[k] !== src[k]) l[k] = src[k];
             l.content = src.content.deepCopy(model);
+            // native layout options (G20 / N3)
+            const nat = ["bottomBar", "sidebar", "popup"].filter(k => o[k] !== undefined);
+            if (nat.length && !(l.content instanceof pages.NativeLayoutContent)) {
+                l.delete();
+                throw new Error(`createLayout ${qn}: ${nat.join(", ")} ${nat.length > 1 ? "go" : "goes"} with a native layout; ${src.qualifiedName} is a web layout (copy a NativePhone_* layout)`);
+            }
+            if (o.bottomBar !== undefined) l.content.showBottomBar = bool(o.bottomBar);
+            if (o.sidebar !== undefined) l.content.sidebar = bool(o.sidebar);
+            if (o.popup !== undefined) l.content.layoutType = bool(o.popup) ? pages.NativeLayoutType.Popup : pages.NativeLayoutType.Default;
             if (src.appearance) l.appearance = src.appearance.deepCopy(model);
             const phs = [];
             l.traverse(el => el instanceof pages.Placeholder && phs.push(el.name));
@@ -982,6 +1016,8 @@ function bind(model, client) {
         ...restOps.impl,
         ...odataOps.impl,
         ...xmlOps.impl,
+        ...docsOps.impl,
+        ...serviceOps.impl,
         ...workflowOps.impl,
         ...scaffoldOps.impl,
         ...compositeOps.impl,
@@ -1156,9 +1192,10 @@ function bind(model, client) {
         ...pageEdit.checks,
         setHomePage: o => pageOps.checks.setHomePage(o),
         ...navOps.checks,
-        addMenuItem: o => (extendedMenuItem(o) ? navOps.checks.addMenuItem(o) : pageOps.checks.addMenuItem(o)),
+        addMenuItem: o => (extendedMenuItem(o) && !nativeMenuItem(o) ? navOps.checks.addMenuItem(o) : pageOps.checks.addMenuItem(o)),
         ...themeOps.checks,
         ...dsTheme.checks,
+        ...nativeTheme.checks,
         ...marketOps.checks,
         async moveDocument(o) {
             const doc = await get(o.document);
@@ -1190,6 +1227,8 @@ function bind(model, client) {
         ...restOps.checks,
         ...odataOps.checks,
         ...xmlOps.checks,
+        ...docsOps.checks,
+        ...serviceOps.checks,
         ...scaffoldOps.checks,
         ...compositeOps.checks,
         ...smallOps.checks,
@@ -1208,9 +1247,12 @@ function bind(model, client) {
         const where = `Op ${i + 1}`;
         if (!o || typeof o !== "object") throw new Error(`${where}: each op must be an object { "op": ... }`);
         const name = Object.keys(OPS).find(k => k.toLowerCase() === String(o.op).toLowerCase());
+        const OP_HINTS = { moveColumn: "use changeWidget \"columns\": { \"move\": [ { \"column\": \"Note\", \"before\": \"Number\" } ] }", convertDataGrid: "use convertGrid", convertToDataGrid2: "use convertGrid", changeDataSource: "use changeWidget \"source\"" };
+        const hint = Object.keys(OP_HINTS).find(k => k.toLowerCase() === String(o.op).toLowerCase());
+        if (!name && hint) throw new Error(`${where}: unknown op '${o.op}': ${OP_HINTS[hint]}`);
         if (!name) fail(`${where}: unknown op '${o.op}'`, o.op, Object.keys(OPS));
         if (name === "addMenuItem" && o.roles !== undefined) throw new Error(`${where} (addMenuItem): ${NO_MENU_ROLES(o.page)}`);
-        for (const [k, hint] of Object.entries({ ...(DOMAIN_SYNONYMS[name] || {}), ...(FIELD_SYNONYMS[name] || {}), ...(SCAFFOLD_SYNONYMS[name] || {}), ...(SMALL_SYNONYMS[name] || {}), ...(COMPOSITE_SYNONYMS[name] || {}), ...(FOLDER_SYNONYMS[name] || {}), ...(APP_SYNONYMS[name] || {}) })) if (o[k] !== undefined && !OPS[name].fields[k]) throw new Error(`${where} (${name}): unknown field '${k}': ${hint}`);
+        for (const [k, hint] of Object.entries({ ...(DOMAIN_SYNONYMS[name] || {}), ...(FIELD_SYNONYMS[name] || {}), ...(SCAFFOLD_SYNONYMS[name] || {}), ...(SMALL_SYNONYMS[name] || {}), ...(COMPOSITE_SYNONYMS[name] || {}), ...(DOCS_SYNONYMS[name] || {}), ...(WIDGET_EDIT_SYNONYMS[name] || {}), ...(SERVICE_SYNONYMS[name] || {}) , ...(FOLDER_SYNONYMS[name] || {}), ...(APP_SYNONYMS[name] || {}) })) if (o[k] !== undefined && !OPS[name].fields[k]) throw new Error(`${where} (${name}): unknown field '${k}': ${hint}`);
         validate("op", name, OPS[name], o, where);
         return { name, where };
     }
@@ -1250,10 +1292,12 @@ function bind(model, client) {
             const opposite = { grantAccess: "revokeAccess", revokeAccess: "grantAccess" }[name];
             const undone = opposite && rest.some(x => x.op === opposite && x.document === o.document);
             // a later page edit of the same page that deletes, moves or renames one of this op's widgets (or changes it again)
-            const mine = PAGE_EDIT_NAMES.includes(name) ? pageEdit.touched(o) : [];
-            const undoes = x => ["deleteWidget", "moveWidget"].includes(x.op) || (x.op === "changeWidget" && (x.name !== undefined || name === "changeWidget"));
-            const reworked = mine.length && rest.some(x => x.page === o.page && undoes(x) && pageEdit.touched(x).some(n => mine.includes(n)));
-            if ((later && name !== "rename" && name !== "delete") || edited || undone || reworked || changedLater(name, o, rest) || smallChangedLater(name, o, rest) || workflowChangedLater(name, o, rest)) continue;
+            const mine = PAGE_EDIT_NAMES.includes(name) || name === "convertWidget" ? pageEdit.touched(o) : [];
+            const undoes = x => ["deleteWidget", "moveWidget", "convertWidget"].includes(x.op) || (x.op === "changeWidget" && (x.name !== undefined || name === "changeWidget"));
+            // a later convertWidget changes the kinds createPage counted
+            const converted = name === "createPage" && rest.some(x => x.op === "convertWidget" && x.page === `${o.module}.${o.name}`);
+            const reworked = converted || (mine.length && rest.some(x => x.page === o.page && undoes(x) && pageEdit.touched(x).some(n => mine.includes(n))));
+            if ((later && name !== "rename" && name !== "delete") || edited || undone || reworked || changedLater(name, o, rest) || smallChangedLater(name, o, rest) || workflowChangedLater(name, o, rest) || integChangedLater(name, o, rest) || docsChangedLater(name, o, rest) || servicesChangedLater(name, o, rest) || nativeChangedLater(name, o, rest)) continue;
             try {
                 failed.push(...(await checks[name](name === "setTranslations" ? o : await textOps.prepare(o, false))).map(f => `${i + 1}. ${name}: ${f}`));
             } catch (e) {
@@ -1263,7 +1307,7 @@ function bind(model, client) {
         return failed;
     }
 
-    const api = { get, runPlan, checkPlan, dataType, folder, lintExpressions: () => lintChanged(), layoutCheck: () => flows.layoutReport(), steps: qn => flows.steps(qn), widgets: qn => pageEdit.widgets(qn), widgetType: name => (name ? pageOps.internals.widgetType(name) : pageOps.internals.widgetTypes()), texts: (scope, missing) => textOps.list(scope, missing) };
+    const api = { get, runPlan, checkPlan, dataType, folder, lintExpressions: () => lintChanged(), layoutCheck: () => flows.layoutReport(), steps: qn => flows.steps(qn), widgets: qn => pageEdit.widgets(qn), widgetType: name => (name ? pageOps.internals.widgetType(name) : pageOps.internals.widgetTypes()), texts: (scope, missing) => textOps.list(scope, missing), mappingTest: (qn, text) => mappingOps.mappingTest(qn, text) };
     for (const name of Object.keys(OPS)) {
         api[name] = o => {
             validate("op", name, OPS[name], o || {}, `ops.${name}`);

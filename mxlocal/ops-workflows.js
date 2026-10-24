@@ -71,14 +71,17 @@ const WORKFLOW_OPS = {
         }
     },
     changeWorkflow: {
-        doc: "Change a workflow (in this order: add, move, change, remove): add, remove or move activities, change an activity (user task page, assignee, due date, outcomes, timeout; decision condition; called microflow; timer delay; jump target), change title/description/due date. Activity names: the workflows export (userTask1, decision1, ...).",
+        doc: "Change a workflow (in this order: add, move, change, remove): add, remove or move activities, change an activity (user task page, assignee, due date, outcomes, timeout; decision condition; called microflow; timer delay; jump target), change title/description/due date and the settings (context entity, admin page, roles that open its pages). Activity names: the workflows export (userTask1, decision1, ...).",
         fields: {
             workflow: "R Module.Workflow",
             add: "optional [ { \"after\": \"activity name\" or \"start\", \"steps\": [ steps ] } | { \"before\": \"activity name\", \"steps\": [...] } | { \"into\": \"activity name\", \"outcome\": \"Approve\" / \"true\" / \"Module.Enum.Value\" / \"\" / path number of a parallel split (one more: a new path) / \"timeout\", \"steps\": [...] } ] (steps as in createWorkflow; ops userTask)",
             remove: "optional [ \"activity name\" ] removes the activity and the steps in its outcomes",
             move: "optional [ { \"activity\": \"name\", \"after\" | \"before\" | \"into\" + \"outcome\": ... } ] (with the steps in its outcomes)",
             change: "optional { \"activity name\": { field: value } }: caption; userTask: page, assignee (null: everyone), dueDate, taskName, description, onCreated (\"\": none), autoAssign, outcomes { \"add\": [ \"Escalate\" ] or { \"Escalate\": [ steps ] }, \"remove\": [ \"Reject\" ], \"rename\": { \"Approve\": \"Accept\" } } (task page buttons follow), timeout (null: none); decision: condition; callMicroflow: microflow, args, timeout; callWorkflow: context, async, timeout; waitForTimer: delay; waitForNotification: timeout; jumpTo: target",
-            title: "optional new display name", description: "optional new description", dueDate: "optional DateTime expression (\"\": none)"
+            title: "optional new display name", description: "optional new description", dueDate: "optional DateTime expression (\"\": none)",
+            context: "optional Module.Entity: a new context entity (stored); refused while an expression or a called microflow needs the old one",
+            adminPage: "optional Module.Page with a System.Workflow parameter (\"\": none): the workflow admin page",
+            roles: "optional [ \"Module.Role\" ] may open the admin page and every user task page of the workflow (workflow security)"
         }
     },
     deleteWorkflowActivity: {
@@ -189,6 +192,13 @@ const WORKFLOW_ACTIONS = {
             if (name === "AbortOperation") c.fillTemplate(op.reason, spec.reason || "", [], where);
             return a;
         },
+        spec(a) {
+            const op = a.operation;
+            const name = op ? op.structureTypeName.split("$")[1] : "";
+            const out = { workflow: op ? op.workflowVariable : "", operation: Object.keys(OPERATIONS).find(k => OPERATIONS[k] === name) || name };
+            if (op instanceof mf.AbortOperation && op.reason && typeof op.reason.text === "string" && op.reason.text) out.reason = op.reason.text;
+            return out;
+        },
         describe: a => `WORKFLOW ${a.operation ? a.operation.structureTypeName.split("$")[1].replace("Operation", "").toUpperCase() : "?"} $${a.operation ? a.operation.workflowVariable : "?"}`
     },
     retrieveWorkflowContext: {
@@ -277,7 +287,20 @@ const WORKFLOW_ACTIONS = {
             else a.pauseAllWorkflows = bool(spec.pauseAll, false);
             return a;
         },
-        describe: a => `LOCK WORKFLOW ${a.workflowSelection && a.workflowSelection.workflowQualifiedName}`
+        spec: a => ({ workflow: a.workflowSelection && a.workflowSelection.workflowQualifiedName, pauseAll: a.pauseAllWorkflows }),
+        describe: a => `LOCK WORKFLOW ${a.workflowSelection && a.workflowSelection.workflowQualifiedName}${a.pauseAllWorkflows ? " (pause running ones)" : ""}`
+    },
+    // F8: Unlock workflow as an action of its own (lockWorkflow "unlock": true still works); type() lets steps,
+    // changeAction and the checks recognize an unlock step
+    unlockWorkflow: {
+        doc: "Unlock a workflow definition: new instances can start again (Studio Pro: Unlock workflow).",
+        fields: { workflow: "R Module.Workflow", resumeAll: "optional true: also resume the instances the lock paused" },
+        type: () => mf.UnlockWorkflowAction,
+        async build(c, act, spec, where) {
+            return WORKFLOW_ACTIONS.lockWorkflow.build(c, act, { workflow: spec.workflow, unlock: true, pauseAll: spec.resumeAll }, where);
+        },
+        spec: a => ({ workflow: a.workflowSelection && a.workflowSelection.workflowQualifiedName, resumeAll: a.resumeAllPausedWorkflows }),
+        describe: a => `UNLOCK WORKFLOW ${a.workflowSelection && a.workflowSelection.workflowQualifiedName}${a.resumeAllPausedWorkflows ? " (resume paused ones)" : ""}`
     },
     notifyWorkflow: {
         doc: "Let a workflow continue at its waitForNotification step (Studio Pro: Notify workflow); 'variable' gets true when it did.",
@@ -1159,11 +1182,81 @@ function makeWorkflows(h) {
         }
         return `~ ${a.name}: ${done.join("; ") || "nothing"}`;
     }
+    // N-6: context entity and admin page of changeWorkflow
+    async function workflowSettings(st, o, where) {
+        const lines = [];
+        if (o.context !== undefined) {
+            const ent = await h.entity(o.context);
+            if (!h.persistable(ent)) throw new Error(`${where}: ${o.context} is not stored (persistable); a workflow context must be a stored entity`);
+            await h.loadParents(ent);
+            const old = st.ctxEnt;
+            const kin = e => {
+                const out = [];
+                for (let x = e; x; ) {
+                    out.push(x.qualifiedName);
+                    const g = x.generalization;
+                    x = g instanceof dm.Generalization && g.generalization && g.generalization.isLoaded ? g.generalization : null;
+                }
+                return out;
+            };
+            const fits = qn => kin(ent).includes(qn);
+            st.ctxEnt = ent;
+            const bad = [];
+            // every expression of the workflow that names $WorkflowContext/Attribute
+            st.d.traverse(el => {
+                for (const p of el.allProperties()) {
+                    if (typeof p.qualifiedName === "function" || !p.name) continue;
+                    let v;
+                    try {
+                        v = el[p.name];
+                    } catch (e) {
+                        continue;
+                    }
+                    if (typeof v !== "string" || !v.includes("$WorkflowContext")) continue;
+                    try {
+                        checkExpr(st, v, where);
+                    } catch (e) {
+                        bad.push(`${(el.name || (el.containerAsWorkflowActivity || {}).name || el.structureTypeName.split("$")[1])}: ${v}`);
+                    }
+                }
+            });
+            // called microflows that take the context object
+            const maps = [];
+            st.d.traverse(el => el instanceof wf.MicroflowCallParameterMapping && String(el.expression || "").trim() === "$WorkflowContext" && maps.push(el));
+            for (const m of maps) {
+                const qn = m.parameterQualifiedName || "";
+                const flow = await get(qn.split(".").slice(0, 2).join(".")).catch(() => null);
+                const par = flow && flow.objectCollection.objects.find(x => x instanceof mf.MicroflowParameterObject && x.name === qn.split(".").pop());
+                const want = par && par.variableType && par.variableType.entityQualifiedName;
+                if (want && !fits(want)) bad.push(`${qn} takes a ${want}`);
+            }
+            if (bad.length) {
+                st.ctxEnt = old;
+                throw new Error(`${where}: the workflow still needs ${old.qualifiedName}: ${[...new Set(bad)].slice(0, 5).join("; ")}. Change those first (change { activity: { ... } }), or pick an entity that has these attributes`);
+            }
+            st.d.parameter.entity = ent;
+            lines.push(`~ context ${ent.qualifiedName} (was ${old.qualifiedName})`);
+            warn(`${st.qn}: the context is now ${ent.qualifiedName}; microflows that start it (callWorkflow) pass a ${old.qualifiedName}: check them with usages ${st.qn}`);
+        }
+        if (o.adminPage !== undefined) {
+            if (o.adminPage === "" || o.adminPage === null) {
+                if (st.d.adminPage) st.d.adminPage.delete();
+                lines.push("~ no admin page");
+            } else {
+                const ap = await pageOf(o.adminPage, "System.Workflow", `${where} adminPage`);
+                (st.d.adminPage || wf.PageReference.createInWorkflowUnderAdminPage(st.d)).page = ap;
+                lines.push(`~ admin page ${o.adminPage}`);
+            }
+        }
+        return lines;
+    }
+
     async function changeWorkflow(o) {
         const where = `changeWorkflow ${o.workflow}`;
         const st = await openState(o.workflow, where);
         const lines = [];
-        if (!["add", "remove", "move", "change", "title", "description", "dueDate"].some(k => o[k] !== undefined)) throw new Error(`${where}: nothing to change; give add, remove, move, change, title, description or dueDate`);
+        if (!["add", "remove", "move", "change", "title", "description", "dueDate", "context", "adminPage", "roles"].some(k => o[k] !== undefined)) throw new Error(`${where}: nothing to change; give add, remove, move, change, title, description, dueDate, context, adminPage or roles`);
+        lines.push(...(await workflowSettings(st, o, where)));
         if (o.title !== undefined) {
             st.d.title = String(o.title);
             st.d.workflowName.text = st.d.title;
@@ -1204,7 +1297,16 @@ function makeWorkflows(h) {
         for (const [i, name] of [].concat(o.remove || []).entries()) lines.push(removeActivity(st, find(st, name, `${where} remove ${i + 1}`), `${where} remove ${i + 1}`));
         resolveJumps(st);
         validateFlows(st);
-        if (st.pages.size && o.roles) for (const p of st.pages) await h.grantAccess({ document: p, roles: o.roles });
+        if (o.roles !== undefined) {
+            // N-6 workflow security: the roles open the admin page and every user task page (Mendix keeps no roles on
+            // the workflow itself since 9.6)
+            if (!Array.isArray(o.roles) || !o.roles.length) throw new Error(`${where}: roles is [ "Module.Role", ... ]`);
+            const all = new Set(st.pages);
+            if (st.d.adminPage && st.d.adminPage.pageQualifiedName) all.add(st.d.adminPage.pageQualifiedName);
+            st.d.traverse(x => x instanceof wf.PageReference && x.pageQualifiedName && all.add(x.pageQualifiedName));
+            for (const p of all) await h.grantAccess({ document: p, roles: o.roles });
+            lines.push(all.size ? `~ ${o.roles.join(", ")} may open ${[...all].join(", ")}` : `~ no pages to open (the workflow has no admin or user task page)`);
+        } else if (st.pages.size && o.roles) for (const p of st.pages) await h.grantAccess({ document: p, roles: o.roles });
         return `${o.workflow}: ${lines.length} change(s)\n      ${lines.join("\n      ")}`;
     }
 
@@ -1256,6 +1358,8 @@ function makeWorkflows(h) {
                 }
             }
             if (o.title !== undefined && d.title !== String(o.title)) r.push(`${o.workflow} title is '${d.title}'`);
+            if (o.context !== undefined && d.parameter.entityQualifiedName !== String(o.context)) r.push(`${o.workflow} context is ${d.parameter.entityQualifiedName}`);
+            if (o.adminPage !== undefined && ((d.adminPage && d.adminPage.pageQualifiedName) || "") !== String(o.adminPage || "")) r.push(`${o.workflow} admin page is ${(d.adminPage && d.adminPage.pageQualifiedName) || "none"}`);
             return r;
         },
         async deleteWorkflowActivity(o) {

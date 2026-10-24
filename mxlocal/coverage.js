@@ -36,6 +36,12 @@ const COVERED_DOCUMENTS = {
     "scheduledevents.ScheduledEvent": ["createScheduledEvent", "changeScheduledEvent"],
     "security.ModuleSecurity": ["createModule", "createModuleRole"],
     "workflows.Workflow": ["createWorkflow", "changeWorkflow"],
+    "regularexpressions.RegularExpression": ["createRegularExpression"],
+    "queues.Queue": ["createTaskQueue"],
+    "customicons.CustomIconCollection": ["importIconCollection"],
+    "datasets.DataSet": ["createDataSet"],
+    "businessevents.BusinessEventService": ["createBusinessEventService"],
+    "webservices.PublishedWebService": ["publishWebService"],
     "xmlschemas.XmlSchema": ["createXmlSchema"]
 };
 
@@ -43,15 +49,12 @@ const COVERED_DOCUMENTS = {
 const NOT_SUPPORTED_DOCUMENTS = {
     "appservices.ConsumedAppService": { reason: "app services were removed in Mendix 8", studioPro: "use a consumed REST or OData service (Add other > Consumed REST service)" },
     "authentication.Authentication": { reason: "no Studio Pro sample in the test projects; its storage is not verified", studioPro: "App > Security > Authentication" },
-    "businessevents.BusinessEventService": { reason: "needs the Business Events module and an AsyncAPI contract Studio Pro generates (createBusinessEvent explains it)", studioPro: "right-click the module > Add other > Business event service" },
     "businessevents.ConsumedBusinessEventService": { reason: "Studio Pro imports the AsyncAPI contract", studioPro: "right-click the module > Add other > Business event service > import the contract" },
     "businessevents.PublishedBusinessEventService": { reason: "Studio Pro generates the AsyncAPI contract", studioPro: "right-click the module > Add other > Business event service" },
     "changedatacapture.EntityChangeDataCaptureService": { reason: "Mendix 11 only, no sample to verify its storage", studioPro: "right-click the module > Add other > Change data capture service" },
     "connectorkit.Connector": { reason: "made by Studio Pro extensions (Connector Kit), not by apps", studioPro: "install the connector from the Marketplace" },
     "connectorkit.ConnectorType": { reason: "made by Studio Pro extensions (Connector Kit), not by apps", studioPro: "install the connector from the Marketplace" },
     "customblobdocuments.CustomBlobDocument": { reason: "the contents belong to a Studio Pro extension", studioPro: "use the extension that owns the document" },
-    "customicons.CustomIconCollection": { reason: "needs the icon font file Studio Pro imports", studioPro: "right-click the module > Add other > Icon collection, import the font" },
-    "datasets.DataSet": { reason: "no Studio Pro sample in the test projects; OQL data sets are a legacy reporting feature", studioPro: "right-click the module > Add other > Data set" },
     "datatransformers.DataTransformer": { reason: "Mendix 11 only, no sample to verify its storage", studioPro: "right-click the module > Add other > Data transformer" },
     "databaseconnector.DatabaseConnection": { reason: "needs the Database Connector module and a live database to read the schema", studioPro: "install Database Connector, then Add other > Database connection" },
     "documenttemplates.DocumentTemplate": { reason: "no Studio Pro sample in the test projects; its widget tree is not verified", studioPro: "right-click the module > Add other > Document template" },
@@ -62,13 +65,10 @@ const NOT_SUPPORTED_DOCUMENTS = {
     "messagedefinitions.MessageDefinition2": { reason: "an older storage of message definitions; ops write MessageDefinitionCollection", studioPro: "Add other > Message definitions" },
     "nativepages.NativeLayout": { reason: "the old native layout type (Mendix 8); native layouts are pages.Layout now", studioPro: "copy a native layout of Atlas (createLayout from works on them)" },
     "nativepages.NativePage": { reason: "the old native page type (Mendix 8); native pages are pages.Page on a native layout (createPage)", studioPro: "Add page > native" },
-    "queues.Queue": { reason: "task queues are not written by ops yet", studioPro: "right-click the module > Add other > Task queue" },
-    "regularexpressions.RegularExpression": { reason: "regular expression documents are not written by ops yet", studioPro: "right-click the module > Add other > Regular expression" },
     "rest.ConsumedODataService": { reason: "Studio Pro reads the $metadata and keeps the external entities in step (consumeODataService explains it)", studioPro: "right-click the module > Add other > Consumed OData service" },
     "rest.PublishedODataService": { reason: "an older storage of published OData; ops write odatapublish.PublishedODataService2 (publishOData)", studioPro: "right-click the module > Add other > Published OData service" },
     "webservices.ImportedWebService": { reason: "Studio Pro imports the WSDL and its schemas (consumeWebService explains it)", studioPro: "right-click the module > Add other > Consumed web service" },
-    "webservices.PublishedAppService": { reason: "app services were removed in Mendix 8", studioPro: "publish a REST or OData service" },
-    "webservices.PublishedWebService": { reason: "published SOAP services are not written by ops yet", studioPro: "right-click the module > Add other > Published web service" }
+    "webservices.PublishedAppService": { reason: "app services were removed in Mendix 8", studioPro: "publish a REST or OData service" }
 };
 
 // SDK action type -> the ACTIONS key of the microflow/nanoflow action that writes it
@@ -83,25 +83,17 @@ const COVERED_ACTIONS = {
     NotifyWorkflowAction: "notifyWorkflow", OpenUserTaskAction: "openUserTask", OpenWorkflowAction: "openWorkflow", RestCallAction: "callRest",
     RestOperationCallAction: "sendRestRequest", RetrieveAction: "retrieve", RollbackAction: "rollback", SetTaskOutcomeAction: "completeUserTask",
     ShowHomePageAction: "showHomePage", ShowMessageAction: "message", ShowPageAction: "showPage", SynchronizeAction: "synchronize",
-    ValidationFeedbackAction: "validationFeedback", WorkflowCallAction: "callWorkflow", WorkflowOperationAction: "changeWorkflowState"
+    ValidationFeedbackAction: "validationFeedback", CancelSynchronizationAction: "cancelSynchronization", ClearFromClientAction: "clearFromDevice", DeleteExternalObject: "deleteExternalObject", SendExternalObject: "sendExternalObject", CallExternalAction: "callExternalAction", WebServiceCallAction: "callWebService", SendEmailAction: "sendEmail", UnlockWorkflowAction: "unlockWorkflow", WorkflowCallAction: "callWorkflow", WorkflowOperationAction: "changeWorkflowState"
 };
 
 const NOT_SUPPORTED_ACTIONS = {
     AppServiceCallAction: { reason: "app services were removed in Mendix 8", studioPro: "call a REST or OData service instead" },
-    CallExternalAction: { reason: "needs a consumed OData service with actions (Studio Pro reads its metadata)", studioPro: "Toolbox > Call external action" },
-    CancelSynchronizationAction: { reason: "not written by ops yet", studioPro: "nanoflow Toolbox > Cancel synchronization" },
-    ClearFromClientAction: { reason: "not written by ops yet", studioPro: "nanoflow Toolbox > Clear from device" },
     ConnectorActionCallAction: { reason: "made by Studio Pro extensions (Connector Kit)", studioPro: "the connector's own toolbox action" },
-    DeleteExternalObject: { reason: "needs external entities of a consumed OData service", studioPro: "Toolbox > Delete external object" },
     ExecuteDatabaseQueryAction: { reason: "needs the Database Connector module and a database connection document", studioPro: "Toolbox > Execute database query" },
     ImportExcelDataAction: { reason: "needs the Excel importer module and a template", studioPro: "Toolbox > Import data from Excel" },
     MLModelCallAction: { reason: "needs an ML model mapping (an imported .onnx file)", studioPro: "Toolbox > Call ML model" },
     PushToClientAction: { reason: "not written by ops yet", studioPro: "Toolbox > Push to client" },
-    SendEmailAction: { reason: "Mendix 11 built-in email: no sample to verify its storage", studioPro: "Toolbox > Send email" },
-    SendExternalObject: { reason: "needs external entities of a consumed OData service", studioPro: "Toolbox > Send external object" },
     TransformJsonAction: { reason: "needs a data transformer (Mendix 11), not written by ops", studioPro: "Toolbox > Transform JSON" },
-    UnlockWorkflowAction: { reason: "not written by ops yet", studioPro: "Toolbox > Unlock workflow" },
-    WebServiceCallAction: { reason: "needs a consumed web service (Studio Pro imports the WSDL)", studioPro: "Toolbox > Call web service" }
 };
 
 // concrete SDK subclasses of base: [ "ns.Name" ]

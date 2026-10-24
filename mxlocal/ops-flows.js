@@ -6,6 +6,7 @@ const { DATA_TYPES, suggest, fail, validate, bool, noDollar, enumValue } = requi
 const { makeFlowExtras, RETRIEVE_FIELDS, MEMBER_FIELDS } = require("./ops-flow-extras");
 const L = require("./flow-layout");
 const FE = require("./flow-errors");
+const { setQueue, queuedCallProblem } = require("./ops-docs");
 
 const { microflows: mf, domainmodels: dm, datatypes, pages, codeactions, javaactions, javascriptactions, importmappings, exportmappings, services } = sdk;
 
@@ -24,7 +25,7 @@ const ACTIONS = {
     change: { doc: "Change members of an object.", fields: { variable: "R variable to change (no $)", set: "{ \"Attribute\": \"expression\", \"Module.Assoc\": \"$Var\" } (set, add or remove is required)", ...MEMBER_FIELDS, commit: "optional true/false", refresh: "optional true/false" } },
     commit: { doc: "Commit an object or list.", fields: { variable: "R variable (no $)", events: "optional false = without events" } },
     delete: { doc: "Delete an object or list.", fields: { variable: "R variable (no $)" } },
-    call: { doc: "Call a microflow. In a nanoflow: a nanoflow or a microflow.", fields: { microflow: "R Module.Microflow or Module.Nanoflow", args: "optional { \"ParamName\": \"expression\" }", variable: "optional result variable name" } },
+    call: { doc: "Call a microflow. In a nanoflow: a nanoflow or a microflow.", fields: { microflow: "R Module.Microflow or Module.Nanoflow", args: "optional { \"ParamName\": \"expression\" }", variable: "optional result variable name", queue: "optional Module.Queue: run the call in the background in this task queue (microflows only; the call returns nothing; \"none\" in changeAction takes it out)", retry: "optional with queue: { \"retries\": 3, \"interval\": 10, \"unit\": \"Seconds\" } or exponential { \"retries\", \"initialInterval\", \"maximumInterval\", \"unit\": Seconds | Minutes | Hours }" } },
     log: { doc: "Write a log line (microflows only).", fields: { message: "R text; {1} {2} are filled from args", args: "optional [\"expression\", ...]", level: "optional Info | Warning | Error | Debug | Trace | Critical", node: "optional log node name (default the module name)", stackTrace: "optional true = add the stack trace of $latestError (in an error handler)" } },
     message: { doc: "Show a message to the user.", fields: { text: "R message text", type: "optional Information | Warning | Error", blocking: "optional true/false" } },
     variable: { doc: "Create a variable.", fields: { name: "R variable name", type: "R " + DATA_TYPES, value: "R initial value expression, e.g. 0 or 'text' or empty" } },
@@ -34,11 +35,12 @@ const ACTIONS = {
     showHomePage: { doc: "Open the home page (microflows only).", fields: {} },
     callJava: {
         doc: "Call a Java action (microflows only).",
-        fields: { javaAction: "R Module.JavaAction", args: "optional { \"Param\": \"expression\" } (every required parameter needs one; an entity type parameter takes \"Module.Entity\")", variable: "optional result variable name (when the Java action returns something)" }
+        fields: { javaAction: "Module.JavaAction (required, unless preset)", args: "optional { \"Param\": \"expression\" } (every required parameter needs one; an entity type parameter takes \"Module.Entity\")", variable: "optional result variable name (when the Java action returns something)",
+            preset: "optional publishBusinessEvent: the publish Java action of the Marketplace Business Events module (no javaAction needed)", event: "with preset publishBusinessEvent: the object variable of the business event to publish (a specialization of BusinessEvents.PublishedBusinessEvent)", queue: "optional Module.Queue: run the call in the background in this task queue (microflows only; the call returns nothing; \"none\" in changeAction takes it out)", retry: "optional with queue: { \"retries\": 3, \"interval\": 10, \"unit\": \"Seconds\" } or exponential { \"retries\", \"initialInterval\", \"maximumInterval\", \"unit\": Seconds | Minutes | Hours }" }
     },
     callJavaScript: {
         doc: "Call a JavaScript action (nanoflows only).",
-        fields: { jsAction: "R Module.JavaScriptAction", args: "optional { \"Param\": \"expression\" } (every required parameter needs one; an entity type parameter takes \"Module.Entity\")", variable: "optional result variable name (when the action returns something)" }
+        fields: { jsAction: "R Module.JavaScriptAction, or the name alone when one module has it (e.g. \"TakePicture\", \"GetCurrentLocation\", \"Vibrate\": NativeMobileResources / NanoflowCommons)", args: "optional { \"Param\": \"expression\" } (every required parameter needs one; an entity type parameter takes \"Module.Entity\")", variable: "optional result variable name (when the action returns something)" }
     },
     validationFeedback: {
         doc: "Show a validation message below the input of an attribute or association of an object.",
@@ -77,12 +79,12 @@ const ACTIONS = {
             proxy: "optional default | none | { \"host\": \"expression\", \"port\": \"expression\", \"user\": \"expression\", \"password\": \"expression\" } (default: default = the app's proxy settings)",
             response: "optional none | string | file | Module.ImportMapping (default: string when variable is set, else none)", variable: "result variable: the response text, the file document or the import mapping result",
             fileEntity: "with response file: Module.Entity that inherits from System.FileDocument (default System.FileDocument)",
-            commit: "with an import mapping: yes | no | withoutEvents (default withoutEvents)", errorBody: "optional true/false: on an error keep the response in $latestHttpResponse (default true)"
+            commit: "with an import mapping: yes | no | withoutEvents (default withoutEvents)", mappingParameter: "with an import mapping that takes a parameter: the variable to pass (no $)", errorBody: "optional true/false: on an error keep the response in $latestHttpResponse (default true)"
         }
     },
     importWithMapping: {
         doc: "Import JSON or XML text with an import mapping (microflows only).",
-        fields: { mapping: "R Module.ImportMapping", source: "R String variable with the JSON/XML (no $)", variable: "optional result variable name", commit: "optional yes | no | withoutEvents (default withoutEvents)" }
+        fields: { mapping: "R Module.ImportMapping", source: "R String variable with the JSON/XML (no $)", variable: "optional result variable name", commit: "optional yes | no | withoutEvents (default withoutEvents)", parameter: "with a mapping that takes a parameter: the variable to pass (no $)" }
     },
     exportWithMapping: {
         doc: "Export an object (or list) to JSON or XML text with an export mapping (microflows only).",
@@ -99,7 +101,7 @@ const ACTIONS = {
 };
 // Mendix actions ops cannot write: refused with the way out (no Studio Pro sample, or the Model SDK cannot write them).
 const REFUSED = {
-    publishBusinessEvent: "publishing a business event is not supported: no Studio Pro sample in the test projects and the Model SDK 4.116 has no such action. Add it in Studio Pro (Toolbox > Business events > Publish business event)",
+    publishBusinessEvent: "publishing a business event is the Java action of the Business Events module: { \"action\": \"callJava\", \"preset\": \"publishBusinessEvent\", \"event\": \"MyEvent\" } (ops callJava)",
     callMLModel: "calling an ML model is not supported: it needs an ML mapping document that only Studio Pro creates. Add it in Studio Pro (Toolbox > Machine learning > Call ML model)",
     callML: "see callMLModel: add it in Studio Pro",
     reduce: "reduce is a function of aggregateList: { \"action\": \"aggregateList\", \"function\": \"reduce\", \"initial\": \"0\", \"expression\": \"$currentResult + $currentObject/Amount\", ... }",
@@ -109,7 +111,9 @@ const REFUSED = {
 // Actions defined next to their documents (consumed REST, workflows): { doc, fields, only: "micro" | "nano", creates,
 // type: () => SDK action class, build(c, act, spec, where) -> action, info(a, c) -> { entity, list }, vars(a) -> [names],
 // describe(a) -> text }. c: { f, h, model, expr, variableInfo, needVariable, fillTemplate }.
-const EXTRA_ACTIONS = { ...require("./ops-rest").REST_ACTIONS, ...require("./ops-workflows").WORKFLOW_ACTIONS, ...require("./ops-offline").SYNC_ACTION };
+const FA = require("./ops-flow-actions");
+const EXTRA_ACTIONS = { ...require("./ops-rest").REST_ACTIONS, ...require("./ops-workflows").WORKFLOW_ACTIONS, ...require("./ops-offline").SYNC_ACTION, ...FA.FLOW_ACTIONS };
+for (const [old, now] of Object.entries(FA.ALIASES)) REFUSED[old] = `the action is called ${now}: { "action": "${now}", ... } (ops ${now})`;
 const { SYSTEM_ASSOCIATIONS } = require("./ops-workflows");
 Object.assign(ACTIONS, EXTRA_ACTIONS);
 // Which field of an action names the variable it creates.
@@ -455,6 +459,11 @@ function makeFlows(h) {
         if (missing.length) throw new Error(`${where}: ${spec.microflow} needs args for: ${missing.map(p => p.name).join(", ")}`);
         a.useReturnVariable = !!spec.variable;
         a.outputVariableName = spec.variable ? noDollar(spec.variable) : "";
+        if (spec.queue !== undefined || spec.retry !== undefined) {
+            if (f.nano || isNanoTarget) throw new Error(`${where}: only a microflow can call a microflow in a task queue`);
+            queuedCallProblem(spec, target, where);
+            await setQueue(h, call, spec, where);
+        }
         return a;
     }
 
@@ -549,8 +558,32 @@ function makeFlows(h) {
     };
 
     // Java action (microflows) or JavaScript action (nanoflows) call: one mapping per parameter, in parameter order.
+    // N-8 callJava presets: a Java action of a Marketplace module, found by name, with its arguments filled in.
+    const PRESETS = ["publishBusinessEvent"];
+    async function javaPreset(f, spec, where) {
+        if (spec.javaAction !== undefined) throw new Error(`${where}: give preset or javaAction, not both`);
+        if (!PRESETS.includes(spec.preset)) fail(`${where}: preset '${spec.preset}' is not known`, String(spec.preset), PRESETS);
+        if (spec.event === undefined) throw new Error(`${where}: preset publishBusinessEvent needs "event": the object variable of the business event (e.g. "OrderShipped")`);
+        const actions = model.allJavaActions().filter(j => /^BusinessEvents\./.test(j.qualifiedName) && /^publish/i.test(j.name) && /event/i.test(j.name));
+        if (!actions.length) throw new Error(`${where}: this project has no Business Events module (Marketplace) with a publish Java action. Studio Pro: Marketplace > Business Events (import it, or importModulePackage with its .mpk), add a published business event service (Add other > Business event service) for the event entity, then use this preset`);
+        const target = actions.length > 1 ? actions.find(j => /^PublishBusinessEvent$/i.test(j.name)) || actions[0] : actions[0];
+        const ja = target.isLoaded ? target : await target.load();
+        const ent = await needVariable(f.m, spec.event, false, where);
+        const base = await h.entity("BusinessEvents.PublishedBusinessEvent").catch(() => null);
+        if (base && !(await isA(ent, base.qualifiedName))) throw new Error(`${where}: $${noDollar(spec.event)} is a ${ent}, which is no published business event (a specialization of ${base.qualifiedName}); create it from the event entity of your business event service`);
+        const objParams = [...ja.actionParameters].filter(p => p.actionParameterType instanceof codeactions.BasicParameterType && p.actionParameterType.type instanceof codeactions.EntityType);
+        if (!objParams.length) throw new Error(`${where}: ${ja.qualifiedName} has no object parameter for the event; call it with javaAction and args`);
+        const args = { ...(spec.args || {}), [objParams[0].name]: `$${noDollar(spec.event)}` };
+        if (h.client) h.client.warnFirst(`${where.split(" ")[0]}: callJava preset publishBusinessEvent calls ${ja.qualifiedName} (${objParams[0].name} = $${noDollar(spec.event)}); no Studio Pro sample of it in the test projects: check the call in Studio Pro`);
+        const { preset, event, ...rest } = spec;
+        return { ...rest, javaAction: ja.qualifiedName, args };
+    }
+
     async function codeCall(f, act, spec, where, js) {
-        const qn = js ? spec.jsAction : spec.javaAction;
+        // a JavaScript action by its name alone ("TakePicture"): the project's only one of that name (NativeMobileResources,
+        // NanoflowCommons, ...; ops-native-ui.js)
+        const qn = js ? require("./ops-native-ui").jsActionName(model, spec.jsAction, where) : spec.javaAction;
+        if (!qn) throw new Error(`${where}: ${js ? "callJavaScript needs jsAction" : "callJava needs javaAction (Module.JavaAction) or a preset (publishBusinessEvent)"}`);
         const target = await h.get(qn);
         const [want, other] = js ? [javascriptactions.JavaScriptAction, javaactions.JavaAction] : [javaactions.JavaAction, javascriptactions.JavaScriptAction];
         if (!(target instanceof want)) throw new Error(`${where}: '${qn}' is not a ${js ? "JavaScript" : "Java"} action` + (target instanceof other ? ` but a ${js ? "Java action: use callJava in a microflow" : "JavaScript action: use callJavaScript in a nanoflow"}` : ""));
@@ -586,6 +619,12 @@ function makeFlows(h) {
         if (spec.variable && isVoid) throw new Error(`${where}: ${qn} returns nothing; remove 'variable'`);
         a.useReturnVariable = isVoid || !!spec.variable; // Studio Pro keeps true for actions that return nothing
         a.outputVariableName = spec.variable ? noDollar(spec.variable) : "";
+        if (spec.queue !== undefined || spec.retry !== undefined) {
+            if (js) throw new Error(`${where}: a JavaScript action does not run in a task queue`);
+            queuedCallProblem(spec, target, where);
+            if (!isVoid && spec.queue && spec.queue !== "none") throw new Error(`${where}: a Java action in a task queue must return nothing (${qn} returns a value); call a microflow in the queue that calls it`);
+            await setQueue(h, a, spec, where);
+        }
         return a;
     }
 
@@ -624,11 +663,20 @@ function makeFlows(h) {
         const map = await h.get(spec.mapping);
         if (!(map instanceof importmappings.ImportMapping)) throw new Error(`${where}: '${spec.mapping}' is not an import mapping`);
         const pt = map.parameterType;
-        if (pt && !(pt instanceof datatypes.UnknownType) && !(pt instanceof datatypes.VoidType)) throw new Error(`${where}: import mapping ${spec.mapping} takes a parameter, which ops cannot pass; add this call in Studio Pro`);
+        const takes = pt && !(pt instanceof datatypes.UnknownType) && !(pt instanceof datatypes.VoidType);
+        const passed = spec.parameter !== undefined ? spec.parameter : spec.mappingParameter;
+        const pfield = spec.parameter !== undefined || spec.action === "importWithMapping" ? "parameter" : "mappingParameter";
+        if (takes && passed === undefined) throw new Error(`${where}: import mapping ${spec.mapping} takes a parameter (${pt instanceof datatypes.ObjectType ? pt.entityQualifiedName : pt.structureTypeName.split("$")[1].replace("Type", "")}); give "${pfield}": the variable to pass (no $)`);
+        if (!takes && passed !== undefined) throw new Error(`${where}: import mapping ${spec.mapping} has no parameter; leave out "${pfield}" (or give the mapping one: changeMapping "parameter")`);
+        if (takes) {
+            const info = await variableInfo(f.m, passed, where);
+            if (pt instanceof datatypes.ObjectType ? info.entity !== pt.entityQualifiedName || info.list : info.entity) throw new Error(`${where}: ${spec.mapping} takes ${pt instanceof datatypes.ObjectType ? `a ${pt.entityQualifiedName} object` : `a ${pt.structureTypeName.split("$")[1].replace("Type", "")} value`}; $${noDollar(passed)} is ${info.entity ? (info.list ? "a list of " : "") + info.entity : "a value"}`);
+        }
         const root = map.rootMappingElements[0];
         if (!root || !root.entity) throw new Error(`${where}: import mapping ${spec.mapping} has no root object (finish it in Studio Pro)`);
         const call = mf.ImportMappingCall.createIn(r);
         call.mapping = map;
+        if (takes) call.mappingArgumentVariableName = noDollar(passed);
         importCommit(r, spec.commit || "withoutEvents");
         call.contentType = contentType(map);
         call.objectHandlingBackup = sdk.mappings.ObjectHandlingBackupEnum.Create;
@@ -894,6 +942,7 @@ function makeFlows(h) {
         const how = /^none$/i.test(response) ? "none" : /^string$/i.test(response) ? "string" : /^file$/i.test(response) ? "file" : "mapping";
         if (how === "mapping" && !response.includes(".")) fail(`${where}: response '${response}' is not none, string, file or an import mapping (Module.Mapping)`, response, ["none", "string", "file"]);
         if (spec.fileEntity !== undefined && how !== "file") throw new Error(`${where}: fileEntity only applies to response "file"`);
+        if (spec.mappingParameter !== undefined && how !== "mapping") throw new Error(`${where}: mappingParameter only applies to a response import mapping`);
         const r = a.resultHandling || mf.ResultHandling.createInRestCallActionUnderResultHandling(a);
         a.resultHandlingType = mf.ResultHandlingType[await resultHandling(f, r, how, { ...spec, mapping: response }, where)];
         return a;
@@ -903,7 +952,7 @@ function makeFlows(h) {
         const kind = spec.action;
         validate("action", kind, { fields: { ...ACTIONS[kind].fields, ...COMMON } }, spec, where);
         if (ONLY[kind] === "micro" && f.nano) throw new Error(`${where}: '${kind}' is not available in nanoflows${kind === "callJava" ? "; call a microflow that calls the Java action" : ""}`);
-        if (ONLY[kind] === "nano" && !f.nano) throw new Error(`${where}: '${kind}' only works in nanoflows (JavaScript runs in the browser); in a microflow use callJava`);
+        if (ONLY[kind] === "nano" && !f.nano) throw new Error(`${where}: '${kind}' only works in nanoflows${kind === "callJavaScript" ? " (JavaScript runs in the browser); in a microflow use callJava" : " (it acts on the device); call a nanoflow"}`);
         if (f.rule && !RULE_ACTIONS.includes(kind)) throw new Error(`${where}: '${kind}' is not allowed in a rule (a rule only reads and computes: ${RULE_ACTIONS.join(", ")}, if, switch, loop, end)`);
         const act = mf.ActionActivity.createIn(f.coll);
         point(act, x, y);
@@ -1002,7 +1051,7 @@ function makeFlows(h) {
                 break;
             case "callJava":
             case "callJavaScript":
-                a = await codeCall(f, act, spec, where, kind === "callJavaScript");
+                a = await codeCall(f, act, kind === "callJava" && spec.preset !== undefined ? await javaPreset(f, spec, where) : spec, where, kind === "callJavaScript");
                 break;
             case "validationFeedback": {
                 const ent = await needVariable(f.m, spec.variable, false, where);
@@ -1913,6 +1962,16 @@ function makeFlows(h) {
         throw new Error(`id '${id}' matches ${hits.length} steps in ${m.qualifiedName}; use more characters`);
     }
 
+    // changeAction queue / retry of a call (microflow) or callJava step
+    async function queueChange(f, a, spec, where) {
+        if (a instanceof mf.NanoflowCallAction || a instanceof mf.JavaScriptActionCallAction || f.nano) throw new Error(`${where}: only microflow and Java action calls in a microflow run in a task queue`);
+        const java = a instanceof mf.JavaActionCallAction;
+        const on = spec.queue === undefined ? !!(java ? a.queueSettings : a.microflowCall.queueSettings) : !(spec.queue === null || spec.queue === "" || spec.queue === "none");
+        if (on && a.useReturnVariable && a.outputVariableName) throw new Error(`${where}: the call stores its result in $${a.outputVariableName}; a call in a task queue returns nothing (remove the step and add it again without variable)`);
+        if (on && java && a.javaAction && !((await a.javaAction.load()).actionReturnType instanceof codeactions.VoidType)) throw new Error(`${where}: a Java action in a task queue must return nothing (${a.javaActionQualifiedName} returns a value)`);
+        await setQueue(h, java ? a : a.microflowCall, spec, where);
+    }
+
     // Field -> how to apply it, per kind of step. Each returns nothing; throws on bad input.
     const CHANGES = {
         activity: {
@@ -1962,6 +2021,8 @@ function makeFlows(h) {
         },
         CommitAction: { events: (f, a, v) => (a.withEvents = bool(v, true)), refresh: (f, a, v) => (a.refreshInClient = bool(v, false)) },
         call: {
+            queue: (f, a, v, where, o) => queueChange(f, a, { queue: v, retry: o.retry }, where),
+            retry: (f, a, v, where, o) => o.queue === undefined && queueChange(f, a, { retry: v }, where),
             args: (f, a, v, where) => {
                 const call = a.microflowCall || a.nanoflowCall;
                 for (const [name, value] of Object.entries(v || {})) {
@@ -1985,6 +2046,8 @@ function makeFlows(h) {
             blocking: (f, a, v) => (a.blocking = bool(v, true))
         },
         code: {
+            queue: (f, a, v, where, o) => queueChange(f, a, { queue: v, retry: o.retry }, where),
+            retry: (f, a, v, where, o) => o.queue === undefined && queueChange(f, a, { retry: v }, where),
             args: async (f, a, v, where) => {
                 for (const [name, value] of Object.entries(v || {})) {
                     const pm = [...a.parameterMappings].find(x => x.parameterQualifiedName.split(".").pop() === name);
@@ -2169,6 +2232,17 @@ function makeFlows(h) {
         if (!fields.length) throw new Error(`changeAction needs at least one field to change. For this step: ${names().join(", ") || "(nothing can be changed)"}`);
         const where = `${o.microflow} [${o.id}]`;
         const done = [];
+        // an action of EXTRA_ACTIONS with spec(): its own fields change by building it again from the stored fields
+        // plus the new ones, in one go (the action keeps its box, caption and error handling)
+        const x = step instanceof mf.ActionActivity && step.action && !Object.keys(own).length ? extraOf(step.action) : null;
+        if (x && x.spec) {
+            const mine = fields.filter(k => k in x.fields);
+            if (mine.length) {
+                done.push(await rebuildExtra(f, step, x, o, mine, where));
+                fields.splice(0, fields.length, ...fields.filter(k => !mine.includes(k)));
+            }
+            for (const k of fields) if (!(k in x.fields) && !common[k] && !(k === "onError" && handles)) fail(`${where}: '${k}' cannot be changed on ${describe(step)}. Fields for this step: ${[...Object.keys(x.fields), ...Object.keys(common), "onError"].join(", ")}`, k, [...Object.keys(x.fields), ...Object.keys(common)]);
+        }
         for (const k of fields) {
             if (k === "onError" && handles) {
                 done.push(await setOnError(m, step, o.onError, where));
@@ -2180,6 +2254,32 @@ function makeFlows(h) {
             done.push(k);
         }
         return `${where} ${describe(step)}: ${done.join(", ")}`;
+    }
+
+    // changeAction on an action of EXTRA_ACTIONS: the stored fields (x.spec) with the given ones on top; an object field
+    // ({ "param": ... }) merges, null removes a field; a new operation / service drops the old args and query.
+    async function rebuildExtra(f, step, x, o, keys, where) {
+        const a = step.action;
+        const kind = Object.keys(EXTRA_ACTIONS).find(n => EXTRA_ACTIONS[n] === x);
+        const old = x.spec(a);
+        const next = { ...old };
+        const plain = v => v && typeof v === "object" && !Array.isArray(v);
+        const newTarget = ["operation", "service", "name"].some(k => keys.includes(k) && o[k] !== old[k]);
+        for (const k of keys) {
+            const v = o[k];
+            if (v === null) delete next[k];
+            else if (plain(v) && plain(old[k]) && !(newTarget && ["args", "query"].includes(k))) next[k] = Object.fromEntries(Object.entries({ ...old[k], ...v }).filter(([, y]) => y !== null));
+            else next[k] = v;
+        }
+        if (newTarget) for (const k of ["args", "query"]) if (!keys.includes(k)) delete next[k];
+        const errorType = a.errorHandlingType;
+        const c = { f, h, model, expr: (v, w) => expr(f.m, v, w), variableInfo: (n, w) => variableInfo(f.m, n, w), needVariable: (n, l, w) => needVariable(f.m, n, l, w), fillTemplate: (t, text, args, w) => fillTemplate(f, t, text, args, w) };
+        validate("action", kind, { fields: { ...x.fields, ...COMMON } }, { action: kind, ...next }, where);
+        const made = await x.build(c, step, { action: kind, ...next }, where);
+        made.errorHandlingType = errorType;
+        const was = old[CREATES[kind]];
+        if (CREATES[kind] && was && next[CREATES[kind]] !== was && h.client) h.client.warn(`${where}: the result is now ${next[CREATES[kind]] ? "$" + next[CREATES[kind]] : "not stored"} (was $${was}); check the steps that use $${was}`);
+        return keys.join(", ");
     }
 
     async function deleteAction(o) {

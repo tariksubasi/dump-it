@@ -1633,6 +1633,842 @@
       }
     },
     {
+      "id": "intjsonchange",
+      "text": "MyFirstModule'de JSON_Order adlı JSON structure'ın yeni örneği şu: {\"number\": 12, \"total\": 99.5, \"status\": \"open\"}. Structure'ı güncelle ve IMM_Order import mapping'ini yeni yapıya uydur; yeni alan için Order'a attribute ekle.",
+      "setup": [
+        {
+          "op": "createJsonStructure",
+          "module": "MyFirstModule",
+          "name": "JSON_Order",
+          "snippet": "{\"number\": 12, \"total\": 99.5}"
+        },
+        {
+          "op": "createImportMapping",
+          "module": "MyFirstModule",
+          "name": "IMM_Order",
+          "jsonStructure": "MyFirstModule.JSON_Order",
+          "entity": "MyFirstModule.Order"
+        }
+      ],
+      "checks": {
+        "find": [
+          "MyFirstModule.Order.Status"
+        ],
+        "files": {
+          "integrations/.*IMM_Order.*\\.txt$": "(?i)status"
+        }
+      }
+    },
+    {
+      "id": "intmappingkeys",
+      "text": "IMM_Order import mapping'inde Order nesnesi number alanına göre bulunsun, bulunamazsa yok sayılsın (ignore).",
+      "setup": [
+        {
+          "op": "createJsonStructure",
+          "module": "MyFirstModule",
+          "name": "JSON_Order",
+          "snippet": "{\"number\": 12, \"total\": 99.5}"
+        },
+        {
+          "op": "createImportMapping",
+          "module": "MyFirstModule",
+          "name": "IMM_Order",
+          "jsonStructure": "MyFirstModule.JSON_Order",
+          "entity": "MyFirstModule.Order"
+        }
+      ],
+      "checks": {
+        "files": {
+          "integrations/.*IMM_Order.*\\.txt$": "(?i)find"
+        }
+      }
+    },
+    {
+      "id": "intrestchange",
+      "text": "OrderApi REST istemcisinin GetOrder operasyonunun yolu /v2/orders/{id} olsun ve X-Api-Version: 2 header'ı eklensin; DeleteOrder operasyonunu sil.",
+      "setup": [
+        {
+          "op": "createConsumedRestService",
+          "module": "MyFirstModule",
+          "name": "OrderApi",
+          "baseUrl": "https://api.example.com",
+          "operations": [
+            {
+              "name": "GetOrder",
+              "path": "/orders/{id}"
+            },
+            {
+              "name": "DeleteOrder",
+              "method": "Delete",
+              "path": "/orders/{id}"
+            }
+          ]
+        }
+      ],
+      "checks": {
+        "files": {
+          "integrations/.*OrderApi.*\\.txt$": "(?s)^(?=.*/v2/orders)(?!.*DeleteOrder)"
+        }
+      }
+    },
+    {
+      "id": "gridcolumns",
+      "text": "Order_Board sayfası yap: siparişleri Data grid 2 ile listele; ilk kolon Number ve Note'u '{Number} - {Note}' şeklinde birlikte gösteren dinamik metin olsun, sonra Total, en sonda her satırda siparişi silen bir buton olan özel içerik kolonu. Sayfalama 'daha fazla yükle' olsun, sayfa başına 25 satır, liste boşsa 'Sipariş yok' yazsın.",
+      "checks": {
+        "find": [
+          "MyFirstModule.Order_Board"
+        ],
+        "files": {
+          "Order_Board\\.txt$": "(?s)^(?=.*Data grid 2)(?=.*showContentAs: dynamicText)(?=.*showContentAs: customContent)(?=.*pagination: loadMore)(?=.*pageSize: 25)(?=.*'?Sipariş yok)"
+        }
+      }
+    },
+    {
+      "id": "gridconvert",
+      "setup": [
+        {
+          "op": "createPage",
+          "module": "MyFirstModule",
+          "name": "Order_NewEdit",
+          "entity": "MyFirstModule.Order"
+        },
+        {
+          "op": "createPage",
+          "module": "MyFirstModule",
+          "name": "Order_Classic",
+          "widgets": [
+            {
+              "widget": "dataGrid",
+              "kind": "classic",
+              "name": "grid1",
+              "entity": "MyFirstModule.Order",
+              "columns": [
+                "Number",
+                "Total",
+                "Note"
+              ],
+              "buttons": [
+                {
+                  "action": "new",
+                  "page": "MyFirstModule.Order_NewEdit"
+                },
+                {
+                  "action": "edit",
+                  "page": "MyFirstModule.Order_NewEdit"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "text": "Order_Classic sayfasındaki klasik grid1'i Data grid 2'ye çevir; butonlar ve arama alanları da taşınsın. Sonra Total kolonunu en başa al.",
+      "checks": {
+        "find": [
+          "MyFirstModule.Order_Classic"
+        ],
+        "files": {
+          "Order_Classic\\.txt$": "(?s)^(?=.*Data grid 2)(?=.*grid1)(?!.*Forms\\$DataGrid\\b)"
+        }
+      }
+    },
+    {
+      "id": "gridsource",
+      "setup": [
+        {
+          "op": "createMicroflow",
+          "module": "MyFirstModule",
+          "name": "DS_UnpaidOrders",
+          "returns": "List(MyFirstModule.Order)",
+          "actions": [
+            {
+              "action": "retrieve",
+              "entity": "MyFirstModule.Order",
+              "xpath": "[Paid = false()]",
+              "variable": "L"
+            }
+          ],
+          "returnValue": "$L"
+        },
+        {
+          "op": "createPage",
+          "module": "MyFirstModule",
+          "name": "Order_Gallery",
+          "widgets": [
+            {
+              "widget": "gallery",
+              "name": "gallery1",
+              "entity": "MyFirstModule.Order"
+            }
+          ]
+        }
+      ],
+      "text": "Order_Gallery sayfasındaki gallery1 siparişleri DS_UnpaidOrders microflow'undan alsın; her kartta sadece '{Number}: {Total}' yazsın; masaüstünde 3, tablette 2, telefonda 1 kolon olsun.",
+      "checks": {
+        "find": [
+          "MyFirstModule.Order_Gallery"
+        ],
+        "files": {
+          "Order_Gallery\\.txt$": "(?s)^(?=.*DS_UnpaidOrders)(?=.*desktopItems: 3)(?=.*tabletItems: 2)"
+        }
+      }
+    },
+    {
+      "id": "dsnvars",
+      "text": "Native mobil uygulamada ana marka rengini #0B5FFF yap; arka plan açık modda #FFFFFF, karanlık modda #0A1325 olsun. Sonra MyFirstModule'de Mobile_Home adında native bir sayfa oluştur, üstünde 'Hoş geldiniz' yazısı olsun.",
+      "checks": {
+        "find": [
+          "MyFirstModule.Mobile_Home"
+        ],
+        "files": {
+          "Mobile_Home\\.txt$": "Hoş geldiniz"
+        }
+      }
+    },
+    {
+      "id": "dsnstyle",
+      "text": "Native sayfalar için kartYukseltilmis adında bir stil class'ı tanımla: beyaz arka plan, 8 köşe yarıçapı, 16 iç boşluk ve hafif bir gölge. MyFirstModule'de Mobile_Orders adında native bir sayfa oluştur; içinde bu class'ı kullanan bir container ve container'ın içinde 'Siparişler' yazısı olsun.",
+      "checks": {
+        "find": [
+          "MyFirstModule.Mobile_Orders"
+        ],
+        "files": {
+          "Mobile_Orders\\.txt$": "(?s)kartYukseltilmis.*Siparişler"
+        }
+      }
+    },
+    {
+      "id": "dsndesign",
+      "setup": [
+        {
+          "op": "createPage",
+          "module": "MyFirstModule",
+          "name": "Mobile_Start",
+          "native": true,
+          "widgets": [
+            {
+              "widget": "text",
+              "text": "Start"
+            }
+          ]
+        }
+      ],
+      "text": "Native container'lar için 'Kart görünümü' adında bir tasarım özelliği tanımla: 'Düz' (gölgesiz) ve 'Yükseltilmiş' (gölgeli) seçenekleri olsun. Mobile_Start native sayfasının en üstüne bu özelliği 'Yükseltilmiş' olan bir container ekle; içinde 'Özet' yazısı olsun.",
+      "checks": {
+        "files": {
+          "Mobile_Start\\.txt$": "(?s)Kart görünümü: Yükseltilmiş.*Özet|Özet.*Kart görünümü: Yükseltilmiş"
+        }
+      }
+    },
+    {
+      "id": "dsnpopup",
+      "setup": [
+        {
+          "op": "createEntity",
+          "module": "MyFirstModule",
+          "name": "Visit",
+          "attributes": [
+            {
+              "name": "Note",
+              "type": "String(500)"
+            },
+            {
+              "name": "Done",
+              "type": "Boolean"
+            }
+          ]
+        }
+      ],
+      "text": "MyFirstModule'de Visit nesnesini düzenlemek için Visit_EditPopup adında native bir pop-up sayfa oluştur: not için çok satırlı bir alan, 'Tamamlandı' onay kutusu ve Kaydet butonu olsun.",
+      "checks": {
+        "find": [
+          "MyFirstModule.Visit_EditPopup"
+        ],
+        "files": {
+          "Visit_EditPopup\\.txt$": "(?s)Note.*Done|Done.*Note"
+        }
+      }
+    },
+    {
+      "id": "dsnweb",
+      "setup": [
+        {
+          "op": "createEntity",
+          "module": "MyFirstModule",
+          "name": "Task",
+          "attributes": [
+            {
+              "name": "Title",
+              "type": "String(100)"
+            }
+          ]
+        },
+        {
+          "op": "createPage",
+          "module": "MyFirstModule",
+          "name": "Mobile_Tasks",
+          "native": true,
+          "widgets": [
+            {
+              "widget": "text",
+              "text": "Görevler"
+            }
+          ]
+        }
+      ],
+      "text": "Mobile_Tasks native sayfasına görevleri (Task) gösteren bir data grid ekle, her satırda başlık görünsün.",
+      "checks": {
+        "files": {
+          "Mobile_Tasks\\.txt$": "(?s)Görevler.*Title"
+        }
+      }
+    },
+    {
+      "id": "wfconcurrency",
+      "setup": [
+        {
+          "op": "createMicroflow",
+          "module": "MyFirstModule",
+          "name": "ACT_Order_Approve",
+          "parameters": [
+            {
+              "name": "Order",
+              "type": "MyFirstModule.Order"
+            }
+          ],
+          "actions": [
+            {
+              "action": "change",
+              "variable": "Order",
+              "set": {
+                "Paid": "true"
+              },
+              "commit": true
+            }
+          ]
+        }
+      ],
+      "text": "ACT_Order_Approve microflow'u aynı anda iki kez çalışmasın; ikinci çağrıda kullanıcıya 'Sipariş zaten onaylanıyor' mesajı gösterilsin. Ayrıca bu microflow'da entity erişim kuralları uygulansın.",
+      "ops": [
+        "changeMicroflow"
+      ],
+      "families": [
+        "flows"
+      ],
+      "checks": {
+        "files": {
+          "ACT_Order_Approve\\.txt$": "(?s)APPLY ENTITY ACCESS: yes.*CONCURRENT EXECUTION: disallowed"
+        }
+      }
+    },
+    {
+      "id": "wfdelbranch",
+      "setup": [
+        {
+          "op": "createMicroflow",
+          "module": "MyFirstModule",
+          "name": "ACT_Order_Check",
+          "parameters": [
+            {
+              "name": "Order",
+              "type": "MyFirstModule.Order"
+            }
+          ],
+          "actions": [
+            {
+              "action": "if",
+              "condition": "$Order/Paid",
+              "caption": "Paid?",
+              "then": [
+                {
+                  "action": "log",
+                  "message": "paid order"
+                }
+              ],
+              "else": [
+                {
+                  "action": "log",
+                  "message": "unpaid order"
+                },
+                {
+                  "action": "log",
+                  "message": "send reminder"
+                }
+              ]
+            },
+            {
+              "action": "log",
+              "message": "check done"
+            }
+          ]
+        }
+      ],
+      "text": "ACT_Order_Check microflow'undaki 'Paid?' kararının false (ödenmemiş) dalını içindeki adımlarla birlikte sil; ödenmiş yolu doğrudan ana hat olsun.",
+      "ops": [
+        "deleteBranch"
+      ],
+      "families": [
+        "flows"
+      ],
+      "checks": {
+        "files": {
+          "ACT_Order_Check\\.txt$": "^(?![\\s\\S]*(unpaid order|send reminder))[\\s\\S]*paid order[\\s\\S]*check done"
+        }
+      }
+    },
+    {
+      "id": "wfreroute",
+      "setup": [
+        {
+          "op": "createMicroflow",
+          "module": "MyFirstModule",
+          "name": "ACT_Order_Route",
+          "parameters": [
+            {
+              "name": "Order",
+              "type": "MyFirstModule.Order"
+            }
+          ],
+          "actions": [
+            {
+              "action": "if",
+              "condition": "$Order/Paid",
+              "caption": "Paid?",
+              "then": [
+                {
+                  "action": "log",
+                  "message": "paid order"
+                }
+              ],
+              "else": [
+                {
+                  "action": "log",
+                  "message": "remind customer"
+                }
+              ]
+            },
+            {
+              "action": "log",
+              "message": "archive order"
+            },
+            {
+              "action": "log",
+              "message": "route done"
+            }
+          ]
+        }
+      ],
+      "text": "ACT_Order_Route'ta 'Paid?' kararının false dalı 'remind customer' adımına gitmesin, doğrudan 'route done' log adımına bağlansın; artık hiçbir yoldan ulaşılmayan adım silinsin.",
+      "ops": [
+        "rerouteBranch"
+      ],
+      "families": [
+        "flows"
+      ],
+      "checks": {
+        "files": {
+          "ACT_Order_Route\\.txt$": "^(?![\\s\\S]*remind customer)[\\s\\S]*route done"
+        }
+      }
+    },
+    {
+      "id": "wfemail",
+      "setup": [
+        {
+          "op": "createMicroflow",
+          "module": "MyFirstModule",
+          "name": "ACT_Order_Ship",
+          "parameters": [
+            {
+              "name": "Customer",
+              "type": "MyFirstModule.Customer"
+            }
+          ],
+          "actions": [
+            {
+              "action": "log",
+              "message": "shipping"
+            }
+          ]
+        }
+      ],
+      "text": "ACT_Order_Ship microflow'unun sonuna müşteriye ($Customer/Email) 'Siparişiniz kargoda' konulu bir e-posta gönderen adım ekle. SMTP sunucusu smtp.example.com, port 587, TLS; gönderen shop@example.com.",
+      "ops": [
+        "addActions"
+      ],
+      "families": [
+        "flows"
+      ],
+      "checks": {
+        "files": {
+          "ACT_Order_Ship\\.txt$": "SendEmail|SENDEMAIL|SEND EMAIL"
+        }
+      }
+    },
+    {
+      "id": "wfunlock",
+      "setup": [
+        {
+          "op": "createPage",
+          "kind": "userTaskPage",
+          "module": "MyFirstModule",
+          "name": "Order_Review_Task",
+          "outcomes": [
+            "Approve",
+            "Reject"
+          ]
+        },
+        {
+          "op": "createWorkflow",
+          "module": "MyFirstModule",
+          "name": "WF_Order",
+          "context": "MyFirstModule.Order",
+          "steps": [
+            {
+              "step": "userTask",
+              "name": "review",
+              "caption": "Review order",
+              "page": "MyFirstModule.Order_Review_Task",
+              "outcomes": [
+                "Approve",
+                "Reject"
+              ]
+            }
+          ]
+        }
+      ],
+      "text": "WF_Order workflow'unun kilidini açan ACT_WF_Order_Unlock adında bir microflow yaz; kilitliyken duraklatılan örnekler de devam etsin.",
+      "ops": [
+        "createMicroflow"
+      ],
+      "families": [
+        "workflows"
+      ],
+      "checks": {
+        "files": {
+          "ACT_WF_Order_Unlock\\.txt$": "RESUME WORKFLOWS[\\s\\S]*WF_Order"
+        }
+      }
+    },
+    {
+      "id": "wfsplitmove",
+      "setup": [
+        {
+          "op": "createMicroflow",
+          "module": "MyFirstModule",
+          "name": "ACT_Order_Sync",
+          "parameters": [
+            {
+              "name": "Order",
+              "type": "MyFirstModule.Order"
+            }
+          ],
+          "actions": [
+            {
+              "action": "log",
+              "message": "start sync"
+            },
+            {
+              "action": "commit",
+              "variable": "Order",
+              "onError": {
+                "actions": [
+                  {
+                    "action": "log",
+                    "message": "commit failed",
+                    "level": "Error"
+                  },
+                  {
+                    "action": "error"
+                  }
+                ]
+              }
+            },
+            {
+              "action": "log",
+              "message": "notify"
+            },
+            {
+              "action": "log",
+              "message": "sync done"
+            }
+          ]
+        }
+      ],
+      "text": "ACT_Order_Sync microflow'unda Order'ı commit eden adımı (hata işleyicisiyle birlikte) 'notify' log adımından sonraya taşı.",
+      "ops": [
+        "moveAction"
+      ],
+      "families": [
+        "flows",
+        "error handling"
+      ],
+      "checks": {
+        "files": {
+          "ACT_Order_Sync\\.txt$": "(?s)notify.*COMMIT.*commit failed"
+        }
+      }
+    },
+    {
+      "id": "docregex",
+      "text": "Posta kodu için PostCode adında bir regular expression oluştur (4 rakam, isteğe bağlı boşluk, 2 büyük harf; örn. 1234 AB) ve Order entity'sine PostCode adında String attribute ekleyip bu ifadeyle doğrulama kuralı koy: mesaj 'Geçerli bir posta kodu girin'.",
+      "checks": {
+        "find": [
+          "MyFirstModule.PostCode",
+          "MyFirstModule.Order.PostCode"
+        ]
+      },
+      "ops": [
+        "createRegularExpression",
+        "addAttribute",
+        "addValidationRule"
+      ],
+      "families": [
+        "app"
+      ]
+    },
+    {
+      "id": "docqueue",
+      "text": "InvoiceQueue adında, tüm cluster için 2 thread'li bir task queue oluştur; Order parametreli ACT_QueueInvoice microflow'u, Order'ı commit eden SUB_Invoice microflow'unu bu kuyrukta çağırsın (3 deneme, 30 saniye arayla).",
+      "checks": {
+        "find": [
+          "MyFirstModule.InvoiceQueue",
+          "MyFirstModule.ACT_QueueInvoice",
+          "MyFirstModule.SUB_Invoice"
+        ]
+      },
+      "ops": [
+        "createTaskQueue",
+        "createMicroflow"
+      ],
+      "families": [
+        "app",
+        "flows"
+      ]
+    },
+    {
+      "id": "docodatachange",
+      "text": "OrderOData servisinde Order entity'sine Note attribute'unu da yayınla, Total'ı yayından kaldır ve sayfalamayı kapat.",
+      "setup": [
+        {
+          "op": "addAttribute",
+          "entity": "MyFirstModule.Order",
+          "name": "Note",
+          "type": "String(200)"
+        },
+        {
+          "op": "publishOData",
+          "module": "MyFirstModule",
+          "name": "OrderOData",
+          "entities": [
+            {
+              "entity": "MyFirstModule.Order",
+              "attributes": [
+                "Number",
+                "Total"
+              ],
+              "pageSize": 100
+            }
+          ]
+        }
+      ],
+      "checks": {
+        "find": [
+          "MyFirstModule.OrderOData"
+        ]
+      },
+      "ops": [
+        "changePublishedOData"
+      ],
+      "families": [
+        "odata"
+      ]
+    },
+    {
+      "id": "docbizevents",
+      "text": "OrderEvents adında bir business event servisi tanımla: OrderPlaced event'i (OrderId metin, Total ondalık) ve OrderShipped event'i (OrderId metin).",
+      "checks": {
+        "find": [
+          "MyFirstModule.OrderEvents"
+        ]
+      },
+      "ops": [
+        "createBusinessEventService"
+      ],
+      "families": [
+        "services"
+      ]
+    },
+    {
+      "id": "docwebservice",
+      "text": "Order numarası (String) alıp Order nesnesini döndüren WS_GetOrder microflow'unu yaz ve OrderService adında bir SOAP published web service olarak yayınla; kimlik doğrulama olmasın.",
+      "checks": {
+        "find": [
+          "MyFirstModule.OrderService",
+          "MyFirstModule.WS_GetOrder"
+        ]
+      },
+      "ops": [
+        "createMicroflow",
+        "publishWebService"
+      ],
+      "families": [
+        "services"
+      ]
+    },
+    {
+      "id": "docdataset",
+      "text": "Order'ları Total değeri verilen bir alt sınırın üstünde olanlarla listeleyen BigOrders adında bir OQL data set oluştur (Min adında Decimal parametre); User rolü çalıştırabilsin.",
+      "checks": {
+        "find": [
+          "MyFirstModule.BigOrders"
+        ]
+      },
+      "ops": [
+        "createDataSet"
+      ],
+      "families": [
+        "app"
+      ]
+    },
+    {
+      "id": "docdbrefuse",
+      "text": "PostgreSQL veritabanına bağlanan bir external database connection oluştur ve müşteri tablosunu sorgula.",
+      "checks": {
+        "gap": true
+      },
+      "ops": [
+        "createDatabaseConnection"
+      ],
+      "families": [
+        "app"
+      ]
+    },
+    {
+      "id": "widtabs",
+      "setup": [
+        {
+          "op": "createEntity",
+          "module": "MyFirstModule",
+          "name": "Ticket",
+          "attributes": [
+            {
+              "name": "Title",
+              "type": "String(100)"
+            }
+          ]
+        },
+        {
+          "op": "createPage",
+          "module": "MyFirstModule",
+          "name": "Ticket_Detail",
+          "widgets": [
+            {
+              "widget": "tabContainer",
+              "name": "tabs1",
+              "tabs": [
+                {
+                  "caption": "Genel",
+                  "name": "tabGeneral"
+                },
+                {
+                  "caption": "Eski",
+                  "name": "tabOld"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "text": "Ticket_Detail sayfasındaki sekmelerde 'Eski' sekmesini sil, en başa 'Notlar' adında yeni bir sekme ekle ve içine 'Notlar burada' yazısı koy.",
+      "ops": [
+        "changeWidget"
+      ],
+      "families": [
+        "data widgets"
+      ],
+      "checks": {
+        "files": {
+          "Ticket_Detail\\.txt$": "(?s)Notlar"
+        }
+      }
+    },
+    {
+      "id": "widlogin",
+      "text": "MyFirstModule'de özel bir giriş (login) sayfası oluştur: kullanıcı adı, şifre ve giriş butonu olsun, uygulamanın giriş sayfası bu olsun.",
+      "ops": [
+        "createLoginPage"
+      ],
+      "families": [
+        "data widgets"
+      ],
+      "checks": {
+        "find": [
+          "MyFirstModule.Login"
+        ]
+      }
+    },
+    {
+      "id": "widconvert",
+      "setup": [
+        {
+          "op": "createEnumeration",
+          "module": "MyFirstModule",
+          "name": "Priority",
+          "values": [
+            "Low",
+            "High"
+          ]
+        },
+        {
+          "op": "createEntity",
+          "module": "MyFirstModule",
+          "name": "Issue",
+          "attributes": [
+            {
+              "name": "Priority",
+              "type": "Enum(MyFirstModule.Priority)"
+            }
+          ]
+        },
+        {
+          "op": "createPage",
+          "module": "MyFirstModule",
+          "name": "Issue_Edit",
+          "entity": "MyFirstModule.Issue",
+          "widgets": [
+            {
+              "widget": "dataView",
+              "widgets": [
+                {
+                  "widget": "container",
+                  "name": "box1",
+                  "widgets": [
+                    {
+                      "widget": "dropDown",
+                      "attribute": "Priority",
+                      "name": "prio"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "text": "Issue_Edit sayfasındaki box1 container'ını başlığı 'Detay' olan bir group box'a çevir; içindekiler kalsın.",
+      "ops": [
+        "convertWidget"
+      ],
+      "families": [
+        "data widgets"
+      ],
+      "checks": {
+        "files": {
+          "Issue_Edit\\.txt$": "(?s)Detay"
+        }
+      }
+    },
+    {
       "id": "dmsysmembers",
       "text": "Order entity'sinde createdDate, changedDate ve owner sistem üyelerini aç; Total attribute'una 'KDV dahil toplam' açıklamasını yaz.",
       "checks": {

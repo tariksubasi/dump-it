@@ -77,7 +77,7 @@ const WIDGETS = {
         fields: {
             entity: "optional Module.Entity (default: the page entity; with association / microflow: what it gives)",
             ...LIST_SOURCE,
-            columns: "optional [ \"Attribute\" or { \"attribute\": ..., \"caption\": ..., \"width\": 25, \"format\": { \"decimals\": 2 } } ] (default: all attributes; width as a weight, format: classic only; a classic column also takes \"class\"); the attribute is " + PATH + "; Data grid 2 column settings: " + Object.entries(gridExtras.COLUMN_SETTINGS).map(([k, d]) => `${k} (${d})`).join(", ") + ", and \"filter\": true | \"text\" | \"number\" | \"date\" | \"dropdown\" | \"association\" | { \"filter\": ..., \"multiSelect\": true, \"caption\": \"Name\", \"options\": \"[XPath]\", \"placeholder\": ..., \"default\": ..., \"operator\": ... } (a column over a reference \"Order_Customer/Name\" with true: a drop-down of the customers); Data grid 2 also { \"dynamicText\": \"{Name} ({Order_Customer/Name})\", \"caption\": ..., \"format\": { \"<Attribute>\": { ... } } } and { \"widgets\": [ widgets per row ], \"caption\": ... } (custom content)",
+            columns: "optional [ \"Attribute\" or { \"attribute\": ..., \"caption\": ..., \"width\": 25, \"format\": { \"decimals\": 2 } } ] (default: all attributes; width as a weight, format: classic only; a classic column also takes \"class\"); the attribute is " + PATH + "; Data grid 2 column types in one field: { \"type\": \"attribute\" | \"dynamicText\" | \"customContent\", \"attribute\": ... | \"text\": \"{Name} ({Code})\" (or \"{1} ({2})\" with \"params\": [\"Name\", \"Code\"]) | \"widgets\": [ widgets per row ], \"caption\": ... }; Data grid 2 column settings: " + Object.entries(gridExtras.COLUMN_SETTINGS).map(([k, d]) => `${k} (${d})`).join(", ") + ", and \"filter\": true | \"text\" | \"number\" | \"date\" | \"dropdown\" | \"association\" | { \"filter\": ..., \"multiSelect\": true, \"caption\": \"Name\", \"options\": \"[XPath]\", \"placeholder\": ..., \"default\": ..., \"operator\": ... } (a column over a reference \"Order_Customer/Name\" with true: a drop-down of the customers); Data grid 2 also { \"dynamicText\": \"{Name} ({Order_Customer/Name})\", \"caption\": ..., \"format\": { \"<Attribute>\": { ... } } } and { \"widgets\": [ widgets per row ], \"caption\": ... } (custom content)",
             buttons: "optional, classic only: control bar buttons [ { \"action\": \"new\" | \"edit\", \"page\": \"Module.Page\" } | { \"action\": \"delete\" } | { \"action\": \"callMicroflow\" | \"callNanoflow\", \"microflow\" / \"nanoflow\": ..., \"params\": ... } | any other actionButton action ], each with optional caption, style, name and the action options (confirm, progress, pageTitle, \"maintainSelection\": true keeps the selection after a flow); a flow gets the selected row (a List parameter: the selected rows with selection Multi)",
             onClick: "optional, Data grid 2 only: on a row click " + ACTION + "; the row is passed",
             xpath: "optional XPath constraint (source database), e.g. [Active = true()]; inside a data view [Module.Assoc = '[%CurrentObject%]'] shows the committed objects linked to its object (source association also shows new ones)",
@@ -86,7 +86,9 @@ const WIDGETS = {
             export: "optional, Data grid 2: true or { \"caption\": \"Export to Excel\", \"fileName\": \"Orders\", \"sheetName\": \"Orders\", \"headers\": true }: an Export to Excel button above the grid and a nanoflow <Page>_<grid>_Export calling DataWidgets.Export_To_Excel (the Data Widgets module must be in the project)",
             filters: "optional, Data grid 2: true = a filter in every attribute column header (text, number, date or drop-down filter by attribute type, from widgets/*.mpk; a column over a reference: a drop-down of the objects it refers to); per column { \"attribute\": ..., \"filter\": true / false / ... }",
             headerFilters: HEADER_FILTERS,
-            paging: "optional, Data grid 2: buttons | virtualScrolling | loadMore (default buttons)",
+            paging: "optional, Data grid 2: buttons | virtualScrolling | loadMore (default buttons), or { " + Object.entries(gridExtras.PAGING_FIELDS).map(([k, d]) => `"${k}": ${d}`).join("; ") + " }",
+            emptyMessage: "optional, Data grid 2 / gallery: a text shown when there are no rows (Empty message: Custom)",
+            onClickTrigger: "optional, Data grid 2 / gallery: single | double (default single): the click that runs onClick",
             selectionMethod: "optional, Data grid 2: rowClick | checkbox (default rowClick for Single, checkbox for Multi)",
             rowClass: "optional, Data grid 2: expression for a CSS class per row, e.g. \"if $currentObject/Active then 'row-active' else ''\"",
             configAttribute: "optional, Data grid 2: String attribute of the data view around the grid that stores the user's column settings (personalization)",
@@ -98,7 +100,7 @@ const WIDGETS = {
     },
     listView: {
         doc: "list of objects (from the database, over an association or from a microflow/nanoflow), each item with its own widgets (also inputs: an editable list); a data view can listen to it",
-        fields: { entity: "optional Module.Entity (default: the page entity; with association / microflow: what it gives)", ...LIST_SOURCE, xpath: "optional XPath constraint (see dataGrid)", fields: "optional [ \"Attribute\" ] one text per attribute (also paths \"Order_Customer/Name\"; default: all attributes, unless widgets is given)", widgets: "optional [ widgets ] per item", pageSize: "optional (default 10)",
+        fields: { entity: "optional Module.Entity (default: the page entity; with association / microflow: what it gives)", ...LIST_SOURCE, xpath: "optional XPath constraint (see dataGrid)", fields: "optional [ \"Attribute\" ] one text per attribute (also paths \"Order_Customer/Name\"; default: all attributes, unless widgets is given)", widgets: "optional [ widgets ] per item (inputs too: an editable list)", pageSize: "optional (default 10)", editable: "optional true/false (default false): the list view's Editable setting, for inputs in its items", onClick: "optional: on an item click " + ACTION + "; the item is passed",
             search: "optional [ \"Attribute\" ] (source database): a search box over these attributes", sort: "optional default sort order (source database): [ \"Attribute\" | { \"attribute\": \"Name\", \"direction\": \"desc\" } ] (default direction asc)" }
     },
     actionButton: {
@@ -171,7 +173,7 @@ const WIDGETS = {
     },
     gallery: {
         doc: "Gallery (pluggable, built from widgets/*.mpk like Data grid 2): objects (database, association or microflow/nanoflow, as listView) as tiles, each item with its own widgets; a data view can listen to it. Without the .mpk it is refused: use listView",
-        fields: { entity: "optional Module.Entity (default: the page entity)", ...LIST_SOURCE, xpath: "optional XPath constraint", widgets: "optional [ widgets ] per item (default: one text per attribute)", selection: "optional Single | Multi | None (default Single)", pageSize: "optional (default 20)", columns: "optional desktop columns 1-12 (default 1)", tabletColumns: "optional tablet columns 1-12 (default 1)", phoneColumns: "optional phone columns 1-12 (default 1)", headerFilters: HEADER_FILTERS, onClick: "optional: on an item click " + ACTION + "; the item is passed", sort: "optional default sort order (source database): [ \"Attribute\" | { \"attribute\": \"Name\", \"direction\": \"desc\" } ] (default direction asc)" }
+        fields: { entity: "optional Module.Entity (default: the page entity)", ...LIST_SOURCE, xpath: "optional XPath constraint", widgets: "optional [ widgets ] per item (default: one text per attribute)", selection: "optional Single | Multi | None (default Single)", pageSize: "optional (default 20)", columns: "optional desktop columns 1-12, or { \"desktop\": 3, \"tablet\": 2, \"phone\": 1 } (default 1 each)", paging: "optional as dataGrid paging (mode, pageSize, showButtons, position, showTotal, loadMoreCaption, pageSizeAttribute)", emptyMessage: "optional text shown when there are no items", onClickTrigger: "optional single | double", headerFilters: HEADER_FILTERS, onClick: "optional: on an item click " + ACTION + "; the item is passed", sort: "optional default sort order (source database): [ \"Attribute\" | { \"attribute\": \"Name\", \"direction\": \"desc\" } ] (default direction asc)", tabletColumns: "optional tablet columns 1-12 (default 1)", phoneColumns: "optional phone columns 1-12 (default 1)" }
     }
 };
 // Fields every widget kind takes (style: inline CSS, but for text and actionButton it is the text / button style
@@ -189,10 +191,14 @@ for (const [k, f] of Object.entries(ui.KIND_UI)) Object.assign(WIDGETS[k].fields
 // pluggable widget presets (pl-presets.js): badge, progressBar, accordion, popupMenu, treeNode, charts
 const presets = require("./pl-presets");
 for (const [k, p] of Object.entries(presets.PRESETS)) WIDGETS[k] = { doc: `${p.doc}; needs widgets/*.mpk with ${p.id.split(".").pop()} (else refused); becomes a "pluggable" widget with working values`, fields: p.fields };
+// layout, navigation and sign-in widgets (widget-kinds.js): menus, scroll container, side bar toggle, title, label, back /
+// link button, login widgets, navigation list
+const wk = require("./widget-kinds");
+Object.assign(WIDGETS, wk.KINDS);
 
 const INPUTS = { textBox: "TextBox", textArea: "TextArea", checkBox: "CheckBox", datePicker: "DatePicker", radioButtons: "RadioButtonGroup", dropDown: "DropDown" };
 const ALIASES = { button: "actionButton", grid: "dataGrid", datagrid: "dataGrid", datagrid2: "dataGrid", list: "listView", heading: "text", div: "container", radiobuttongroup: "radioButtons",
-    tabs: "tabContainer", tabcontrol: "tabContainer", snippet: "snippetCall", referencesetselector: "referenceSetSelector", inputreferencesetselector: "referenceSetSelector", staticimage: "image", dynamicimage: "image", imageviewer: "image", reference: "referenceSelector", combo: "comboBox" };
+    tabs: "tabContainer", tabcontrol: "tabContainer", snippet: "snippetCall", referencesetselector: "referenceSetSelector", inputreferencesetselector: "referenceSetSelector", staticimage: "image", dynamicimage: "image", imageviewer: "image", reference: "referenceSelector", combo: "comboBox", ...wk.ALIASES };
 // fields a weak model takes from a neighbouring widget kind -> what to write instead
 const MASTER_DETAIL = `to show objects linked to the selected row, put a listView or dataGrid inside the listening dataView with "source": "association", "association": "Module.Assoc"`;
 const SYNONYMS = {
@@ -276,7 +282,7 @@ const PAGE_FIELDS = {
     variables: "optional page variables (Mendix 10+): [ { \"name\": \"Search\", \"type\": \"String\" | \"Boolean\" | \"Integer\" | \"Decimal\" | \"DateTime\" | \"Enum(Module.E)\", \"default\": \"''\" (an expression) } ]; an input takes \"variable\": \"Search\" instead of an attribute, expressions, XPath and flow \"params\" use $Search",
     design: "optional design properties of the page (Atlas FormBase: { \"Form orientation\": \"Horizontal\", \"Label width\": \"3\" }) where the theme has them",
     ...ui.PAGE_UI,
-    native: "optional true: a native mobile page (a NativePhone layout of the project; widgets: text, container, actionButton, dataView, listView, input / textBox / checkBox / datePicker); refused when the project has no native layout"
+    native: "optional true: a native mobile page (a NativePhone layout of the project), or the kind of native page: popup (a pop-up page: NativePhone_PopOver), fullPage, topBarOnly, sideMenu, default; widgets: text, container, actionButton, dataView, listView, inputs (textBox, textArea, checkBox, datePicker, radioButtons, dropDown), referenceSelector, image, tabContainer, layoutGrid, snippetCall, native pluggable widgets; refused when the project has no native layout"
 };
 const MENU_FIELDS = {
     page: "Module.Page (without page parameters); a native page becomes a bottom bar item of the native profile",
@@ -355,6 +361,13 @@ function makePages(h) {
         return { native: !!(l.isLoaded && l.content instanceof pages.NativeLayoutContent), placeholders: phs };
     }
     const nativeLayouts = () => model.allLayouts().map(l => l.qualifiedName).filter(qn => layoutInfo(qn).native);
+    // the LayoutType of a saved layout (Default, Popup, ...), or null
+    const layoutTypeOf = qn => {
+        const l = model.allLayouts().find(x => x.qualifiedName === qn);
+        if (!l || !client.project.units.has(l.id)) return null;
+        const u = client.project.read(l.id);
+        return (u.Content && u.Content.LayoutType) || null;
+    };
 
     const humanize = s => s.replace(/_/g, " ").replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/^./, c => c.toUpperCase());
 
@@ -412,6 +425,7 @@ function makePages(h) {
         if (raw === undefined) throw new Error(`${where}: missing "widget". Supported: ${KINDS.join(", ")}`);
         if (typeof raw !== "string") throw new Error(`${where}: "widget" must be a kind name such as "text" (supported: ${KINDS.join(", ")})`);
         const kind = widgetKind(raw);
+        if (!kind && wk.DEPRECATED[raw.toLowerCase().replace(/[\s_-]/g, "")]) throw new Error(`${where}: ${wk.DEPRECATED[raw.toLowerCase().replace(/[\s_-]/g, "")]}`);
         if (!kind) fail(`${where}: unknown widget '${raw}'. Supported: ${KINDS.join(", ")} (other pluggable widgets: "widget": "pluggable", "type": ... ; see widgettype)`, raw, KINDS);
         const own = [...new Set([...Object.keys((WIDGETS[kind] || WIDGETS.input).fields), ...Object.keys(COMMON_FIELDS)])];
         const known = ["widget", "type", "name", ...own];
@@ -441,16 +455,29 @@ function makePages(h) {
         return n;
     }
 
+    // the platform of the page the widgets of a scan go on ("native": native pluggable widgets allowed, web ones refused)
+    let scanPlatform = "web";
+    function setPlatform(p) {
+        const was = scanPlatform;
+        scanPlatform = p;
+        return was;
+    }
     // Spec tree -> node tree. container: nearest data view / list view node around this one.
     function scan(specs, where, container, nodes) {
         return list(specs, where).map((spec, i) => {
             const at = `${where}[${i + 1}]`;
-            let kind = kindOf(spec, at);
+            let kind = kindOf(spec, at), from = null;
             if (presets.PRESETS[kind]) {
                 spec = presets.expand(kind, spec, at, client.project.dir);
                 kind = "pluggable";
             }
-            const node = { kind, spec, where: `${at} (${kind})`, container, name: spec.name !== undefined ? String(spec.name) : null, heading: /^heading$/i.test(spec.widget || spec.type) };
+            if (wk.REWRITE[kind]) {
+                // back / link button: an action button, as Mendix stores them
+                from = kind;
+                spec = wk.REWRITE[kind](spec, at);
+                kind = "actionButton";
+            }
+            const node = { kind, spec, from, where: `${at} (${from || kind})`, container, name: spec.name !== undefined ? String(spec.name) : null, heading: /^heading$/i.test(spec.widget || spec.type) };
             nodes.push(node);
             if (kind === "layoutGrid") {
                 if (spec.rows !== undefined && spec.columns !== undefined) throw new Error(`${node.where}: give rows or columns, not both`);
@@ -484,6 +511,7 @@ function makePages(h) {
                 node.footer = scan(spec.footer, `${node.where}.footer`, node, nodes);
             } else if (kind === "listView" || kind === "gallery" || kind === "templateGrid") node.widgets = scan(spec.widgets, `${node.where}.widgets`, node, nodes);
             else if (kind === "groupBox") node.widgets = scan(spec.widgets, `${node.where}.widgets`, container, nodes);
+            else if (wk.CHILDREN[kind]) wk.CHILDREN[kind](node, spec, (specs, w) => scan(specs, w, container, nodes));
             else if (kind === "tabContainer") {
                 const tabs = list(spec.tabs, `${node.where}.tabs`);
                 if (!tabs.length) throw new Error(`${node.where}: needs at least one tab: "tabs": [ { "caption": "General", "widgets": [...] } ]`);
@@ -814,6 +842,7 @@ function makePages(h) {
             if (FLOW_ONLY[k]) throw new Error(`${where}: ${k} goes with ${FLOW_ONLY[k]}, not ${action}${k === "confirm" && ["delete", "save", "create", "showPage"].includes(action) ? `; for a ${action} with a question call a microflow or nanoflow that does it ("action": "callMicroflow", "confirm": { ... })` : ""}`);
             throw new Error(`${where}: '${k}' does not go with action ${action} (it takes ${allowed.join(", ") || "nothing else"})`);
         }
+        require("./ops-native-ui").checkAction(client, model, ctx && ctx.page, action, spec, where);
         const need = { showPage: "page", callMicroflow: "microflow", callNanoflow: "nanoflow", callWorkflow: "workflow" }[action];
         if (need && !spec[need]) throw new Error(`${where}: action ${action} needs '${need}'`);
         if (spec.maintainSelection !== undefined && !opts.grid) throw new Error(`${where}: maintainSelection goes with a grid button (classic or template grid control bar) that calls a flow`);
@@ -1339,8 +1368,8 @@ function makePages(h) {
         const cols = Array.isArray(s.columns) ? s.columns : [];
         const numWidth = c => c && typeof c === "object" && c.width !== undefined && /^\d+$/.test(String(c.width));
         const dg2Set = Object.keys(gridExtras.COLUMN_SETTINGS).filter(k => k !== "class" && k !== "width");
-        const dg2Only = [cols.some(c => c && typeof c === "object" && (c.widgets !== undefined || c.dynamicText !== undefined)) && "dynamic text / custom content columns", s.onClick !== undefined && "onClick",
-            ...["filters", "headerFilters", "paging", "selectionMethod", "rowClass", "configAttribute", "export"].filter(k => s[k] !== undefined), cols.some(c => c && typeof c === "object" && c.filter !== undefined) && "column filter",
+        const dg2Only = [cols.some(c => c && typeof c === "object" && (c.widgets !== undefined || c.dynamicText !== undefined || c.text !== undefined || (c.type !== undefined && !/^attribute$/i.test(String(c.type))))) && "dynamic text / custom content columns", s.onClick !== undefined && "onClick",
+            ...["filters", "headerFilters", "paging", "selectionMethod", "rowClass", "configAttribute", "export", "emptyMessage", "onClickTrigger"].filter(k => s[k] !== undefined), cols.some(c => c && typeof c === "object" && c.filter !== undefined) && "column filter",
             ...dg2Set.filter(k => cols.some(c => c && typeof c === "object" && c[k] !== undefined)).map(k => `column ${k}`), cols.some(c => c && typeof c === "object" && c.width !== undefined && !numWidth(c)) && "column width autoFill / autoFit / manual"].filter(Boolean);
         const dg2Asked = /^(datagrid2|dg2)$/i.test(String(s.kind !== undefined ? s.kind : s.widget !== undefined ? s.widget : s.type).replace(/[\s_-]/g, ""));
         const classicOnly = [(Array.isArray(s.search) || bool(s.search, false)) && "search", !dg2Asked && cols.some(numWidth) && "column width", s.buttons !== undefined && "control bar buttons",
@@ -1880,6 +1909,17 @@ function makePages(h) {
         return makeAction(node.spec.onClick, { container: node, name: node.name }, ctx, `${node.where}: onClick`, a => (v.action = a));
     }
 
+    // "emptyMessage" of a Data grid 2 / gallery: Empty message Custom and a text in its empty placeholder (outside the
+    // rows: {Attribute} is of the data view around it)
+    async function emptyMessage(node, w, ctx) {
+        const show = valueOf(w.object, "showEmptyPlaceholder"), ph = valueOf(w.object, "emptyPlaceholder");
+        if (!show || !ph) throw new Error(`${node.where}: this ${node.kind === "gallery" ? "gallery" : "Data grid 2"} has no empty message`);
+        if (typeof node.spec.emptyMessage !== "string" || !node.spec.emptyMessage) throw new Error(`${node.where}: emptyMessage is a text, e.g. "No orders yet"`);
+        show.primitiveValue = "custom";
+        const t = await build({ kind: "text", spec: { text: node.spec.emptyMessage }, where: `${node.where}: emptyMessage`, container: node.container }, ph.widgets, ctx);
+        return `empty message ${t}`;
+    }
+
     // A classic grid column at the end of grid.columns; width is a weight (Studio Pro: WidthUnit Weight).
     async function classicColumn(grid, attr, caption, width, ctx) {
         const col = pages.GridColumn.create(model);
@@ -1901,15 +1941,13 @@ function makePages(h) {
             return { cols: attrs.filter(ok).map(attr => ({ kind: "attribute", attr, caption: humanize(attr.name) })), dropped: attrs.filter(a => !ok(a)).map(a => `${a.name} (${typeOf(a)})`) };
         }
         const cols = list(node.spec.columns, `${node.where}.columns`).map((c, i) => {
-            const s = typeof c === "string" ? { attribute: c } : c;
             const at = `${node.where} column ${i + 1}`;
-            const shape = s && typeof s === "object" ? ["attribute", "dynamicText", "widgets"].filter(k => s[k] !== undefined) : [];
-            if (shape.length !== 1) throw new Error(`${at}: use "Attribute", { "attribute": ..., "caption": ... }, { "dynamicText": "{Name}", "caption": ... } or { "widgets": [...], "caption": ... }`);
-            const own = [shape[0], "caption", ...(shape[0] === "attribute" ? ["filter", "format"] : shape[0] === "dynamicText" ? ["format"] : []), ...Object.keys(gridExtras.COLUMN_SETTINGS)];
-            if (shape[0] === "attribute" && s.format !== undefined) throw new Error(`${at}: a Data grid 2 attribute column shows the attribute with its own format; for a format use { "dynamicText": "{${s.attribute}}", "format": { "${s.attribute}": { ... } } }`);
-            GX().checkColumnFields(s, own, at);
-            if (shape[0] === "dynamicText") return { kind: "dynamicText", text: s.dynamicText, caption: s.caption !== undefined ? String(s.caption) : "", format: s.format, spec: s };
-            if (shape[0] === "widgets") return { kind: "customContent", nodes: (node.colNodes || [])[i] || [], caption: s.caption !== undefined ? String(s.caption) : "", spec: s };
+            const shape = gridExtras.columnShape(c, at);
+            const s = shape.spec;
+            if (shape.kind === "attribute" && s.format !== undefined) throw new Error(`${at}: a Data grid 2 attribute column shows the attribute with its own format; for a format use { "type": "dynamicText", "text": "{${s.attribute}}", "format": { "${s.attribute}": { ... } } }`);
+            GX().checkColumnFields(s, shape.own, at);
+            if (shape.kind === "dynamicText") return { kind: "dynamicText", text: shape.text, caption: s.caption !== undefined ? String(s.caption) : "", format: s.format, spec: s };
+            if (shape.kind === "customContent") return { kind: "customContent", nodes: (node.colNodes || [])[i] || [], caption: s.caption !== undefined ? String(s.caption) : "", spec: s };
             const path = pathOf(ent, s.attribute, node.where);
             const attr = path.attr;
             if (!ok(attr)) throw new Error(`${node.where}: a Data grid 2 column cannot show '${attr.name}' (${typeOf(attr)}); it shows ${allowed.join(", ")}`);
@@ -2112,7 +2150,9 @@ function makePages(h) {
             pv.primitiveValue = hit;
             more.push(`${field} ${hit}`);
         };
-        if (node.spec.paging !== undefined) enumProp("pagination", node.spec.paging, "paging");
+        const dcOf = node.container && node.container.ent ? node.container : null;
+        if (node.spec.paging !== undefined) more.push(...(await GX().paging(grid, node.spec.paging, dcOf, ctx, `${node.where}: paging`)));
+        if (node.spec.onClickTrigger !== undefined) more.push(GX().clickTrigger(grid, node.spec.onClickTrigger, node.where));
         if (node.spec.selectionMethod !== undefined) {
             if (selName === "None") throw new Error(`${node.where}: selectionMethod goes with selection Single or Multi`);
             enumProp("itemSelectionMethod", node.spec.selectionMethod, "selectionMethod");
@@ -2170,6 +2210,7 @@ function makePages(h) {
         if (node.spec.headerFilters !== undefined) extra.push(...(await GX().headerFilters(grid, ent, node.spec.headerFilters, node, ctx, `${node.where}`)));
         if (node.spec.onClick !== undefined) extra.push("on click: " + (await pluggableClick(node, props, ctx)));
         if (node.spec.export !== undefined && node.spec.export !== false) extra.push(await dg2Export(node, grid, props, target, ctx));
+        if (node.spec.emptyMessage !== undefined) extra.push(await emptyMessage(node, grid, ctx));
         extra.push(...more);
         const why = node.kindAsked === "auto" ? `"kind": "auto"` : `"kind": "datagrid2"`;
         client.warnFirst(`${ctx.qn}: ${grid.name} is a Data grid 2 ${info.def.version} (${why}), ${base.from}; "kind": "classic" for a classic Data grid`);
@@ -2355,6 +2396,9 @@ function makePages(h) {
         const s = node.spec, out = [];
         const dc = node.container || null;
         const css = cssOf(node);
+        // a native page (G20): no inline CSS; design properties of the native theme
+        const native = require("./theme-native").isNativeDoc(client, ctx && ctx.page);
+        if (native && css !== undefined) throw new Error(`${node.where}: ${require("./theme-native").NATIVE_STYLE_REFUSAL}`);
         if (s.class !== undefined || css !== undefined) {
             if (!has(w, "appearance")) throw new Error(`${node.where}: a ${node.kind} has no CSS class or style`);
             if (s.class !== undefined && w.appearance.class !== String(s.class)) w.appearance.class = String(s.class);
@@ -2364,7 +2408,7 @@ function makePages(h) {
         }
         if (s.design !== undefined) {
             if (!has(w, "appearance")) throw new Error(`${node.where}: a ${node.kind} has no design properties`);
-            const t = design.apply(sdk, model, w, design.resolve(client.project.dir, w, s.design, `${node.where}: design`), client.warn);
+            const t = design.apply(sdk, model, w, design.resolve(client.project.dir, w, s.design, `${node.where}: design`, native ? "native" : "web"), client.warn);
             if (t) out.push(`design ${t}`);
         }
         if (s.visible !== undefined && s.visible !== true && s.visible !== "true") {
@@ -2596,7 +2640,8 @@ function makePages(h) {
     function plScan(node, container, nodes) {
         const s = node.spec;
         node.pl = plDef(s.type, node.where);
-        if (node.pl.type.SupportedPlatform === "Native") throw new Error(`${node.where}: ${node.pl.type.WidgetName} is a native widget; it goes on a native page`);
+        if (node.pl.type.SupportedPlatform === "Native" && scanPlatform !== "native") throw new Error(`${node.where}: ${node.pl.type.WidgetName} is a native widget; it goes on a native page`);
+        if (node.pl.type.SupportedPlatform !== "Native" && scanPlatform === "native") throw new Error(`${node.where}: ${node.pl.type.WidgetName} is a web widget; a native page takes native pluggable widgets (widgets/*.mpk with platform Native: widgettype lists them)`);
         node.pspec = s;
         node.plWidgets = new Map();
         const t = node.pl.type, wname = t.WidgetName;
@@ -2705,7 +2750,11 @@ function makePages(h) {
             if (vt.dataSourceProperty) {
                 const r = dsRef(vt.dataSourceProperty, depth);
                 const f = frames[r.depth];
-                const ent = f && f.get(r.key);
+                let ent = f && f.get(r.key);
+                // a data source linked to the gallery / Data grid 2 around it (Drop-down sort in its header): its entity
+                const lpt = !ent && r.depth === 0 && node.pl && node.pl.type ? node.pl.type.ObjectType.PropertyTypes.find(p => p.PropertyKey === r.key) : null;
+                const around = node.listOwner || (node.container && node.container.kind !== "dataView" ? node.container : null);
+                if (lpt && lpt.ValueType.IsLinked && around && around.ent) ent = around.ent;
                 if (!ent) throw new Error(`${at}: give its data source '${vt.dataSourceProperty.replace(/^(\.\.\/)+/, "")}' first`);
                 return ent;
             }
@@ -2875,8 +2924,10 @@ function makePages(h) {
         for (const p of obj.properties) {
             const vt = p.type.valueType, v = p.value, t = vt.type.name;
             if (!vt.required || vt.isLinked) continue;
+            // an action is never empty: "Do nothing" (Forms$NoAction) is the value Studio Pro stores for a required one
+            // (Studio Pro sample: TreeView Home_Web progressCircle2, Progress Circle 3.3.1 onClick required=true)
             const empty = { Attribute: !v.attributeRef, Association: !v.entityRef, Entity: !v.entityRef, DataSource: !v.dataSource, Image: !v.imageQualifiedName,
-                Expression: !v.expression, TextTemplate: !v.textTemplate || !v.textTemplate.template.translations.some(x => x.text), Object: vt.isList && !v.objects.length, Action: v.action instanceof pages.NoClientAction }[t];
+                Expression: !v.expression, TextTemplate: !v.textTemplate || !v.textTemplate.template.translations.some(x => x.text), Object: vt.isList && !v.objects.length }[t];
             if (empty) miss.push(p.type.key);
         }
         return miss;
@@ -2919,7 +2970,10 @@ function makePages(h) {
         return `${w.name} (${image ? "image uploader" : "file manager"} of ${dv.ent.name}${bits.length ? ", " + bits.join(", ") : ""})`;
     }
 
+    let kindsMade = null;
+    const kindsFns = () => kindsMade || (kindsMade = wk.makeKinds(h, () => internals));
     const BUILD = {
+        ...Object.fromEntries(Object.keys(wk.KINDS).filter(k => !wk.REWRITE[k]).map(k => [k, (node, target, ctx) => kindsFns().BUILD[k](node, target, ctx)])),
         async buildingBlock(node, target, ctx) {
             const tpl = await templateOf(String(node.spec.from), node.where);
             if (!(tpl.doc instanceof pages.BuildingBlock)) throw new Error(`${node.where}: ${tpl.doc.qualifiedName} is a page template; a page takes it with createPage "from", a widget list takes a building block`);
@@ -3162,6 +3216,12 @@ function makePages(h) {
                 inner.push(await build({ kind: "text", spec: { text: `{${path.text}}` }, where: node.where, container: node }, lv.widgets, ctx));
             }
             for (const ch of node.widgets) inner.push(await build(ch, lv.widgets, ctx));
+            if (node.spec.editable !== undefined) {
+                if (typeof node.spec.editable !== "boolean" && !/^(true|false)$/.test(String(node.spec.editable))) throw new Error(`${node.where}: editable of a list view is true or false (its inputs can be conditional)`);
+                lv.editable = bool(node.spec.editable, false);
+                if (lv.editable) lvMore += ", editable";
+            }
+            if (node.spec.onClick !== undefined) lvMore += `, on click: ${await makeAction(node.spec.onClick, { container: node, name: node.name }, ctx, `${node.where}: onClick`, a => (lv.clickAction = a))}`;
             return `${lv.name} (${shows}${lvMore}) [${inner.join(", ")}]`;
         },
         async actionButton(node, target, ctx) {
@@ -3230,6 +3290,9 @@ function makePages(h) {
             if (!(sn instanceof pages.Snippet)) return fail(`${node.where}: '${qn}' is a ${sn.structureTypeName.split("$")[1]}, not a snippet`, qn, snippets());
             if (ctx.page === sn) throw new Error(`${node.where}: a snippet cannot show itself`);
             const full = sn.isLoaded ? sn : await sn.load();
+            // native pages show native snippets, web pages web ones
+            const tn = require("./theme-native");
+            if (ctx.page && tn.isNativeDoc(client, ctx.page) !== tn.isNativeDoc(client, full)) throw new Error(`${node.where}: ${qn} is a ${tn.isNativeDoc(client, full) ? "native" : "web"} snippet; a ${tn.isNativeDoc(client, ctx.page) ? "native" : "web"} ${ctx.page instanceof pages.Snippet ? "snippet" : "page"} shows only ${tn.isNativeDoc(client, ctx.page) ? "native snippets (createSnippet \"native\": true)" : "web snippets"}`);
             const params = pageParams(full);
             if (params.some(p => !p.entity) && node.spec.params === undefined) throw new Error(`${node.where}: ${qn} has parameter(s) ${params.map(p => `${p.name} (${p.type})`).join(", ")}; give "params"`);
             const mapped = await mapParams(node.spec.params, params, node, ctx, qn, "snippet");
@@ -3434,7 +3497,7 @@ function makePages(h) {
                 return String(n);
             };
             const pageSize = s.pageSize !== undefined ? num(s.pageSize, "pageSize", 10000) : null;
-            const cols = s.columns !== undefined ? num(s.columns, "columns", 12) : null;
+            const cols = s.columns !== undefined && (typeof s.columns !== "object" || s.columns === null) ? num(s.columns, "columns", 12) : null;
             if (s.xpath) checkXPath(node, ent);
             const base = await basePluggable(info, GALLERY, node, target, ctx, "gallery", alt);
             const { w, props } = base;
@@ -3451,6 +3514,11 @@ function makePages(h) {
                 if (!props.has(key)) throw new Error(`${node.where}: Gallery ${info.def.version} has no ${key}; leave out ${k}`);
                 props.get(key).value.primitiveValue = num(s[k], k, 12);
             }
+            const gMore = [];
+            if (s.columns !== undefined && typeof s.columns === "object" && s.columns !== null) gMore.push(GX().galleryColumns(w, s.columns, node.where));
+            if (s.pageSize !== undefined && s.paging !== undefined && typeof s.paging === "object" && s.paging.pageSize !== undefined) throw new Error(`${node.where}: give pageSize or paging.pageSize, not both`);
+            if (s.paging !== undefined) gMore.push(...(await GX().paging(w, s.paging, node.container && node.container.ent ? node.container : null, ctx, `${node.where}: paging`)));
+            if (s.onClickTrigger !== undefined) gMore.push(GX().clickTrigger(w, s.onClickTrigger, node.where));
             leftovers(w, [ent], node.where, "gallery", alt);
             // the content: one text per attribute, or the given widgets, in the context of an item
             const content = props.get("content").value.widgets;
@@ -3460,8 +3528,9 @@ function makePages(h) {
             for (const ch of node.widgets) inner.push(await build(ch, content, ctx));
             const click = s.onClick !== undefined ? `, on click: ${await pluggableClick(node, props, ctx)}` : "";
             const hf = s.headerFilters !== undefined ? await GX().headerFilters(w, ent, s.headerFilters, node, ctx, node.where) : [];
+            if (s.emptyMessage !== undefined) gMore.push(await emptyMessage(node, w, ctx));
             client.warnFirst(`${ctx.qn}: ${w.name} is a Gallery ${info.def.version}, ${base.from}`);
-            return `${w.name} (Gallery ${info.def.version}, ${shows}, selection ${selName}${click}${hf.length ? "; " + hf.join("; ") : ""}) [${inner.join(", ")}]`;
+            return `${w.name} (Gallery ${info.def.version}, ${shows}, selection ${selName}${click}${hf.length ? "; " + hf.join("; ") : ""}${gMore.length ? "; " + gMore.join(", ") : ""}) [${inner.join(", ")}]`;
         },
         async input(node, target, ctx) {
             const s = node.spec;
@@ -3589,14 +3658,27 @@ function makePages(h) {
         if (!isNativePage(page)) throw new Error(`${where}: ${page.qualifiedName} is a web page; the native bottom bar opens native pages (createPage "native": true)`);
         if (o.parent !== undefined) throw new Error(`${where}: a native bottom bar has no sub-items; leave out parent`);
         if (profile.bottomBarItems.some(b => b.pageQualifiedName === page.qualifiedName)) throw new Error(`${where}: ${page.qualifiedName} is already in the ${profile.name} bottom bar`);
+        // the place: after / before the item with that caption (default: at the end)
+        const items = profile.bottomBarItems;
+        const capOf = b => captionOf(b.caption) || (b.pageQualifiedName || "").split(".").pop();
+        let at = items.length;
+        for (const k of ["after", "before"]) {
+            if (o[k] === undefined) continue;
+            if (o.after !== undefined && o.before !== undefined) throw new Error(`${where}: give after or before, not both`);
+            const i = items.findIndex(b => capOf(b).toLowerCase() === String(o[k]).toLowerCase());
+            if (i < 0) fail(`${where}: the ${profile.name} bottom bar has no item '${o[k]}'`, String(o[k]), items.map(capOf));
+            at = k === "after" ? i + 1 : i;
+        }
         const item = sdk.nativepages.BottomBarItem.create(model);
-        profile.bottomBarItems.push(item);
+        items.splice(at, 0, item);
         const caption = o.caption !== undefined ? String(o.caption) : captionOf(page.title) || humanize(page.name);
         await textAll(item.caption, caption, ctx);
         item.page = page;
+        const icon = o.icon !== undefined ? await require("./ops-native-ui").iconOf(h, model, o.icon, where) : null;
+        if (icon) item.icon = icon.icon;
         client.warnFirst(`NativePages$BottomBarItem first use by ops (no Studio Pro sample in the test projects): check the ${profile.name} profile in Studio Pro`);
         const seen = await menuRoleLint(where, page, caption);
-        return `${profile.name} bottom bar: "${caption}" -> ${page.qualifiedName} (${seen})`;
+        return `${profile.name} bottom bar: "${caption}" -> ${page.qualifiedName}${icon ? `, ${icon.text}` : ""}${at < items.length - 1 ? `, place ${at + 1} of ${items.length}` : ""} (${seen})`;
     }
 
     async function projectSecurity() {
@@ -3693,13 +3775,23 @@ function makePages(h) {
         if (o.arrange !== undefined && !/^(auto|rows)$/i.test(String(o.arrange))) fail(`${qn}: arrange must be auto or rows`, o.arrange, ["auto", "rows"]);
         const specs = !form ? o.widgets || [] : !o.entity ? [] : [{ widget: "dataView", ...(o.fields !== undefined ? { fields: o.fields } : {}), ...(o.buttons !== undefined ? { buttons: o.buttons } : {}) }];
         const nodes = [];
-        const top = scan(specs, form ? "form" : "widgets", null, nodes);
+        // native pages: a native layout and the widgets native pages have (ops-native-ui.js)
+        // "native": true, or the kind of native layout: popup | fullPage | topBarOnly | sideMenu | default
+        const NATIVE_LAYOUTS = { popup: /NativePhone_PopOver$|PopOver$|Popup$/i, fullpage: /FullPage$/i, topbaronly: /TopBarOnly$/i, sidemenu: /SideMenu$/i, default: /NativePhone_Default$/i };
+        const nativeKind = typeof o.native === "string" && !/^(true|false)$/i.test(o.native) ? String(o.native).toLowerCase().replace(/[\s_-]/g, "") : null;
+        if (nativeKind && !NATIVE_LAYOUTS[nativeKind]) fail(`${qn}: native '${o.native}' is not a native page kind (true, popup, fullPage, topBarOnly, sideMenu, default)`, String(o.native), ["popup", "fullPage", "topBarOnly", "sideMenu", "default"]);
+        if (nativeKind && o.layout !== undefined) throw new Error(`${qn}: give "native": "${o.native}" or "layout", not both`);
+        const nativeAsked = !!nativeKind || bool(o.native, false) || (o.layout !== undefined && layoutInfo(String(o.layout)).native);
+        const wasPlatform = setPlatform(nativeAsked ? "native" : "web");
+        let top;
+        try {
+            top = scan(specs, form ? "form" : "widgets", null, nodes);
+        } finally {
+            setPlatform(wasPlatform);
+        }
         if (!top.length && !form && o.from === undefined) throw new Error(`${qn}: 'widgets' is empty; leave it out for an empty page`);
-        // native pages: a native layout and the widgets native pages have
-        const nativeAsked = bool(o.native, false) || (o.layout !== undefined && layoutInfo(String(o.layout)).native);
         if (nativeAsked) {
-            const ok = ["text", "container", "actionButton", "dataView", "listView", "input", "textBox", "checkBox", "datePicker"];
-            for (const n of nodes) if (!ok.includes(n.kind)) throw new Error(`${n.where}: a native page takes ${ok.join(", ")}; not ${n.kind}`);
+            require("./ops-native-ui").checkNativeNodes(nodes);
 
             if (o.from !== undefined) throw new Error(`${qn}: "from" makes web pages; leave it out for a native page`);
         }
@@ -3735,7 +3827,12 @@ function makePages(h) {
             const natives = nativeLayouts();
             if (!natives.length) throw new Error(`${qn}: this project has no native layout (Atlas NativePhone_*), so it has no native pages; add a native navigation profile and layout in Studio Pro`);
             const used = layoutUse().filter(u => natives.includes(u.layout)).map(u => u.layout);
-            wantLayout = used[0] || natives.find(l => /NativePhone_Default$/.test(l)) || natives[0];
+            if (nativeKind) {
+                // a pop-up: the native layout whose LayoutType is Popup (Atlas NativePhone_PopOver), else by name
+                const popup = nativeKind === "popup" ? natives.find(l => layoutTypeOf(l) === "Popup") : null;
+                wantLayout = popup || natives.find(l => NATIVE_LAYOUTS[nativeKind].test(l)) || null;
+                if (!wantLayout) throw new Error(`${qn}: this project has no ${o.native} native layout (native layouts: ${natives.join(", ")}); give "layout" with one of them`);
+            } else wantLayout = used[0] || natives.find(l => /NativePhone_Default$/.test(l)) || natives[0];
         }
         if (nativeAsked) {
             arranged = top; // no layout grids on native pages
@@ -3760,7 +3857,8 @@ function makePages(h) {
         arg.parameter = lp;
         const parts = [];
         if (o.variables !== undefined) parts.push(await pageVariables(page, o.variables, qn, ctx));
-        if (o.design !== undefined) parts.push(`design ${design.apply(sdk, model, page, design.resolve(client.project.dir, page, o.design, `${qn}: design`), client.warn)}`);
+        if (nativeAsked && o.style !== undefined) throw new Error(`${qn}: ${require("./theme-native").NATIVE_STYLE_REFUSAL.replace("widget", "page")}`);
+        if (o.design !== undefined) parts.push(`design ${design.apply(sdk, model, page, design.resolve(client.project.dir, page, o.design, `${qn}: design`, nativeAsked ? "native" : "web"), client.warn)}`);
         if (o.class !== undefined || o.style !== undefined) parts.push(uiFns().pageLook(page, o, qn));
         if (tpl) parts.push(await copyTemplate(tpl, call, arg, layoutDoc, ctx));
         for (const n of arranged) parts.push(await build(n, arg.widgets, ctx));
@@ -4068,10 +4166,10 @@ function makePages(h) {
         return gx || (gx = gridExtras.makeGridExtras(internals, h));
     }
     // the builders and lookups ops-page-edit.js uses on existing pages
-    const internals = { scan, build, gridKind, entityOf, attributeOf, pathOf, attrRefOf, prepareAssocs, formatInto, pageVariables, dvSettings, inputExtras, onChange, selectPage, ACTION_DOC, names, textAll, templateAll, noPlaceholder, checkXPath, dg2Info,
+    const internals = { scan, setPlatform, build, gridKind, entityOf, attributeOf, pathOf, attrRefOf, prepareAssocs, formatInto, pageVariables, dvSettings, inputExtras, onChange, selectPage, ACTION_DOC, names, textAll, templateAll, noPlaceholder, checkXPath, dg2Info,
         isGrid2, isPl, valueOf, humanize, condition, sameCondition, fill, languages, shown, listenTarget, classicColumn, dg2Column, typeOf, isA, list, unitNamed,
         prepare, listEntity, resolveSources, sourceKind, makeAction, plDef, plApply, plScan, widgetType, widgetTypes,
-        blankObject, exprCheck, textTemplate, inputDefaults, templateOf, adopt, buildPluggable: (n, t, c) => BUILD.pluggable(n, t, c), associations: () => ASSOCS || [], gridExtras: () => GX(), ui: () => uiFns() };
+        blankObject, exprCheck, textTemplate, inputDefaults, templateOf, adopt, sortOrder, dg2Export, listSource, dg2Types: () => dg2Types(dg2Live()), buildPluggable: (n, t, c) => BUILD.pluggable(n, t, c), associations: () => ASSOCS || [], gridExtras: () => GX(), ui: () => uiFns(), kinds: () => kindsFns() };
     let uiMade = null;
     function uiFns() {
         return uiMade || (uiMade = ui.makeUi(h, () => internals));

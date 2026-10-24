@@ -38,6 +38,35 @@ const REST_OPS = {
         }
     },
     addRestOperation: { doc: "Add an operation to an existing consumed REST service.", fields: { service: "R Module.Service", ...OPERATION_FIELDS } },
+    changeRestService: {
+        doc: "Change a consumed REST service: base URL and authentication.",
+        fields: { service: "R Module.Service", baseUrl: "optional new base URL, e.g. https://api.example.com/v2", authentication: "optional \"none\" or { \"username\": ..., \"password\": ... } (Basic; values text or @Module.Constant)" }
+    },
+    changeRestOperation: {
+        doc: "Change an operation of a consumed REST service: method, path, parameters, query, headers, body, response mapping, timeout. Give only what changes; {placeholders} are recomputed and the sendRestRequest steps that call it are listed.",
+        fields: {
+            operation: "R Module.Service.Operation", method: "optional new method", path: "optional new path after the base URL",
+            parameters: "optional { \"name\": \"type\" } types of {name} parameters (others keep theirs, new ones default String)",
+            query: "optional query parameters, replaces them all (as in addRestOperation)", headers: "optional { \"Name\": \"value\" } added or changed; { \"Name\": null } removes one (not Accept)",
+            body: "optional new body: text template or { \"snippet\": ..., \"entity\": ... } export mapping (Post/Put/Patch)", response: "optional new response: \"none\" or { \"snippet\": ..., \"entity\": ... } import mapping",
+            timeout: "optional seconds"
+        }
+    },
+    deleteRestOperation: { doc: "Delete an operation of a consumed REST service; lists the sendRestRequest steps that still call it.", fields: { operation: "R Module.Service.Operation" } },
+    changePublishedRestService: {
+        doc: "Change a published REST service: path, version, authentication, allowed roles.",
+        fields: { service: "R Module.Service", path: "optional base path, e.g. rest/orders/v2", version: "optional version, e.g. 2.0.0", authentication: "optional [ \"Basic\" | \"Session\" | \"Microflow\" | \"Guest\" ] (replaces)", roles: "optional [ \"Module.Role\" ] (replaces)" }
+    },
+    changePublishedRestOperation: {
+        doc: "Change an operation of a published REST service (found by resource, method and path): new method, path, microflow, mappings, summary. Its parameters are made again from the microflow.",
+        fields: {
+            service: "R Module.Service", resource: "R resource name", method: "R current method", path: "optional current operation path (default empty)",
+            newMethod: "optional", newPath: "optional", microflow: "optional Module.Microflow", importMapping: "optional Module.ImportMapping, \"\" removes", exportMapping: "optional Module.ExportMapping, \"\" removes",
+            commit: "optional yes | no | withoutEvents", headers: "optional [ \"MicroflowParameter\" ] passed as headers (replaces)", summary: "optional", description: "optional", deprecated: "optional true/false"
+        }
+    },
+    deletePublishedRestOperation: { doc: "Delete an operation of a published REST service (found by resource, method and path).", fields: { service: "R Module.Service", resource: "R resource name", method: "R Get | Post | Put | Patch | Delete", path: "optional operation path (default empty)" } },
+    deletePublishedRestResource: { doc: "Delete a resource of a published REST service with all its operations.", fields: { service: "R Module.Service", resource: "R resource name" } },
     publishRest: {
         doc: "Publish a microflow as a REST operation (creates the service and resource when missing). Parameters: {Name} in the path -> path, object/list -> body (needs importMapping), System.HttpRequest/HttpResponse -> none, others query (or header). An object/list result needs exportMapping.",
         fields: {
@@ -149,6 +178,22 @@ const REST_ACTIONS = {
         },
         vars: a => (a.outputVariable && a.outputVariable.variableName ? [a.outputVariable.variableName] : []),
         info: a => responseOf(a.operation) || { entity: null, list: false },
+        // the stored fields, for changeAction (operation, args, query, body, variable)
+        spec(a) {
+            if (a.baseUrlParameterMapping) throw new Error(`SEND REST ${a.operationQualifiedName}: it maps the base URL parameter, which ops does not write; change it in Studio Pro`);
+            const name = (ref, qn) => (ref && ref.name) || String(qn || "").split(".").pop();
+            const out = { operation: a.operationQualifiedName, args: Object.fromEntries(a.parameterMappings.map(m => [name(m.parameter, m.parameterQualifiedName), m.value])) };
+            let q = [];
+            try {
+                q = a.queryParameterMappings.filter(m => m.included && m.included.name !== "No");
+            } catch (e) {
+                q = []; // Mendix 10: query parameters are path parameters (args)
+            }
+            if (q.length) out.query = Object.fromEntries(q.map(m => [name(m.queryParameter, m.queryParameterQualifiedName), m.value]));
+            if (a.bodyVariable && a.bodyVariable.variableName) out.body = a.bodyVariable.variableName;
+            if (a.outputVariable && a.outputVariable.variableName) out.variable = a.outputVariable.variableName;
+            return out;
+        },
         describe: a => `SEND REST ${a.operationQualifiedName || "?"}${a.outputVariable ? " -> $" + a.outputVariable.variableName : ""}`
     }
 };
@@ -295,6 +340,201 @@ function makeRest(h) {
         return svc;
     }
 
+    // Basic authentication (or none) of a consumed REST service
+    async function setAuthentication(svc, auth, name) {
+        if (auth === undefined) return;
+        if (/^none$/i.test(String(auth))) {
+            svc.authenticationScheme = null;
+            return;
+        }
+        if (typeof auth !== "object" || auth.username === undefined || auth.password === undefined) throw new Error(`${name}: authentication is "none" or { "username": ..., "password": ... } (Basic)`);
+        for (const k of Object.keys(auth)) if (!["username", "password"].includes(k)) fail(`${name}: unknown authentication field '${k}'`, k, ["username", "password"]);
+        const b = rest.BasicAuthenticationScheme.create(model);
+        svc.authenticationScheme = b;
+        await value(b, "username", auth.username, `${name} username`);
+        await value(b, "password", auth.password, `${name} password`);
+    }
+
+    // The microflows that call an operation with sendRestRequest (from the stored model) and their action objects (loaded).
+    async function callersOf(opQn) {
+        const users = h.client ? h.client.referencesTo(opQn).filter(u => u !== opQn.split(".").slice(0, 2).join(".")) : [];
+        const actions = [];
+        for (const u of users) {
+            const m = model.allMicroflows().find(x => x.qualifiedName === u);
+            if (!m) continue;
+            const loaded = await m.load();
+            loaded.objectCollection.traverse(x => {
+                if (x instanceof mf.RestOperationCallAction && x.operationQualifiedName === opQn) actions.push({ flow: u, a: x });
+            });
+        }
+        return { users, actions };
+    }
+
+    const bodyText = op => {
+        const b = op.method instanceof rest.RestOperationMethodWithBody ? op.method.body : null;
+        return b instanceof rest.StringBody ? b.valueTemplate.value : null;
+    };
+
+    // Change an operation in place: what is not given stays.
+    async function changeOperation(svc, op, o, where) {
+        const lines = [];
+        let created = [];
+        const opQn = `${qn(svc)}.${op.name}`;
+        const oldMethod = op.method.httpMethod;
+        const httpMethod = o.method === undefined ? oldMethod : enumValue(sdk.services.HttpMethod, o.method, `${where} method`);
+        const withBody = ["Post", "Put", "Patch"].includes(httpMethod.name);
+        if (!withBody && o.body !== undefined) throw new Error(`${where}: a ${httpMethod.name} request has no body (use Post, Put or Patch)`);
+        if (o.parameters !== undefined && (typeof o.parameters !== "object" || Array.isArray(o.parameters))) throw new Error(`${where}: parameters is { "name": "String" }`);
+        if (o.headers !== undefined && (typeof o.headers !== "object" || Array.isArray(o.headers) || !o.headers)) throw new Error(`${where}: headers is { "Name": "value" } (null removes one)`);
+        if (o.headers) for (const [k, v] of Object.entries(o.headers)) if (v === null && k.toLowerCase() === "accept") throw new Error(`${where}: every operation keeps an Accept header (Studio Pro CE7062); give it another value instead`);
+        if (o.path !== undefined && /^https?:/i.test(String(o.path))) throw new Error(`${where}: path is the part after the base URL (${svc.baseUrl.value}), e.g. /orders/{id}`);
+        const callers = await callersOf(opQn);
+        // method (and body)
+        if (withBody !== (op.method instanceof rest.RestOperationMethodWithBody)) {
+            const m = (withBody ? rest.RestOperationMethodWithBody : rest.RestOperationMethodWithoutBody).create(model);
+            op.method = m;
+            m.httpMethod = httpMethod;
+            if (withBody && o.body === undefined) {
+                const b = rest.StringBody.create(model);
+                m.body = b;
+                b.valueTemplate.value = "{}";
+            }
+            if (!withBody) lines.push("body removed");
+        } else op.method.httpMethod = httpMethod;
+        if (httpMethod !== oldMethod) lines.push(`method ${oldMethod.name} -> ${httpMethod.name}`);
+        if (o.body !== undefined) {
+            if (typeof o.body === "object" && o.body !== null) {
+                const b = rest.ImplicitMappingBody.create(model);
+                op.method.body = b;
+                created = created.concat((await inlineMapping(o.body, false, qn(svc), op.name, `${where} body`, OBJ => OBJ.createInImplicitMappingBodyUnderRootMappingElement(b))).created);
+                if (b.rootMappingElement.maxOccurs === -1) throw new Error(`${where}: the body snippet is an array; send one object (an object around the array)`);
+                await value(b, "testValue", "", where);
+                lines.push(`body: mapping of ${b.rootMappingElement.entityQualifiedName}`);
+            } else {
+                const b = rest.StringBody.create(model);
+                op.method.body = b;
+                b.valueTemplate.value = String(o.body);
+                lines.push("body: text template");
+            }
+        }
+        // headers: merged; null removes
+        if (o.headers) {
+            for (const [k, v] of Object.entries(o.headers)) {
+                const hd = op.headers.find(x => x.name.toLowerCase() === k.toLowerCase());
+                if (v === null) {
+                    if (!hd) fail(`${where}: no header '${k}' to remove`, k, op.headers.map(x => x.name));
+                    hd.delete();
+                    lines.push(`header ${k} removed`);
+                } else if (hd) {
+                    hd.value.value = String(v);
+                    lines.push(`header ${hd.name} changed`);
+                } else {
+                    const n = rest.HeaderWithValueTemplate.createIn(op);
+                    n.name = k;
+                    n.value.value = String(v);
+                    lines.push(`header ${k} added`);
+                }
+            }
+        }
+        if (withBody && !op.headers.some(x => x.name.toLowerCase() === "content-type")) {
+            const n = rest.HeaderWithValueTemplate.createIn(op);
+            n.name = "Content-Type";
+            n.value.value = "application/json";
+        }
+        // path and query
+        let path = op.path.value;
+        if (o.path !== undefined) {
+            path = String(o.path);
+            if (path && !path.startsWith("/")) path = "/" + path;
+        }
+        if (o.query !== undefined) {
+            const query = Array.isArray(o.query) ? Object.fromEntries(o.query.map(n => [n, {}])) : o.query || {};
+            if (typeof query !== "object") throw new Error(`${where}: query is [ "name" ] or { "name": { "required": false } }`);
+            if (!atLeast("11.0.0")) {
+                if (Object.values(query).some(q => q && q.required === false)) throw new Error(`${where}: optional query parameters need Mendix 11 (this project is ${version})`);
+                path = path.replace(/\?.*$/, "");
+                if (Object.keys(query).length) path += "?" + Object.keys(query).map(n => `${n}={${n}}`).join("&");
+            } else {
+                for (const q of [...op.queryParameters]) q.delete();
+                for (const [n, q] of Object.entries(query)) {
+                    validName(n, "query parameter name");
+                    const qp = rest.QueryParameter.createIn(op);
+                    qp.name = n;
+                    qp.testValue = "";
+                    if (q && q.required === false) rest.OptionalQueryParameterUsage.createIn(qp).included = true;
+                    else rest.RequiredQueryParameterUsage.createIn(qp);
+                }
+            }
+            lines.push(`query ${Object.keys(query).join(", ") || "none"}`);
+        }
+        if (path !== op.path.value) {
+            lines.push(`path ${op.path.value} -> ${path}`);
+            op.path.value = path;
+        }
+        if (o.timeout !== undefined) {
+            const t = Number(o.timeout);
+            if (!Number.isInteger(t) || t < 0) throw new Error(`${where}: timeout is a number of seconds`);
+            op.timeout = t;
+            lines.push(`timeout ${t}s`);
+        }
+        // response
+        if (o.response !== undefined) {
+            if (/^none$/i.test(String(o.response))) {
+                const r = rest.NoResponseHandling.create(model);
+                op.responseHandling = r;
+                r.statusCode = 200;
+                r.contentType = "application/json";
+                lines.push("response: none");
+            } else {
+                if (typeof o.response !== "object") throw new Error(`${where}: response is "none" or { "snippet": ..., "entity": ... }`);
+                const r = rest.ImplicitMappingResponseHandling.create(model);
+                op.responseHandling = r;
+                r.statusCode = 200;
+                r.contentType = "application/json";
+                created = created.concat((await inlineMapping(o.response, true, qn(svc), op.name, `${where} response`, OBJ => OBJ.createInImplicitMappingResponseHandlingUnderRootMappingElement(r))).created);
+                const res = responseOf(op);
+                lines.push(`response: ${res.list ? "list of " : ""}${res.entity}`);
+            }
+            if (callers.actions.some(x => x.a.outputVariable)) lines.push(`CHECK the steps that keep the response in a variable: ${[...new Set(callers.actions.filter(x => x.a.outputVariable).map(x => x.flow))].join(", ")}`);
+        }
+        // parameters: every {name} in path, headers and body (CE7056); existing ones keep their type
+        const types = o.parameters || {};
+        const used = [...new Set([...placeholders(path), ...op.headers.map(x => x.value.value).flatMap(placeholders), ...placeholders(bodyText(op))])];
+        for (const k of Object.keys(types)) if (!used.includes(k)) fail(`${where}: parameters names '${k}', which is not a {placeholder} in path, headers or body`, k, used);
+        const removed = [], added = [];
+        for (const p of [...op.parameters]) {
+            if (used.includes(p.name)) continue;
+            removed.push(p.name);
+            for (const { a } of callers.actions) for (const pm of [...a.parameterMappings]) if (pm.parameterQualifiedName === `${opQn}.${p.name}` || (pm.parameter && pm.parameter.name === p.name)) pm.delete();
+            p.delete();
+        }
+        for (const n of used) {
+            let p = op.parameters.find(x => x.name === n);
+            if (!p) {
+                validName(n, "parameter name");
+                p = rest.OperationParameter.createIn(op);
+                p.name = n;
+                p.dataType = dataType(types[n], `${where} parameter ${n}`);
+                await value(p, "testValue", "", where);
+                added.push(n);
+            } else if (types[n] !== undefined) {
+                p.dataType = dataType(types[n], `${where} parameter ${n}`);
+                lines.push(`parameter ${n}: ${types[n]}`);
+            }
+        }
+        if (atLeast("11.0.0")) for (const q of op.queryParameters) if (used.includes(q.name)) throw new Error(`${where}: '${q.name}' is both a {placeholder} and a query parameter`);
+        if (removed.length) lines.push(`parameters removed: ${removed.join(", ")}${callers.actions.length ? " (and their values in the calling steps)" : ""}`);
+        if (added.length) lines.push(`parameters added: ${added.join(", ")}` + (callers.actions.length ? `\n      STILL USED BY (these calls need a value for ${added.join(", ")}: delete the step with deleteAction and add it again with args): ${[...new Set(callers.actions.map(x => x.flow))].join(", ")}` : ""));
+        if (!lines.length) throw new Error(`${where}: nothing to change; give method, path, parameters, query, headers, body, response or timeout`);
+        if (created.length) lines.push(`created: ${created.join(", ")}`);
+        return lines;
+    }
+
+    async function operationNamed(name, where) {
+        const op = await operationOf(h, name, where);
+        return { svc: op.containerAsConsumedRestService, op };
+    }
+
     // ------------------------------------------------ published REST
 
     const special = t => t && ["System.HttpRequest", "System.HttpResponse"].includes(t.entityQualifiedName);
@@ -336,6 +576,86 @@ function makeRest(h) {
         return `${o.microflow} (new: ${params.map(p => `${p.name}: ${p.type}`).join(", ") || "no parameters"} -> ${returns})`;
     }
 
+    // The export mapping a microflow's object/list result needs, and the import mapping of its body parameter.
+    async function mappingsFor(o, mfl, where) {
+        const ret = mfl.microflowReturnType;
+        let em = null, im = null;
+        if (o.exportMapping) {
+            em = await mappingDoc(o.exportMapping, false, where);
+            if (!ret || !isObj(ret) || special(ret)) throw new Error(`${o.microflow} returns no object or list; exportMapping only applies to an object/list result`);
+            if (ret.entityQualifiedName !== em.entity || (ret instanceof datatypes.ListType) !== em.list) throw new Error(`${o.exportMapping} exports ${em.list ? "a list of " : ""}${em.entity}, but ${o.microflow} returns ${ret instanceof datatypes.ListType ? "a list of " : ""}${ret.entityQualifiedName}`);
+        } else if (ret && isObj(ret) && !special(ret)) throw new Error(`${o.microflow} returns an object/list; give "exportMapping": an export mapping of ${ret.entityQualifiedName} (create one with createExportMapping)`);
+        if (o.importMapping) im = await mappingDoc(o.importMapping, true, where);
+        return { em, im };
+    }
+
+    // The operation of a published REST resource for a microflow; its parameters from the microflow's parameters.
+    function publishedOperation(svc, res, o, mfl, em, im, name) {
+        const method = enumValue(sdk.services.HttpMethod, o.method, "method");
+        const path = String(o.path || "");
+        if (res.operations.some(x => x.httpMethod === method && x.path === path)) throw new Error(`${name}/${o.resource}: ${o.method} '${path}' already exists`);
+        const op = rest.PublishedRestServiceOperation.createIn(res);
+        op.httpMethod = method;
+        op.path = path;
+        op.microflow = mfl;
+        op.summary = String(o.summary || "");
+        op.documentation = String(o.description || "");
+        op.deprecated = bool(o.deprecated, false);
+        op.commit = mf.CommitEnum.No;
+        if (em) op.exportMapping = em.d;
+        if (im) {
+            op.importMapping = im.d;
+            const c = { yes: "Yes", no: "No", withoutevents: "YesWithoutEvents" }[String(o.commit === undefined ? "yes" : o.commit).toLowerCase()];
+            if (!c) fail(`commit '${o.commit}' is not one of yes | no | withoutEvents`, o.commit, ["yes", "no", "withoutEvents"]);
+            op.commit = mf.CommitEnum[c];
+        }
+        const inPath = new Set(placeholders(path));
+        const headers = new Set([].concat(o.headers || []));
+        let body = 0;
+        const kinds = [];
+        for (const p of mfl.objectCollection.objects.filter(x => x instanceof mf.MicroflowParameterObject)) {
+            const t = p.variableType;
+            if (special(t)) continue; // System.HttpRequest/HttpResponse are passed by the runtime
+            let kind;
+            if (isObj(t)) {
+                if (!im) throw new Error(`${o.microflow} parameter '${p.name}' is an object/list: give "importMapping" (an import mapping of ${t.entityQualifiedName}) to fill it from the request body`);
+                if (t.entityQualifiedName !== im.entity) throw new Error(`${o.importMapping} imports ${im.entity}, but parameter '${p.name}' is ${t.entityQualifiedName}`);
+                if (++body > 1) throw new Error(`${o.microflow} has more than one object/list parameter; only one can be the body`);
+                kind = rest.RestOperationParameterType.Body;
+            } else if (inPath.has(p.name)) kind = rest.RestOperationParameterType.Path;
+            else if (headers.has(p.name)) kind = rest.RestOperationParameterType.Header;
+            else kind = rest.RestOperationParameterType.Query;
+            const rp = rest.RestOperationParameter.createInPublishedRestServiceOperationUnderParameters(op);
+            rp.name = p.name;
+            rp.microflowParameter = p;
+            rp.parameterType = kind;
+            rp.type = copyType(t);
+            inPath.delete(p.name);
+            headers.delete(p.name);
+            kinds.push(`${p.name}: ${kind.name.toLowerCase()}`);
+        }
+        if (inPath.size) throw new Error(`path has {${[...inPath].join("}, {")}} but ${o.microflow} has no such parameter`);
+        if (headers.size) throw new Error(`headers names ${[...headers].join(", ")}, which ${o.microflow} has no parameter for`);
+        if (im && !body) throw new Error(`${o.microflow} has no object/list parameter of ${im.entity} for the importMapping body`);
+        return kinds;
+    }
+
+    async function publishedService(name, where) {
+        const all = model.allPublishedRestServices().map(qn);
+        const svc = await get(name).catch(() => fail(`${where}: no published REST service ${name}`, name, all));
+        if (!(svc instanceof rest.PublishedRestService)) fail(`${where}: ${name} is not a published REST service`, name, all);
+        return svc;
+    }
+    // The operation of a resource by method and path
+    function publishedOp(svc, o, where) {
+        const res = svc.resources.find(x => x.name === o.resource) || fail(`${where}: no resource '${o.resource}'`, o.resource, svc.resources.map(x => x.name));
+        const method = enumValue(sdk.services.HttpMethod, o.method, "method");
+        const path = String(o.path || "");
+        const op = res.operations.find(x => x.httpMethod === method && x.path === path);
+        if (!op) throw new Error(`${where}/${o.resource}: no ${method.name} operation with path '${path}' (its operations: ${res.operations.map(x => `${x.httpMethod.name} '${x.path}'`).join(", ") || "none"})`);
+        return { res, op };
+    }
+
     const impl = {
         async createConsumedRestService(o) {
             if (!atLeast("10.1.0")) throw new Error(`consumed REST services need Mendix 10.1 (this project is ${version}); use the callRest action`);
@@ -347,15 +667,7 @@ function makeRest(h) {
             const svc = rest.ConsumedRestService.createIn(folder(o.module, o.folder));
             svc.name = o.name;
             svc.baseUrl.value = String(o.baseUrl).replace(/\/+$/, "");
-            const auth = o.authentication;
-            if (auth !== undefined && !/^none$/i.test(String(auth))) {
-                if (typeof auth !== "object" || auth.username === undefined || auth.password === undefined) throw new Error(`${name}: authentication is "none" or { "username": ..., "password": ... } (Basic)`);
-                for (const k of Object.keys(auth)) if (!["username", "password"].includes(k)) fail(`${name}: unknown authentication field '${k}'`, k, ["username", "password"]);
-                const b = rest.BasicAuthenticationScheme.create(model);
-                svc.authenticationScheme = b;
-                await value(b, "username", auth.username, `${name} username`);
-                await value(b, "password", auth.password, `${name} password`);
-            }
+            await setAuthentication(svc, o.authentication, name);
             const lines = [];
             for (const [i, op] of o.operations.entries()) {
                 if (!op || typeof op !== "object") throw new Error(`${name} operation ${i + 1}: { "name": ..., "path": ... }`);
@@ -380,14 +692,7 @@ function makeRest(h) {
             } else if (o.query !== undefined) throw new Error(`'query' only applies with "create": true (the microflow's own parameters are used)`);
             const mfl = await get(o.microflow);
             if (!(mfl instanceof mf.Microflow)) throw new Error(`'${o.microflow}' is not a microflow`);
-            const ret = mfl.microflowReturnType;
-            let em = null, im = null;
-            if (o.exportMapping) {
-                em = await mappingDoc(o.exportMapping, false, where);
-                if (!ret || !isObj(ret) || special(ret)) throw new Error(`${o.microflow} returns no object or list; exportMapping only applies to an object/list result`);
-                if (ret.entityQualifiedName !== em.entity || (ret instanceof datatypes.ListType) !== em.list) throw new Error(`${o.exportMapping} exports ${em.list ? "a list of " : ""}${em.entity}, but ${o.microflow} returns ${ret instanceof datatypes.ListType ? "a list of " : ""}${ret.entityQualifiedName}`);
-            } else if (ret && isObj(ret) && !special(ret)) throw new Error(`${o.microflow} returns an object/list; give "exportMapping": an export mapping of ${ret.entityQualifiedName} (create one with createExportMapping)`);
-            if (o.importMapping) im = await mappingDoc(o.importMapping, true, where);
+            const { em, im } = await mappingsFor(o, mfl, where);
             if (o.commit !== undefined && !im) throw new Error("'commit' only applies with importMapping");
             const name = `${o.module}.${o.service}`;
             let svc;
@@ -413,57 +718,167 @@ function makeRest(h) {
                 res = rest.PublishedRestServiceResource.createIn(svc);
                 res.name = o.resource;
             }
-            const method = enumValue(sdk.services.HttpMethod, o.method, "method");
+            const kinds = publishedOperation(svc, res, o, mfl, em, im, name);
             const path = String(o.path || "");
-            if (res.operations.some(x => x.httpMethod === method && x.path === path)) throw new Error(`${name}/${o.resource}: ${o.method} '${path}' already exists`);
-            const op = rest.PublishedRestServiceOperation.createIn(res);
-            op.httpMethod = method;
-            op.path = path;
-            op.microflow = mfl;
-            op.summary = String(o.summary || "");
-            op.documentation = String(o.description || "");
-            op.deprecated = bool(o.deprecated, false);
-            op.commit = mf.CommitEnum.No;
-            if (em) op.exportMapping = em.d;
-            if (im) {
-                op.importMapping = im.d;
-                const c = { yes: "Yes", no: "No", withoutevents: "YesWithoutEvents" }[String(o.commit === undefined ? "yes" : o.commit).toLowerCase()];
-                if (!c) fail(`commit '${o.commit}' is not one of yes | no | withoutEvents`, o.commit, ["yes", "no", "withoutEvents"]);
-                op.commit = mf.CommitEnum[c];
-            }
-            const inPath = new Set(placeholders(path));
-            const headers = new Set([].concat(o.headers || []));
-            let body = 0;
-            const kinds = [];
-            for (const p of mfl.objectCollection.objects.filter(x => x instanceof mf.MicroflowParameterObject)) {
-                const t = p.variableType;
-                if (special(t)) continue; // System.HttpRequest/HttpResponse are passed by the runtime
-                let kind;
-                if (isObj(t)) {
-                    if (!im) throw new Error(`${o.microflow} parameter '${p.name}' is an object/list: give "importMapping" (an import mapping of ${t.entityQualifiedName}) to fill it from the request body`);
-                    if (t.entityQualifiedName !== im.entity) throw new Error(`${o.importMapping} imports ${im.entity}, but parameter '${p.name}' is ${t.entityQualifiedName}`);
-                    if (++body > 1) throw new Error(`${o.microflow} has more than one object/list parameter; only one can be the body`);
-                    kind = rest.RestOperationParameterType.Body;
-                } else if (inPath.has(p.name)) kind = rest.RestOperationParameterType.Path;
-                else if (headers.has(p.name)) kind = rest.RestOperationParameterType.Header;
-                else kind = rest.RestOperationParameterType.Query;
-                const rp = rest.RestOperationParameter.createInPublishedRestServiceOperationUnderParameters(op);
-                rp.name = p.name;
-                rp.microflowParameter = p;
-                rp.parameterType = kind;
-                rp.type = copyType(t);
-                inPath.delete(p.name);
-                headers.delete(p.name);
-                kinds.push(`${p.name}: ${kind.name.toLowerCase()}`);
-            }
-            if (inPath.size) throw new Error(`path has {${[...inPath].join("}, {")}} but ${o.microflow} has no such parameter`);
-            if (headers.size) throw new Error(`headers names ${[...headers].join(", ")}, which ${o.microflow} has no parameter for`);
-            if (im && !body) throw new Error(`${o.microflow} has no object/list parameter of ${im.entity} for the importMapping body`);
             return `${name}: ${o.method.toUpperCase()} /${svc.path}/${o.resource}${path ? "/" + path : ""} -> ${o.microflow}${kinds.length ? ` (${kinds.join(", ")})` : ""}${em ? `, result by ${o.exportMapping}` : ""}${made ? `\n      microflow ${made}` : ""}`;
+        },
+        async changeRestService(o) {
+            const svc = await service(o.service, "changeRestService");
+            const lines = [];
+            if (o.baseUrl !== undefined) {
+                const u = String(o.baseUrl);
+                if (!/^https?:\/\/\S+$/i.test(u)) throw new Error(`baseUrl must be an http(s) URL, e.g. https://api.example.com/v1 (got '${u}')`);
+                svc.baseUrl.value = u.replace(/\/+$/, "");
+                lines.push(`base URL ${u.replace(/\/+$/, "")}`);
+            }
+            if (o.authentication !== undefined) {
+                await setAuthentication(svc, o.authentication, o.service);
+                lines.push(svc.authenticationScheme ? "Basic authentication" : "no authentication");
+            }
+            if (!lines.length) throw new Error(`changeRestService ${o.service}: nothing to change; give baseUrl or authentication`);
+            return `${o.service}: ${lines.join("; ")}`;
+        },
+        async changeRestOperation(o) {
+            const { svc, op } = await operationNamed(o.operation, "changeRestOperation");
+            const lines = await changeOperation(svc, op, o, o.operation);
+            const res = responseOf(op);
+            return `${o.operation}: ${op.method.httpMethod.name.toUpperCase()} ${op.path.value}${res ? ` -> ${res.list ? "list of " : ""}${res.entity}` : ""}` + lines.map(l => "\n      " + l).join("");
+        },
+        async deleteRestOperation(o) {
+            const { svc, op } = await operationNamed(o.operation, "deleteRestOperation");
+            if (svc.operations.length === 1) throw new Error(`deleteRestOperation: ${o.operation} is the last operation of ${qn(svc)}; delete the service instead: { "op": "delete", "target": "${qn(svc)}" }`);
+            const { users } = await callersOf(o.operation);
+            op.delete();
+            return o.operation + (users.length ? `\n      STILL USED BY (fix these, or Studio Pro shows errors: delete those steps with deleteAction): ${users.join(", ")}` : "");
+        },
+        async changePublishedRestService(o) {
+            const svc = await publishedService(o.service, "changePublishedRestService");
+            const lines = [];
+            if (o.path !== undefined) {
+                svc.path = String(o.path).replace(/^\/+|\/+$/g, "");
+                lines.push(`path /${svc.path}`);
+            }
+            if (o.version !== undefined) {
+                svc.version = String(o.version);
+                lines.push(`version ${svc.version}`);
+            }
+            if (o.authentication !== undefined) {
+                const list = [].concat(o.authentication).map(a => enumValue(rest.RestAuthenticationType, a, "authentication"));
+                svc.authenticationTypes.clear();
+                for (const a of list) svc.authenticationTypes.push(a);
+                lines.push(`authentication ${list.map(a => a.name).join(", ")}`);
+            }
+            if (o.roles !== undefined) {
+                const roles = [];
+                for (const r of [].concat(o.roles)) {
+                    const role = await get(r).catch(() => fail(`no module role ${r}`, r, model.allModuleSecurities().flatMap(m => m.moduleRoles.map(x => x.qualifiedName))));
+                    if (!(role instanceof security.ModuleRole)) throw new Error(`'${r}' is not a module role`);
+                    roles.push(role);
+                }
+                svc.allowedRoles.clear();
+                for (const r of roles) svc.allowedRoles.push(r);
+                lines.push(`roles ${[].concat(o.roles).join(", ") || "none"}`);
+            }
+            if (!lines.length) throw new Error(`changePublishedRestService ${o.service}: nothing to change; give path, version, authentication or roles`);
+            return `${o.service}: ${lines.join("; ")}`;
+        },
+        async changePublishedRestOperation(o) {
+            const where = `changePublishedRestOperation ${o.service}`;
+            const svc = await publishedService(o.service, where);
+            const { res, op } = publishedOp(svc, o, where);
+            const keep = ["newMethod", "newPath", "microflow", "importMapping", "exportMapping", "commit", "headers", "summary", "description", "deprecated"];
+            if (!keep.some(k => o[k] !== undefined)) throw new Error(`${where}: nothing to change; give ${keep.join(", ")}`);
+            const spec = {
+                resource: o.resource,
+                method: o.newMethod !== undefined ? o.newMethod : op.httpMethod.name,
+                path: o.newPath !== undefined ? String(o.newPath) : op.path,
+                microflow: o.microflow !== undefined ? o.microflow : op.microflowQualifiedName,
+                importMapping: o.importMapping !== undefined ? o.importMapping || undefined : op.importMappingQualifiedName || undefined,
+                exportMapping: o.exportMapping !== undefined ? o.exportMapping || undefined : op.exportMappingQualifiedName || undefined,
+                commit: o.commit !== undefined ? o.commit : { Yes: "yes", No: "no", YesWithoutEvents: "withoutEvents" }[op.commit.name],
+                headers: o.headers !== undefined ? o.headers : op.parameters.filter(p => p.parameterType === rest.RestOperationParameterType.Header).map(p => p.name),
+                summary: o.summary !== undefined ? o.summary : op.summary,
+                description: o.description !== undefined ? o.description : op.documentation,
+                deprecated: o.deprecated !== undefined ? o.deprecated : op.deprecated
+            };
+            const mfl = await get(spec.microflow).catch(() => fail(`${where}: no microflow ${spec.microflow}`, spec.microflow, model.allMicroflows().map(qn)));
+            if (!(mfl instanceof mf.Microflow)) throw new Error(`${where}: '${spec.microflow}' is not a microflow`);
+            const { em, im } = await mappingsFor(spec, mfl, where);
+            if (!im) spec.commit = undefined;
+            const index = res.operations.indexOf(op);
+            op.delete();
+            const kinds = publishedOperation(svc, res, spec, mfl, em, im, o.service);
+            const made = res.operations[res.operations.length - 1];
+            if (index < res.operations.length - 1) {
+                made.detach();
+                res.operations.splice(index, 0, made);
+            }
+            return `${o.service}: ${spec.method.toUpperCase()} /${svc.path}/${o.resource}${spec.path ? "/" + spec.path : ""} -> ${spec.microflow}${kinds.length ? ` (${kinds.join(", ")})` : ""}`;
+        },
+        async deletePublishedRestOperation(o) {
+            const where = `deletePublishedRestOperation ${o.service}`;
+            const svc = await publishedService(o.service, where);
+            const { res, op } = publishedOp(svc, o, where);
+            op.delete();
+            return `${o.service}/${o.resource}: ${o.method.toUpperCase()} '${o.path || ""}' deleted${res.operations.length ? "" : ` (the resource ${o.resource} has no operations left: deletePublishedRestResource removes it)`}`;
+        },
+        async deletePublishedRestResource(o) {
+            const where = `deletePublishedRestResource ${o.service}`;
+            const svc = await publishedService(o.service, where);
+            const res = svc.resources.find(x => x.name === o.resource) || fail(`${where}: no resource '${o.resource}'`, o.resource, svc.resources.map(x => x.name));
+            const n = res.operations.length;
+            res.delete();
+            return `${o.service}: resource ${o.resource} deleted (${n} operation(s))`;
         }
     };
 
     const checks = {
+        async changeRestService(o) {
+            const svc = await get(o.service);
+            const r = [];
+            if (o.baseUrl !== undefined && svc.baseUrl.value !== String(o.baseUrl).replace(/\/+$/, "")) r.push(`${o.service} base URL is ${svc.baseUrl.value}`);
+            if (o.authentication !== undefined && !!svc.authenticationScheme === /^none$/i.test(String(o.authentication))) r.push(`${o.service} authentication not as asked`);
+            return r;
+        },
+        async changeRestOperation(o) {
+            const op = await operationOf(h, o.operation, "check");
+            const r = [];
+            if (o.method !== undefined && op.method.httpMethod.name.toLowerCase() !== String(o.method).toLowerCase()) r.push(`${o.operation} method is ${op.method.httpMethod.name}`);
+            const used = new Set([...placeholders(op.path.value), ...op.headers.map(x => x.value.value).flatMap(placeholders), ...placeholders(bodyText(op))]);
+            const declared = op.parameters.map(p => p.name);
+            if (declared.length !== used.size || declared.some(n => !used.has(n))) r.push(`${o.operation}: parameters ${declared} vs placeholders ${[...used]}`);
+            if (!op.headers.some(x => x.name === "Accept")) r.push(`${o.operation} has no Accept header`);
+            return r;
+        },
+        async deleteRestOperation(o) {
+            const svc = await get(o.operation.split(".").slice(0, 2).join("."));
+            return svc.operations.some(x => x.name === o.operation.split(".")[2]) ? [`${o.operation} still exists`] : [];
+        },
+        async changePublishedRestService(o) {
+            const svc = await get(o.service);
+            const r = [];
+            if (o.version !== undefined && svc.version !== String(o.version)) r.push(`${o.service} version ${svc.version}`);
+            if (o.roles !== undefined && svc.allowedRolesQualifiedNames.length !== [].concat(o.roles).length) r.push(`${o.service} roles ${svc.allowedRolesQualifiedNames}`);
+            return r;
+        },
+        async changePublishedRestOperation(o) {
+            const svc = await get(o.service);
+            const res = svc.resources.find(x => x.name === o.resource);
+            const method = String(o.newMethod || o.method).toLowerCase();
+            const path = o.newPath !== undefined ? String(o.newPath) : String(o.path || "");
+            const op = res && res.operations.find(x => x.httpMethod.name.toLowerCase() === method && x.path === path);
+            if (!op) return [`${o.service}/${o.resource} has no ${method} '${path}'`];
+            return o.microflow && op.microflowQualifiedName !== o.microflow ? [`operation runs ${op.microflowQualifiedName}`] : [];
+        },
+        async deletePublishedRestOperation(o) {
+            const svc = await get(o.service);
+            const res = svc.resources.find(x => x.name === o.resource);
+            return res && res.operations.some(x => x.httpMethod.name.toLowerCase() === String(o.method).toLowerCase() && x.path === String(o.path || "")) ? [`${o.method} '${o.path || ""}' still exists`] : [];
+        },
+        async deletePublishedRestResource(o) {
+            const svc = await get(o.service);
+            return svc.resources.some(x => x.name === o.resource) ? [`resource ${o.resource} still exists`] : [];
+        },
         async createConsumedRestService(o) {
             const svc = await get(`${o.module}.${o.name}`);
             if (!(svc instanceof rest.ConsumedRestService)) return [`${o.module}.${o.name} is not a consumed REST service`];

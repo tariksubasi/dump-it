@@ -1326,8 +1326,13 @@ async function selftest(mpr, keep, { out, relevant, mxcheck, mx, timeout }) {
                 ["workflows", `two workflows (${pageable ? "user tasks with task pages, targeting by user role and microflow, outcomes with steps, " : ""}decisions on a Boolean and an enumeration, call microflow with outcomes, jump, timer, parallel split, call workflow, notification wait, end in a branch)${pageable ? ", user task pages (WorkflowUserTask parameter, context from a data source microflow, outcome buttons)" : ""}, workflow actions (call, context, notify, jump-to options, state, lock/unlock, open, complete task)`,
                     () => integ.workflowPlan(mod, T, src.version, pageable, userRole), p => integ.workflowProblems(p, T, src.version, pageable)],
                 ["OData/XML", `${require("./versions").cmp(src.version, "10.4.0") >= 0 ? "published OData (2 entities: ID and attribute key, enumeration, association, insert/update by microflow/delete, paging), " : ""}XML schema from an .xsd, XML import/export mappings over it, message definition with associations and mappings over it, import/export steps; consumed OData, SOAP and business events refused with Studio Pro steps`,
-                    () => integ.odataPlan(mod, T, src.version, tmp), p => integ.odataProblems(p, T, src.version)]
+                    () => integ.odataPlan(mod, T, src.version, tmp), p => integ.odataProblems(p, T, src.version)],
+                ["integration changes", "changeJsonStructure (added, removed, retyped paths), updateImportMapping/updateExportMapping (new values and object with createAttributes/create, prune, skip), mappings onto existing entities (loose attribute names), changeMapping (keys, find + ignore, transform microflow, custom microflow handler refused, association, mapping parameter, root = parameter), importWithMapping passing the parameter, callRest error handler parsing $latestHttpResponse with an import mapping, mapping-test simulation, refusals; delete of a mapping",
+                    () => integ.changePlan(mod, T, tmp, src.version), p => integ.changeProblems(p, T, src.version)]
             ];
+            // app documents of ops-docs.js (selftest-docs.js): regular expressions, task queues, ...
+            const docs = require("./selftest-docs");
+            for (const [name, [plan, verify]] of Object.entries(docs.PHASES)) phases.push([name, docs.WHAT[name], () => plan(mod, T, src.version, tmp), p => verify(p, T, src.version)]);
             if (!pageable) results.push("SKIP workflow user tasks and user task pages: this project has no page with a layout to copy (a user task needs a task page)");
             for (const [name, what, plan, verify] of phases) {
                 const r = await integ.runPhase(env, s2, plan(), verify);
@@ -1383,11 +1388,19 @@ async function selftest(mpr, keep, { out, relevant, mxcheck, mx, timeout }) {
         await require("./selftest-ds").dsPhase({ src, reopen, check, results, tmp, mod, layout, layoutProblems });
         // phase DS-model (selftest-ds-model.js): building blocks, page templates, layouts from scratch, applyStyle, component kits, style guide
         s2 = await require("./selftest-ds-model").dsModelPhase({ s2, reopen, copy, mod, T, layout, layoutProblems, check, results });
+        // phase widgets (selftest-widgets.js): tab pages, navigation / menu widgets, scroll container, sign-in widgets and
+        // createLoginPage, title / label / back / link buttons, navigation list, presets, convertWidget, deprecated widgets
+        s2 = await require("./selftest-widgets").widgetsPhase({ s2, reopen, copy, mod, T, layout, layoutProblems, check, results });
+        // phase native (selftest-native.js): native theme variables, tokens, style classes, native design properties, native
+        // page classes / design, NATIVE STYLE CHECK and the refusals
+        s2 = await require("./selftest-native").nativePhase({ s2, reopen, copy, src, mod, T, layout, layoutProblems, check, results });
         // phase R (before phase S, which deletes the event handler it looks at): reference graph (usages, unused) and the ops built on it (selftest-refs.js)
         s2 = await require("./selftest-refs").refsPhase({ reopen, copy, mod, T, check, results, layout, layoutProblems, lostProperties, relevant, userRole });
         // phase S (selftest-smallops.js): retrieve sort/range, reference set add/remove, snippets, CRUD pages, changing
         // and deleting constants, scheduled events, rules, handlers, indexes, enumeration values
         s2 = await require("./selftest-smallops").smallPhase({ s2, reopen, copy, mod, T, role, layout, layoutProblems, check, results, src });
+        // phase W (selftest-wflows.js): microflow settings and the flow / workflow editing of wave 2, one step per feature
+        s2 = await require("./selftest-wflows").wflowsPhase({ s2, reopen, copy, mod, T, layout, layoutProblems, check, results });
 
         // phase 4 + 5: change a page Studio Pro saved (add into a column, change a caption and a class), then move the
         // text into the new container, delete that and put the class back: the page must be byte for byte what it was
