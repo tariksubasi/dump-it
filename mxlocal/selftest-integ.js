@@ -133,6 +133,11 @@ function restProblems(project, T) {
     if (calls.length !== 4) r.push(`${calls.length} send REST request actions, expected 4`);
     for (const c of calls) {
         for (const m of c.ParameterMappings || []) if (m.$Type !== "Microflows$RestOperationParameterMapping") r.push(`parameter mapping stored as ${m.$Type} (Studio Pro cannot load it)`);
+        // Studio Pro resolves a parameter as Module.Service.Operation.param; without the operation the model does not load
+        for (const m of [...(c.ParameterMappings || []), ...(c.QueryParameterMappings || [])]) {
+            const ref = m.Parameter !== undefined ? m.Parameter : m.QueryParameter;
+            if (typeof ref !== "string" || !ref.startsWith(c.Operation + ".")) r.push(`${c.Operation}: parameter mapping refers to '${ref}', not a parameter of the operation (Studio Pro cannot load it)`);
+        }
         if (c.BodyVariable && !/CreateOrder$/.test(c.Operation)) r.push(`${c.Operation} has a BodyVariable without a mapping body (CE7067)`);
         if (c.ErrorHandlingType === "Custom" || c.ErrorHandlingType === "CustomWithoutRollBack") r.push("send REST request with custom error handling (CE6035)");
     }

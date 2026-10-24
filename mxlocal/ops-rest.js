@@ -147,7 +147,9 @@ const REST_ACTIONS = {
             if (missing.length) throw new Error(`${where}: ${spec.operation} needs args for: ${missing.map(p => p.name).join(", ")}`);
             for (const p of params) {
                 const pm = mf.RestOperationParameterMapping.createIn(a);
-                pm.parameter = p;
+                // by name with the operation in it (Module.Service.Operation.param): the SDK leaves the operation out and
+                // Studio Pro then cannot resolve the parameter (mx check 10.24 / 11.12: the model does not load)
+                pm.__parameter.updateWithRawValue(`${op.qualifiedName}.${p.name}`);
                 pm.value = c.expr(args[p.name], `${where} ${p.name}`);
             }
             const qps = queryParamsOf(op) || [];
@@ -156,7 +158,7 @@ const REST_ACTIONS = {
                 const required = q.parameterUsage instanceof rest.RequiredQueryParameterUsage;
                 if (required && !(q.name in query)) throw new Error(`${where}: ${spec.operation} needs a value for query parameter '${q.name}' (in "query")`);
                 const qm = mf.QueryParameterMapping.createIn(a);
-                qm.queryParameter = q;
+                qm.__queryParameter.updateWithRawValue(`${op.qualifiedName}.${q.name}`); // as the path parameters above
                 qm.value = q.name in query ? c.expr(query[q.name], `${where} query ${q.name}`) : "";
                 qm.included = q.name in query ? (required ? mf.IncludedOption.Yes : mf.IncludedOption.WhenNotNull) : mf.IncludedOption.No;
             }
