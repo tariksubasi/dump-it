@@ -394,6 +394,9 @@ function hinter(catalog, schema, warn) {
         if (p && (p.kind === "byId" || p.prim === "Guid" || p.prim === "Blob")) return { k: 0x05, s: 0 };
         if (p && p.prim === "Double") return { k: 0x01 };
         if (p && p.prim === "DateTime") return { k: 0x09 }; // a BSON date: Studio Pro cannot load a string there (ScheduledEvent.StartDateTime)
+        // a GUID field the SDK does not model (DomainModels$CrossAssociation.GUID, no sample in the project): Studio Pro
+        // stores GUIDs as binary and cannot load a string there
+        if (!p && /GUID$/.test(key) && typeof value === "string" && GUID_RE.test(value)) return { k: 0x05, s: 0 };
         if (Array.isArray(value)) {
             const parts = p && p.kind === "partList";
             const known = LIST_MARKERS[`${type}.${key}`];

@@ -41,6 +41,7 @@ function toCross(a, childQn) {
     const c = { $ID: a.$ID, $Type: "DomainModels$CrossAssociation" };
     for (const k of CROSS_KEYS) if (k in a) c[k] = a[k];
     c.Child = childQn;
+    if (typeof c.GUID !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(c.GUID)) c.GUID = require("crypto").randomUUID();
     return c;
 }
 function toRegular(c, childId) {
