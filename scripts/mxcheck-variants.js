@@ -33,16 +33,23 @@ const constants = [];
 for (const f of units) {
     const u = read(f);
     if (u.$Type === "Settings$ProjectSettings") settingsFile = f;
-    if (u.$Type === "Constants$Constant") constants.push(`${u.Name} (${rel(f)})`);
+    if (u.$Type === "Constants$Constant") {
+        constants.push(`${u.Name} (${rel(f)})`);
+        if (/_Url$|^ApiKey$|_Origins$/.test(u.Name)) console.log(`constant ${u.Name}: ${show(u)}`);
+    }
 }
 const settings = read(settingsFile);
 const confs = settings.Settings.find(s => s.$Type === "Settings$ConfigurationSettings").Configurations;
 for (const c of confs) console.log(`configuration ${c.Name}: ${show(c.ConstantValues)}`);
 console.log(`constants: ${constants.join(", ")}`);
 
+// the constant's module: the qualified name of the configured constant without its last part
+const firstCv = confs.flatMap(c => c.ConstantValues)[0] || {};
+const mod = String(firstCv.Constant || "").split(".")[0];
 const variants = {
     asStored: cv => cv,
-    withoutValue: () => null,
+    otherConstantSameModule: cv => ({ ...cv, Constant: `${mod}.ZzMxlocalTest_Origins` }),
+    unknownName: cv => ({ ...cv, Constant: "NoSuchModule.NoSuchConstant" }),
     flatValueToo: cv => ({ ...cv, Value: cv.SharedOrPrivateValue && cv.SharedOrPrivateValue.Value !== undefined ? cv.SharedOrPrivateValue.Value : "" }),
     flatValueOnly: cv => {
         const { SharedOrPrivateValue, ...rest } = cv;
