@@ -141,6 +141,13 @@ jobs:
         env:
           MX_PATH: ${{ steps.mxbuild.outputs.mx }}
         run: CI_ONLY=${{ matrix.project }} CI_STAGES=selftest CI_SELFTEST_ARGS="--keep --mxcheck" bash scripts/ci.sh
+      - name: Diagnose configuration constant values (mx check on variants of the kept copy)
+        if: failure()
+        env:
+          MX_PATH: ${{ steps.mxbuild.outputs.mx }}
+        run: |
+          kept="$(ls -d "$RUNNER_TEMP"/mxlocal-selftest-* 2>/dev/null | head -n1)"
+          if [ -n "$kept" ]; then node scripts/mxcheck-variants.js "$kept" || true; fi
       - name: Upload the mx check reports
         if: always()
         uses: actions/upload-artifact@v4
