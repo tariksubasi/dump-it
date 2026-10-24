@@ -483,9 +483,18 @@ function makeDocs(h) {
         async deleteImage(o) {
             const where = `deleteImage ${o.image}`;
             const img = await imageOf(o.image, where);
-            const users = h.client && h.client.referencesTo ? h.client.referencesTo(o.image) : [];
+            let users = h.client && h.client.referencesTo ? h.client.referencesTo(o.image) : [];
+            // enumeration values lose the image (an enumeration value may have none); the saved index does not know
+            // enumerations made earlier in this plan, so loaded ones are looked at too
+            const cleared = [];
+            for (const e of model.allEnumerations()) {
+                if (!e.isLoaded && !users.includes(e.qualifiedName)) continue;
+                const en = await e.load();
+                for (const v of en.values) if (v.imageQualifiedName === o.image) (v.image = null, cleared.push(`${en.qualifiedName}.${v.name}`));
+            }
+            users = users.filter(u => !model.allEnumerations().some(e => e.qualifiedName === u));
             img.delete();
-            return o.image + (users.length ? `\n      STILL USED BY (fix these, or Studio Pro shows errors; pick another image with changeWidget / changeEnumerationValue): ${users.join(", ")}` : "");
+            return o.image + (cleared.length ? `\n      enumeration values without an image now: ${cleared.join(", ")}` : "") + (users.length ? `\n      STILL USED BY (fix these, or Studio Pro shows errors; pick another image with changeWidget / changeEnumerationValue): ${users.join(", ")}` : "");
         },
         async createRegularExpression(o) {
             validName(o.name, "regular expression name");

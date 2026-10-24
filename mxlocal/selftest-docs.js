@@ -290,6 +290,8 @@ function mediaProblems(project, T, version) {
     const c = unitsNamed(project, `${T}_`)[`${T}_Img`];
     const names = c ? c.Images.map(i => i.Name).join(",") : "missing";
     if (names !== "Keep") r.push(`images ${names}`);
+    const en = unitsNamed(project, `${T}DocEnum`)[`${T}DocEnum`];
+    if (!en || en.Values.find(v => v.Name === "A").Image) r.push(`enumeration value A still shows the deleted image (${en && en.Values.find(v => v.Name === "A").Image})`);
     const ic = unitsNamed(project, `${T}_`)[`${T}_Icons`];
     if (cmp(version, "9.22.0") >= 0 && !ic) r.push("icon collection missing");
     if (ic) {
@@ -348,6 +350,6 @@ module.exports.WHAT = {
     "regex/queues": "regular expressions (create with examples, Java-only syntax, change; a validation rule using one), task queues (threads, cluster scope, change), a call in a queue with exponential retry, changeAction moving a call to another queue with a fixed retry and one out of its queue; refusals (bad pattern, failing example, a pattern given as rule regex, did-you-mean names, threads 0, bad scope, queued call with a result variable, unknown retry field)",
     "OData change": "changePublishedOData change: add and remove attributes of a published entity, insert by microflow, paging off, count off, update kept (Mendix 10.4+); refusals (unknown attribute, already published, entity not published, unknown change field)",
     services: "business event service (Mendix 10+: events with attributes, add/remove events and attributes), published web service (object, list and primitive operations, optional parameter; change: add, remove, authentication, validate), consumed web service compared with a new WSDL (added/removed operations, refused with the Studio Pro steps); refusals with did-you-mean",
-    media: "deleteImage of an image an enumeration value shows (STILL USED BY), the other image kept; importIconCollection from a .ttf with an IcoMoon selection.json (two names for a code, tags) and with an inline hex map and prefix; refusals (did-you-mean image and collection, a name without collection, a code the font lacks, a WOFF file, a missing file, a bad code); createDocumentTemplate refused with the Studio Pro steps",
+    media: "deleteImage of an image an enumeration value shows (the value loses the image), the other image kept; importIconCollection from a .ttf with an IcoMoon selection.json (two names for a code, tags) and with an inline hex map and prefix; refusals (did-you-mean image and collection, a name without collection, a code the font lacks, a WOFF file, a missing file, a bad code); createDocumentTemplate refused with the Studio Pro steps",
     "data sets": "createDataSet (OQL with an aggregate, a Decimal parameter, a $ inside a string literal, a module role with parameter access); refusals (unknown parameter with did-you-mean, unknown entity, unused parameter, sql field hint); database connection, data transformer, ML model mapping, change data capture service, Excel Importer template, data importer and document import refused with the Studio Pro steps"
 };

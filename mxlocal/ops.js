@@ -993,6 +993,9 @@ function bind(model, client) {
             if (!("name" in el)) throw new Error(`'${o.target}' cannot be renamed`);
             validName(o.newName);
             el.name = o.newName;
+            // process the rename now: the reference rewrite works on the stored names, which a later rename in the same
+            // plan (e.g. of the module) would change first (references to Mod.Entity.Old then stay)
+            await model.flushChanges();
             return `${o.target} -> ${o.newName}`;
         },
         async delete(o) {
