@@ -32,7 +32,7 @@ const COVERED_DOCUMENTS = {
     "pages.Snippet": ["createSnippet"],
     "projects.ModuleSettings": ["createModule", "setModuleSettings"],
     "rest.ConsumedRestService": ["createConsumedRestService", "addRestOperation"],
-    "rest.PublishedRestService": ["publishRest"],
+    "rest.PublishedRestService": ["publishRest", "generateRestResource"],
     "scheduledevents.ScheduledEvent": ["createScheduledEvent", "changeScheduledEvent"],
     "security.ModuleSecurity": ["createModule", "createModuleRole"],
     "workflows.Workflow": ["createWorkflow", "changeWorkflow"],

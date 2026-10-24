@@ -2627,6 +2627,53 @@
         "app",
         "security"
       ]
+    },
+    {
+      "id": "restcrud",
+      "text": "Order entity'si için OrderAPI adında bir published REST servisi üret: orders kaynağında hepsini listeleme, Number ile tek kayıt getirme, ekleme, güncelleme ve silme olsun (Studio Pro'daki Generate gibi). User rolü çağırabilsin.",
+      "checks": {
+        "files": {
+          "integrations/.*\\.txt$": "PUBLISHED REST SERVICE",
+          "entry-points\\.txt$": "DELETE /rest/\\S+/orders/\\{Key\\}"
+        }
+      },
+      "ops": [
+        "generateRestResource"
+      ]
+    },
+    {
+      "id": "restbearer",
+      "text": "https://stock.example.com/v1 için StockApi adında bir REST istemcisi yap: Bearer token ile kimlik doğrulasın, GET /items/{sku} operasyonu olsun, sku'nun test değeri A-1 olsun. Yayınlanan OrderService REST servisine de Origins sabitiyle CORS ekle (sabit yoksa oluştur).",
+      "checks": {
+        "find": [
+          "MyFirstModule.StockApi"
+        ],
+        "files": {
+          "integrations/.*\\.txt$": "Bearer"
+        }
+      },
+      "ops": [
+        "createConsumedRestService",
+        "changePublishedRestService",
+        "createConstant"
+      ],
+      "setup": [
+        {
+          "op": "createMicroflow",
+          "module": "MyFirstModule",
+          "name": "PRS_Ping",
+          "returns": "String",
+          "returnValue": "'ok'"
+        },
+        {
+          "op": "publishRest",
+          "module": "MyFirstModule",
+          "service": "OrderService",
+          "resource": "ping",
+          "method": "Get",
+          "microflow": "MyFirstModule.PRS_Ping"
+        }
+      ]
     }
   ]
 }

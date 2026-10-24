@@ -323,7 +323,9 @@ function makeMappings(h) {
             return target;
         }
         if (root.kind === "Array") {
-            if (!imp) throw new Error(`${where}: the root of ${o.jsonStructure} is an array; export mappings over a root array are not supported here (do it in Studio Pro, or use an object around the array)`);
+            // a list: the root element is the array item (maxOccurs -1), for export as for import; the export mapping then
+            // takes a list of the root entity (no Studio Pro sample of an export over a root array: first use)
+            if (!imp && h.client) h.client.warn(`ExportMappings$ObjectMappingElement over a root array first use by ops (no Studio Pro sample in the test projects): check ${o.module}.${o.name} in Studio Pro`);
             if (!root.children[0]) throw new Error(`${where}: ${o.jsonStructure} is an empty array; give the snippet one item`);
             return { where, top: fill(obj(root.children[0], true), root.children[0]) };
         }
@@ -1166,7 +1168,7 @@ function integChangedLater(name, o, rest) {
     // consumed and published REST: later changes and deletes of the same service
     const svcQn = name === "createConsumedRestService" ? qn : name === "addRestOperation" ? o.service : null;
     if (svcQn && rest.some(x => ["changeRestService", "changeRestOperation", "deleteRestOperation"].includes(x.op) && String(x.service || x.operation || "").startsWith(svcQn))) return true;
-    const pub = name === "publishRest" ? `${o.module}.${o.service}` : name === "changePublishedRestOperation" ? o.service : null;
+    const pub = name === "publishRest" || name === "generateRestResource" ? `${o.module}.${o.service}` : name === "changePublishedRestOperation" ? o.service : null;
     if (pub && rest.some(x => ["changePublishedRestOperation", "deletePublishedRestOperation", "deletePublishedRestResource", "changePublishedRestService"].includes(x.op) && x.service === pub)) return true;
     if (name === "publishOData" && rest.some(x => x.op === "changePublishedOData" && x.service === qn)) return true;
     if (name === "changeRestOperation" && rest.some(x => ["changeRestOperation", "deleteRestOperation"].includes(x.op) && x.operation === o.operation)) return true;

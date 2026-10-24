@@ -24,7 +24,8 @@ const OPERATION_FIELDS = {
     headers: "optional { \"Name\": \"value template, {param} allowed\" } (default Accept: application/json; Content-Type: application/json with a body)",
     body: "Post/Put/Patch: a text template with {param} placeholders, or { \"snippet\": JSON, \"entity\": ..., \"entities\": ..., \"attributes\": ..., \"skip\": ..., \"create\": ... } (an export mapping of an object, like createExportMapping) (default \"{}\")",
     response: "optional \"none\" (default: the response is in $latestHttpResponse) or { \"snippet\": JSON, \"entity\": ..., \"entities\": ..., \"attributes\": ..., \"skip\": ..., \"keys\": ..., \"create\": ... } (an import mapping, like createImportMapping)",
-    timeout: "optional seconds (default 300)"
+    timeout: "optional seconds (default 300)",
+    testValues: "optional { \"param\": \"value\" } test values of the parameters (Studio Pro: Test value; used by its Send request button)"
 };
 
 const REST_OPS = {
@@ -32,15 +33,20 @@ const REST_OPS = {
         doc: "Create a consumed REST service (REST client document, Mendix 10.1+) with its operations; call them with the sendRestRequest action.",
         fields: {
             module: "R module name", name: "R service name, e.g. OrderApi", baseUrl: "R base URL, e.g. https://api.example.com/v1",
-            authentication: "optional \"none\" (default) or { \"username\": \"text or @Module.Constant\", \"password\": \"text or @Module.Constant\" } (Basic)",
+            authentication: "optional \"none\" (default), { \"username\": \"text or @Module.Constant\", \"password\": \"text or @Module.Constant\" } (Basic) or { \"bearer\": \"token\" } (every operation gets the header Authorization: Bearer {token} and a String parameter token, filled in sendRestRequest args)",
+            baseUrlParameter: "optional name of a String parameter for the base URL (Mendix 10.17+), e.g. ApiUrl: sendRestRequest gives it in \"baseUrl\"; baseUrl is then its test value",
             operations: "R [ { \"name\": ..., \"method\": ..., \"path\": ..., \"parameters\": ..., \"query\": ..., \"headers\": ..., \"body\": ..., \"response\": ..., \"timeout\": ... } ] (ops addRestOperation lists the fields)",
             folder: "optional folder path"
         }
     },
     addRestOperation: { doc: "Add an operation to an existing consumed REST service.", fields: { service: "R Module.Service", ...OPERATION_FIELDS } },
     changeRestService: {
-        doc: "Change a consumed REST service: base URL and authentication.",
-        fields: { service: "R Module.Service", baseUrl: "optional new base URL, e.g. https://api.example.com/v2", authentication: "optional \"none\" or { \"username\": ..., \"password\": ... } (Basic; values text or @Module.Constant)" }
+        doc: "Change a consumed REST service: base URL, base URL parameter and authentication.",
+        fields: {
+            service: "R Module.Service", baseUrl: "optional new base URL, e.g. https://api.example.com/v2",
+            authentication: "optional \"none\", { \"username\": ..., \"password\": ... } (Basic; values text or @Module.Constant) or { \"bearer\": \"token\" } (Authorization: Bearer {token} header on every operation)",
+            baseUrlParameter: "optional name of a String parameter for the base URL (Mendix 10.17+), or \"none\" to remove it (only when no sendRestRequest maps it)"
+        }
     },
     changeRestOperation: {
         doc: "Change an operation of a consumed REST service: method, path, parameters, query, headers, body, response mapping, timeout. Give only what changes; {placeholders} are recomputed and the sendRestRequest steps that call it are listed.",
@@ -49,13 +55,18 @@ const REST_OPS = {
             parameters: "optional { \"name\": \"type\" } types of {name} parameters (others keep theirs, new ones default String)",
             query: "optional query parameters, replaces them all (as in addRestOperation)", headers: "optional { \"Name\": \"value\" } added or changed; { \"Name\": null } removes one (not Accept)",
             body: "optional new body: text template or { \"snippet\": ..., \"entity\": ... } export mapping (Post/Put/Patch)", response: "optional new response: \"none\" or { \"snippet\": ..., \"entity\": ... } import mapping",
-            timeout: "optional seconds"
+            timeout: "optional seconds", testValues: "optional { \"param\": \"value\" } test values (Studio Pro: Test value)"
         }
     },
     deleteRestOperation: { doc: "Delete an operation of a consumed REST service; lists the sendRestRequest steps that still call it.", fields: { operation: "R Module.Service.Operation" } },
     changePublishedRestService: {
-        doc: "Change a published REST service: path, version, authentication, allowed roles.",
-        fields: { service: "R Module.Service", path: "optional base path, e.g. rest/orders/v2", version: "optional version, e.g. 2.0.0", authentication: "optional [ \"Basic\" | \"Session\" | \"Microflow\" | \"Guest\" ] (replaces)", roles: "optional [ \"Module.Role\" ] (replaces)" }
+        doc: "Change a published REST service: path, version, authentication (with the authentication microflow), allowed roles, CORS.",
+        fields: {
+            service: "R Module.Service", path: "optional base path, e.g. rest/orders/v2", version: "optional version, e.g. 2.0.0", authentication: "optional [ \"Basic\" | \"Session\" | \"Microflow\" | \"Guest\" ] (replaces)",
+            authenticationMicroflow: "with Microflow authentication: Module.Microflow that returns the System.User (optional parameter of type System.HttpRequest); \"\" removes",
+            roles: "optional [ \"Module.Role\" ] (replaces)",
+            cors: "optional \"none\" or { \"origins\": \"@Module.Constant\" (String constant: allowed origins, e.g. https://a.example.com,https://b.example.com or *), \"maxAge\": \"@Module.Constant\" (Integer constant, seconds; optional), \"credentials\": true/false (allow authentication, default false) }"
+        }
     },
     changePublishedRestOperation: {
         doc: "Change an operation of a published REST service (found by resource, method and path): new method, path, microflow, mappings, summary. Its parameters are made again from the microflow.",
@@ -67,6 +78,19 @@ const REST_OPS = {
     },
     deletePublishedRestOperation: { doc: "Delete an operation of a published REST service (found by resource, method and path).", fields: { service: "R Module.Service", resource: "R resource name", method: "R Get | Post | Put | Patch | Delete", path: "optional operation path (default empty)" } },
     deletePublishedRestResource: { doc: "Delete a resource of a published REST service with all its operations.", fields: { service: "R Module.Service", resource: "R resource name" } },
+    generateRestResource: {
+        doc: "Publish an entity as a REST resource with CRUD operations, like Studio Pro's Generate on a published REST service: JSON structures, an import mapping (found by key, else created) and export mappings, one microflow per operation (GET all, GET by key, POST, PUT, DELETE; 404 when the key is not found), then publishRest for each.",
+        fields: {
+            module: "R module name for the service, mappings and microflows", service: "R service name, e.g. OrderAPI (created when missing)", entity: "R persistable Module.Entity",
+            key: "R attribute that identifies an object in the URL, e.g. OrderNumber (String, Integer, Long or AutoNumber)",
+            resource: "optional resource name (default the entity name in lower case + s, e.g. orders)",
+            operations: "optional [ \"getAll\" | \"getByKey\" | \"post\" | \"put\" | \"delete\" ] (default all five)",
+            attributes: "optional [ \"Attr\" ] attributes in the JSON (default every attribute of the entity except binary ones; the key is always in)",
+            folder: "optional folder for the new documents (default the service name)",
+            servicePath: "optional base path of a new service", version: "optional version of a new service", authentication: "optional [ \"Basic\" | \"Session\" | \"Microflow\" | \"Guest\" ] for a new service",
+            authenticationMicroflow: "optional, with Microflow authentication of a new service", roles: "optional [ \"Module.Role\" ] allowed to call the service"
+        }
+    },
     publishRest: {
         doc: "Publish a microflow as a REST operation (creates the service and resource when missing). Parameters: {Name} in the path -> path, object/list -> body (needs importMapping), System.HttpRequest/HttpResponse -> none, others query (or header). An object/list result needs exportMapping.",
         fields: {
@@ -77,7 +101,7 @@ const REST_OPS = {
             create: "optional true: create the microflow when it does not exist (parameters from the path, headers, query and importMapping; returns String or the exportMapping's entity)",
             query: "with create: [ \"name\" ] String query parameters of the new microflow",
             servicePath: "optional base path for a new service (default rest/<service>/v1)", version: "optional service version for a new service, shown in its OpenAPI document (default 1.0.0)",
-            authentication: "optional [ \"Basic\" | \"Session\" | \"Microflow\" | \"Guest\" ] for a new service (default [\"Basic\"])", roles: "optional [ \"Module.Role\" ] allowed to call the service", folder: "optional folder path for a new service"
+            authentication: "optional [ \"Basic\" | \"Session\" | \"Microflow\" | \"Guest\" ] for a new service (default [\"Basic\"])", authenticationMicroflow: "with Microflow authentication of a new service: Module.Microflow that returns the System.User", roles: "optional [ \"Module.Role\" ] allowed to call the service", folder: "optional folder path for a new service"
         }
     }
 };
@@ -123,7 +147,8 @@ const REST_ACTIONS = {
             args: "optional { \"param\": \"expression\" } for the {param} parameters of path, headers and body (every parameter needs one)",
             query: "optional { \"name\": \"expression\" } query parameters (every required one; Mendix 10: give them in args)",
             body: "with a mapping body: the object variable to send (no $)",
-            variable: "optional result variable: the object or list the response mapping creates"
+            variable: "optional result variable: the object or list the response mapping creates",
+            baseUrl: "with a base URL parameter on the service: expression for it, e.g. @Module.ApiUrl (required then)"
         },
         only: "micro",
         creates: "variable",
@@ -133,6 +158,14 @@ const REST_ACTIONS = {
             const op = await operationOf(c.h, spec.operation, where);
             const a = mf.RestOperationCallAction.createIn(act);
             a.operation = op;
+            // the base URL parameter of the service (Mendix 10.17+): stored by name, like the operation parameters
+            const bup = op.containerAsConsumedRestService.baseUrlParameter;
+            if (bup) {
+                if (spec.baseUrl === undefined || spec.baseUrl === "") throw new Error(`${where}: ${qn(op.containerAsConsumedRestService)} takes its base URL from parameter ${bup.name}: give "baseUrl": an expression, e.g. @Module.ApiUrl`);
+                const bm = mf.RestParameterMapping.createIn(a);
+                bm.__parameter.updateWithRawValue(`${qn(op.containerAsConsumedRestService)}.${bup.name}`);
+                bm.value = c.expr(spec.baseUrl, `${where} baseUrl`);
+            } else if (spec.baseUrl !== undefined) throw new Error(`${where}: ${qn(op.containerAsConsumedRestService)} has no base URL parameter; add one: { "op": "changeRestService", "service": "${qn(op.containerAsConsumedRestService)}", "baseUrlParameter": "ApiUrl" }`);
             let args = spec.args || {};
             let query = spec.query || {};
             // Mendix 10: query parameters are parameters of the path template
@@ -182,9 +215,9 @@ const REST_ACTIONS = {
         info: a => responseOf(a.operation) || { entity: null, list: false },
         // the stored fields, for changeAction (operation, args, query, body, variable)
         spec(a) {
-            if (a.baseUrlParameterMapping) throw new Error(`SEND REST ${a.operationQualifiedName}: it maps the base URL parameter, which ops does not write; change it in Studio Pro`);
             const name = (ref, qn) => (ref && ref.name) || String(qn || "").split(".").pop();
             const out = { operation: a.operationQualifiedName, args: Object.fromEntries(a.parameterMappings.map(m => [name(m.parameter, m.parameterQualifiedName), m.value])) };
+            if (a.baseUrlParameterMapping) out.baseUrl = a.baseUrlParameterMapping.value;
             let q = [];
             try {
                 q = a.queryParameterMappings.filter(m => m.included && m.included.name !== "No");
@@ -243,10 +276,27 @@ function makeRest(h) {
         return { plan, created };
     }
 
+    // The bearer token parameter all operations of a service share (Authorization: Bearer {token}), or null
+    function bearerOf(ops) {
+        const names = ops.map(op => {
+            const hd = op.headers.find(x => x.name.toLowerCase() === "authorization");
+            const m = hd && /^Bearer \{(\w+)\}$/.exec(hd.value.value);
+            return m ? m[1] : null;
+        });
+        return names.length && names.every(n => n && n === names[0]) ? names[0] : null;
+    }
+
+    // What the REST client document cannot store (the callRest action can)
+    function unsupportedBodyOrResponse(o, where) {
+        if (o.body && typeof o.body === "object" && ["formData", "form", "file", "binary", "multipart"].some(k => k in o.body)) throw new Error(`${where}: a consumed REST operation sends a text template or a mapping body; form data, multipart and file bodies are not part of it in Mendix ${version}. Use the callRest action: "formData": { "key": "expression" } or "binaryBody": "$File"`);
+        if (typeof o.response === "string" && !/^none$/i.test(o.response)) throw new Error(`${where}: a consumed REST operation stores no response (the text is in $latestHttpResponse/Content) or an import mapping; "${o.response}" is not one. For a String or a file document result use the callRest action: "response": "string" | "file"`);
+    }
+
     async function addOperation(svc, o, where) {
         validName(o.name, "operation name");
+        unsupportedBodyOrResponse(o, where);
         if (svc.operations.some(x => x.name === o.name)) throw new Error(`${where}: ${qn(svc)} already has an operation ${o.name}`);
-        for (const k of Object.keys(o)) if (!OPERATION_FIELDS[k] && k !== "service" && k !== "op") fail(`${where}: unknown field '${k}' for an operation`, k, Object.keys(OPERATION_FIELDS));
+        for (const k of Object.keys(o)) if (!OPERATION_FIELDS[k] && !["service", "op", "bearer"].includes(k)) fail(`${where}: unknown field '${k}' for an operation`, k, Object.keys(OPERATION_FIELDS));
         for (const [k, d] of Object.entries(OPERATION_FIELDS)) if (d.startsWith("R ") && (o[k] === undefined || o[k] === "")) throw new Error(`${where}: an operation needs '${k}' (${d.slice(2)})`);
         const httpMethod = enumValue(sdk.services.HttpMethod, o.method || "Get", `${where} method`);
         const withBody = ["Post", "Put", "Patch"].includes(httpMethod.name);
@@ -271,6 +321,9 @@ function makeRest(h) {
         const headers = { ...(o.headers || {}) };
         if (typeof o.headers === "object" && Array.isArray(o.headers)) throw new Error(`${where}: headers is { "Name": "value" }`);
         const hasHeader = n => Object.keys(headers).some(k => k.toLowerCase() === n.toLowerCase());
+        // bearer authentication: the header every operation of the service has (a new operation follows the others)
+        const bearer = o.bearer || bearerOf(svc.operations.filter(x => x !== op));
+        if (bearer && !hasHeader("Authorization")) headers.Authorization = `Bearer {${bearer}}`;
         if (!hasHeader("Accept")) headers.Accept = "application/json"; // CE7062: every operation has an Accept header
         // body: Studio Pro wants one for Post/Put/Patch (CE7064)
         let bodyText = null;
@@ -301,12 +354,16 @@ function makeRest(h) {
         // parameters: every {name} in path, headers and body (CE7056); query parameters of Mendix 11 are separate
         const used = [...new Set([...placeholders(path), ...Object.values(headers).flatMap(placeholders), ...placeholders(bodyText)])];
         for (const k of Object.keys(types)) if (!used.includes(k)) fail(`${where}: parameters names '${k}', which is not a {placeholder} in path, headers or body`, k, used);
+        const tests = o.testValues || {};
+        if (typeof tests !== "object" || Array.isArray(tests)) throw new Error(`${where}: testValues is { "param": "value" }`);
+        const queryNames = atLeast("11.0.0") ? Object.keys(query) : [];
+        for (const k of Object.keys(tests)) if (!used.includes(k) && !queryNames.includes(k)) fail(`${where}: testValues names '${k}', which is not a parameter of the operation`, k, [...used, ...queryNames]);
         for (const n of used) {
             validName(n, "parameter name");
             const p = rest.OperationParameter.createIn(op);
             p.name = n;
             p.dataType = dataType(types[n], `${where} parameter ${n}`);
-            await value(p, "testValue", "", where);
+            await value(p, "testValue", tests[n] === undefined ? "" : tests[n], where);
         }
         if (atLeast("11.0.0")) {
             for (const [n, q] of Object.entries(query)) {
@@ -314,7 +371,7 @@ function makeRest(h) {
                 if (used.includes(n)) throw new Error(`${where}: '${n}' is both a {placeholder} and a query parameter`);
                 const qp = rest.QueryParameter.createIn(op);
                 qp.name = n;
-                qp.testValue = "";
+                qp.testValue = tests[n] === undefined ? "" : String(tests[n]);
                 if (q && q.required === false) rest.OptionalQueryParameterUsage.createIn(qp).included = true;
                 else rest.RequiredQueryParameterUsage.createIn(qp);
             }
@@ -342,19 +399,53 @@ function makeRest(h) {
         return svc;
     }
 
-    // Basic authentication (or none) of a consumed REST service
+    // Basic authentication (or none) of a consumed REST service. Bearer is no scheme of the document: a header with
+    // a parameter on every operation (returns the parameter name; the caller writes the headers).
     async function setAuthentication(svc, auth, name) {
-        if (auth === undefined) return;
+        if (auth === undefined) return null;
         if (/^none$/i.test(String(auth))) {
             svc.authenticationScheme = null;
-            return;
+            return null;
         }
-        if (typeof auth !== "object" || auth.username === undefined || auth.password === undefined) throw new Error(`${name}: authentication is "none" or { "username": ..., "password": ... } (Basic)`);
+        if (auth && typeof auth === "object" && auth.bearer !== undefined) {
+            for (const k of Object.keys(auth)) if (k !== "bearer") fail(`${name}: unknown authentication field '${k}' (bearer takes only the parameter name)`, k, ["bearer"]);
+            validName(auth.bearer, "bearer token parameter name");
+            svc.authenticationScheme = null;
+            return String(auth.bearer);
+        }
+        if (typeof auth !== "object" || auth.username === undefined || auth.password === undefined) throw new Error(`${name}: authentication is "none", { "username": ..., "password": ... } (Basic) or { "bearer": "token" }`);
         for (const k of Object.keys(auth)) if (!["username", "password"].includes(k)) fail(`${name}: unknown authentication field '${k}'`, k, ["username", "password"]);
         const b = rest.BasicAuthenticationScheme.create(model);
         svc.authenticationScheme = b;
         await value(b, "username", auth.username, `${name} username`);
         await value(b, "password", auth.password, `${name} password`);
+        return null;
+    }
+
+    // The base URL parameter (Mendix 10.17+): a String parameter whose test value is the base URL
+    async function setBaseUrlParameter(svc, p, where) {
+        if (/^none$/i.test(String(p))) {
+            if (!svc.baseUrlParameter) throw new Error(`${where}: ${qn(svc)} has no base URL parameter`);
+            const users = (await Promise.all(svc.operations.map(op => callersOf(`${qn(svc)}.${op.name}`)))).flatMap(x => x.actions).filter(x => x.a.baseUrlParameterMapping);
+            if (users.length) throw new Error(`${where}: ${[...new Set(users.map(x => x.flow))].join(", ")} still map the base URL parameter; delete those sendRestRequest steps (deleteAction) or keep the parameter`);
+            const tv = svc.baseUrlParameter.testValue;
+            svc.baseUrl.value = tv instanceof rest.StringValue && /^https?:/.test(tv.value) ? tv.value : svc.baseUrl.value;
+            svc.baseUrlParameter = null;
+            return `no base URL parameter (base URL ${svc.baseUrl.value})`;
+        }
+        if (!atLeast("10.17.0")) throw new Error(`${where}: a base URL parameter needs Mendix 10.17 (this project is ${version}); put the URL in a constant and use the callRest action, or change baseUrl per environment`);
+        validName(p, "base URL parameter name");
+        if (svc.operations.some(op => op.parameters.some(x => x.name === p))) throw new Error(`${where}: an operation already has a parameter '${p}'; pick another name`);
+        const old = svc.baseUrlParameter;
+        const url = old && old.testValue instanceof rest.StringValue ? old.testValue.value : svc.baseUrl.value;
+        const bp = rest.RestParameter.create(model);
+        svc.baseUrlParameter = bp;
+        bp.name = String(p);
+        bp.dataType = datatypes.StringType.create(model);
+        // the base URL is the parameter; the URL stays as its test value (Studio Pro's Send request uses it)
+        await value(bp, "testValue", url, where);
+        svc.baseUrl.value = `{${p}}`;
+        return `base URL parameter ${p}${old ? ` (was ${old.name}: CHECK the sendRestRequest steps)` : ""} (sendRestRequest: "baseUrl": expression)`;
     }
 
     // The microflows that call an operation with sendRestRequest (from the stored model) and their action objects (loaded).
@@ -396,6 +487,7 @@ function makeRest(h) {
         if (o.headers !== undefined && (typeof o.headers !== "object" || Array.isArray(o.headers) || !o.headers)) throw new Error(`${where}: headers is { "Name": "value" } (null removes one)`);
         if (o.headers) for (const [k, v] of Object.entries(o.headers)) if (v === null && k.toLowerCase() === "accept") throw new Error(`${where}: every operation keeps an Accept header (Studio Pro CE7062); give it another value instead`);
         if (o.path !== undefined && /^https?:/i.test(String(o.path))) throw new Error(`${where}: path is the part after the base URL (${svc.baseUrl.value}), e.g. /orders/{id}`);
+        unsupportedBodyOrResponse(o, where);
         const callers = await callersOf(opQn);
         // method (and body)
         if (withBody !== (op.method instanceof rest.RestOperationMethodWithBody)) {
@@ -531,9 +623,20 @@ function makeRest(h) {
             }
         }
         if (atLeast("11.0.0")) for (const q of op.queryParameters) if (used.includes(q.name)) throw new Error(`${where}: '${q.name}' is both a {placeholder} and a query parameter`);
+        if (o.testValues !== undefined) {
+            if (!o.testValues || typeof o.testValues !== "object" || Array.isArray(o.testValues)) throw new Error(`${where}: testValues is { "param": "value" }`);
+            const qps = atLeast("11.0.0") ? [...op.queryParameters] : [];
+            for (const [k, v] of Object.entries(o.testValues)) {
+                const p = op.parameters.find(x => x.name === k), q = qps.find(x => x.name === k);
+                if (p) await value(p, "testValue", v, where);
+                else if (q) q.testValue = String(v);
+                else fail(`${where}: testValues names '${k}', which is not a parameter of the operation`, k, [...op.parameters.map(x => x.name), ...qps.map(x => x.name)]);
+            }
+            lines.push(`test values: ${Object.keys(o.testValues).join(", ")}`);
+        }
         if (removed.length) lines.push(`parameters removed: ${removed.join(", ")}${callers.actions.length ? " (and their values in the calling steps)" : ""}`);
         if (added.length) lines.push(`parameters added: ${added.join(", ")}` + (callers.actions.length ? `\n      STILL USED BY (these calls need a value for ${added.join(", ")}: delete the step with deleteAction and add it again with args): ${[...new Set(callers.actions.map(x => x.flow))].join(", ")}` : ""));
-        if (!lines.length) throw new Error(`${where}: nothing to change; give method, path, parameters, query, headers, body, response or timeout`);
+        if (!lines.length) throw new Error(`${where}: nothing to change; give method, path, parameters, query, headers, body, response, timeout or testValues`);
         if (created.length) lines.push(`created: ${created.join(", ")}`);
         return lines;
     }
@@ -648,6 +751,53 @@ function makeRest(h) {
         return kinds;
     }
 
+    // The authentication microflow of a published REST or OData service (Microflow authentication): it returns the
+    // System.User and takes at most a System.HttpRequest (Studio Pro's rule). Used by ops-odata.js too.
+    async function authenticationMicroflow(svc, name, where) {
+        if (name === "" || name === null) {
+            svc.authenticationMicroflow = null;
+            return "no authentication microflow";
+        }
+        const m = await get(name).catch(() => fail(`${where}: no microflow ${name}`, name, model.allMicroflows().map(qn)));
+        if (!(m instanceof mf.Microflow)) throw new Error(`${where}: ${name} is not a microflow`);
+        const rt = m.microflowReturnType;
+        if (!(rt instanceof datatypes.ObjectType) || rt.entityQualifiedName !== "System.User") throw new Error(`${where}: an authentication microflow returns a System.User (the user of the request, empty = refused); ${name} returns ${rt instanceof datatypes.ObjectType ? rt.entityQualifiedName : rt.structureTypeName.split("$")[1].replace("Type", "")}`);
+        const params = m.objectCollection.objects.filter(x => x instanceof mf.MicroflowParameterObject);
+        const bad = params.filter(p => !(p.variableType instanceof datatypes.ObjectType && p.variableType.entityQualifiedName === "System.HttpRequest"));
+        if (bad.length) throw new Error(`${where}: an authentication microflow takes only a System.HttpRequest parameter; ${name} has ${bad.map(p => p.name).join(", ")}`);
+        if (!svc.authenticationTypes.includes(rest.RestAuthenticationType.Microflow)) svc.authenticationTypes.push(rest.RestAuthenticationType.Microflow);
+        svc.authenticationMicroflow = m;
+        return `authentication microflow ${name}`;
+    }
+
+    // CORS of a published REST service: allowed origins and max age come from constants (per environment)
+    async function setCors(svc, cors, where) {
+        if (/^none$/i.test(String(cors))) {
+            svc.corsConfiguration = null;
+            return "no CORS";
+        }
+        if (!cors || typeof cors !== "object" || Array.isArray(cors)) throw new Error(`${where}: cors is "none" or { "origins": "@Module.Constant", "maxAge": "@Module.Constant", "credentials": true }`);
+        for (const k of Object.keys(cors)) if (!["origins", "maxAge", "credentials"].includes(k)) fail(`${where}: unknown cors field '${k}'`, k, ["origins", "maxAge", "credentials"]);
+        const constant = async (v, type, what) => {
+            const n = String(v || "");
+            if (!n.startsWith("@")) throw new Error(`${where}: cors ${what} is a constant ("@Module.Constant", so each environment sets its own); create one with createConstant (type ${type})`);
+            const c = await get(n.slice(1)).catch(() => fail(`${where}: no constant ${n.slice(1)}`, n.slice(1), model.allConstants().map(qn)));
+            if (!(c instanceof sdk.constants.Constant)) throw new Error(`${where}: ${n.slice(1)} is not a constant`);
+            const t = await c.load().then(x => x.type);
+            if (!(t instanceof datatypes[`${type}Type`])) throw new Error(`${where}: cors ${what} needs a ${type} constant; ${n.slice(1)} is ${t.structureTypeName.split("$")[1].replace("Type", "")}`);
+            return c;
+        };
+        if (cors.origins === undefined) throw new Error(`${where}: cors needs "origins": "@Module.Constant" (a String constant: comma-separated origins, or *)`);
+        const origins = await constant(cors.origins, "String", "origins");
+        const maxAge = cors.maxAge === undefined ? null : await constant(cors.maxAge, "Integer", "maxAge");
+        const c = rest.CorsConfiguration.create(model);
+        svc.corsConfiguration = c;
+        c.allowedOrigins = origins;
+        if (maxAge) c.maxAge = maxAge;
+        c.allowAuthentication = bool(cors.credentials, false);
+        return `CORS origins ${cors.origins}${maxAge ? `, max age ${cors.maxAge}` : ""}${c.allowAuthentication ? ", with credentials" : ""}`;
+    }
+
     async function publishedService(name, where) {
         const all = model.allPublishedRestServices().map(qn);
         const svc = await get(name).catch(() => fail(`${where}: no published REST service ${name}`, name, all));
@@ -664,7 +814,80 @@ function makeRest(h) {
         return { res, op };
     }
 
+    // ------------------------------------------------ generated CRUD resource
+
+    const CRUD = ["getAll", "getByKey", "post", "put", "delete"];
+    const SAMPLE = { String: "\"text\"", Integer: "1", Long: "1", AutoNumber: "1", Decimal: "1.5", Boolean: "true", DateTime: "\"2024-01-01T00:00:00.000Z\"", Enumeration: null, HashString: "\"text\"" };
+    const kindOf = a => a.type.structureTypeName.split("$")[1].replace("AttributeType", "");
+
+    async function generateResource(o) {
+        const where = `generateRestResource ${o.module}.${o.service}`;
+        const ent = await h.entity(o.entity);
+        await h.loadParents(ent);
+        if (!h.persistable(ent)) throw new Error(`${where}: ${o.entity} is not persistable; a generated resource retrieves and commits it (publish a non-persistable entity with publishRest and your own microflows)`);
+        const own = h.attributeChain(ent).attributes.filter(a => !a.qualifiedName.startsWith("System."));
+        const key = own.find(a => a.name === o.key) || fail(`${where}: ${o.entity} has no attribute '${o.key}'`, o.key, own.map(a => a.name));
+        const kk = kindOf(key);
+        if (!["String", "Integer", "Long", "AutoNumber"].includes(kk)) throw new Error(`${where}: the key ${o.key} is ${kk}; a URL key is String, Integer, Long or AutoNumber`);
+        let attrs = own.filter(a => SAMPLE[kindOf(a)] !== undefined);
+        if (o.attributes !== undefined) {
+            if (!Array.isArray(o.attributes)) throw new Error(`${where}: attributes is [ "Attr" ]`);
+            for (const n of o.attributes) if (!own.some(a => a.name === n)) fail(`${where}: ${o.entity} has no attribute '${n}'`, n, own.map(a => a.name));
+            attrs = attrs.filter(a => a === key || o.attributes.includes(a.name));
+        }
+        const ops = o.operations === undefined ? CRUD : [].concat(o.operations);
+        for (const x of ops) if (!CRUD.includes(x)) fail(`${where}: unknown operation '${x}'`, x, CRUD);
+        if (!ops.length) throw new Error(`${where}: operations is a non-empty list of ${CRUD.join(", ")}`);
+        const E = ent.name, M = o.module, P = `${o.service}_${E}`, folderPath = o.folder === undefined ? o.service : o.folder;
+        const res = o.resource || `${E.toLowerCase()}s`;
+        for (const n of ["Json", "ListJson", "Imm", "Exm", "ListExm", ...ops.map(x => x[0].toUpperCase() + x.slice(1))]) if (await exists(`${M}.${P}_${n}`)) throw new Error(`${where}: ${M}.${P}_${n} already exists (an earlier generate?); delete it or pick another service name`);
+        const sample = a => kindOf(a) === "Enumeration" ? JSON.stringify(a.type.enumeration ? (a.type.enumeration.values[0] || { name: "Value" }).name : "Value") : SAMPLE[kindOf(a)];
+        const snippet = `{ ${attrs.map(a => `${JSON.stringify(a.name)}: ${sample(a)}`).join(", ")} }`;
+        const doc = (op, rest) => ({ op, module: M, folder: folderPath, ...rest });
+        const impl = h.impl();
+        const out = [];
+        const run = async (name, spec) => out.push(`${name}: ${await impl[name](spec)}`);
+        // enumerations: their values are read for the sample; load once
+        for (const a of attrs) if (kindOf(a) === "Enumeration" && a.type.enumeration) await a.type.enumeration.load();
+        await run("createJsonStructure", doc("createJsonStructure", { name: `${P}_Json`, snippet }));
+        await run("createJsonStructure", doc("createJsonStructure", { name: `${P}_ListJson`, snippet: `[ ${snippet} ]` }));
+        const map = { entity: o.entity };
+        await run("createImportMapping", doc("createImportMapping", { name: `${P}_Imm`, jsonStructure: `${M}.${P}_Json`, ...map, keys: [key.name] }));
+        await run("createExportMapping", doc("createExportMapping", { name: `${P}_Exm`, jsonStructure: `${M}.${P}_Json`, ...map }));
+        await run("createExportMapping", doc("createExportMapping", { name: `${P}_ListExm`, jsonStructure: `${M}.${P}_ListJson`, ...map }));
+        const xpath = `[${key.name} = ${kk === "String" ? "$Key" : "parseInteger($Key)"}]`;
+        // found: the steps; not found: 404 (the flow returns $E, which is empty then)
+        const status = (code, text) => ({ action: "change", variable: "httpResponse", set: { StatusCode: String(code), ReasonPhrase: `'${text}'` } });
+        const byKey = (steps = []) => [
+            { action: "retrieve", variable: E, entity: o.entity, xpath, first: true },
+            { action: "if", condition: `$${E} != empty`, caption: "found?", then: steps, else: [status(404, "Not Found")] }];
+        const same = kk === "String" ? `$${E}/${key.name} = $Key` : `toString($${E}/${key.name}) = $Key`;
+        const http = { name: "httpResponse", type: "System.HttpResponse" };
+        const flows = {
+            getAll: { parameters: [], returns: `List(${o.entity})`, returnValue: `$${E}List`, actions: [{ action: "retrieve", variable: `${E}List`, entity: o.entity }], method: "Get", path: "", exportMapping: `${M}.${P}_ListExm`, summary: `All ${E} objects` },
+            getByKey: { parameters: [{ name: "Key", type: "String" }, http], returns: o.entity, returnValue: `$${E}`, actions: byKey(), method: "Get", path: "{Key}", exportMapping: `${M}.${P}_Exm`, summary: `One ${E} by ${key.name}` },
+            post: { parameters: [{ name: E, type: o.entity }], returns: o.entity, returnValue: `$${E}`, actions: [{ action: "commit", variable: E }], method: "Post", path: "", importMapping: `${M}.${P}_Imm`, exportMapping: `${M}.${P}_Exm`, commit: "no", summary: `Create (or update by ${key.name}) a ${E}` },
+            put: { parameters: [{ name: "Key", type: "String" }, { name: E, type: o.entity }, http], returns: o.entity, returnValue: `$${E}`,
+                actions: [{ action: "if", condition: same, caption: "key matches?", then: [{ action: "commit", variable: E }], else: [status(400, "The key in the URL and in the body differ")] }],
+                method: "Put", path: "{Key}", importMapping: `${M}.${P}_Imm`, exportMapping: `${M}.${P}_Exm`, commit: "no", summary: `Update a ${E} by ${key.name}` },
+            delete: { parameters: [{ name: "Key", type: "String" }, http], actions: byKey([{ action: "delete", variable: E }]), method: "Delete", path: "{Key}", summary: `Delete a ${E} by ${key.name}` }
+        };
+        let first = true;
+        for (const x of ops) {
+            const f = flows[x], name = `${P}_${x[0].toUpperCase()}${x.slice(1)}`;
+            await run("createMicroflow", { module: M, name, folder: folderPath, parameters: f.parameters, ...(f.returns ? { returns: f.returns, returnValue: f.returnValue } : {}), actions: f.actions });
+            const pub = { module: M, service: o.service, resource: res, method: f.method, path: f.path, microflow: `${M}.${name}`, summary: f.summary };
+            for (const k of ["importMapping", "exportMapping", "commit"]) if (f[k]) pub[k] = f[k];
+            if (first) for (const k of ["servicePath", "version", "authentication", "authenticationMicroflow", "folder"]) if (o[k] !== undefined) pub[k] = o[k];
+            if (first && o.roles) pub.roles = o.roles;
+            first = false;
+            await run("publishRest", pub);
+        }
+        return `${M}.${o.service}/${res}: ${ops.join(", ")} for ${o.entity} (key ${key.name})` + out.map(l => "\n      " + l.split("\n")[0]).join("");
+    }
+
     const impl = {
+        generateRestResource: generateResource,
         async createConsumedRestService(o) {
             if (!atLeast("10.1.0")) throw new Error(`consumed REST services need Mendix 10.1 (this project is ${version}); use the callRest action`);
             validName(o.name, "service name");
@@ -675,14 +898,15 @@ function makeRest(h) {
             const svc = rest.ConsumedRestService.createIn(folder(o.module, o.folder));
             svc.name = o.name;
             svc.baseUrl.value = String(o.baseUrl).replace(/\/+$/, "");
-            await setAuthentication(svc, o.authentication, name);
+            const bearer = await setAuthentication(svc, o.authentication, name);
             const lines = [];
+            if (o.baseUrlParameter !== undefined) lines.push(await setBaseUrlParameter(svc, o.baseUrlParameter, name));
             for (const [i, op] of o.operations.entries()) {
                 if (!op || typeof op !== "object") throw new Error(`${name} operation ${i + 1}: { "name": ..., "path": ... }`);
-                lines.push(`${op.name}: ${await addOperation(svc, op, `${name} operation ${i + 1} (${op.name})`)}`);
+                lines.push(`${op.name}: ${await addOperation(svc, { ...op, ...(bearer ? { bearer } : {}) }, `${name} operation ${i + 1} (${op.name})`)}`);
             }
             warn(`Rest$ConsumedRestService first use by ops (no Studio Pro sample in the test projects; built from the Model SDK metamodel of Mendix ${version}): check ${name} in Studio Pro`);
-            return `${name} (${svc.baseUrl.value}${svc.authenticationScheme ? ", Basic authentication" : ""})` + lines.map(l => "\n      " + l).join("");
+            return `${name} (${svc.baseUrl.value}${svc.authenticationScheme ? ", Basic authentication" : bearer ? `, bearer token {${bearer}}` : ""})` + lines.map(l => "\n      " + l).join("");
         },
         async addRestOperation(o) {
             const svc = await service(o.service, "addRestOperation");
@@ -707,6 +931,7 @@ function makeRest(h) {
             if (await exists(name)) {
                 svc = await get(name);
                 if (!(svc instanceof rest.PublishedRestService)) throw new Error(`${name} exists and is not a published REST service`);
+                if (o.authenticationMicroflow !== undefined) throw new Error(`${where}: ${name} exists; set its authentication microflow with changePublishedRestService`);
             } else {
                 svc = rest.PublishedRestService.createIn(folder(o.module, o.folder));
                 svc.name = o.service;
@@ -715,6 +940,8 @@ function makeRest(h) {
                 svc.path = o.servicePath || `rest/${o.service.toLowerCase()}/v1`;
                 svc.authenticationTypes.clear();
                 for (const a of [].concat(o.authentication || ["Basic"])) svc.authenticationTypes.push(enumValue(rest.RestAuthenticationType, a, "authentication"));
+                if (o.authenticationMicroflow !== undefined) await authenticationMicroflow(svc, o.authenticationMicroflow, where);
+                if (svc.authenticationTypes.includes(rest.RestAuthenticationType.Microflow) && !svc.authenticationMicroflow) throw new Error(`${where}: Microflow authentication needs "authenticationMicroflow": "Module.Microflow" (returns System.User)`);
             }
             for (const r of [].concat(o.roles || [])) {
                 const role = await get(r);
@@ -736,14 +963,24 @@ function makeRest(h) {
             if (o.baseUrl !== undefined) {
                 const u = String(o.baseUrl);
                 if (!/^https?:\/\/\S+$/i.test(u)) throw new Error(`baseUrl must be an http(s) URL, e.g. https://api.example.com/v1 (got '${u}')`);
-                svc.baseUrl.value = u.replace(/\/+$/, "");
-                lines.push(`base URL ${u.replace(/\/+$/, "")}`);
+                if (svc.baseUrlParameter) await value(svc.baseUrlParameter, "testValue", u.replace(/\/+$/, ""), o.service);
+                else svc.baseUrl.value = u.replace(/\/+$/, "");
+                lines.push(svc.baseUrlParameter ? `test value of the base URL parameter ${svc.baseUrlParameter.name}: ${u.replace(/\/+$/, "")}` : `base URL ${u.replace(/\/+$/, "")}`);
             }
             if (o.authentication !== undefined) {
-                await setAuthentication(svc, o.authentication, o.service);
-                lines.push(svc.authenticationScheme ? "Basic authentication" : "no authentication");
+                const old = bearerOf(svc.operations);
+                const bearer = await setAuthentication(svc, o.authentication, o.service);
+                // the Authorization header of every operation follows: added for bearer, removed when it goes
+                if (old !== bearer) for (const op of [...svc.operations]) {
+                    const headers = {};
+                    if (old) headers[op.headers.find(x => x.name.toLowerCase() === "authorization").name] = null;
+                    if (bearer) headers.Authorization = `Bearer {${bearer}}`;
+                    lines.push(...(await changeOperation(svc, op, { headers }, `${o.service}.${op.name}`)).map(l => `${op.name}: ${l}`));
+                }
+                lines.unshift(svc.authenticationScheme ? "Basic authentication" : bearer ? `bearer token {${bearer}} on every operation` : "no authentication");
             }
-            if (!lines.length) throw new Error(`changeRestService ${o.service}: nothing to change; give baseUrl or authentication`);
+            if (o.baseUrlParameter !== undefined) lines.push(await setBaseUrlParameter(svc, o.baseUrlParameter, `changeRestService ${o.service}`));
+            if (!lines.length) throw new Error(`changeRestService ${o.service}: nothing to change; give baseUrl, baseUrlParameter or authentication`);
             return `${o.service}: ${lines.join("; ")}`;
         },
         async changeRestOperation(o) {
@@ -778,6 +1015,9 @@ function makeRest(h) {
                 for (const a of list) svc.authenticationTypes.push(a);
                 lines.push(`authentication ${list.map(a => a.name).join(", ")}`);
             }
+            if (o.authenticationMicroflow !== undefined) lines.push(await authenticationMicroflow(svc, o.authenticationMicroflow, `changePublishedRestService ${o.service}`));
+            if (svc.authenticationTypes.includes(rest.RestAuthenticationType.Microflow) && !svc.authenticationMicroflow) throw new Error(`changePublishedRestService ${o.service}: Microflow authentication needs "authenticationMicroflow": "Module.Microflow" (returns System.User)`);
+            if (o.cors !== undefined) lines.push(await setCors(svc, o.cors, `changePublishedRestService ${o.service}`));
             if (o.roles !== undefined) {
                 const roles = [];
                 for (const r of [].concat(o.roles)) {
@@ -789,7 +1029,7 @@ function makeRest(h) {
                 for (const r of roles) svc.allowedRoles.push(r);
                 lines.push(`roles ${[].concat(o.roles).join(", ") || "none"}`);
             }
-            if (!lines.length) throw new Error(`changePublishedRestService ${o.service}: nothing to change; give path, version, authentication or roles`);
+            if (!lines.length) throw new Error(`changePublishedRestService ${o.service}: nothing to change; give path, version, authentication, authenticationMicroflow, roles or cors`);
             return `${o.service}: ${lines.join("; ")}`;
         },
         async changePublishedRestOperation(o) {
@@ -846,7 +1086,9 @@ function makeRest(h) {
         async changeRestService(o) {
             const svc = await get(o.service);
             const r = [];
-            if (o.baseUrl !== undefined && svc.baseUrl.value !== String(o.baseUrl).replace(/\/+$/, "")) r.push(`${o.service} base URL is ${svc.baseUrl.value}`);
+            const url = svc.baseUrlParameter && svc.baseUrlParameter.testValue ? svc.baseUrlParameter.testValue.value : svc.baseUrl.value;
+            if (o.baseUrl !== undefined && url !== String(o.baseUrl).replace(/\/+$/, "")) r.push(`${o.service} base URL is ${url}`);
+            if (o.baseUrlParameter !== undefined && !!svc.baseUrlParameter === /^none$/i.test(String(o.baseUrlParameter))) r.push(`${o.service} base URL parameter not as asked`);
             if (o.authentication !== undefined && !!svc.authenticationScheme === /^none$/i.test(String(o.authentication))) r.push(`${o.service} authentication not as asked`);
             return r;
         },
@@ -899,6 +1141,12 @@ function makeRest(h) {
             const svc = await get(o.service);
             return svc.operations && svc.operations.some(y => y.name === o.name) ? [] : [`${o.service} has no operation ${o.name}`];
         },
+        async generateRestResource(o) {
+            const svc = await get(`${o.module}.${o.service}`);
+            const res = svc.resources.find(x => x.name === (o.resource || `${o.entity.split(".")[1].toLowerCase()}s`));
+            const want = (o.operations || CRUD).length;
+            return res && res.operations.length >= want ? [] : [`${o.module}.${o.service} has ${res ? res.operations.length : 0} generated operation(s), expected ${want}`];
+        },
         async publishRest(o) {
             const svc = await get(`${o.module}.${o.service}`);
             const res = svc.resources.find(x => x.name === o.resource);
@@ -911,7 +1159,7 @@ function makeRest(h) {
         }
     };
 
-    return { impl, checks };
+    return { impl, checks, authenticationMicroflow };
 }
 
 module.exports = { makeRest, REST_OPS, REST_ACTIONS };

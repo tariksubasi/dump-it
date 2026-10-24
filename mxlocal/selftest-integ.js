@@ -477,4 +477,212 @@ function changeProblems(project, T, version) {
     return r;
 }
 
-module.exports = { runPhase, restPlan, restProblems, workflowPlan, workflowProblems, odataPlan, odataProblems, changePlan, changeProblems, unitsNamed, walk };
+// ---------------------------------------------------------------- integration settings and contract files
+
+// Published REST: authentication microflow, CORS from constants, System.HttpResponse status and headers set in the
+// microflow; consumed REST: bearer token header on every operation (a later operation follows), base URL parameter
+// (10.17+) mapped in sendRestRequest, test values; a CRUD resource generated from an entity (generateRestResource,
+// with an export mapping over a root array); published OData actions with an authentication microflow; a published
+// web service with attribute selection; and the plans the contract command makes from an OpenAPI YAML, a WSDL and a
+// $metadata, run as they come. Refusals: form-data body, String response, a wrong authentication microflow, CORS
+// origins as text, sendRestRequest without the base URL.
+const OPENAPI = T => `openapi: 3.0.0
+info:
+  title: ${T} Pets
+  version: 1.0.0
+servers:
+  - url: https://pets.example.com/v1
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer }
+  schemas:
+    ${T}Pet:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        price: { type: number }
+        born: { type: string, format: date-time }
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      parameters:
+        - { name: kind, in: query, required: true, schema: { type: string } }
+        - { name: X-Trace, in: header, schema: { type: string } }
+      responses:
+        "200":
+          description: pets
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/${T}Pet" } }
+    post:
+      operationId: createPet
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/${T}Pet" }
+      responses:
+        "201": { description: created }
+  /pets/{petId}:
+    get:
+      operationId: showPet
+      parameters:
+        - { name: petId, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: one pet
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/${T}Pet" }
+`;
+const WSDL = `<?xml version="1.0" encoding="utf-8"?>
+<wsdl:definitions xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/" xmlns:tns="http://example.com/zzcalc" xmlns:s="http://www.w3.org/2001/XMLSchema" xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/" targetNamespace="http://example.com/zzcalc">
+  <wsdl:types>
+    <s:schema elementFormDefault="qualified" targetNamespace="http://example.com/zzcalc">
+      <s:element name="Add"><s:complexType><s:sequence><s:element name="A" type="s:int" /><s:element name="B" type="s:int" /></s:sequence></s:complexType></s:element>
+      <s:element name="AddResponse"><s:complexType><s:sequence><s:element name="Sum" type="s:int" /></s:sequence></s:complexType></s:element>
+    </s:schema>
+  </wsdl:types>
+  <wsdl:message name="AddIn"><wsdl:part name="parameters" element="tns:Add" /></wsdl:message>
+  <wsdl:message name="AddOut"><wsdl:part name="parameters" element="tns:AddResponse" /></wsdl:message>
+  <wsdl:portType name="CalcSoap"><wsdl:operation name="Add"><wsdl:input message="tns:AddIn" /><wsdl:output message="tns:AddOut" /></wsdl:operation></wsdl:portType>
+  <wsdl:binding name="CalcSoap" type="tns:CalcSoap"><soap:binding transport="http://schemas.xmlsoap.org/soap/http" />
+    <wsdl:operation name="Add"><soap:operation soapAction="http://example.com/zzcalc/Add" /><wsdl:input><soap:body use="literal" /></wsdl:input><wsdl:output><soap:body use="literal" /></wsdl:output></wsdl:operation></wsdl:binding>
+  <wsdl:service name="Calc"><wsdl:port name="CalcSoap" binding="tns:CalcSoap"><soap:address location="https://calc.example.com/calc.asmx" /></wsdl:port></wsdl:service>
+</wsdl:definitions>
+`;
+const METADATA = T => `<?xml version="1.0" encoding="utf-8"?>
+<edmx:Edmx Version="4.0" xmlns:edmx="http://docs.oasis-open.org/odata/ns/edmx"><edmx:DataServices>
+  <Schema Namespace="Shop" xmlns="http://docs.oasis-open.org/odata/ns/edm">
+    <EntityType Name="${T}Cust"><Key><PropertyRef Name="Code" /></Key><Property Name="Code" Type="Edm.String" Nullable="false" /><Property Name="Credit" Type="Edm.Decimal" /><Property Name="Since" Type="Edm.DateTimeOffset" /></EntityType>
+    <Action Name="Approve"><Parameter Name="Code" Type="Edm.String" /><ReturnType Type="Edm.Boolean" /></Action>
+    <EntityContainer Name="C"><EntitySet Name="${T}Custs" EntityType="Shop.${T}Cust" /></EntityContainer>
+  </Schema></edmx:DataServices></edmx:Edmx>
+`;
+
+function settingsPlan(mod, T, version, dir) {
+    const E = `${mod}.${T}`;
+    const fs = require("fs"), path = require("path");
+    const { inspectContract } = require("./contract");
+    const v1017 = cmp(version, "10.17.0") >= 0, odata = cmp(version, "10.4.0") >= 0;
+    const files = { yaml: path.join(dir, "zz-pets.yaml"), wsdl: path.join(dir, "zz-calc.wsdl"), meta: path.join(dir, "zz-metadata.xml") };
+    fs.writeFileSync(files.yaml, OPENAPI(T));
+    fs.writeFileSync(files.wsdl, WSDL);
+    fs.writeFileSync(files.meta, METADATA(T));
+    let contract = [], contractError = null;
+    try {
+        contract = ["yaml", "wsdl", "meta"].flatMap(k => inspectContract(files[k], { module: mod, name: `${T}_Pets`, out: dir }).plan.ops);
+    } catch (e) {
+        contractError = `contract: ${e.message}`; // a problem of this phase, not the end of the selftest
+    }
+    const http = { name: "httpResponse", type: "System.HttpResponse" };
+    return {
+        ops: [
+            { op: "createConstant", module: mod, name: `${T}_Origins`, type: "String", default: "https://a.example.com", folder: "ZzSet" },
+            { op: "createConstant", module: mod, name: `${T}_MaxAge`, type: "Integer", default: "600", folder: "ZzSet" },
+            { op: "createConstant", module: mod, name: `${T}_ApiUrl`, type: "String", default: "https://api.example.com/v3", folder: "ZzSet" },
+            { op: "createEntity", module: mod, name: `${T}SetOrder`, attributes: [{ name: "Number", type: "String(20)" }, { name: "Total", type: "Decimal" }, { name: "Placed", type: "DateTime" }] },
+            { op: "createMicroflow", module: mod, name: `${T}_SetAuth`, folder: "ZzSet", parameters: [{ name: "Request", type: "System.HttpRequest" }], returns: "System.User", returnValue: "empty" },
+            { op: "createMicroflow", module: mod, name: `${T}_SetStatus`, folder: "ZzSet", parameters: [{ name: "Id", type: "String" }, http], returns: "String", returnValue: "'ok'", actions: [
+                { action: "change", variable: "httpResponse", set: { StatusCode: "201", ReasonPhrase: "'Created'", Content: "'{}'" } },
+                { action: "create", entity: "System.HttpHeader", variable: "Location", set: { Key: "'Location'", Value: "'/orders/' + $Id", "System.HttpHeaders": "$httpResponse" } }] },
+            { op: "publishRest", module: mod, service: `${T}_SetPub`, resource: "orders", method: "Get", path: "{Id}", microflow: `${E}_SetStatus`, authentication: ["Microflow", "Basic"], authenticationMicroflow: `${E}_SetAuth`, folder: "ZzSet" },
+            { op: "changePublishedRestService", service: `${E}_SetPub`, cors: { origins: `@${E}_Origins`, maxAge: `@${E}_MaxAge`, credentials: true } },
+            { op: "createConsumedRestService", module: mod, name: `${T}_SetApi`, folder: "ZzSet", baseUrl: "https://api.example.com/v2", authentication: { bearer: "token" }, ...(v1017 ? { baseUrlParameter: "ApiUrl" } : {}),
+                operations: [{ name: "GetOne", path: "/orders/{id}", parameters: { id: "Integer" }, testValues: { id: "42" } }] },
+            { op: "addRestOperation", service: `${E}_SetApi`, name: "Ping", method: "Post", path: "/ping", body: "{ \"at\": \"{at}\" }" },
+            { op: "changeRestOperation", operation: `${E}_SetApi.GetOne`, testValues: { token: "abc" } },
+            { op: "createMicroflow", module: mod, name: `${T}_SetCall`, folder: "ZzSet", actions: [
+                { action: "sendRestRequest", operation: `${E}_SetApi.GetOne`, ...(v1017 ? { baseUrl: `@${E}_ApiUrl` } : {}), args: { id: "1", token: "'t'" } },
+                { action: "sendRestRequest", operation: `${E}_SetApi.Ping`, ...(v1017 ? { baseUrl: `@${E}_ApiUrl` } : {}), args: { at: "'now'", token: "'t'" } }] },
+            { op: "generateRestResource", module: mod, service: `${T}_SetCrud`, entity: `${E}SetOrder`, key: "Number", folder: "ZzSet" },
+            { op: "createMicroflow", module: mod, name: `${T}_SetWsOp`, folder: "ZzSet", parameters: [{ name: "Order", type: `${E}SetOrder` }], returns: `${E}SetOrder`, returnValue: "$Order" },
+            { op: "publishWebService", module: mod, name: `${T}_SetWs`, folder: "ZzSet", operations: [{ microflow: `${E}_SetWsOp`, attributes: { Order: ["Number"], result: ["Number", "Total"] } }] },
+            ...(odata ? [
+                { op: "createMicroflow", module: mod, name: `${T}_SetAct`, folder: "ZzSet", parameters: [{ name: "Code", type: "String" }, { name: "Order", type: `${E}SetOrder` }], returns: "Boolean", returnValue: "true" },
+                { op: "createMicroflow", module: mod, name: `${T}_SetAct2`, folder: "ZzSet", returns: `List(${E}SetOrder)`, returnValue: "empty" },
+                { op: "publishOData", module: mod, name: `${T}_SetOd`, folder: "ZzSet", entities: [`${E}SetOrder`], authentication: ["Microflow"], authenticationMicroflow: `${E}_SetAuth`,
+                    microflows: [{ microflow: `${E}_SetAct`, exposedName: "Approve", optional: ["Code"] }, `${E}_SetAct2`] },
+                { op: "changePublishedOData", service: `${E}_SetOd`, removeMicroflows: [`${T}_SetAct2`] }] : []),
+            ...contract
+        ],
+        reject: [
+            { op: { op: "addRestOperation", service: `${E}_SetApi`, name: "Up", method: "Post", path: "/up", body: { formData: { a: "1" } } }, expect: /form data, multipart and file bodies/ },
+            { op: { op: "addRestOperation", service: `${E}_SetApi`, name: "Txt", path: "/t", response: "string" }, expect: /use the callRest action/ },
+            { op: { op: "changePublishedRestService", service: `${E}_SetPub`, authenticationMicroflow: `${E}_SetStatus` }, expect: /returns a System\.User/ },
+            { op: { op: "changePublishedRestService", service: `${E}_SetPub`, cors: { origins: "*" } }, expect: /is a constant/ },
+            ...(v1017 ? [{ op: { op: "createMicroflow", module: mod, name: `${T}_SetBad`, actions: [{ action: "sendRestRequest", operation: `${E}_SetApi.GetOne`, args: { id: "1", token: "'t'" } }] }, expect: /base URL from parameter ApiUrl/ }] : [])
+        ],
+        probe: async () => (contractError ? [contractError] : [])
+    };
+}
+
+function settingsProblems(project, T, version) {
+    const r = [];
+    const u = unitsNamed(project, `${T}_`);
+    const pub = u[`${T}_SetPub`], api = u[`${T}_SetApi`], call = u[`${T}_SetCall`], st = u[`${T}_SetStatus`], crud = u[`${T}_SetCrud`], ws = u[`${T}_SetWs`];
+    if (!pub || !api || !call || !st || !crud || !ws) return [`documents missing: ${["SetPub", "SetApi", "SetCall", "SetStatus", "SetCrud", "SetWs"].filter(n => !u[`${T}_${n}`]).join(", ")}`];
+    if (!/_SetAuth$/.test(pub.AuthenticationMicroflow || "") || !pub.AuthenticationTypes.includes("Microflow")) r.push(`published REST authentication microflow ${pub.AuthenticationMicroflow}`);
+    const cors = pub.CorsConfiguration;
+    if (!cors || cors.$Type !== "Rest$CorsConfiguration" || !/_Origins$/.test(cors.AllowedOrigins) || !/_MaxAge$/.test(cors.MaxAge) || cors.AllowAuthentication !== true) r.push(`CORS ${JSON.stringify(cors)}`);
+    const items = [];
+    walk(st, o => o.$Type === "Microflows$ChangeActionItem" && items.push(`${o.Attribute || o.Association}`));
+    for (const want of ["System.HttpResponse.StatusCode", "System.HttpResponse.ReasonPhrase", "System.HttpMessage.Content", "System.HttpHeader.Key", "System.HttpHeaders"]) if (!items.includes(want)) r.push(`HttpResponse microflow lacks ${want} (has ${items.join(", ")})`);
+    let header = null;
+    walk(st, o => o.$Type === "Microflows$CreateChangeAction" && (header = o));
+    if (!header || header.Entity !== "System.HttpHeader") r.push("System.HttpHeader not created by name");
+    for (const op of api.Operations) {
+        if (!op.Headers.some(h => h.Name === "Authorization" && h.Value.Value === "Bearer {token}") || !op.Parameters.some(p => p.Name === "token")) r.push(`${op.Name}: no bearer header with its token parameter`);
+    }
+    const one = api.Operations.find(o => o.Name === "GetOne");
+    const tv = n => ((one.Parameters.find(p => p.Name === n) || {}).TestValue || {}).Value;
+    if (!one || tv("id") !== "42" || tv("token") !== "abc") r.push(`GetOne test values id=${one && tv("id")} token=${one && tv("token")}`);
+    const v1017 = cmp(version, "10.17.0") >= 0;
+    if (v1017) {
+        if (!api.BaseUrlParameter || api.BaseUrlParameter.Name !== "ApiUrl" || api.BaseUrl.Value !== "{ApiUrl}" || api.BaseUrlParameter.TestValue.Value !== "https://api.example.com/v2") r.push(`base URL parameter ${JSON.stringify(api.BaseUrlParameter)} / base URL ${api.BaseUrl.Value}`);
+        const maps = [];
+        walk(call, o => o.$Type === "Microflows$RestOperationCallAction" && maps.push(o.BaseUrlParameterMapping));
+        // by name with the service in it (Module.Service.ApiUrl), like the operation parameters
+        if (maps.length !== 2 || maps.some(m => !m || m.$Type !== "Microflows$RestParameterMapping" || !new RegExp(`\\.${T}_SetApi\\.ApiUrl$`).test(m.Parameter) || !/_ApiUrl$/.test(m.Value))) r.push(`base URL mappings ${JSON.stringify(maps)}`);
+    }
+    const ops = crud.Resources.flatMap(x => x.Operations);
+    const methods = ops.map(o => `${o.HttpMethod} ${o.Path}`).sort().join(", ");
+    if (methods !== "Delete {Key}, Get , Get {Key}, Post , Put {Key}") r.push(`generated resource: ${methods}`);
+    const all = ops.find(o => o.HttpMethod === "Get" && o.Path === "");
+    const listExm = all && unitsNamed(project, all.ExportMapping.split(".")[1])[all.ExportMapping.split(".")[1]];
+    if (!listExm || listExm.Elements[0].MaxOccurs !== -1) r.push("Get all: export mapping over the root array (a list) missing");
+    for (const o of ops.filter(o => o.HttpMethod === "Post" || o.HttpMethod === "Put")) if (!o.ImportMapping || !o.ExportMapping) r.push(`generated ${o.HttpMethod} lacks its mappings`);
+    const imm = unitsNamed(project, `${T}_SetCrud_${T}SetOrder_Imm`)[`${T}_SetCrud_${T}SetOrder_Imm`];
+    if (!imm || imm.Elements[0].ObjectHandling !== "Find") r.push("generated import mapping does not find by the key");
+    const das = [];
+    walk(ws, o => o.$Type === "WebServices$DataEntityImpl" && das.push(o.ChildMembers.length));
+    if (das.sort().join() !== "1,2") r.push(`web service data entities with ${das.join(", ")} attribute(s), expected 1 and 2`);
+    if (cmp(version, "10.4.0") >= 0) {
+        const od = u[`${T}_SetOd`];
+        const acts = od ? od.Microflows : [];
+        if (!od || !/_SetAuth$/.test(od.AuthenticationMicroflow || "") || acts.length !== 1 || acts[0].ExposedName !== "Approve") r.push(`OData actions ${acts.map(a => a.ExposedName)} / authentication ${od && od.AuthenticationMicroflow}`);
+        else {
+            const ps = acts[0].Parameters;
+            if (ps.length !== 2 || !ps.find(p => p.ExposedName === "Code").CanBeEmpty || !/_SetAct\.Code$/.test(ps[0].MicroflowParameter) || ps.find(p => p.ExposedName === "Order").DataType.$Type !== "DataTypes$ObjectType" || acts[0].ReturnType.$Type !== "DataTypes$BooleanType") r.push(`OData action Approve parameters ${JSON.stringify(ps.map(p => [p.ExposedName, p.MicroflowParameter, p.DataType.$Type, p.CanBeEmpty]))}`);
+        }
+    }
+    // the contract plans
+    const pets = u[`${T}_Pets`];
+    if (!pets || pets.$Type !== "Rest$ConsumedRestService" || pets.Operations.length !== 3 || pets.BaseUrl.Value !== "https://pets.example.com/v1") r.push(`OpenAPI plan: service ${pets && pets.Operations.length} operation(s), base ${pets && pets.BaseUrl.Value}`);
+    else {
+        const list = pets.Operations.find(o => o.Name === "ListPets");
+        if (!list || !list.Headers.some(h => h.Name === "X-Trace") || !list.Headers.some(h => h.Value.Value === "Bearer {token}") || !list.ResponseHandling || list.ResponseHandling.$Type !== "Rest$ImplicitMappingResponseHandling") r.push("OpenAPI ListPets: header, bearer or response mapping missing");
+        const show = pets.Operations.find(o => o.Name === "ShowPet");
+        if (!show || show.Path.Value !== "/pets/{petId}" || !show.Parameters.some(p => p.Name === "petId" && p.DataType.$Type === "DataTypes$IntegerType")) r.push("OpenAPI ShowPet path parameter");
+        const create = pets.Operations.find(o => o.Name === "CreatePet");
+        if (!create || create.Method.Body.$Type !== "Rest$ImplicitMappingBody") r.push("OpenAPI CreatePet: body mapping missing");
+    }
+    const xsd = Object.values(unitsNamed(project, "ZzCalc_Schema"))[0];
+    if (!xsd || !xsd.Entries[0].Contents.includes("AddResponse")) r.push("WSDL plan: XML schema missing");
+    const meta = unitsNamed(project, `IMM_${T}Custs`)[`IMM_${T}Custs`];
+    if (!meta || !meta.Elements[0].Children.some(c => c.MaxOccurs === -1)) r.push("$metadata plan: import mapping of the entity set missing");
+    return r;
+}
+
+module.exports = { runPhase, restPlan, restProblems, workflowPlan, workflowProblems, odataPlan, odataProblems, changePlan, changeProblems, settingsPlan, settingsProblems, unitsNamed, walk };

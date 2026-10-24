@@ -70,6 +70,13 @@ export const mapping_test = {
     execute: (args, context) => mx(context, ["mapping-test", args.mapping, args.file])
 };
 
+export const contract = {
+    description: "An API contract file (OpenAPI .json/.yaml, WSDL, OData $metadata), read-only: its operations or entity " +
+        "sets; with a module also a change plan in edits/ to dry run (OpenAPI: the consumed REST service).",
+    args: { file: text("contract file, e.g. edits/petstore.yaml"), module: text("module for the plan, e.g. Sales, or \"\"") },
+    execute: (args, context) => mx(context, ["contract", args.file, ...(args.module ? [args.module] : [])])
+};
+
 export const texts = {
     description: "Translatable texts (page titles, widget captions/labels, messages, enumeration and menu captions) " +
         "with their text in every project language. Use the listed where [part] in setTranslations.",

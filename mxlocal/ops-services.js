@@ -17,7 +17,7 @@ const { businessevents: be, webservices: ws, domainmodels: dm, microflows: mf, d
 
 const EVENT_TYPES = ["String", "Integer", "Long", "Decimal", "Boolean", "DateTime"];
 const EVENT_FIELDS = "[ { \"name\": \"OrderPlaced\", \"attributes\": { \"OrderId\": \"String\", \"Total\": \"Decimal\" }, \"description\": \"...\", \"publish\": true, \"subscribe\": true } ]";
-const OPERATION_FIELDS = "[ \"Module.Microflow\" or { \"microflow\": \"Module.Microflow\", \"name\": \"GetOrder\", \"description\": \"...\", \"optional\": [ \"Param\" ] } ]";
+const OPERATION_FIELDS = "[ \"Module.Microflow\" or { \"microflow\": \"Module.Microflow\", \"name\": \"GetOrder\", \"description\": \"...\", \"optional\": [ \"Param\" ], \"attributes\": { \"Param\": [ \"Attr\" ], \"result\": [ \"Attr\" ] } } ] (attributes: the ones an object/list parameter or the result shows in the WSDL; default all)";
 
 const SERVICE_OPS = {
     createBusinessEventService: {
@@ -36,7 +36,7 @@ const SERVICE_OPS = {
         }
     },
     publishWebService: {
-        doc: "Publish microflows as operations of a SOAP web service (Studio Pro: Published web service). Parameters and results of primitive types, objects and lists (all attributes of the entity).",
+        doc: "Publish microflows as operations of a SOAP web service (Studio Pro: Published web service). Parameters and results of primitive types, objects and lists (all attributes of the entity, or the ones in attributes).",
         fields: {
             module: "R module name", name: "R service name, e.g. OrderService", operations: "R " + OPERATION_FIELDS, namespace: "optional target namespace (default http://www.example.com/)",
             authentication: "optional None | UsernamePassword | Custom (default UsernamePassword)", headerMicroflow: "optional Custom: Module.Microflow that checks the request",
@@ -133,8 +133,11 @@ function makeServices(h) {
     const PRIMITIVE = [datatypes.StringType, datatypes.IntegerType, datatypes.DecimalType, datatypes.BooleanType, datatypes.DateTimeType, datatypes.EnumerationType];
 
     // A data entity of an object or list type: the entity with all its attributes.
-    async function dataEntityFor(de, type, where) {
-        if (!(type instanceof datatypes.ObjectType || type instanceof datatypes.ListType)) return "";
+    async function dataEntityFor(de, type, where, only) {
+        if (!(type instanceof datatypes.ObjectType || type instanceof datatypes.ListType)) {
+            if (only) throw new Error(`${where}: attributes are for an object or list; this one is ${type.structureTypeName.split("$")[1].replace("Type", "")}`);
+            return "";
+        }
         const ent = await h.entity(type.entityQualifiedName).catch(() => {
             throw new Error(`${where}: ${type.entityQualifiedName} is not an entity of this project; publish it in Studio Pro`);
         });
@@ -142,7 +145,12 @@ function makeServices(h) {
         de.entity = ent;
         de.exposedName = ent.name;
         de.exposedItemName = ent.name;
-        const attrs = h.attributeChain(ent).attributes;
+        let attrs = h.attributeChain(ent).attributes;
+        if (only) {
+            if (!Array.isArray(only) || !only.length) throw new Error(`${where}: attributes is a list of attribute names of ${ent.qualifiedName}, e.g. [ "Number" ]`);
+            for (const n of only) if (!attrs.some(a => a.name === n)) fail(`${where}: ${ent.qualifiedName} has no attribute '${n}'`, n, attrs.map(a => a.name));
+            attrs = attrs.filter(a => only.includes(a.name));
+        }
         for (const a of attrs) {
             const da = ws.DataAttribute.createIn(de);
             da.attribute = a;
@@ -160,7 +168,7 @@ function makeServices(h) {
         return c;
     }
 
-    const OP_KEYS = ["microflow", "name", "description", "optional"];
+    const OP_KEYS = ["microflow", "name", "description", "optional", "attributes"];
     async function addOperation(vs, raw, where) {
         const spec = typeof raw === "string" ? { microflow: raw } : raw;
         if (!spec || !spec.microflow) throw new Error(`${where}: an operation is ${OPERATION_FIELDS}`);
@@ -178,6 +186,9 @@ function makeServices(h) {
         const params = m.objectCollection.objects.filter(x => x instanceof mf.MicroflowParameterObject);
         const optional = [].concat(spec.optional || []);
         for (const n of optional) if (!params.some(p => p.name === n)) fail(`${where}: ${spec.microflow} has no parameter '${n}'`, n, params.map(p => p.name));
+        const only = spec.attributes || {};
+        if (typeof only !== "object" || Array.isArray(only)) throw new Error(`${where}: attributes is { "Param": [ "Attr" ], "result": [ "Attr" ] }`);
+        for (const n of Object.keys(only)) if (n !== "result" && !params.some(p => p.name === n)) fail(`${where}: attributes names '${n}', which is not a parameter of ${spec.microflow} (or "result")`, n, [...params.map(p => p.name), "result"]);
         const parts = [];
         for (const p of params) {
             if (!ok(p.variableType)) throw new Error(`${where}: parameter ${p.name} of ${spec.microflow} is ${p.variableType.structureTypeName.split("$")[1]}, which a web service cannot take`);
@@ -187,14 +198,14 @@ function makeServices(h) {
             pp.isOptional = optional.includes(p.name);
             pp.isNillable = true;
             const de = ws.DataEntity.createInPublishedParameterUnderDataEntity(pp);
-            parts.push(`${p.name}${await dataEntityFor(de, p.variableType, where)}`);
+            parts.push(`${p.name}${await dataEntityFor(de, p.variableType, `${where} ${p.name}`, only[p.name])}`);
         }
         const rt = m.microflowReturnType;
         if (!ok(rt)) throw new Error(`${where}: ${spec.microflow} returns ${rt.structureTypeName.split("$")[1]}, which a web service cannot return`);
         op.operationReturnType = copyType(rt);
         op.returnTypeIsNillable = true;
         const de = ws.DataEntity.createInPublishedResourceUnderDataEntity(op);
-        const ret = await dataEntityFor(de, rt, where);
+        const ret = await dataEntityFor(de, rt, `${where} result`, only.result);
         return `operation ${name} (${parts.join(", ") || "no parameters"})${rt instanceof datatypes.VoidType ? "" : ` -> ${ret.trim() || rt.structureTypeName.split("$")[1].replace("Type", "")}`}`;
     }
 

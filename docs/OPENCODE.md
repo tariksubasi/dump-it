@@ -68,6 +68,7 @@ Run all of these from the export folder.
 | `python mx.py widgets <Module.Page>` | Lists the widget tree of a page or snippet: names, kinds, entity of each data view / list view, and where new widgets can go (`[into]`, layout grid column paths). For `addWidgets`, `changeWidget`, `deleteWidget`, `moveWidget` | no |
 | `python mx.py preview <Module.Page>` | APPROXIMATE picture of a page with the compiled theme: `edits/preview/<Module.Page>.html`, and phone / tablet / desktop `.png` screenshots when Playwright is installed (see "Design system") | no |
 | `python mx.py mapping-test <Module.ImportMapping> <sample.json>` | Shows what a sample JSON would make with an import mapping: each object (created, found by keys, from a microflow, the parameter), each attribute value, values that would fail at runtime (text in a number, a bad date, too long), sample keys the mapping ignores. Static: no database, no microflows run. The file may be in `edits/` | no |
+| `python mx.py contract <file> [Module]` | Reads an API contract file: OpenAPI 2/3 (`.json` or `.yaml`), a SOAP WSDL, or an OData `$metadata`. Lists its operations (or entity sets, keys, actions). With a module it also writes a change plan to `edits/<file>-plan.json`: OpenAPI -> `createConsumedRestService` with every operation (path, query and header parameters, bearer / basic / API key authentication, body and response mappings from the schemas); WSDL -> its XML schemas as `.xsd` files and `createXmlSchema`; `$metadata` -> JSON structures and import mappings that read each entity set with `callRest`. Dry run the plan like any change file. The file may be in `edits/` | no |
 | `python mx.py texts [Module\|Module.Doc\|menu] [--missing <lang>]` | Lists translatable texts (page titles, widget captions/texts/labels/placeholders, enumeration captions, show-message and validation feedback texts, validation messages, menu captions) as `where [part]` with their text in every project language; `--missing tr_TR`: only those without Turkish. For `setTranslations` | no |
 | `python mx.py ops [name]` | One line per operation; with a name (`ops createPage`, `ops retrieve`): its fields. `ops all`: everything | no |
 | `python mx.py api <Type> [word]` | SDK type reference for this Mendix version (for `.js` files only) | no |
@@ -1055,20 +1056,21 @@ error list.
 
 | Op | Fields | Notes |
 |---|---|---|
-| `createConsumedRestService` | **module**, **name**, **baseUrl**, **operations**, authentication (`"none"` or `{username, password}`; a value `"@Module.Constant"` uses a constant), folder | Mendix 10.1+ REST client document. Each operation: **name**, **path** (`/orders/{id}`, after the base URL), method (default Get), parameters `{"id": "Integer"}` (types of the `{name}` placeholders in path, headers and body; default String), query `["status"]` or `{"page": {"required": false}}` (Mendix 11; on Mendix 10 they go into the path as `?status={status}`, optional ones are refused), headers `{"Name": "value {param}"}`, body (Post/Put/Patch: a text template with `{param}`, or `{snippet, entity, entities, attributes, skip, create}` = an export mapping of one object), response (`"none"`, or `{snippet, entity, entities, attributes, skip, keys, create}` = an import mapping like `createImportMapping`), timeout (s, 300). Added for Studio Pro's rules: `Accept: application/json` on every operation, `Content-Type: application/json` and a `{}` body for Post/Put/Patch without one |
-| `addRestOperation` | **service** (`Module.Service`) + the operation fields above | Adds one operation to an existing consumed REST service |
-| `changeRestService` | **service**, baseUrl, authentication (`"none"` or `{username, password}`) | Give only what changes |
-| `changeRestOperation` | **operation** (`Module.Service.Operation`), method, path, parameters, query, headers, body, response, timeout | Changes the operation in place; what you leave out stays. headers are merged: `{"X-Trace": null}` removes one (Accept stays). query replaces all query parameters. The `{placeholders}` are counted again: a removed parameter also leaves the calling `sendRestRequest` steps; a new one is listed with the callers (`STILL USED BY`): delete those steps and add them again with the new arg |
+| `createConsumedRestService` | **module**, **name**, **baseUrl**, **operations**, authentication (`"none"`, `{username, password}` = Basic (a value `"@Module.Constant"` uses a constant), or `{"bearer": "token"}` = the header `Authorization: Bearer {token}` and a String parameter `token` on every operation), baseUrlParameter (Mendix 10.17+: `"ApiUrl"`, a String parameter for the base URL; `sendRestRequest` then needs `"baseUrl"`; the URL becomes its test value), folder | Mendix 10.1+ REST client document. Each operation: **name**, **path** (`/orders/{id}`, after the base URL), method (default Get), parameters `{"id": "Integer"}` (types of the `{name}` placeholders in path, headers and body; default String), query `["status"]` or `{"page": {"required": false}}` (Mendix 11; on Mendix 10 they go into the path as `?status={status}`, optional ones are refused), headers `{"Name": "value {param}"}`, body (Post/Put/Patch: a text template with `{param}`, or `{snippet, entity, entities, attributes, skip, create}` = an export mapping of one object), response (`"none"`, or `{snippet, entity, entities, attributes, skip, keys, create}` = an import mapping like `createImportMapping`), timeout (s, 300), testValues `{"id": "42"}` (Studio Pro's Test value). Form data, multipart or file bodies and a String or file response are not part of a REST client document: use `callRest` (`formData`, `binaryBody`, `response: "string"/"file"`). Added for Studio Pro's rules: `Accept: application/json` on every operation, `Content-Type: application/json` and a `{}` body for Post/Put/Patch without one |
+| `addRestOperation` | **service** (`Module.Service`) + the operation fields above | Adds one operation to an existing consumed REST service. With bearer authentication it gets the same `Authorization` header |
+| `changeRestService` | **service**, baseUrl, authentication (`"none"`, `{username, password}` or `{"bearer": "token"}`), baseUrlParameter (`"ApiUrl"`, or `"none"` to remove it) | Give only what changes. Bearer adds (or removes) the `Authorization` header on every operation and lists the calls that need the new `token` arg. With a base URL parameter, baseUrl changes its test value |
+| `changeRestOperation` | **operation** (`Module.Service.Operation`), method, path, parameters, query, headers, body, response, timeout, testValues | Changes the operation in place; what you leave out stays. headers are merged: `{"X-Trace": null}` removes one (Accept stays). query replaces all query parameters. The `{placeholders}` are counted again: a removed parameter also leaves the calling `sendRestRequest` steps; a new one is listed with the callers (`STILL USED BY`): delete those steps and add them again with the new arg |
 | `deleteRestOperation` | **operation** | Lists the microflows that still call it (`STILL USED BY`). The last operation: delete the service with `delete` |
-| `changePublishedRestService` | **service**, path, version, authentication, roles | authentication and roles replace the old lists |
+| `changePublishedRestService` | **service**, path, version, authentication, authenticationMicroflow, roles, cors | authentication and roles replace the old lists. authenticationMicroflow (`Microflow` authentication): a microflow that returns the `System.User` (empty = refused) and takes only a `System.HttpRequest`; `""` removes it. cors: `{ "origins": "@Module.Origins", "maxAge": "@Module.MaxAge", "credentials": true }` (origins: a String constant with `https://a.example.com,https://b.example.com` or `*`; maxAge: an Integer constant in seconds) or `"none"` |
+| `generateRestResource` | **module**, **service**, **entity**, **key**, resource (default `<entity>s`), operations (`["getAll", "getByKey", "post", "put", "delete"]`, default all), attributes, folder (default the service name), servicePath, version, authentication, authenticationMicroflow, roles | Like Studio Pro's Generate: JSON structures, an import mapping (finds the object by the key, else creates it), export mappings (one object, and a list for GET all), one microflow per operation, then `publishRest`. GET/PUT/DELETE `{Key}` answer 404 when no object has that key; PUT answers 400 when the key in the URL and the body differ. The key: a String, Integer, Long or AutoNumber attribute. Check the generated microflows (security, validation) before you go live |
 | `changePublishedRestOperation` | **service**, **resource**, **method**, path (the current ones, to find it), newMethod, newPath, microflow, importMapping, exportMapping (`""` removes), commit, headers, summary, description, deprecated | The operation is made again from the (new) microflow; mappings and texts you leave out stay |
 | `deletePublishedRestOperation` | **service**, **resource**, **method**, path | |
 | `deletePublishedRestResource` | **service**, **resource** | With all its operations |
-| `publishRest` | **module**, **service**, **resource**, **method**, **microflow**, path (`{Id}`), headers `["Param"]`, importMapping, exportMapping, commit, summary, description, deprecated, create, query, servicePath, version, authentication, roles, folder | Creates the service (version default 1.0.0, shown in its OpenAPI document; authentication default `["Basic"]`) and resource when missing. Microflow parameters: `{Name}` in the path -> path, listed in `headers` -> header, an object/list -> the body (needs `importMapping` of that entity; commit `yes`/`no`/`withoutEvents`, default yes), `System.HttpRequest`/`HttpResponse` -> none, others -> query. An object/list result needs `exportMapping`. `create: true` makes the microflow when it is missing (String parameters from path, headers and `query`, the import mapping's entity, returns String or the export mapping's entity). `roles` may call the service |
+| `publishRest` | **module**, **service**, **resource**, **method**, **microflow**, path (`{Id}`), headers `["Param"]`, importMapping, exportMapping, commit, summary, description, deprecated, create, query, servicePath, version, authentication, authenticationMicroflow, roles, folder | Creates the service (version default 1.0.0, shown in its OpenAPI document; authentication default `["Basic"]`) and resource when missing. Microflow parameters: `{Name}` in the path -> path, listed in `headers` -> header, an object/list -> the body (needs `importMapping` of that entity; commit `yes`/`no`/`withoutEvents`, default yes), `System.HttpRequest`/`HttpResponse` -> none, others -> query. An object/list result needs `exportMapping`. `create: true` makes the microflow when it is missing (String parameters from path, headers and `query`, the import mapping's entity, returns String or the export mapping's entity). `roles` may call the service |
 
 Action `sendRestRequest` calls an operation: `{ "action": "sendRestRequest", "operation": "Module.Service.Operation",
 "args": { "id": "$Id" }, "query": { "status": "'open'" }, "body": "Order", "variable": "Result" }`. Every `{param}`
-needs an arg; required query parameters need a value. `body` only for an operation with a mapping body, `variable`
+needs an arg; required query parameters need a value; a service with a base URL parameter needs `"baseUrl": "@Module.ApiUrl"` (an expression). `body` only for an operation with a mapping body, `variable`
 only for one with a response mapping (an object, or a list for an array). Otherwise the response is in
 `$latestHttpResponse` (`$latestHttpResponse/Content`, `$latestHttpResponse/StatusCode`). No `onError` (Studio Pro
 does not allow a custom error handler here); use `callRest` when the call needs one.
@@ -1110,6 +1112,48 @@ show it. `rollback: false` keeps earlier changes; the flow returns `returnValue`
         { "action": "variable", "name": "ErrorBody", "type": "String", "value": "$latestHttpResponse/Content" },
         { "action": "importWithMapping", "mapping": "Sales.IMM_ApiError", "source": "ErrorBody", "variable": "ApiError", "commit": "no" },
         { "action": "log", "level": "Error", "message": "API error {1}: {2}", "args": [ "toString($latestHttpResponse/StatusCode)", "$ApiError/Message" ] } ] } } ] }
+] }
+```
+
+Bearer token, base URL parameter and test values; the call gives the token and the base URL:
+
+```json
+{ "ops": [
+  { "op": "createConsumedRestService", "module": "Sales", "name": "StockApi", "baseUrl": "https://stock.example.com/v1",
+    "authentication": { "bearer": "token" }, "baseUrlParameter": "StockUrl",
+    "operations": [ { "name": "GetStock", "path": "/items/{sku}", "testValues": { "sku": "A-1" } } ] },
+  { "op": "createMicroflow", "module": "Sales", "name": "ACT_Stock_Get", "parameters": [ { "name": "Sku", "type": "String" } ],
+    "actions": [ { "action": "sendRestRequest", "operation": "Sales.StockApi.GetStock", "baseUrl": "@Sales.StockUrl",
+      "args": { "sku": "$Sku", "token": "@Sales.StockToken" } } ] }
+] }
+```
+
+Published REST with Microflow authentication and CORS (the constants must exist):
+
+```json
+{ "ops": [
+  { "op": "changePublishedRestService", "service": "Sales.OrderService", "authentication": ["Microflow"],
+    "authenticationMicroflow": "Sales.REST_Authenticate", "cors": { "origins": "@Sales.AllowedOrigins", "credentials": true } } ] }
+```
+
+Generate a CRUD resource from an entity (GET all, GET by key, POST, PUT, DELETE):
+
+```json
+{ "ops": [
+  { "op": "generateRestResource", "module": "Sales", "service": "OrderAPI", "entity": "Sales.Order", "key": "OrderNumber", "roles": ["Sales.ApiUser"] } ] }
+```
+
+Status code and headers of a published REST answer (recipe): give the microflow a parameter of type
+`System.HttpResponse` named `httpResponse` (it gets no value from the caller). Change it, and create `System.HttpHeader`
+objects linked to it with the association `System.HttpHeaders`:
+
+```json
+{ "ops": [
+  { "op": "createMicroflow", "module": "Sales", "name": "PRS_Order_Create", "parameters": [ { "name": "Order", "type": "Sales.Order" }, { "name": "httpResponse", "type": "System.HttpResponse" } ],
+    "returns": "Sales.Order", "returnValue": "$Order", "actions": [
+      { "action": "commit", "variable": "Order" },
+      { "action": "change", "variable": "httpResponse", "set": { "StatusCode": "201", "ReasonPhrase": "'Created'" } },
+      { "action": "create", "entity": "System.HttpHeader", "variable": "Location", "set": { "Key": "'Location'", "Value": "'/orders/' + $Order/OrderNumber", "System.HttpHeaders": "$httpResponse" } } ] }
 ] }
 ```
 
@@ -1248,12 +1292,12 @@ The export shows a structure as `json/path: Name type` lines and a mapping as `j
 
 | Op | Fields | Notes |
 |---|---|---|
-| `publishOData` | **module**, **name**, **entities**, path (default `odata/<name>/v1/`), version (1.0.0), namespace (DefaultNamespace), authentication (`["Basic"]`), roles, associations (default true), summary, description, folder | Mendix 10.4+. Each entity: `"Module.Entity"` or `{entity, exposedName, attributes, key, insert, update, delete, count, topSkip, pageSize}`. key: `"ID"` (default for stored entities) or `["Attr"]` (required for non-stored entities). insert/update/delete: `true` (write to the database) or `"Module.Microflow"`; default read-only. Enumeration attributes publish their enumeration; associations between published entities become navigation properties. Binary and hashed string attributes are left out. Layout as the one Studio Pro sample (TestApp 11.14); check associations, enumerations and write modes in Studio Pro |
+| `publishOData` | **module**, **name**, **entities**, path (default `odata/<name>/v1/`), version (1.0.0), namespace (DefaultNamespace), authentication (`["Basic"]`), authenticationMicroflow, roles, associations (default true), summary, description, folder, microflows | Mendix 10.4+. microflows: microflows published as OData actions, `["Module.Microflow"]` or `[{ "microflow", "exposedName", "summary", "description", "optional": ["Param"] }]`; parameters and results are primitives, enumerations, or objects/lists of entities this service publishes. authenticationMicroflow: as in `changePublishedRestService`. Each entity: `"Module.Entity"` or `{entity, exposedName, attributes, key, insert, update, delete, count, topSkip, pageSize}`. key: `"ID"` (default for stored entities) or `["Attr"]` (required for non-stored entities). insert/update/delete: `true` (write to the database) or `"Module.Microflow"`; default read-only. Enumeration attributes publish their enumeration; associations between published entities become navigation properties. Binary and hashed string attributes are left out. Layout as the one Studio Pro sample (TestApp 11.14); check associations, enumerations and write modes in Studio Pro |
 | `createXmlSchema` | **module**, **name**, **file** (`.xsd` path, relative to the current or the project folder), folder | Stores the XSD as Studio Pro does. One file only: `xs:import`/`xs:include` are refused |
 | `createMessageDefinition` | **module**, **name** (collection), **entity**, definition (default the entity name), attributes, associations `["Module.Assoc"]`, folder | A list of the entity (`<Entity>s` with items `<Entity>`), its attributes (all but binary) and per association the other entity with its attributes. Layout of the Mendix 8.18 sample |
 | `createXmlImportMapping` | **module**, **name**, xmlSchema + rootElement, or messageDefinition (`Module.Collection.Definition`), entity, entities, attributes, skip, keys, create, persistable, folder | Like `createImportMapping`, over an XML schema element or a message definition. Paths are the element names joined with `/` from the root: `Order/Line/Sku`. A message definition says its entities (no entity/entities/create). XSD support: sequences/all-groups of elements with built-in types, named and anonymous complex types, repeated complex elements; attributes, choices, extensions and repeated simple elements are refused |
 | `createXmlExportMapping` | same fields, no keys | Like `createExportMapping` |
-| `changePublishedOData` | **service**, entities (add, or replace when published: same fields as publishOData), change, remove `["Module.Entity"]`, version, path, authentication, roles, summary, description | change: `[{ "entity": "Module.Entity", "addAttributes": ["Attr"], "removeAttributes": ["Attr"], "insert": true, "update": "Module.Microflow", "delete": false, "count": true, "topSkip": true, "pageSize": 500 }]` changes part of a published entity (`"pageSize": null` = no paging); the rest stays. Navigation properties are made again; enumerations nobody publishes any more are removed |
+| `changePublishedOData` | **service**, entities (add, or replace when published: same fields as publishOData), change, remove `["Module.Entity"]`, version, path, authentication, authenticationMicroflow, roles, summary, description, microflows (OData actions to add, or replace by exposed name), removeMicroflows `["ExposedName"]` | change: `[{ "entity": "Module.Entity", "addAttributes": ["Attr"], "removeAttributes": ["Attr"], "insert": true, "update": "Module.Microflow", "delete": false, "count": true, "topSkip": true, "pageSize": 500 }]` changes part of a published entity (`"pageSize": null` = no paging); the rest stays. Navigation properties are made again; enumerations nobody publishes any more are removed |
 | `changeXmlSchema` | **schema**, file (default: the file it came from) | Imports the `.xsd` again. Lists added/removed elements and, per mapping over it, the changed paths and the update op |
 | `changeMessageDefinition` | **definition** (`Module.Collection.Definition`), attributes (`[..]` or `"all"`), associations | Rebuilds the definition from its entity; what you leave out stays. Lists the mappings to update (`prune` when members are gone) |
 | `updateConsumedODataService` | | Not supported: refused with the Studio Pro steps (Update from the new `$metadata`). Removing an external entity: `delete` |
@@ -1266,6 +1310,20 @@ Change part of a published entity (here: publish Note, stop publishing Qty, inse
   { "op": "changePublishedOData", "service": "Sales.OrderOData", "change": [ { "entity": "Sales.Order", "addAttributes": ["Note"], "removeAttributes": ["Qty"], "insert": "Sales.ODATA_InsertOrder" } ] }
 ] }
 ```
+
+OData actions and an authentication microflow:
+
+```json
+{ "ops": [
+  { "op": "changePublishedOData", "service": "Sales.OrderOData", "authentication": ["Microflow"], "authenticationMicroflow": "Sales.API_Authenticate",
+    "microflows": [ { "microflow": "Sales.ODATA_ApproveOrder", "exposedName": "ApproveOrder", "optional": ["Note"] } ], "removeMicroflows": ["OldAction"] } ] }
+```
+
+A consumed OData service or SOAP web service is imported in Studio Pro (ops refuses `consumeODataService` and
+`consumeWebService`). First read the file: `python mx.py contract edits/metadata.xml Sales` lists the entity sets,
+keys and actions; `python mx.py contract edits/stock.wsdl Sales` lists the operations and SOAPActions and writes the
+XML schemas as `.xsd` files. An OpenAPI file becomes a consumed REST service plan: `python mx.py contract
+edits/petstore.yaml Sales`, then `python mx.py dryrun petstore-plan.json`.
 
 Delete any of these documents (structure, mapping, XML schema, message definition, published or consumed service,
 web service, business event service) with `delete` (`STILL USED BY` lists who uses it).
@@ -1330,7 +1388,7 @@ No test project has a Studio Pro sample of these: the dry run says "check it in 
 |---|---|---|
 | `createBusinessEventService` | **module**, **name**, **events**, serviceName, eventNamePrefix, summary, description, folder | Mendix 10+. Defines the events of this app: `[{ "name": "OrderPlaced", "attributes": { "OrderId": "String" }, "publish": true, "subscribe": true }]`. Attribute types: String, Integer, Long, Decimal, Boolean, DateTime. Publishing or subscribing (the event entities, the Business Events module) is done in Studio Pro |
 | `changeBusinessEventService` | **service**, addEvents, removeEvents `["Event"]`, addAttributes `{ "Event": { "Attr": "Type" } }`, removeAttributes `{ "Event": ["Attr"] }`, summary, description, force | Only services this app defines. A consumed service (contract of another app) is refused with the Studio Pro steps. An event this app implements is removed only with `"force": true`; the dry run lists the entities to bring in step in Studio Pro |
-| `publishWebService` | **module**, **name**, **operations**, namespace, authentication (None, UsernamePassword (default), Custom + headerMicroflow), description, validate, folder | Each operation: `"Module.Microflow"` or `{ "microflow", "name", "description", "optional": ["Param"] }`. Parameters and results: primitive types, an object or a list (all attributes of the entity are published) |
+| `publishWebService` | **module**, **name**, **operations**, namespace, authentication (None, UsernamePassword (default), Custom + headerMicroflow), description, validate, folder | Each operation: `"Module.Microflow"` or `{ "microflow", "name", "description", "optional": ["Param"], "attributes": { "Param": ["Attr"], "result": ["Attr"] } }`. Parameters and results: primitive types, an object or a list (all attributes of the entity, or the ones in `attributes`). One version per service: for a new contract version publish a new service (e.g. `OrderService_v2`, its own namespace) |
 | `changeWebService` | **service**, operations (add, or replace by name), remove `["Operation"]`, namespace, authentication, headerMicroflow, description, validate | A service with more than one version is refused (change it in Studio Pro) |
 | `updateConsumedWebService` | **service**, **wsdl** | Read-only check: lists added and removed operations of the new WSDL and the Call web service actions that use them, then refuses with the Studio Pro steps (Update from file) |
 
@@ -1339,7 +1397,8 @@ No test project has a Studio Pro sample of these: the dry run says "check it in 
   { "op": "createBusinessEventService", "module": "Sales", "name": "OrderEvents", "events": [ { "name": "OrderPlaced", "attributes": { "OrderId": "String", "Total": "Decimal" } } ] },
   { "op": "changeBusinessEventService", "service": "Sales.OrderEvents", "addAttributes": { "OrderPlaced": { "Paid": "Boolean" } }, "addEvents": [ { "name": "OrderShipped", "attributes": { "OrderId": "String" } } ] },
   { "op": "publishWebService", "module": "Sales", "name": "OrderService", "operations": [ "Sales.WS_GetOrder", { "microflow": "Sales.WS_ListOrders", "name": "ListOrders", "optional": ["Max"] } ] },
-  { "op": "changeWebService", "service": "Sales.OrderService", "remove": ["ListOrders"], "authentication": "None" },
+  { "op": "changeWebService", "service": "Sales.OrderService", "remove": ["ListOrders"], "authentication": "None",
+    "operations": [ { "microflow": "Sales.WS_FindOrder", "attributes": { "Order": ["Number"], "result": ["Number", "Total"] } } ] },
   { "op": "updateConsumedWebService", "service": "Sales.StockService", "wsdl": "edits/stock-v2.wsdl" }
 ] }
 ```

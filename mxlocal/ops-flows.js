@@ -430,7 +430,32 @@ function makeFlows(h) {
         return mc;
     }
 
+    // System HTTP objects of a published REST microflow (PR5 recipe): change $httpResponse (StatusCode, ReasonPhrase,
+    // Content) and create System.HttpHeader objects linked to it by System.HttpHeaders. The System module is not in
+    // the project: members are stored by name (declaring entity), as Studio Pro stores System.User.Name.
+    async function systemMemberChanges(f, action, entityQn, set, where) {
+        const SE = require("./exprlint").SYSTEM_ENTITIES;
+        const all = [];
+        for (let e = entityQn; e; e = SE[e].gen) all.push(...Object.keys(SE[e].attrs).map(n => [e, n]));
+        for (const [member, value] of Object.entries(set || {})) {
+            const mc = mf.MemberChange.createIn(action);
+            mc.type = mf.ChangeActionItemType.Set;
+            mc.value = expr(f.m, value, where);
+            if (member.includes(".")) {
+                if (member !== "System.HttpHeaders" || entityQn !== "System.HttpHeader") fail(`${where}: ${entityQn} has no association '${member}' ops can set${entityQn === "System.HttpHeader" ? "" : " (a header links to the response: create System.HttpHeader with \"System.HttpHeaders\": \"$httpResponse\")"}`, member, entityQn === "System.HttpHeader" ? ["System.HttpHeaders"] : []);
+                mc.__association.updateWithRawValue(member);
+                continue;
+            }
+            const hit = all.find(([, n]) => n === member);
+            if (!hit) fail(`${where}: ${entityQn} has no attribute '${member}'`, member, all.map(([, n]) => n));
+            if (member === "HttpVersion") throw new Error(`${where}: HttpVersion is set by the runtime; set StatusCode, ReasonPhrase or Content`);
+            mc.__attribute.updateWithRawValue(`${hit[0]}.${member}`);
+        }
+    }
+    const SYSTEM_WRITABLE = { "System.HttpResponse": "change", "System.HttpHeader": "create" };
+
     async function memberChanges(f, action, entityQn, set, where) {
+        if (SYSTEM_WRITABLE[entityQn]) return systemMemberChanges(f, action, entityQn, set, where);
         const ent = await h.entity(entityQn);
         await h.loadParents(ent);
         for (const [member, value] of Object.entries(set || {})) await memberChange(f, action, ent, entityQn, member, value, where);
@@ -981,7 +1006,9 @@ function makeFlows(h) {
             }
             case "create":
                 a = mf.CreateObjectAction.createIn(act);
-                a.entity = await h.entity(spec.entity);
+                if (SYSTEM_WRITABLE[spec.entity] === "create") a.__entity.updateWithRawValue(spec.entity); // System module: by name
+                else if (String(spec.entity).startsWith("System.")) throw new Error(`${where}: ops creates System.HttpHeader only of the System entities (a header of a published REST response); create a ${spec.entity} in Studio Pro`);
+                else a.entity = await h.entity(spec.entity);
                 a.outputVariableName = noDollar(spec.variable);
                 a.commit = bool(spec.commit, false) ? mf.CommitEnum.Yes : mf.CommitEnum.No;
                 await memberChanges(f, a, spec.entity, spec.set, where);

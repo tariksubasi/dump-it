@@ -8,9 +8,12 @@ const sdk = require("mendixmodelsdk");
 const { fail, bool, validName, enumValue } = require("./ops-util");
 const { cmp } = require("./versions");
 
-const { odatapublish: od, domainmodels: dm, security, microflows: mf, rest } = sdk;
+const { odatapublish: od, domainmodels: dm, security, microflows: mf, rest, datatypes } = sdk;
 
 const ENTITY_FIELDS = "[ \"Module.Entity\" or { \"entity\": ..., \"exposedName\": ..., \"attributes\": [ \"Attr\" ], \"key\": \"ID\" | [ \"Attr\" ], \"insert\": true | \"Module.Microflow\", \"update\": ..., \"delete\": ..., \"count\": true, \"topSkip\": true, \"pageSize\": number } ]";
+
+const ACTION_FIELDS = "[ \"Module.Microflow\" or { \"microflow\": \"Module.Microflow\", \"exposedName\": \"ApproveOrder\", \"summary\": ..., \"description\": ..., \"optional\": [ \"Param\" ] } ] (parameters and result: primitives, or objects/lists of entities this service publishes)";
+const AUTH_MF = "with Microflow authentication: Module.Microflow that returns the System.User (optional parameter of type System.HttpRequest)";
 
 const ODATA_OPS = {
     publishOData: {
@@ -19,7 +22,8 @@ const ODATA_OPS = {
             module: "R module name", name: "R service name, e.g. OrderOData", entities: "R " + ENTITY_FIELDS,
             path: "optional location (default odata/<name>/v1/)", version: "optional (default 1.0.0)", namespace: "optional (default DefaultNamespace)",
             authentication: "optional [ \"Basic\" | \"Session\" | \"Microflow\" | \"Guest\" ] (default [\"Basic\"])", roles: "optional [ \"Module.Role\" ] allowed to use the service",
-            associations: "optional true/false: publish associations between published entities (default true)", summary: "optional", description: "optional", folder: "optional folder path"
+            associations: "optional true/false: publish associations between published entities (default true)", summary: "optional", description: "optional", folder: "optional folder path",
+            authenticationMicroflow: "optional " + AUTH_MF, microflows: "optional microflows published as OData actions: " + ACTION_FIELDS
         }
     },
     changePublishedOData: {
@@ -28,7 +32,8 @@ const ODATA_OPS = {
             service: "R Module.Service", entities: "optional entities to add, or to replace when already published: " + ENTITY_FIELDS, remove: "optional [ \"Module.Entity\" ] to stop publishing",
             change: "optional [ { \"entity\": \"Module.Entity\", \"addAttributes\": [ \"Attr\" ], \"removeAttributes\": [ \"Attr\" ], \"insert\" / \"update\" / \"delete\": true | false | \"Module.Microflow\", \"count\", \"topSkip\", \"pageSize\": number | null, \"exposedName\", \"key\" } ]: change a published entity, the rest stays",
             version: "optional", path: "optional location", authentication: "optional [ \"Basic\" | \"Session\" | \"Microflow\" | \"Guest\" ] (replaces)", roles: "optional [ \"Module.Role\" ] (replaces)",
-            summary: "optional", description: "optional"
+            summary: "optional", description: "optional", authenticationMicroflow: "optional " + AUTH_MF + "; \"\" removes",
+            microflows: "optional microflows published as OData actions to add, or to replace when one has that exposed name: " + ACTION_FIELDS, removeMicroflows: "optional [ \"ExposedName\" ] OData actions to remove"
         }
     },
     updateConsumedODataService: {
@@ -51,8 +56,8 @@ const ODATA_OPS = {
 
 const REFUSALS = {
     updateConsumedODataService: "A consumed OData service is updated by Studio Pro from the new $metadata (or the Catalog): it compares the contract, changes the external entities, their attributes, keys and associations and stores the new contract; no test project has a Studio Pro-saved consumed OData service to build that from. In Studio Pro: open the consumed OData service document, click Update (or Update from file for a $metadata file), review the changes, then drag new external entities from the Integration pane into the domain model. Removing an external entity works with ops: { \"op\": \"delete\", \"target\": \"Module.Entity\" }.",
-    consumeODataService: "Consumed OData services are not written by ops: Studio Pro reads the $metadata, stores it, makes the external entities with their remote types and keys and keeps them in step; a hand-made copy breaks on the first update. In Studio Pro: right-click the module > Add other > Consumed OData service, choose the $metadata file (or the Catalog), then drag the external entities from the Integration pane into the domain model and give module roles access.",
-    consumeWebService: "Consumed SOAP web services are not written by ops: Studio Pro imports the WSDL and its schemas and builds the operations from them. In Studio Pro: right-click the module > Add other > Consumed web service, import the WSDL, then call an operation with the 'Call web service' microflow action and map the result with an import mapping (createXmlImportMapping works on its XML schema too).",
+    consumeODataService: "Consumed OData services are not written by ops: Studio Pro reads the $metadata, stores it, makes the external entities with their remote types and keys and keeps them in step; a hand-made copy breaks on the first update. In Studio Pro: right-click the module > Add other > Consumed OData service, choose the $metadata file (or the Catalog), then drag the external entities from the Integration pane into the domain model and give module roles access. What the $metadata holds, and a plan of JSON structures and import mappings that read the entity sets with callRest: python mx.py contract <file> <Module>.",
+    consumeWebService: "Consumed SOAP web services are not written by ops: Studio Pro imports the WSDL and its schemas and builds the operations from them. In Studio Pro: right-click the module > Add other > Consumed web service, import the WSDL, then call an operation with the 'Call web service' microflow action and map the result with an import mapping (createXmlImportMapping works on its XML schema too). Its operations and its XML schemas as .xsd files (for createXmlSchema and XML mappings): python mx.py contract <file.wsdl> <Module>.",
     createBusinessEvent: "Publishing or consuming business events is not written by ops: it needs the Business Events module from the Marketplace, and Studio Pro makes the event entities (they inherit from BusinessEvents.PublishedBusinessEvent / ConsumedBusinessEvent) and imports contracts of other apps (AsyncAPI). Ops can define the events of this app: createBusinessEventService / changeBusinessEventService. In Studio Pro: add the Business Events module, open the business event service, tick Publish / Subscribe per event (or Add other > Business event service > use an existing contract), and publish with the 'Publish business event' action."
 };
 
@@ -74,6 +79,48 @@ function makeOData(h) {
     }
 
     // One published entity (type and set) of a service; published: entity qn -> entity type, enums: enumeration qn -> published one
+    // A microflow published as an OData action: its parameters (primitives, or objects/lists of published entities)
+    // and its result. Parameters are stored by name (Module.Microflow.Param), as Studio Pro stores them.
+    const PRIM = ["StringType", "IntegerType", "LongType", "DecimalType", "BooleanType", "DateTimeType", "EnumerationType"];
+    function actionType(t, published, what, where) {
+        const k = t.structureTypeName.split("$")[1];
+        const c = datatypes[k].create(model);
+        if (k === "ObjectType" || k === "ListType") {
+            if (!published.has(t.entityQualifiedName)) throw new Error(`${where}: ${what} is ${k === "ListType" ? "a list of " : ""}${t.entityQualifiedName}, which this service does not publish; publish it in "entities" first`);
+            c.__entity.updateWithRawValue(t.entityQualifiedName);
+        } else if (k === "EnumerationType") c.__enumeration.updateWithRawValue(t.enumerationQualifiedName);
+        else if (!PRIM.includes(k) && !(what === "the result" && k === "VoidType")) throw new Error(`${where}: ${what} is ${k.replace("Type", "")}; an OData action takes primitives, enumerations and objects/lists of published entities`);
+        return c;
+    }
+    const ACTION_KEYS = ["microflow", "exposedName", "summary", "description", "optional"];
+    async function publishAction(svc, raw, where, published) {
+        const spec = typeof raw === "string" ? { microflow: raw } : raw;
+        if (!spec || !spec.microflow) throw new Error(`${where}: an action is ${ACTION_FIELDS}`);
+        for (const k of Object.keys(spec)) if (!ACTION_KEYS.includes(k)) fail(`${where}: unknown action field '${k}'`, k, ACTION_KEYS);
+        const m = await get(spec.microflow).catch(() => fail(`${where}: no microflow ${spec.microflow}`, spec.microflow, model.allMicroflows().map(x => x.qualifiedName)));
+        if (!(m instanceof mf.Microflow)) throw new Error(`${where}: ${spec.microflow} is not a microflow (nanoflows cannot be OData actions)`);
+        const name = spec.exposedName || m.name;
+        validName(name, "action name");
+        if (svc.microflows.some(x => x.exposedName === name)) throw new Error(`${where}: the service already has an action '${name}'`);
+        const params = m.objectCollection.objects.filter(x => x instanceof mf.MicroflowParameterObject);
+        const optional = [].concat(spec.optional || []);
+        for (const n of optional) if (!params.some(p => p.name === n)) fail(`${where}: ${spec.microflow} has no parameter '${n}'`, n, params.map(p => p.name));
+        const pm = od.PublishedMicroflow.createIn(svc);
+        pm.microflow = m;
+        pm.exposedName = name;
+        pm.summary = String(spec.summary || "");
+        pm.description = String(spec.description || "");
+        for (const p of params) {
+            const pp = od.PublishedMicroflowParameter.createIn(pm);
+            pp.__microflowParameter.updateWithRawValue(`${m.qualifiedName}.${p.name}`);
+            pp.exposedName = p.name;
+            pp.dataType = actionType(p.variableType, published, `parameter ${p.name}`, where);
+            pp.canBeEmpty = optional.includes(p.name);
+        }
+        pm.returnType = actionType(m.microflowReturnType, published, "the result", where);
+        return `action ${name} (${params.map(p => p.name).join(", ") || "no parameters"}) -> ${spec.microflow}`;
+    }
+
     async function publishEntity(svc, raw, where, published, enums) {
         const spec = typeof raw === "string" ? { entity: raw } : raw;
         if (!spec || !spec.entity) throw new Error(`${where}: ${ENTITY_FIELDS}`);
@@ -237,6 +284,10 @@ function makeOData(h) {
             const lines = [];
             for (const [i, raw] of o.entities.entries()) lines.push(await publishEntity(svc, raw, `${qn} entity ${i + 1}`, published, enums));
             if (svc.publishAssociations) await publishAssociations(svc, published, lines);
+            for (const [i, raw] of [].concat(o.microflows || []).entries()) lines.push(await publishAction(svc, raw, `${qn} action ${i + 1}`, published));
+            if (o.authenticationMicroflow !== undefined) lines.push(await h.authMicroflow(svc, o.authenticationMicroflow, qn));
+            if (svc.authenticationTypes.includes(rest.RestAuthenticationType.Microflow) && !svc.authenticationMicroflow) throw new Error(`${qn}: Microflow authentication needs "authenticationMicroflow": "Module.Microflow" (returns System.User)`);
+            if (svc.microflows.length) warn(`ODataPublish$PublishedMicroflow first use by ops (no Studio Pro sample in the test projects): check the actions of ${qn} in Studio Pro`);
             warn(`ODataPublish$PublishedODataService2 by ops (layout of the one Studio Pro sample, TestApp 11.14; associations, enumerations and write modes have no sample): check ${qn} in Studio Pro`);
             return `${qn} (/${svc.path}, version ${svc.version})` + lines.map(l => "\n      " + l).join("");
         },
@@ -265,7 +316,7 @@ function makeOData(h) {
                 if (!known.has(r)) fail(`${where}: ${r} is not published in ${o.service}`, r, [...known.keys()]);
                 if (specs.some(x => x && x.entity === r)) throw new Error(`${where}: ${r} is both in entities and remove`);
             }
-            if (!specs.length && !o.remove && !o.change && ["version", "path", "authentication", "roles", "summary", "description"].every(k => o[k] === undefined)) throw new Error(`${where}: nothing to change`);
+            if (!specs.length && !o.remove && !o.change && ["version", "path", "authentication", "roles", "summary", "description", "authenticationMicroflow", "microflows", "removeMicroflows"].every(k => o[k] === undefined)) throw new Error(`${where}: nothing to change`);
             for (const r of [].concat(o.remove || [])) {
                 removeType(r);
                 lines.push(`removed ${r}`);
@@ -312,6 +363,25 @@ function makeOData(h) {
                 for (const r of roles) svc.allowedModuleRoles.push(r);
                 lines.push(`roles ${[].concat(o.roles).join(", ") || "none"}`);
             }
+            if (o.authenticationMicroflow !== undefined) lines.push(await h.authMicroflow(svc, o.authenticationMicroflow, where));
+            if (svc.authenticationTypes.includes(rest.RestAuthenticationType.Microflow) && !svc.authenticationMicroflow) throw new Error(`${where}: Microflow authentication needs "authenticationMicroflow": "Module.Microflow" (returns System.User)`);
+            for (const n of [].concat(o.removeMicroflows || [])) {
+                const a = svc.microflows.find(x => x.exposedName === n);
+                if (!a) fail(`${where}: no action '${n}'`, n, svc.microflows.map(x => x.exposedName));
+                a.delete();
+                lines.push(`removed action ${n}`);
+            }
+            for (const [i, raw] of [].concat(o.microflows || []).entries()) {
+                const spec = typeof raw === "string" ? { microflow: raw } : raw;
+                const name = spec && (spec.exposedName || String(spec.microflow || "").split(".").pop());
+                const old = svc.microflows.find(x => x.exposedName === name);
+                if (old) old.delete();
+                lines.push((old ? "replaced " : "") + (await publishAction(svc, spec, `${where} action ${i + 1}`, published)));
+            }
+            // an action that takes or returns an entity the service no longer publishes
+            const kept = new Set(svc.entityTypes.map(t => t.entityQualifiedName));
+            for (const a of svc.microflows) for (const t of [a.returnType, ...a.parameters.map(p => p.dataType)]) if ((t instanceof datatypes.ObjectType || t instanceof datatypes.ListType) && !kept.has(t.entityQualifiedName)) throw new Error(`${where}: action ${a.exposedName} uses ${t.entityQualifiedName}, which would no longer be published; remove the action (removeMicroflows) or keep the entity`);
+            if (o.microflows || o.removeMicroflows) warn(`ODataPublish$PublishedMicroflow first use by ops (no Studio Pro sample in the test projects): check the actions of ${o.service} in Studio Pro`);
             if (!svc.entityTypes.length) throw new Error(`${where}: no entity would be left; delete the service instead: { "op": "delete", "target": "${o.service}" }`);
             return `${o.service} (${svc.entityTypes.length} entities)` + lines.map(l => "\n      " + l).join("");
         },

@@ -63,6 +63,10 @@ const USAGE = `mxlocal - Mendix Model SDK offline on a local .mpr (v2)
   node mxlocal.js mapping-test <Module.ImportMapping> --json <sample.json> --project <app.mpr|folder>
                                         what a sample JSON would make with an import mapping (objects, attributes,
                                         find/create, type problems, keys not mapped); a static simulation, read-only
+  node mxlocal.js contract <file> [--module M] [--name Service] [--out <folder>] [--no-mappings]
+                                        an API contract, read-only: OpenAPI 2/3 (JSON, YAML) -> its operations and a
+                                        createConsumedRestService plan; WSDL -> operations and its XML schemas as .xsd;
+                                        OData $metadata -> entity sets and actions, a JSON structure / mapping plan
   node mxlocal.js widgets <Module.Page> --project <app.mpr|folder>
                                         the widget tree of a page or snippet: names, kinds, entity, where new
                                         widgets can go (for addWidgets/changeWidget/deleteWidget/moveWidget)
@@ -551,6 +555,10 @@ async function main() {
     const cmd = a._[0];
     if (!cmd || a.help) return out(USAGE);
     if (cmd === "ops") return out(require("./ops").help(a._[1]));
+    if (cmd === "contract") {
+        if (!a._[1]) throw new Error("contract needs an OpenAPI (.json/.yaml), WSDL or $metadata file, e.g. contract petstore.yaml --module Sales --out edits");
+        return out(require("./contract").inspectContract(path.resolve(a._[1]), { module: a.module === true ? undefined : a.module, name: a.name === true ? undefined : a.name, out: a.out && a.out !== true ? path.resolve(a.out) : undefined, mappings: a["no-mappings"] ? false : undefined }).text);
+    }
     if (cmd === "doccheck") {
         const { count, problems } = require("./doccheck").doccheck();
         out(problems.length ? `DOC PROBLEMS (${problems.length}):\n` + problems.map(p => "  ! " + p).join("\n") : `Docs OK: ${count} JSON examples valid, every operation and action described.`);

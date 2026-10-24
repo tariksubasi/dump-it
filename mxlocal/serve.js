@@ -39,6 +39,8 @@ function tools(allowApply) {
             inputSchema: { type: "object", properties: { page: str("qualified name, e.g. Sales.Customer_Edit") }, required: ["page"] } },
         { name: "mapping_test", description: "What a sample JSON would make with an import mapping: objects (create / find by keys / custom / parameter), attribute values, type problems, sample keys the mapping ignores. A static simulation, read-only.",
             inputSchema: { type: "object", properties: { mapping: str("import mapping, e.g. Sales.IMM_Order"), json: str("the sample JSON text") }, required: ["mapping", "json"] } },
+        { name: "contract", description: "An API contract file, read-only: OpenAPI 2/3 (JSON or YAML) -> its operations and a createConsumedRestService plan; WSDL -> its operations, SOAPActions and XML schemas; OData $metadata -> entity sets, keys, actions and a JSON structure / import mapping plan. Dry run the plan like any change.",
+            inputSchema: { type: "object", properties: { file: str("path of the .json/.yaml/.wsdl/.xml file"), module: str("optional module for the plan, e.g. Sales") }, required: ["file"] } },
         { name: "widgettype", description: "Pluggable widgets installed in widgets/*.mpk; with a name (e.g. Datagrid, \"Data grid 2\", Badge): its properties with types, defaults and values, for { \"widget\": \"pluggable\", \"type\": ..., \"properties\": { ... } } in createPage / addWidgets.",
             inputSchema: { type: "object", properties: { name: str("optional widget id or short name, e.g. Datagrid") } } },
         { name: "texts", description: "Translatable texts (page titles, widget captions/labels, messages, enumeration and menu captions) with their text in every project language. Use before setTranslations; missing lists only texts without that language.",
@@ -179,6 +181,10 @@ class Server {
                     } finally {
                         this.settle(client);
                     }
+                    break;
+                }
+                case "contract": {
+                    lines.push(require("./contract").inspectContract(require("path").resolve(String(a.file || "")), { module: a.module ? String(a.module) : undefined }).text);
                     break;
                 }
                 case "widgettype": {

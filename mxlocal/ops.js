@@ -513,8 +513,8 @@ function bind(model, client) {
         else g.generalization = await entity(qn);
     }
     const version = client.project.version;
-    const restOps = makeRest({ model, client, get, exists, folder, version, mappingInternals: mappingOps.internals, impl: () => impl });
-    const odataOps = makeOData({ model, client, get, exists, entity, folder, version, persistable, attributeChain, loadParents });
+    const restOps = makeRest({ model, client, get, exists, folder, version, entity, persistable, attributeChain, loadParents, mappingInternals: mappingOps.internals, impl: () => impl });
+    const odataOps = makeOData({ model, client, get, exists, entity, folder, version, persistable, attributeChain, loadParents, authMicroflow: (...a) => restOps.authenticationMicroflow(...a) });
     const docsOps = makeDocs({ model, client, get, exists, entity, folder, version, text, attributeChain, loadParents, dataType });
     const serviceOps = makeServices({ model, client, get, exists, entity, folder, version, attributeChain, loadParents });
     const xmlOps = makeXml({ model, client, get, exists, entity, folder, version, attributeChain, loadParents, mappingInternals: mappingOps.internals });
