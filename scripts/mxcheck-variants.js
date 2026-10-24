@@ -50,6 +50,7 @@ const variants = {
     asStored: cv => cv,
     otherConstantSameModule: cv => ({ ...cv, Constant: `${mod}.ZzMxlocalTest_Origins` }),
     unknownName: cv => ({ ...cv, Constant: "NoSuchModule.NoSuchConstant" }),
+    studioProConstant: cv => ({ ...cv, Constant: "Atlas_Core.Atlas_Core_Version" }), // made by Studio Pro (ImageViewer has it)
     flatValueToo: cv => ({ ...cv, Value: cv.SharedOrPrivateValue && cv.SharedOrPrivateValue.Value !== undefined ? cv.SharedOrPrivateValue.Value : "" }),
     flatValueOnly: cv => {
         const { SharedOrPrivateValue, ...rest } = cv;
