@@ -595,7 +595,8 @@ function settingsPlan(mod, T, version, dir) {
             { op: "changeRestOperation", operation: `${E}_SetApi.GetOne`, testValues: { token: "abc" } },
             { op: "createMicroflow", module: mod, name: `${T}_SetCall`, folder: "ZzSet", actions: [
                 { action: "sendRestRequest", operation: `${E}_SetApi.GetOne`, ...(v1017 ? { baseUrl: `@${E}_ApiUrl` } : {}), args: { id: "1", token: "'t'" } },
-                { action: "sendRestRequest", operation: `${E}_SetApi.Ping`, ...(v1017 ? { baseUrl: `@${E}_ApiUrl` } : {}), args: { at: "'now'", token: "'t'" } }] },
+                { action: "sendRestRequest", operation: `${E}_SetApi.Ping`, ...(v1017 ? { baseUrl: `@${E}_ApiUrl` } : {}), args: { at: "'now'", token: "'t'" } },
+                { action: "callRest", url: "https://partner.example.com/orders", clientCertificate: "PartnerCert" }] },
             { op: "generateRestResource", module: mod, service: `${T}_SetCrud`, entity: `${E}SetOrder`, key: "Number", folder: "ZzSet" },
             { op: "createMicroflow", module: mod, name: `${T}_SetWsOp`, folder: "ZzSet", parameters: [{ name: "Order", type: `${E}SetOrder` }], returns: `${E}SetOrder`, returnValue: "$Order" },
             { op: "publishWebService", module: mod, name: `${T}_SetWs`, folder: "ZzSet", operations: [{ microflow: `${E}_SetWsOp`, attributes: { Order: ["Number"], result: ["Number", "Total"] } }] },
@@ -646,6 +647,9 @@ function settingsProblems(project, T, version) {
         // by name with the service in it (Module.Service.ApiUrl), like the operation parameters
         if (maps.length !== 2 || maps.some(m => !m || m.$Type !== "Microflows$RestParameterMapping" || !new RegExp(`\\.${T}_SetApi\\.ApiUrl$`).test(m.Parameter) || !/_ApiUrl$/.test(m.Value))) r.push(`base URL mappings ${JSON.stringify(maps)}`);
     }
+    let cert = null;
+    walk(call, o => o.$Type === "Microflows$RestCallAction" && (cert = o.HttpConfiguration.ClientCertificate));
+    if (cert !== "PartnerCert") r.push(`callRest client certificate ${cert}`);
     const ops = crud.Resources.flatMap(x => x.Operations);
     const methods = ops.map(o => `${o.HttpMethod} ${o.Path}`).sort().join(", ");
     if (methods !== "Delete {Key}, Get , Get {Key}, Post , Put {Key}") r.push(`generated resource: ${methods}`);

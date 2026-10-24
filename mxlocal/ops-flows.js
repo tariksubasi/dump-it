@@ -77,6 +77,7 @@ const ACTIONS = {
             formData: "optional form-data body { \"key\": \"expression\" } (instead of body)", binaryBody: "optional file document to send as the body, e.g. $File (instead of body)",
             auth: "optional basic authentication { \"user\": \"expression\", \"password\": \"expression\" }, e.g. { \"user\": \"@Module.ApiUser\", \"password\": \"@Module.ApiPassword\" }",
             proxy: "optional default | none | { \"host\": \"expression\", \"port\": \"expression\", \"user\": \"expression\", \"password\": \"expression\" } (default: default = the app's proxy settings)",
+            clientCertificate: "optional identifier of the client certificate to send (Studio Pro: Client certificate; the runtime setting ClientCertificateUsages maps it to a .pfx), e.g. PartnerCert",
             response: "optional none | string | file | Module.ImportMapping (default: string when variable is set, else none)", variable: "result variable: the response text, the file document or the import mapping result",
             fileEntity: "with response file: Module.Entity that inherits from System.FileDocument (default System.FileDocument)",
             commit: "with an import mapping: yes | no | withoutEvents (default withoutEvents)", mappingParameter: "with an import mapping that takes a parameter: the variable to pass (no $)", errorBody: "optional true/false: on an error keep the response in $latestHttpResponse (default true)"
@@ -938,6 +939,13 @@ function makeFlows(h) {
         }
     }
 
+    // a client certificate identifier: plain text (Studio Pro stores no expression here)
+    function certificateId(v, where) {
+        const id = String(v);
+        if (/^\s*['@$]/.test(id) || /\s/.test(id)) throw new Error(`${where}: clientCertificate is the certificate's identifier as plain text, e.g. PartnerCert (no quotes, $ or @); the runtime setting ClientCertificateUsages maps it to the certificate`);
+        return id;
+    }
+
     async function restCall(f, act, spec, where) {
         if (!spec.exportMapping !== !spec.exportObject) throw new Error(`${where}: 'exportMapping' and 'exportObject' go together`);
         if (spec.headers !== undefined && (typeof spec.headers !== "object" || Array.isArray(spec.headers) || !spec.headers)) throw new Error(`${where}: headers must be { "Name": "expression" }`);
@@ -958,6 +966,7 @@ function makeFlows(h) {
             e.value = restExpr(f, v, `${where}: header ${k}`);
         }
         if (spec.auth !== undefined) restAuth(f, http, spec.auth, where);
+        if (spec.clientCertificate !== undefined) http.clientCertificate = certificateId(spec.clientCertificate, where);
         a.useRequestTimeOut = true;
         a.timeOutExpression = expr(f.m, spec.timeout === undefined ? "300" : spec.timeout, `${where} timeout`);
         a.errorResultHandlingType = bool(spec.errorBody, true) ? mf.ErrorResultHandlingType.HttpResponse : mf.ErrorResultHandlingType.None;
@@ -2192,6 +2201,7 @@ function makeFlows(h) {
             commit: (f, a, v) => importCommit(a.resultHandling, v),
             auth: (f, a, v, where) => restAuth(f, a.httpConfiguration, v, where),
             proxy: (f, a, v, where) => restProxy(f, a, v, where),
+            clientCertificate: (f, a, v, where) => (a.httpConfiguration.clientCertificate = v === "" ? "" : certificateId(v, where)),
             errorBody: (f, a, v) => (a.errorResultHandlingType = bool(v, true) ? mf.ErrorResultHandlingType.HttpResponse : mf.ErrorResultHandlingType.None)
         },
         ImportXmlAction: { commit: (f, a, v) => importCommit(a.resultHandling, v) },
