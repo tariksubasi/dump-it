@@ -265,21 +265,24 @@ function makeApp(h) {
                 continue;
             }
             if (!native) throw new Error(`${where}: ${k} is an option of the native profile; ${p.name} is a web profile`);
+            const set = (prop, v) => {
+                if (!setIfAvailable(p, prop, v)) throw new Error(`${where}: ${k} is not an option of a native profile in Mendix ${client.project.version}`);
+            };
             if (NATIVE_FIELDS[k]) {
-                p[NATIVE_FIELDS[k]] = strictBool(o[k], k);
+                set(NATIVE_FIELDS[k], strictBool(o[k], k));
                 done.push(`${k} ${p[NATIVE_FIELDS[k]]}`);
                 if (k === "encryptDatabase" && !p.encryptionDbEnabled) client.warn("database encryption off: data on the device is stored unencrypted");
             } else if (k === "networkTimeoutMs") {
                 const n = Number(o[k]);
                 if (!(Number.isInteger(n) && n >= 1000 && n <= 600000)) throw new Error(`${where}: networkTimeoutMs is 1000..600000 milliseconds`);
-                p.networkTimeoutMs = n;
+                set("networkTimeoutMs", n);
                 done.push(`network timeout ${n} ms`);
             } else if (k === "screenTransition" || k === "popupTransition") {
                 const cls = k === "screenTransition" ? navigation.ScreenNavigationTransition : navigation.PopupNavigationTransition;
                 const names = Object.keys(cls).filter(x => cls[x] instanceof cls);
                 const hit = names.find(x => x.toLowerCase() === String(o[k]).toLowerCase());
                 if (!hit) fail(`${where}: ${k} '${o[k]}' is not known`, String(o[k]), names);
-                p[k === "screenTransition" ? "screenNavigationTransition" : "popupNavigationTransition"] = cls[hit];
+                set(k === "screenTransition" ? "screenNavigationTransition" : "popupNavigationTransition", cls[hit]);
                 done.push(`${k} ${hit}`);
             }
         }

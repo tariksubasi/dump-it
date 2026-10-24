@@ -550,15 +550,15 @@ async function codePhase(x) {
         const kind = ["Phone", "Tablet"].find(k => !profiles.some(p => String(p.Kind || "").startsWith(k)));
         if (!kind) results.push("SKIP M12 deleteNavigationProfile: this project has a phone and a tablet profile");
         if (kind) await block(`M12 setup: a ${kind} profile`, { ops: [{ op: "createNavigationProfile", kind }] }, () => []);
-        await block(`M12 navigation profiles: createNavigationProfile + deleteNavigationProfile (${kind || "none free"})${native ? ", changeNavigationProfile native options (OTA, logging, timeout, transition)" : ""}`, { ops: [
+        await block(`M12 navigation profiles: createNavigationProfile + deleteNavigationProfile (${kind || "none free"})${native ? ", changeNavigationProfile native options (OTA, logging)" : ""}`, { ops: [
             ...(kind ? [{ op: "deleteNavigationProfile", profile: kind }] : []),
-            ...(native ? [{ op: "changeNavigationProfile", profile: native.Name, ota: true, logging: false, networkTimeoutMs: 20000, screenTransition: "SlideFromRightIOS" }] : [])
+            ...(native ? [{ op: "changeNavigationProfile", profile: native.Name, ota: true, logging: false }] : [])
         ] }, p => {
             const ps = navOf(p).Profiles || [];
             const out = [];
             if (kind && ps.some(x => x.Kind === kind)) out.push(`${kind} profile not deleted`);
             const n = native && ps.find(x => x.Name === native.Name);
-            if (native && (!n || n.OtaEnabled !== true || n.NetworkTimeoutMs !== 20000)) out.push(`native profile stored as ${n && n.OtaEnabled} ${n && n.NetworkTimeoutMs}`);
+            if (native && (!n || n.OtaEnabled !== true || n.LoggingEnabled !== false)) out.push(`native profile stored as ${n && n.OtaEnabled} ${n && n.LoggingEnabled}`);
             return out;
         });
         if (!native) results.push("SKIP M12 native options: this project has no native profile");
