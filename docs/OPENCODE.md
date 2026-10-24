@@ -68,6 +68,7 @@ Run all of these from the export folder.
 | `python mx.py widgets <Module.Page>` | Lists the widget tree of a page or snippet: names, kinds, entity of each data view / list view, and where new widgets can go (`[into]`, layout grid column paths). For `addWidgets`, `changeWidget`, `deleteWidget`, `moveWidget` | no |
 | `python mx.py preview <Module.Page>` | APPROXIMATE picture of a page with the compiled theme: `edits/preview/<Module.Page>.html`, and phone / tablet / desktop `.png` screenshots when Playwright is installed (see "Design system") | no |
 | `python mx.py mapping-test <Module.ImportMapping> <sample.json>` | Shows what a sample JSON would make with an import mapping: each object (created, found by keys, from a microflow, the parameter), each attribute value, values that would fail at runtime (text in a number, a bad date, too long), sample keys the mapping ignores. Static: no database, no microflows run. The file may be in `edits/` | no |
+| `python mx.py security [Module]` | Security overview: level, administrator, guest access, demo users, every user role with its module roles. ISSUES: guest = administrator's role, a guest role that manages users, entities without an access rule, pages and client-called microflows/nanoflows no module role may use, module roles no user role has. Run it before a production deployment | no |
 | `python mx.py contract <file> [Module]` | Reads an API contract file: OpenAPI 2/3 (`.json` or `.yaml`), a SOAP WSDL, or an OData `$metadata`. Lists its operations (or entity sets, keys, actions). With a module it also writes a change plan to `edits/<file>-plan.json`: OpenAPI -> `createConsumedRestService` with every operation (path, query and header parameters, bearer / basic / API key authentication, body and response mappings from the schemas); WSDL -> its XML schemas as `.xsd` files and `createXmlSchema`; `$metadata` -> JSON structures and import mappings that read each entity set with `callRest`. Dry run the plan like any change file. The file may be in `edits/` | no |
 | `python mx.py texts [Module\|Module.Doc\|menu] [--missing <lang>]` | Lists translatable texts (page titles, widget captions/texts/labels/placeholders, enumeration captions, show-message and validation feedback texts, validation messages, menu captions) as `where [part]` with their text in every project language; `--missing tr_TR`: only those without Turkish. For `setTranslations` | no |
 | `python mx.py ops [name]` | One line per operation; with a name (`ops createPage`, `ops retrieve`): its fields. `ops all`: everything | no |
@@ -274,6 +275,23 @@ The default of an `Enum` attribute is the value name, e.g. `"default": "Open"`.
 | `createDemoUser` | **userName**, **userRoles** `["UserRole"]`, entity, password | Entity defaults to the one the other demo users use (`System.User` when there are none). Says so when demo users are off |
 | `setSecurity` | level (`Off`/`Prototype`/`Production`), demoUsers, guestRole (anonymous users' user role; `""` = guest access off), passwordPolicy `{"minimumLength": 8, "requireDigit": true, "requireMixedCase": true, "requireSymbol": true}` | At least one field. The administrator's role as guest role is refused; a guest role that manages users is warned |
 | `changeUserRole` | **role**, manageAllRoles, manageableRoles `["UserRole"]`, manageUsersWithoutRoles, description, addModuleRoles, removeModuleRoles | Which users this role may manage (Administration pages). `manageableRoles` sets `manageAllRoles` false |
+| `renameUserRole` | **role**, **newName**, force | Demo users, manageable roles, the administrator and guest role and role-based home pages follow. XPath / expressions with `[%UserRole_<old>%]` are listed and the rename is refused until you change them (or `"force": true`) |
+| `deleteUserRole` | **role**, force | Leaves demo users (one left without roles is deleted), manageable roles and role-based home pages. Refused for the administrator's role (`setAdministrator` first), the guest role (`setSecurity` guestRole first), the last role, and while `[%UserRole_<name>%]` is used (unless force) |
+| `setAdministrator` | userName, password, role | The account Studio Pro makes on an empty database (App > Security > Administrator). The password is checked against the password policy; set another one per environment |
+| `changeDemoUser` | **userName**, newUserName, password, userRoles (replaces), entity | |
+| `deleteDemoUser` | **userName** | |
+
+Rename and delete user roles, demo users and the administrator (run `python mx.py security` first and after):
+
+```json
+{ "ops": [
+  { "op": "renameUserRole", "role": "Clerk", "newName": "Cashier" },
+  { "op": "deleteUserRole", "role": "OldTester" },
+  { "op": "changeDemoUser", "userName": "demo_clerk", "newUserName": "demo_cashier", "userRoles": ["Cashier"] },
+  { "op": "deleteDemoUser", "userName": "demo_old" },
+  { "op": "setAdministrator", "userName": "MxAdmin", "password": "Change-me-2024", "role": "Administrator" }
+] }
+```
 
 ### Microflows and nanoflows
 
@@ -1180,6 +1198,7 @@ Steps (`{ "step": "<kind>", "name": "optional", ... }`):
 | Step | Fields | Notes |
 |---|---|---|
 | `userTask` | **page** (a user task page), **outcomes** `["Approve","Reject"]` or `{"Approve": [steps], "Reject": [steps]}`, assignee, caption, taskName, description, dueDate, onCreated, autoAssign | assignee: `{"userRoles": ["HRManager"]}` (user roles of the project), `{"xpath": "[...]"}` on the user entity, or `{"microflow": "Module.Flow"}` (parameters: the context or `System.Workflow`; returns a list of users). Without: every user may pick it up. One outcome: no steps of its own (the workflow continues after the task) |
+| `multiUserTask` | **page**, **outcomes**, **assignee**, **completion**, fallback, users, awaitAll, caption, taskName, description, dueDate, onCreated, timeout | Mendix 10.12+. Several users get the task. completion: `"consensus"` (all the same), `"majority"`, `{"veto": "Reject"}`, `{"threshold": 2}` or `{"threshold": "60%"}`, `{"microflow": "Module.Flow"}`. fallback: the outcome when consensus / majority / threshold is not met (default the last outcome). users: `"all"` (default), `{"count": 3}`, `{"percent": 50}` |
 | `decision` | **condition**, **outcomes** `{"true": [...], "false": [...]}` or `{"Module.Enum.Value": [...], "": [...]}` | Boolean: both outcomes are made. Enumeration: one outcome per value and one for no value (`""`), as Studio Pro requires; leave values out to give them no steps |
 | `parallelSplit` | **paths** `[[steps], [steps]]` | Two or more paths; the workflow continues when all are done. A path cannot `end` the workflow |
 | `callMicroflow` | **microflow**, args `{"Param": "expression"}`, outcomes | The parameter of the context entity gets `$WorkflowContext` (System.Workflow: `$Workflow`). A microflow returning a Boolean or enumeration gets its outcomes (give steps in `outcomes`) |
@@ -1242,6 +1261,16 @@ Workflow actions (in microflows; System variables are written by name, e.g. a pa
       { "step": "callMicroflow", "microflow": "Sales.ACT_Order_Confirm" } ] },
   { "op": "createMicroflow", "module": "Sales", "name": "ACT_Order_StartApproval", "parameters": [ { "name": "Order", "type": "Sales.Order" } ],
     "actions": [ { "action": "callWorkflow", "workflow": "Sales.WF_OrderApproval", "context": "Order" } ] }
+] }
+```
+
+A vote of the board (multi-user task, Mendix 10.12+): 60% of the directors decide; if not, Reject:
+
+```json
+{ "ops": [
+  { "op": "createWorkflow", "module": "Sales", "name": "WF_BoardVote", "context": "Sales.Order", "steps": [
+      { "step": "multiUserTask", "page": "Sales.Order_Approve_Task", "outcomes": ["Approve", "Reject"], "assignee": { "userRoles": ["Director"] },
+        "completion": { "threshold": "60%" }, "fallback": "Reject" } ] }
 ] }
 ```
 
@@ -1952,7 +1981,7 @@ Pluggable presets (widget kinds in `createPage` / `addWidgets` / building blocks
 the widget, with the Marketplace package to import): `badge` (text, type), `progressBar` / `progressCircle` (value: a
 number or `{"attribute": "Done"}`, min, max, showLabel), `accordion` (groups `[{"header", "widgets", "collapsed"}]`,
 multiple), `popupMenu` (items `[{"caption", "action", "style"} | "divider"]`, trigger, position), `treeNode` (entity,
-caption `"{Name}"`, xpath, widgets, expanded), `lineChart` / `columnChart` / `barChart` / `areaChart` (entity, x, y,
+caption `"{Name}"`, xpath, widgets, expanded), `lineChart` / `columnChart` / `barChart` / `areaChart` (moreSeries `[{ "x": "Month", "y": "Cost", "series": "Cost" }]` adds series to the same chart; entity, x, y,
 xpath, series, aggregation, xLabel, yLabel), `pieChart` (entity, value, caption, hole); `webImage` (image or url, alt,
 width, height, enlarge, onClick, thumbnail), `tooltip` (trigger, text, position, openOn), `fieldset` (legend, widgets),
 `htmlElement` (tag, widgets or html, attributes), `timeline` (entity, title, description, time, groupBy, xpath),

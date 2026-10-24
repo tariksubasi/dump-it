@@ -475,6 +475,35 @@ async function codePhase(x) {
                 if (!(r.ModuleRoles || []).includes(`${C}.Viewer`) || (r.ModuleRoles || []).includes(`${C}.User`)) out.push(`module roles stored as ${(r.ModuleRoles || []).join(", ")}`);
                 return out;
             });
+            // user role rename / delete, demo users, the administrator, the security report
+            if (admin) await refuse({ ops: [{ op: "deleteUserRole", role: admin }] }, /administrator's role/, "deleting the administrator's role");
+            await refuse({ ops: [{ op: "renameUserRole", role: R, newName: roles[0] }] }, /already exists/, "renaming a user role to an existing name");
+            await refuse({ ops: [{ op: "setAdministrator", password: "short" }] }, /password policy needs/, "an administrator password against the policy");
+            await block("M11 user roles and demo users: renameUserRole (demo user, manageable roles follow), deleteUserRole (its only-role demo user goes), changeDemoUser, deleteDemoUser, setAdministrator", { ops: [
+                { op: "createUserRole", name: "ZzTempRole", moduleRoles: [`${C}.Viewer`] },
+                { op: "createDemoUser", userName: "zz_demo_code", userRoles: [R] },
+                { op: "createDemoUser", userName: "zz_demo_temp", userRoles: ["ZzTempRole"] },
+                { op: "createDemoUser", userName: "zz_demo_gone", userRoles: [R] },
+                { op: "changeUserRole", role: R, manageableRoles: [R, "ZzTempRole"] },
+                { op: "renameUserRole", role: R, newName: `${R}2` },
+                { op: "changeDemoUser", userName: "zz_demo_code", newUserName: "zz_demo_code2", password: "Zz-demo-2024" },
+                { op: "deleteUserRole", role: "ZzTempRole" },
+                { op: "deleteDemoUser", userName: "zz_demo_gone" },
+                ...(admin ? [{ op: "setAdministrator", userName: "ZzAdmin", password: "Zz-admin-2024", role: admin }] : [])
+            ] }, p => {
+                const ps = sec(p);
+                const out = [];
+                const r = (ps.UserRoles || []).find(x => x.Name === `${R}2`);
+                if (!r || (ps.UserRoles || []).some(x => x.Name === R || x.Name === "ZzTempRole")) out.push(`user roles ${(ps.UserRoles || []).map(x => x.Name)}`);
+                if (r && (JSON.stringify(r.ManageableRoles).includes("ZzTempRole") || !JSON.stringify(r.ManageableRoles).includes(`${R}2`))) out.push(`manageable roles ${JSON.stringify(r.ManageableRoles)}`);
+                const demo = Object.fromEntries((ps.DemoUsers || []).map(d => [d.UserName, d]));
+                if (!demo.zz_demo_code2 || !JSON.stringify(demo.zz_demo_code2.UserRoles).includes(`${R}2`) || demo.zz_demo_code2.Password !== "Zz-demo-2024") out.push(`demo user zz_demo_code2 ${JSON.stringify(demo.zz_demo_code2)}`);
+                if (demo.zz_demo_temp || demo.zz_demo_gone || demo.zz_demo_code) out.push(`demo users ${Object.keys(demo)}`);
+                if (admin && (ps.AdminUserName !== "ZzAdmin" || ps.AdminPassword !== "Zz-admin-2024" || ps.AdminUserRoleName !== admin)) out.push(`administrator ${ps.AdminUserName} / ${ps.AdminUserRoleName}`);
+                return out;
+            });
+            const rep = await s2.ops.securityReport();
+            check("security report: level, administrator, user roles with module roles, issues", /^SECURITY /.test(rep) && rep.includes(`${R}2:`) && /ISSUES/.test(rep), rep.split("\n").slice(0, 4).join(" | "));
         }
     }
 

@@ -70,6 +70,13 @@ export const mapping_test = {
     execute: (args, context) => mx(context, ["mapping-test", args.mapping, args.file])
 };
 
+export const security = {
+    description: "Security overview, read-only: level, administrator, guest, demo users, user roles and issues " +
+        "(entities without access rules, used pages/flows no role may use, module roles nobody has).",
+    args: { module: text("own module to check, e.g. Sales, or \"\" for all") },
+    execute: (args, context) => mx(context, ["security", ...(args.module ? [args.module] : [])])
+};
+
 export const contract = {
     description: "An API contract file (OpenAPI .json/.yaml, WSDL, OData $metadata), read-only: its operations or entity " +
         "sets; with a module also a change plan in edits/ to dry run (OpenAPI: the consumed REST service).",

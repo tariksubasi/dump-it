@@ -109,7 +109,7 @@ function dsPlan(mod, T, x) {
         badge: { widget: "badge", name: "zzBadge", text: "Beta" }, progressBar: { widget: "progressBar", name: "zzBar", value: 40, showLabel: true }, progressCircle: { widget: "progressCircle", name: "zzCircle", value: 70 },
         accordion: { widget: "accordion", name: "zzAcc", groups: [{ header: "One", widgets: [{ widget: "text", text: "a" }] }, { header: "Two", collapsed: false }] },
         popupMenu: { widget: "popupMenu", name: "zzMenu", items: [{ caption: "Close", action: { action: "close" } }, "divider", { caption: "Close too", action: { action: "close" }, style: "danger" }] },
-        treeNode: { widget: "treeNode", name: "zzTree", entity: E, caption: "{Name}" }, lineChart: { widget: "lineChart", name: "zzLine", entity: E, x: "Name", y: "Amount" },
+        treeNode: { widget: "treeNode", name: "zzTree", entity: E, caption: "{Name}" }, lineChart: { widget: "lineChart", name: "zzLine", entity: E, x: "Name", y: "Amount", series: "Amount", moreSeries: [{ x: "Name", y: "Done", series: "Done" }] },
         columnChart: { widget: "columnChart", name: "zzColumns", entity: E, x: "Name", y: "Amount", aggregation: "sum" }, pieChart: { widget: "pieChart", name: "zzPie", entity: E, value: "Amount", caption: "{Name}", hole: 50 },
         barChart: { widget: "barChart", name: "zzBars", entity: E, x: "Name", y: "Done", xLabel: "Name", yLabel: "Done" }, areaChart: { widget: "areaChart", name: "zzArea", entity: E, x: "Name", y: "Amount", xpath: "[Active = true()]" }
     };

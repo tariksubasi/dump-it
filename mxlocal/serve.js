@@ -39,6 +39,8 @@ function tools(allowApply) {
             inputSchema: { type: "object", properties: { page: str("qualified name, e.g. Sales.Customer_Edit") }, required: ["page"] } },
         { name: "mapping_test", description: "What a sample JSON would make with an import mapping: objects (create / find by keys / custom / parameter), attribute values, type problems, sample keys the mapping ignores. A static simulation, read-only.",
             inputSchema: { type: "object", properties: { mapping: str("import mapping, e.g. Sales.IMM_Order"), json: str("the sample JSON text") }, required: ["mapping", "json"] } },
+        { name: "security", description: "Security overview, read-only: level, administrator, guest access, demo users, user roles with their module roles, and issues: entities without access rules, pages/flows used from the client that no module role may use, module roles no user role has, guest = administrator.",
+            inputSchema: { type: "object", properties: { module: str("optional own module to check, e.g. Sales") } } },
         { name: "contract", description: "An API contract file, read-only: OpenAPI 2/3 (JSON or YAML) -> its operations and a createConsumedRestService plan; WSDL -> its operations, SOAPActions and XML schemas; OData $metadata -> entity sets, keys, actions and a JSON structure / import mapping plan. Dry run the plan like any change.",
             inputSchema: { type: "object", properties: { file: str("path of the .json/.yaml/.wsdl/.xml file"), module: str("optional module for the plan, e.g. Sales") }, required: ["file"] } },
         { name: "widgettype", description: "Pluggable widgets installed in widgets/*.mpk; with a name (e.g. Datagrid, \"Data grid 2\", Badge): its properties with types, defaults and values, for { \"widget\": \"pluggable\", \"type\": ..., \"properties\": { ... } } in createPage / addWidgets.",
@@ -178,6 +180,17 @@ class Server {
                     const model = await client.open();
                     try {
                         lines.push(await require("./ops").bind(model, client).mappingTest(String(a.mapping || ""), String(a.json || "")));
+                    } finally {
+                        this.settle(client);
+                    }
+                    break;
+                }
+                case "security": {
+                    const ctx = await this.project();
+                    const client = new LocalClient(ctx);
+                    const model = await client.open();
+                    try {
+                        lines.push(await require("./ops").bind(model, client).securityReport(a.module ? String(a.module) : undefined));
                     } finally {
                         this.settle(client);
                     }

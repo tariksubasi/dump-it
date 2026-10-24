@@ -7,8 +7,9 @@ const pluggable = require("./pluggable");
 const { fail } = require("./ops-util");
 
 const SERIES = (key, extra = {}) => ({
-    doc: "a chart of one series: x and y attributes of an entity (database, optional XPath), aggregation optional",
-    fields: { entity: "R Module.Entity of the points", x: "R attribute for the x axis", y: "R attribute for the y axis (a number)", xpath: "optional XPath constraint", series: "optional series name (default the entity name)", aggregation: "optional none | count | sum | avg | min | max (default none)", xLabel: "optional x axis label", yLabel: "optional y axis label", ...extra },
+    doc: "a chart of one or more series: x and y attributes of an entity (database, optional XPath), aggregation optional; more series in moreSeries",
+    fields: { entity: "R Module.Entity of the points", x: "R attribute for the x axis", y: "R attribute for the y axis (a number)", xpath: "optional XPath constraint", series: "optional series name (default the entity name)", aggregation: "optional none | count | sum | avg | min | max (default none)", xLabel: "optional x axis label", yLabel: "optional y axis label",
+        moreSeries: "optional [ { \"entity\", \"x\", \"y\", \"xpath\", \"series\", \"aggregation\" } ] more series in the same chart (entity default the first one's; give each its own series name)", ...extra },
     key
 });
 
@@ -252,10 +253,24 @@ function expand(kind, spec, where, dir) {
             break;
         }
         default: {
-            const ds = s.xpath ? { entity: String(s.entity), xpath: String(s.xpath) } : String(s.entity);
-            const one = { dataSet: "static", staticDataSource: ds, staticName: s.series !== undefined ? String(s.series) : String(s.entity).split(".").pop(), staticXAttribute: String(s.x), staticYAttribute: String(s.y) };
-            if (s.aggregation !== undefined) one.aggregationType = String(s.aggregation);
-            props = { [p.key]: [one], gridLines: "horizontal" };
+            const serie = (x, w) => {
+                for (const k of ["x", "y"]) if (x[k] === undefined) throw new Error(`${w}: a series needs "${k}"`);
+                const entity = x.entity !== undefined ? x.entity : s.entity;
+                const ds = x.xpath ? { entity: String(entity), xpath: String(x.xpath) } : String(entity);
+                const one = { dataSet: "static", staticDataSource: ds, staticName: x.series !== undefined ? String(x.series) : String(entity).split(".").pop(), staticXAttribute: String(x.x), staticYAttribute: String(x.y) };
+                if (x.aggregation !== undefined) one.aggregationType = String(x.aggregation);
+                return one;
+            };
+            const more = s.moreSeries === undefined ? [] : s.moreSeries;
+            if (!Array.isArray(more)) throw new Error(`${where}: moreSeries is [ { "x": ..., "y": ..., "series": "Name" } ]`);
+            const list = [serie(s, where), ...more.map((x, i) => {
+                if (!x || typeof x !== "object") throw new Error(`${where} moreSeries ${i + 1}: { "x": ..., "y": ..., "series": "Name" }`);
+                for (const k of Object.keys(x)) if (!["entity", "x", "y", "xpath", "series", "aggregation"].includes(k)) fail(`${where} moreSeries ${i + 1}: unknown field '${k}'`, k, ["entity", "x", "y", "xpath", "series", "aggregation"]);
+                return serie(x, `${where} moreSeries ${i + 1}`);
+            })];
+            const names = list.map(x => x.staticName);
+            if (new Set(names).size !== names.length) throw new Error(`${where}: two series are named ${names.find((n, i) => names.indexOf(n) !== i)}; give each a "series" name (the legend shows it)`);
+            props = { [p.key]: list, gridLines: "horizontal" };
             if (s.xLabel !== undefined) props.xAxisLabel = String(s.xLabel);
             if (s.yLabel !== undefined) props.yAxisLabel = String(s.yLabel);
         }

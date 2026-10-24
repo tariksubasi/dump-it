@@ -48,6 +48,16 @@ const STEP_FIELDS = {
             timeout: TIMEOUT_FIELD
         }
     },
+    multiUserTask: {
+        doc: "a task for several users (Mendix 10.12+): each targeted user picks an outcome; the completion rule decides the result",
+        fields: {
+            caption: "optional text on the activity (default: Multi-user task)", page: "R Module.Page with a System.WorkflowUserTask parameter", outcomes: "R as userTask",
+            assignee: "R as userTask (the users who get the task)", completion: "R \"consensus\" (all pick the same) | \"majority\" | { \"veto\": \"Reject\" } (one picks it: that outcome) | { \"threshold\": 2 } or { \"threshold\": \"60%\" } (that many pick an outcome) | { \"microflow\": \"Module.Flow\" } (decides)",
+            fallback: "with consensus, majority or threshold: the outcome when the rule is not met (default the last outcome)",
+            users: "optional \"all\" (default) | { \"count\": 3 } | { \"percent\": 50 }: how many targeted users must take part", awaitAll: "optional true: wait for every user, even when the result is already sure (default false)",
+            taskName: "optional", description: "optional", dueDate: "optional DateTime expression", onCreated: "optional Module.Microflow", timeout: TIMEOUT_FIELD
+        }
+    },
     decision: { doc: "branch on an expression of the context", fields: { caption: "optional text (default: the condition)", condition: "R Boolean or enumeration expression, e.g. $WorkflowContext/Amount > 1000", outcomes: "R { \"true\": [ steps ], \"false\": [ steps ] } or { \"Module.Enum.Value\": [ steps ], \"\": [ steps for no value ] }" } },
     parallelSplit: { doc: "run paths at the same time; the workflow continues when all are done", fields: { caption: "optional text (default: Parallel split)", paths: "R [ [ steps ], [ steps ] ] two or more" } },
     callMicroflow: { doc: "run a microflow", fields: { caption: "optional text (default: Call microflow)", microflow: "R Module.Microflow", args: "optional { \"Param\": \"expression\" } (default: the parameter of the context entity gets $WorkflowContext)", outcomes: "optional, when the microflow returns a Boolean or enumeration: { \"true\": [ steps ], \"false\": [ steps ] } / { \"Module.Enum.Value\": [ steps ], \"\": [ steps ] }", timeout: TIMEOUT_FIELD } },
@@ -64,7 +74,7 @@ const WORKFLOW_OPS = {
         doc: "Create a workflow: context entity, then steps (user tasks with page, assignee and outcomes, decisions, parallel splits, call microflow/workflow, jumps, timers, notification waits, ends).",
         fields: {
             module: "R module name", name: "R workflow name", context: "R Module.Entity the workflow is about (stored, e.g. Sales.Order); in expressions $WorkflowContext",
-            steps: "R [ { \"step\": \"userTask | decision | parallelSplit | callMicroflow | callWorkflow | jumpTo | waitForTimer | waitForNotification | end\", ... } ] (fields: ops <step kind>, e.g. ops userTask)",
+            steps: "R [ { \"step\": \"userTask | multiUserTask | decision | parallelSplit | callMicroflow | callWorkflow | jumpTo | waitForTimer | waitForNotification | end\", ... } ] (fields: ops <step kind>, e.g. ops userTask)",
             title: "optional display name (default from the name)", description: "optional workflow description", dueDate: "optional DateTime expression",
             adminPage: "optional Module.Page with a System.Workflow parameter (the workflow admin page)",
             roles: "optional [ \"Module.Role\" ] may open the task pages and the admin page", folder: "optional folder path"
@@ -112,8 +122,8 @@ const USER_TASK_PAGE_FIELDS = {
     editable: "userTaskPage with entity: true/false the context fields (default false)"
 };
 
-const STEP_PREFIX = { userTask: "userTask", decision: "decision", parallelSplit: "parallelSplit", callMicroflow: "callMicroflow", callWorkflow: "callWorkflow", jumpTo: "jumpTo", waitForTimer: "waitForTimer", waitForNotification: "waitForNotification", end: "end" };
-const STEP_CAPTION = { userTask: "User task", parallelSplit: "Parallel split", callMicroflow: "Call microflow", callWorkflow: "Call workflow", jumpTo: "Jump", waitForTimer: "Timer", waitForNotification: "Wait for notification", end: "End" };
+const STEP_PREFIX = { userTask: "userTask", multiUserTask: "multiUserTask", decision: "decision", parallelSplit: "parallelSplit", callMicroflow: "callMicroflow", callWorkflow: "callWorkflow", jumpTo: "jumpTo", waitForTimer: "waitForTimer", waitForNotification: "waitForNotification", end: "end" };
+const STEP_CAPTION = { userTask: "User task", multiUserTask: "Multi-user task", parallelSplit: "Parallel split", callMicroflow: "Call microflow", callWorkflow: "Call workflow", jumpTo: "Jump", waitForTimer: "Timer", waitForNotification: "Wait for notification", end: "End" };
 
 const humanize = s => String(s).replace(/_/g, " ").replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/^./, c => c.toUpperCase());
 const load = async x => (x && !x.isLoaded && x.load ? x.load() : x);
@@ -548,8 +558,8 @@ function makeWorkflows(h) {
     }
 
     const STEPS = {
-        async userTask(st, flow, s, where, ctx) {
-            const ut = activity(st, flow, wf.SingleUserTaskActivity, "userTask", s.caption === undefined ? STEP_CAPTION.userTask : String(s.caption), s.name);
+        async userTask(st, flow, s, where, ctx, T = wf.SingleUserTaskActivity, kind = "userTask") {
+            const ut = activity(st, flow, T, kind, s.caption === undefined ? STEP_CAPTION[kind] : String(s.caption), s.name);
             const page = await pageOf(s.page, "System.WorkflowUserTask", where);
             ut.taskPage.page = page;
             st.pages.add(s.page);
@@ -574,6 +584,52 @@ function makeWorkflows(h) {
                 await steps(st, oc.flow, outs[k] || [], `${where} outcome ${k}`, { ...ctx, branch: true, main: false });
             }
             await timeouts(st, ut, s.timeout, where, ctx);
+            return ut;
+        },
+        async multiUserTask(st, flow, s, where, ctx) {
+            if (!atLeast("10.12.0")) throw new Error(`${where}: multi-user tasks need Mendix 10.12 (this project is ${version}); use a userTask, or a parallel split with one task per user`);
+            if (s.autoAssign !== undefined) throw new Error(`${where}: a multi-user task has no autoAssign (every targeted user gets it)`);
+            const ut = await STEPS.userTask(st, flow, s, where, ctx, wf.MultiUserTaskActivity, "multiUserTask");
+            const outcome = name => ut.outcomes.find(o => o.value === name) || fail(`${where}: no outcome '${name}'`, String(name), ut.outcomes.map(o => o.value));
+            const fb = () => (s.fallback !== undefined ? outcome(s.fallback) : ut.outcomes[ut.outcomes.length - 1]);
+            const c = s.completion;
+            const under = C => C.createInMultiUserTaskActivityUnderCompletionCriteria(ut);
+            if (c === "consensus") under(wf.ConsensusCompletionCriteria).fallbackOutcome = fb();
+            else if (c === "majority") {
+                const m = under(wf.MajorityCompletionCriteria);
+                m.completionType = wf.CompletionType.Relative;
+                m.fallbackOutcome = fb();
+            } else if (c && typeof c === "object" && c.veto !== undefined) {
+                if (s.fallback !== undefined) throw new Error(`${where}: a veto has no fallback (the other outcome wins when nobody vetoes)`);
+                under(wf.VetoCompletionCriteria).vetoOutcome = outcome(c.veto);
+            } else if (c && typeof c === "object" && c.threshold !== undefined) {
+                const t = String(c.threshold);
+                const pct = /%$/.test(t);
+                const n = Number(t.replace(/%$/, ""));
+                if (!Number.isInteger(n) || n < 1 || (pct && n > 100)) throw new Error(`${where}: threshold is a whole number of users (2) or a percentage ("60%")`);
+                const m = under(wf.ThresholdCompletionCriteria);
+                m.completionType = pct ? wf.CompletionType.Relative : wf.CompletionType.Absolute;
+                m.threshold = n;
+                m.fallbackOutcome = fb();
+            } else if (c && typeof c === "object" && c.microflow !== undefined) {
+                const m = await get(c.microflow).catch(() => fail(`${where}: no microflow ${c.microflow}`, c.microflow, model.allMicroflows().map(x => x.qualifiedName)));
+                if (!(m instanceof mf.Microflow)) throw new Error(`${where}: ${c.microflow} is not a microflow`);
+                under(wf.MicroflowCompletionCriteria).microflow = m;
+            } else throw new Error(`${where}: completion is "consensus", "majority", { "veto": "Outcome" }, { "threshold": 2 | "60%" } or { "microflow": "Module.Flow" }`);
+            const u = s.users === undefined ? "all" : s.users;
+            const input = C => C.createInMultiUserTaskActivityUnderTargetUserInput(ut);
+            if (u === "all") input(wf.AllUserInput);
+            else if (u && typeof u === "object" && u.count !== undefined) {
+                if (!Number.isInteger(Number(u.count)) || Number(u.count) < 1) throw new Error(`${where}: users.count is a whole number`);
+                input(wf.AbsoluteAmountUserInput).amount = Number(u.count);
+            } else if (u && typeof u === "object" && u.percent !== undefined) {
+                const n = Number(u.percent);
+                if (!Number.isInteger(n) || n < 1 || n > 100) throw new Error(`${where}: users.percent is 1..100`);
+                input(wf.PercentageAmountUserInput).percentage = n;
+            } else throw new Error(`${where}: users is "all", { "count": 3 } or { "percent": 50 }`);
+            ut.awaitAllUsers = bool(s.awaitAll, false);
+            if (!s.assignee) throw new Error(`${where}: a multi-user task needs "assignee" (the users who get it)`);
+            if (h.client) h.client.warn(`Workflows$MultiUserTaskActivity first use by ops (no Studio Pro sample in the test projects): check ${where.split(" ")[0]} in Studio Pro`);
         },
         async decision(st, flow, s, where, ctx) {
             const a = activity(st, flow, wf.ExclusiveSplitActivity, "decision", s.caption === undefined ? String(s.condition) : String(s.caption), s.name);

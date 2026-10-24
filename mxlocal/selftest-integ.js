@@ -177,6 +177,9 @@ function workflowPlan(mod, T, version, pageable, userRole) {
                 { step: "decision", condition: "$WorkflowContext/Level", outcomes: { [`${E}WfLevel.High`]: [{ step: "waitForTimer", delay: "addHours([%CurrentDateTime%], 1)" }], "": [] } },
                 { step: "callMicroflow", microflow: `${E}_WfIsBig`, outcomes: { true: [{ step: "jumpTo", target: "bigCheck" }], false: [] } },
                 { step: "parallelSplit", paths: [[{ step: "callMicroflow", microflow: `${E}_WfNotify` }], [{ step: "callWorkflow", workflow: `${E}_SubWf` }, { step: "waitForNotification", name: "waitDocs" }]] }] },
+        // a multi-user task (Mendix 10.12+): 60% of half the targeted users decide, else Reject
+        ...(pageable && cmp(version, "10.12.0") >= 0 ? [{ op: "createWorkflow", module: mod, name: `${T}_Vote`, folder: "ZzWf", context: R, steps: [
+            { step: "multiUserTask", name: "vote", page: `${E}_Review_Task`, outcomes: ["Approve", "Reject"], assignee: { microflow: `${E}_WfTargets` }, completion: { threshold: "60%" }, fallback: "Reject", users: { percent: 50 }, awaitAll: true }] }] : []),
         { op: "createMicroflow", module: mod, name: `${T}_WfActions`, folder: "ZzWf", parameters: [{ name: "Request", type: R }, { name: "Task", type: "System.WorkflowUserTask" }], actions: [
             { action: "callWorkflow", workflow: `${E}_Approval`, context: "Request", variable: "Wf" },
             { action: "retrieveWorkflowContext", workflow: "Wf", definition: `${E}_Approval`, variable: "Ctx" },
@@ -200,6 +203,17 @@ const WF_ACTIONS = ["WorkflowCallAction", "GetWorkflowDataAction", "NotifyWorkfl
     "LockWorkflowAction", "UnlockWorkflowAction", "OpenUserTaskAction", "SetTaskOutcomeAction", "OpenWorkflowAction"];
 
 function workflowProblems(project, T, version, pageable) {
+    const vote = pageable && cmp(version, "10.12.0") >= 0 ? unitsNamed(project, `${T}_Vote`)[`${T}_Vote`] : null;
+    const voteProblems = [];
+    if (vote) {
+        let m = null;
+        walk(vote, o => o.$Type === "Workflows$MultiUserTaskActivity" && (m = o));
+        if (!m || !m.CompletionCriteria || m.CompletionCriteria.$Type !== "Workflows$ThresholdCompletionCriteria" || m.CompletionCriteria.Threshold !== 60 || m.CompletionCriteria.CompletionType !== "Relative" || !m.TargetUserInput || m.TargetUserInput.$Type !== "Workflows$PercentageAmountUserInput" || m.AwaitAllUsers !== true) voteProblems.push(`multi-user task ${JSON.stringify(m && { c: m.CompletionCriteria, t: m.TargetUserInput, a: m.AwaitAllUsers })}`.slice(0, 300));
+    } else if (pageable && cmp(version, "10.12.0") >= 0) voteProblems.push("workflow with a multi-user task missing");
+    return [...voteProblems, ...workflowProblems0(project, T, version, pageable)];
+}
+
+function workflowProblems0(project, T, version, pageable) {
     const r = [];
     const u = unitsNamed(project, `${T}_`);
     const w = u[`${T}_Approval`], flow = u[`${T}_WfActions`];

@@ -2674,6 +2674,32 @@
           "microflow": "MyFirstModule.PRS_Ping"
         }
       ]
+    },
+    {
+      "id": "secrename",
+      "text": "User rolünün adını Clerk yap, demo kullanıcısı demo_user'ı da demo_clerk olarak değiştir. Sonra güvenlikte eksik bir şey var mı kontrol et.",
+      "checks": {
+        "files": {
+          "index/security\\.txt$": "Clerk"
+        }
+      },
+      "ops": [
+        "renameUserRole",
+        "changeDemoUser"
+      ]
+    },
+    {
+      "id": "wfvote",
+      "text": "Order için WF_OrderVote adında bir onay workflow'u yap: User rolündeki herkes oy versin, %60'ı onaylarsa Approve, yoksa Reject olsun. Görev sayfasını da oluştur.",
+      "checks": {
+        "find": [
+          "MyFirstModule.WF_OrderVote"
+        ]
+      },
+      "ops": [
+        "createWorkflow",
+        "createPage"
+      ]
     }
   ]
 }

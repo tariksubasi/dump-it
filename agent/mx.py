@@ -18,6 +18,8 @@ Copied into the export folder by mxcontext.py with CONFIG filled in, so the agen
     python mx.py mapping-test <Module.ImportMapping> <sample.json>
                                       what a sample JSON would make with an import mapping (objects, values, find or
                                       create, type problems); static, read-only; the file may be in edits/
+    python mx.py security [Module]    security overview: level, administrator, guest, demo users, user roles, and
+                                      issues (entities without access rules, used pages/flows no role may use)
     python mx.py contract <file> [Module]
                                       an API contract file (OpenAPI .json/.yaml, WSDL, OData $metadata): its
                                       operations / entities; with a module also a change plan in edits/ (OpenAPI:
@@ -70,7 +72,7 @@ for stream in (sys.stdout, sys.stderr):
     except (AttributeError, ValueError):
         pass
 EDITS = os.path.join(HERE, "edits")
-COMMANDS = ("refresh", "find", "usages", "unused", "steps", "widgets", "preview", "widgettype", "mapping-test", "contract", "texts", "ops", "api", "dryrun", "rerun", "gap", "apply", "undo", "undoplan", "check", "ok",
+COMMANDS = ("refresh", "find", "usages", "unused", "steps", "widgets", "preview", "widgettype", "mapping-test", "contract", "security", "texts", "ops", "api", "dryrun", "rerun", "gap", "apply", "undo", "undoplan", "check", "ok",
             "selftest", "mergecheck", "mergefix", "clean")
 last_output = ""
 
@@ -294,6 +296,8 @@ def main(argv):
             say("Usage: python mx.py mapping-test <Module.ImportMapping> <sample.json> (the file may be in edits/)")
             return 1
         return mxlocal("mapping-test", rest[0], "--json", change_file(rest[1]))
+    if cmd == "security":
+        return mxlocal("security", *rest[:1])
     if cmd == "contract":
         if not rest:
             say("Usage: python mx.py contract <file> [Module] (OpenAPI .json/.yaml, WSDL or $metadata; the file may be in edits/)")
