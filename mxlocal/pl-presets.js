@@ -41,7 +41,7 @@ const PRESETS = {
     maps: { id: "com.mendix.widget.custom.Maps.Maps", mpk: "Maps", doc: "a map (Maps widget) with markers: fixed addresses, or one per object of an entity (an address attribute)", fields: { markers: "optional [ { \"address\": \"Rotterdam\", \"title\": \"Office\" } | { \"latitude\": \"51.9\", \"longitude\": \"4.5\" } ]", entity: "optional Module.Entity with one marker per object", address: "with entity: String attribute with the address", title: "optional with entity: String attribute shown on the marker", apiKey: "optional Google Maps API key (else OpenStreetMap)", zoom: "optional automatic | world | continent | city | street | buildings (default automatic)", height: "optional pixels (default: 75% of the width)" } },
     checkboxRadioSelection: { id: "com.mendix.widget.web.checkboxradioselection.CheckboxRadioSelection", mpk: "Checkbox Radio Selection", doc: "check boxes or radio buttons for an enumeration or Boolean attribute of the data view around it (Check box / Radio button widget)", fields: { attribute: "R enumeration attribute (a Boolean one: with \"boolean\": true)", boolean: "optional true: the attribute is a Boolean", control: "optional checkbox | radio (default radio)" } },
     selectionHelper: { id: "com.mendix.widget.web.selectionhelper.SelectionHelper", mpk: "Selection helper", doc: "a select-all check box for a gallery / Data grid 2 with selection Multi (Selection helper widget): add it to the gallery's header (addWidgets into the gallery, slot filtersPlaceholder)", fields: { caption: "optional check box caption (default none)" } },
-    dropdownSort: { id: "com.mendix.widget.web.dropdownsort.DropdownSort", mpk: "Drop-down sort", doc: "a sort drop-down for a gallery (Drop-down sort widget): add it to the gallery's header (addWidgets into the gallery, slot filtersPlaceholder); the attributes to sort by", fields: { attributes: "R [ \"Name\" | { \"attribute\": \"Name\", \"caption\": \"Name\" } ] of the gallery's entity", emptyCaption: "optional caption without a sort" } }
+    dropdownSort: { id: "com.mendix.widget.web.dropdownsort.DropdownSort", mpk: "Drop-down sort", doc: "a sort drop-down for a gallery (Drop-down sort widget): add it to the gallery's header (addWidgets into the gallery, slot filtersPlaceholder); the attributes to sort by", fields: { attributes: "[ \"Name\" | { \"attribute\": \"Name\", \"caption\": \"Name\" } ] of the gallery's entity (required by Drop-down sort 2.x; 1.x has none: it sorts by the gallery's sortable attributes)", emptyCaption: "optional caption without a sort" } }
 };
 
 const num = (v, where, k) => {
@@ -237,11 +237,20 @@ function expand(kind, spec, where, dir) {
         case "selectionHelper":
             props = s.caption !== undefined ? { checkboxCaption: String(s.caption) } : {};
             break;
-        case "dropdownSort":
+        case "dropdownSort": {
+            // older Drop-down sort packages (1.x) have no attributes: they offer the gallery's sortable attributes
+            const listed = pluggable.installed(dir).get(p.id).lines.some(l => l.startsWith("attributes "));
+            if (!listed) {
+                if (s.attributes !== undefined) throw new Error(`${where}: this Drop-down sort version has no attributes; it sorts by the gallery's sortable attributes (give the gallery "sort"), or update the Data Widgets module`);
+                props = {};
+                if (s.emptyCaption !== undefined) props.emptyOptionCaption = String(s.emptyCaption);
+                break;
+            }
             if (!Array.isArray(s.attributes) || !s.attributes.length) throw new Error(`${where}: attributes is [ "Name", { "attribute": "Date", "caption": "Date" } ]`);
             props = { attributes: s.attributes.map(a => (typeof a === "string" ? { attribute: a, caption: a } : { attribute: String(a.attribute), caption: String(a.caption !== undefined ? a.caption : a.attribute) })) };
             if (s.emptyCaption !== undefined) props.emptyOptionCaption = String(s.emptyCaption);
             break;
+        }
         default: {
             const ds = s.xpath ? { entity: String(s.entity), xpath: String(s.xpath) } : String(s.entity);
             const one = { dataSet: "static", staticDataSource: ds, staticName: s.series !== undefined ? String(s.series) : String(s.entity).split(".").pop(), staticXAttribute: String(s.x), staticYAttribute: String(s.y) };

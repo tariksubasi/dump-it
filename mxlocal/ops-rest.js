@@ -358,6 +358,12 @@ function makeRest(h) {
     // The microflows that call an operation with sendRestRequest (from the stored model) and their action objects (loaded).
     async function callersOf(opQn) {
         const users = h.client ? h.client.referencesTo(opQn).filter(u => u !== opQn.split(".").slice(0, 2).join(".")) : [];
+        // also flows already loaded in this change (new ones, or changed by earlier ops): the saved index does not know their steps
+        for (const m of model.allMicroflows()) if (m.isLoaded && !users.includes(m.qualifiedName)) {
+            let hit = false;
+            m.objectCollection.traverse(x => { if (x instanceof mf.RestOperationCallAction && x.operationQualifiedName === opQn) hit = true; });
+            if (hit) users.push(m.qualifiedName);
+        }
         const actions = [];
         for (const u of users) {
             const m = model.allMicroflows().find(x => x.qualifiedName === u);
@@ -748,8 +754,10 @@ function makeRest(h) {
             const { svc, op } = await operationNamed(o.operation, "deleteRestOperation");
             if (svc.operations.length === 1) throw new Error(`deleteRestOperation: ${o.operation} is the last operation of ${qn(svc)}; delete the service instead: { "op": "delete", "target": "${qn(svc)}" }`);
             const { users } = await callersOf(o.operation);
+            // deleting it would leave the steps' parameter mappings without a parameter: Studio Pro then cannot load the flow
+            if (users.length) throw new Error(`deleteRestOperation: ${o.operation} is still called by ${users.join(", ")}; delete those sendRestRequest steps first (deleteAction, ids from: steps <flow>), then the operation`);
             op.delete();
-            return o.operation + (users.length ? `\n      STILL USED BY (fix these, or Studio Pro shows errors: delete those steps with deleteAction): ${users.join(", ")}` : "");
+            return o.operation;
         },
         async changePublishedRestService(o) {
             const svc = await publishedService(o.service, "changePublishedRestService");

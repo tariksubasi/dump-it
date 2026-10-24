@@ -126,7 +126,7 @@ function presetOps(mod, T, x) {
     if (gallery) x.presets.push(...["selectionHelper", "dropdownSort"].filter(has));
     if (!top.length && !dv.length && !gallery) return [];
     return [{ op: "createPage", module: mod, name: `${T}WPresets`, entity: E, widgets: [...top, ...(dv.length ? [{ widget: "dataView", name: "zwPreDv", widgets: dv }] : []), ...(gallery ? [{ widget: "gallery", name: "zwGal", entity: E, selection: "Multi" }] : [])] },
-        ...(gallery ? [{ op: "addWidgets", page: `${mod}.${T}WPresets`, into: "zwGal", slot: "filtersPlaceholder", widgets: [...(has("selectionHelper") ? [{ widget: "selectionHelper", name: "zwSelAll" }] : []), ...(has("dropdownSort") ? [{ widget: "dropdownSort", name: "zwSort", attributes: ["Note"] }] : [])] }] : [])];
+        ...(gallery ? [{ op: "addWidgets", page: `${mod}.${T}WPresets`, into: "zwGal", slot: "filtersPlaceholder", widgets: [...(has("selectionHelper") ? [{ widget: "selectionHelper", name: "zwSelAll" }] : []), ...(has("dropdownSort") ? [{ widget: "dropdownSort", name: "zwSort", ...(x.installed.get("com.mendix.widget.web.dropdownsort.DropdownSort").lines.some(l => l.startsWith("attributes ")) ? { attributes: ["Note"] } : {}) }] : [])] }] : [])];
 }
 
 function wProblems(project, mod, T, x) {
