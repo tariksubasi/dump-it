@@ -473,8 +473,9 @@ function makeUi(h, getI) {
     async function dropDownButton(node, target, ctx) {
         const s = node.spec;
         if (!pages.DropDownButton) throw new Error(`${node.where}: Mendix ${version} has no drop-down button`);
-        // mx check of Studio Pro 11.12 cannot load Forms$DropDownButton (unknown type): Mendix 11 dropped the widget
-        if (parseInt(version, 10) >= 11) throw new Error(`${node.where}: Mendix ${version} has no drop-down button (Studio Pro 11 cannot load it); use a pop-up menu: { "widget": "popupMenu", ... } (Pop-up menu widget from the Marketplace), or action buttons in a container`);
+        // mx check of Studio Pro 10.24 and 11.12 cannot load Forms$DropDownButton (unknown type) and no project has a sample
+        // of the stored name: refused in every version
+        throw new Error(`${node.where}: a drop-down button is not written: Studio Pro 10.24 / 11.12 cannot load the type this tool would store; use a pop-up menu: { "widget": "popupMenu", ... } (Pop-up menu widget from the Marketplace), or action buttons in a container`);
         const items = Array.isArray(s.items) ? s.items : null;
         if (!items || !items.length) throw new Error(`${node.where}: items is a list [ { "caption": "Edit", "action": "showPage", "page": "Module.Page" }, ... ]`);
         if ((s.caption === undefined || s.caption === "") && !bool(s.iconOnly, false)) throw new Error(`${node.where}: a drop-down button needs "caption" (or "icon" with "iconOnly": true)`);

@@ -28,7 +28,7 @@ const words = t => (t && t.Items ? t.Items.map(i => i.Text).join("") : "");
 // an image, the app module's themesource folder, theme variables.
 function uiTargets(s, mod) {
     const project = s.ctx.project, dir = project.dir;
-    const x = { layout: null, other: null, icons: false, image: null, multi: null, color: null, themeModule: null, vars: false, ddb: parseInt(s.ctx.project.version, 10) < 11 };
+    const x = { layout: null, other: null, icons: false, image: null, multi: null, color: null, themeModule: null, vars: false, ddb: false }; // drop-down button: refused in every version (Studio Pro cannot load the stored type)
     const mains = new Map(), used = new Map(), modOf = new Map();
     const moduleName = id => {
         for (let c = id; c; c = project.units.get(c) && project.units.get(c).containerId) {
@@ -108,7 +108,7 @@ function uiPlan(mod, T, x) {
         { op: "changeWidget", page: `${mod}.${T}_UiLayout`, widget: "zzBrand", class: "zz-brand", textStyle: "H4" },
         { op: "deleteWidget", page: `${mod}.${T}_UiLayout`, widget: "zzOut" }
     );
-    if (!x.ddb) refuse.push([{ op: "createPage", module: mod, name: `${T}_UiR3`, widgets: [{ widget: "dropDownButton", caption: "More", items: [{ caption: "Close", action: "close" }] }] }, /has no drop-down button/]);
+    if (!x.ddb) refuse.push([{ op: "createPage", module: mod, name: `${T}_UiR3`, widgets: [{ widget: "dropDownButton", caption: "More", items: [{ caption: "Close", action: "close" }] }] }, /drop-down button is not written/]);
     refuse.push(
         [{ op: "changeWidget", page: pg("A"), widget: "zzName", tooltip: "x" }, /no tooltip/],
         [{ op: "createPage", module: mod, name: `${T}_UiR1`, widgets: [{ widget: "layoutGrid", columns: [{ weight: 6, offset: 2 }] }] }, /no column offset/],
