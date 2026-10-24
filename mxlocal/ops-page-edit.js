@@ -61,9 +61,10 @@ const PAGE_EDIT_OPS = {
             validation: "input: { \"expression\": \"$value > 0\", \"message\": \"...\" } (custom validation)",
             format: "text box, date picker or classic grid column: { \"decimals\": 2, \"groupDigits\": true } | { \"date\": \"date\" | \"time\" | \"dateTime\" | \"dd-MM-yyyy\" }",
             readOnlyStyle: "input: inherit | control | text; data view: control | text", inputMask: "text box: a mask, e.g. \"99-99-9999\"", maxLength: "text box / text area: \"attribute\" | \"unlimited\" | a number",
-            orientation: "data view: horizontal | vertical", labelWidth: "data view: label width 1-11 (horizontal form)", showFooter: "data view: true/false",
+            orientation: "data view: horizontal | vertical; simple menu bar: horizontal | vertical", labelWidth: "data view: label width 1-11 (horizontal form)", showFooter: "data view: true/false",
             selectPage: "reference (set) selector: Module.Page that lists the objects to pick (Studio Pro: Select using Page)",
-            ...ui.CHANGE_UI
+            ...ui.CHANGE_UI,
+            ...require("./widget-edit").WIDGET_CHANGE
         }
     },
     changePage: {
@@ -94,7 +95,7 @@ const PAGE_EDIT_OPS = {
 const INPUT_FIELDS = ["required", "requiredMessage", "validation", "format", "readOnlyStyle", "inputMask", "maxLength"];
 const LIST_FIELDS = ["source", "paging", "selection", "emptyMessage", "onClickTrigger", "sort", "template", "export"];
 const CHANGE_FIELDS = ["caption", "text", "label", "placeholder", "editable", "visible", "class", "design", "style", "textStyle", "buttonStyle", ...LIST_FIELDS.slice(0, 1), "columns", "headerFilters", ...LIST_FIELDS.slice(1), "xpath", "name", "action", "onClick", "onChange",
-    "onEnter", "onLeave", "onEnterKeyPress", ...INPUT_FIELDS, "orientation", "labelWidth", "showFooter", "selectPage", ...Object.keys(ui.CHANGE_UI)];
+    "onEnter", "onLeave", "onEnterKeyPress", ...INPUT_FIELDS, "orientation", "labelWidth", "showFooter", "selectPage", ...Object.keys(ui.CHANGE_UI), ...Object.keys(require("./widget-edit").WIDGET_CHANGE)];
 const UI_FIELDS = Object.keys(ui.CHANGE_UI);
 // fields a weak model takes from elsewhere -> what to write instead (checked before the generic "unknown field")
 const FIELD_SYNONYMS = {
@@ -363,6 +364,15 @@ function makePageEdit(h, I) {
             const node = P.nodes.find(n => n.el === col);
             return checkSlot(slotOf(P, col.widgets, node, node.label), slot, where);
         }
+        // a navigation list item: "navigationList1/item 2"
+        const item = /^([A-Za-z_]\w*)\s*\/\s*item\s*(\d+)$/i.exec(s);
+        if (item) {
+            const ln = find(P, item[1], `${where}: into`);
+            if (!(ln.el instanceof pages.NavigationList)) throw new Error(`${where}: into '${s}': ${item[1]} is a ${kindOf(ln.el)}, not a navigation list`);
+            const it = ln.el.items[Number(item[2]) - 1];
+            if (!it) throw new Error(`${where}: ${item[1]} has no item ${item[2]} (items 1-${ln.el.items.length})`);
+            return checkSlot(slotOf(P, it.widgets, ln, `${ln.name} item ${item[2]}`), slot, where);
+        }
         const node = find(P, s, `${where}: into`, { placeholder: true });
         const el = node.el;
         let out = null;
@@ -373,6 +383,7 @@ function makePageEdit(h, I) {
             return slotOf(P, footer ? el.footerWidgets : el.widgets, node, footer ? `${node.name} footer` : node.name);
         } else if (el instanceof pages.DivContainer || el instanceof pages.GroupBox || el instanceof pages.TabPage || el instanceof pages.ListView) out = slotOf(P, el.widgets, node, node.name);
         else if (el instanceof pages.TemplateGrid) out = slotOf(P, el.contents.widgets, node, node.name);
+        else if (el instanceof pages.NavigationList) throw new Error(`${where}: into '${s}': widgets go into one of its items: "${node.name}/item 1" ... "${node.name}/item ${el.items.length}"`);
         else if (pages.ScrollContainer && el instanceof pages.ScrollContainer) {
             // a layout's scroll container: its regions (center by default)
             const regions = ["center", "left", "right", "top", "bottom"].filter(r => el[r]);
@@ -426,7 +437,7 @@ function makePageEdit(h, I) {
     }
     function plSlotOf(P, node, value, label) {
         const linked = !!(value.type && value.type.dataSourceProperty);
-        return linked ? slotOf(P, value.widgets, node, label) : { list: value.widgets, label, node, dc: node.ctx || null };
+        return linked ? slotOf(P, value.widgets, node, label) : { list: value.widgets, label, node, dc: node.ctx || null, owner: node };
     }
 
     function checkSlot(out, slot, where) {
@@ -677,6 +688,7 @@ function makePageEdit(h, I) {
             return gridColumns(P, node, v, ctx, where, dc);
         },
         ...Object.fromEntries(LIST_FIELDS.map(f => [f, (...a) => GE().CHANGE[f](...a)])),
+        ...Object.fromEntries(Object.keys(require("./widget-edit").WIDGET_CHANGE).map(f => [f, (...a) => WE().CHANGE[f](...a)])),
         async headerFilters(P, node, v, dc, ctx, where) {
             const w = node.el;
             if (!(w instanceof cw.CustomWidget) || !w.object || !w.object.properties.some(p => p.type && p.type.key === "filtersPlaceholder")) throw new Error(`${where}: headerFilters is for a Data grid 2 or gallery; ${node.label} is a ${kindOf(w)}`);
@@ -750,6 +762,7 @@ function makePageEdit(h, I) {
         },
         ...Object.fromEntries(INPUT_FIELDS.map(f => [f, (P, node, v, dc, ctx, where) => inputChange(node, f, v, dc, ctx, where)])),
         async orientation(P, node, v, dc, ctx, where) {
+            if (node.el instanceof pages.SimpleMenuBar) return `orientation ${(node.el.orientation = require("./widget-kinds").enumOf(pages.SimpleMenuBarOrientation, v, `${where}`, "horizontal | vertical")).name.toLowerCase()}`;
             return dvChange(node, "orientation", v, where);
         },
         async labelWidth(P, node, v, dc, ctx, where) {
@@ -1057,6 +1070,19 @@ function makePageEdit(h, I) {
     // list edits and convertGrid (grid-edit.js)
     let ge = null;
     const GE = () => ge || (ge = require("./grid-edit").makeGridEdit(h, I, { open, find, containerEntity, builderContext, cwSource, kindOf, listenersOf, subtree, variableUsers, mentions, textOf, slotOfNode, addWidgetsAt: (...a) => addWidgetsAt(...a), place, newCtx, defaultLanguage }));
+    // tabs, scroll container regions, navigation list items, menus, convertWidget, createLoginPage (widget-edit.js)
+    let we = null;
+    const WE = () => we || (we = require("./widget-edit").makeWidgetEdit(h, I, { open, find, containerEntity, builderContext, kindOf, listenersOf, subtree, variableUsers, mentions, textOf, setText, setTemplate, slotOfNode, addWidgetsAt: (...a) => addWidgetsAt(...a), place, newCtx, defaultLanguage, removable, scopeOf: (...a) => scopeOf(...a), convertGrid: o => GE().convertGrid(o), checks: { convertGrid: o => GE().checks.convertGrid(o) }, deleteWidget: o => deleteWidget(o), moveWidget: o => moveWidget(o) }));
+    // refuses when deleting node (and what is inside it) would break the page: data views listening to it, page
+    // variables naming it (as deleteWidget)
+    function removable(P, node, where) {
+        const { names, els } = subtree(node);
+        const listeners = listenersOf(P, names, els);
+        if (listeners.length) throw new Error(`${where}: ${listeners.map(l => `${l.node.label} listens to ${l.src.listenTarget}`).join(", ")}; delete ${listeners.length > 1 ? "those data views" : "that data view"} first, or let ${listeners.length > 1 ? "them" : "it"} listen to another widget`);
+        const users = variableUsers(P, names, els);
+        if (users.length) throw new Error(`${where}: ${users.join(", ")} refer to ${node.label} (or a widget in it) by name; change or delete them first`);
+        return names;
+    }
 
     function newCtx(P) {
         const vars = new Map((prop(P.doc, "variables") || []).map(v => [v.name, v]));
@@ -1130,6 +1156,12 @@ function makePageEdit(h, I) {
         }
         if (native) require("./ops-native-ui").checkNativeNodes(nodes);
         if (!top.length) throw new Error(`${where}: 'widgets' is empty`);
+        // a list of a gallery / Data grid 2 outside its items (header): widgets linked to its data source use its entity
+        if (slot.owner) {
+            const { qn } = await containerEntity(P, slot.owner).catch(() => ({}));
+            const ent = qn ? await I.entityOf(qn, where).catch(() => null) : null;
+            if (ent) for (const n of top) n.listOwner = { ent };
+        }
         const ctx = newCtx(P);
         // default entity: the op's, else the page's only object parameter
         const params = (prop(P.doc, "parameters") || []).filter(p => p.parameterType instanceof datatypes.ObjectType); // also snippet parameters (createSnippet)
@@ -1177,7 +1209,7 @@ function makePageEdit(h, I) {
         if (!fields.length) throw new Error(`${where}: give what to change: ${CHANGE_FIELDS.join(", ")}`);
         const ctx = { ...newCtx(P), lang: await defaultLanguage(), op: o };
         // {Attribute} and conditions use the data view or list view around the widget (for a column: around its grid)
-        const needs = ["caption", "text", "label", "placeholder", "visible", "editable", "dynamicClass", "ariaLabel", "xpath", "columns", "headerFilters", "source", "paging", "emptyMessage", "sort", "export", "action", "onClick", "onChange", "onEnter", "onLeave", "onEnterKeyPress", "validation", "selectPage"].some(k => o[k] !== undefined);
+        const needs = ["caption", "text", "label", "placeholder", "visible", "editable", "dynamicClass", "ariaLabel", "xpath", "columns", "headerFilters", "source", "paging", "emptyMessage", "sort", "export", "action", "onClick", "onChange", "onEnter", "onLeave", "onEnterKeyPress", "validation", "selectPage", "items"].some(k => o[k] !== undefined);
         if (["action", "onClick", "onChange", "onEnter", "onLeave", "onEnterKeyPress"].some(k => o[k] !== undefined)) ctx.scope = await scopeOf(P, where);
         const dc = needs && node.ctx ? await builderContext(P, node.ctx, where).catch(e => (/\{[A-Za-z_]|currentObject|"attribute"/.test(JSON.stringify(o)) ? Promise.reject(e) : null)) : null;
         const done = [];
@@ -1553,7 +1585,8 @@ function makePageEdit(h, I) {
             for (const k of ["onEnter", "onLeave", "onEnterKeyPress"]) if (o[k] !== undefined) say(prop(w, EVENT_PROPS[k]) && !(w[EVENT_PROPS[k]] instanceof pages.NoClientAction), `${k} is not set`);
             if (o.required !== undefined) say(bool(o.required, false) ? w.validation.expression === "$value != empty" : !w.validation.expression, `required is not ${o.required}`);
             if (o.validation && o.validation.expression !== undefined) say(w.validation.expression === String(o.validation.expression).trim(), "validation expression differs");
-            if (o.orientation !== undefined) say(/^vertical$/i.test(String(o.orientation)) ? w.labelWidth === 0 : w.labelWidth > 0, `orientation is not ${o.orientation}`);
+            if (o.orientation !== undefined && w instanceof pages.SimpleMenuBar) say(w.orientation.name.toLowerCase() === String(o.orientation).toLowerCase(), `orientation is ${w.orientation.name}`);
+            else if (o.orientation !== undefined) say(/^vertical$/i.test(String(o.orientation)) ? w.labelWidth === 0 : w.labelWidth > 0, `orientation is not ${o.orientation}`);
             if (o.labelWidth !== undefined) say(w.labelWidth === Number(o.labelWidth), `label width is ${w.labelWidth}`);
             if (o.showFooter !== undefined) say(w.showFooter === bool(o.showFooter, true), `showFooter is ${w.showFooter}`);
             if (o.readOnlyStyle !== undefined) say(String(w.readOnlyStyle.name).toLowerCase() === String(o.readOnlyStyle).toLowerCase(), `read-only style is ${w.readOnlyStyle.name}`);
@@ -1591,6 +1624,7 @@ function makePageEdit(h, I) {
                     say(attrs.includes(String(n).split("/").pop()), `has no column for ${n}`);
                 }
             }
+            r.push(...(await WE().check(P, w, o)));
             return r;
         },
         async deleteWidget(o) {
@@ -1814,7 +1848,9 @@ function makePageEdit(h, I) {
     });
 
     checks.convertGrid = o => GE().checks.convertGrid(o);
-    return { addWidgets, changeWidget, deleteWidget, moveWidget, changePage, convertGrid: o => GE().convertGrid(o), pageUrl, widgets, checks, touched, open };
+    checks.convertWidget = o => WE().checks.convertWidget(o);
+    checks.createLoginPage = o => WE().checks.createLoginPage(o);
+    return { addWidgets, changeWidget, deleteWidget, moveWidget, changePage, convertGrid: o => GE().convertGrid(o), convertWidget: o => WE().convertWidget(o), createLoginPage: (o, impl) => WE().createLoginPage(o, impl), pageUrl, widgets, checks, touched, open };
 }
 
 Object.assign(PAGE_EDIT_OPS, require("./grid-edit").GRID_EDIT_OPS);

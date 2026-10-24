@@ -1388,6 +1388,9 @@ async function selftest(mpr, keep, { out, relevant, mxcheck, mx, timeout }) {
         await require("./selftest-ds").dsPhase({ src, reopen, check, results, tmp, mod, layout, layoutProblems });
         // phase DS-model (selftest-ds-model.js): building blocks, page templates, layouts from scratch, applyStyle, component kits, style guide
         s2 = await require("./selftest-ds-model").dsModelPhase({ s2, reopen, copy, mod, T, layout, layoutProblems, check, results });
+        // phase widgets (selftest-widgets.js): tab pages, navigation / menu widgets, scroll container, sign-in widgets and
+        // createLoginPage, title / label / back / link buttons, navigation list, presets, convertWidget, deprecated widgets
+        s2 = await require("./selftest-widgets").widgetsPhase({ s2, reopen, copy, mod, T, layout, layoutProblems, check, results });
         // phase native (selftest-native.js): native theme variables, tokens, style classes, native design properties, native
         // page classes / design, NATIVE STYLE CHECK and the refusals
         s2 = await require("./selftest-native").nativePhase({ s2, reopen, copy, src, mod, T, layout, layoutProblems, check, results });

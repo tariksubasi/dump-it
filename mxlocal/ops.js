@@ -13,6 +13,7 @@ const { ATTRIBUTE_TYPES, DATA_TYPES, suggest, fail, validate, bool, noDollar, en
 const { makeFlows, ACTIONS, CONTROL, COMMON, CREATES } = require("./ops-flows");
 const { makePages, PAGE_FIELDS, MENU_FIELDS, HOME_FIELDS, widgetFields, NO_MENU_ROLES } = require("./ops-pages");
 const { makePageEdit, PAGE_EDIT_OPS, PAGE_EDIT_NAMES, FIELD_SYNONYMS } = require("./ops-page-edit");
+const { WIDGET_EDIT_OPS, WIDGET_EDIT_SYNONYMS } = require("./widget-edit");
 const { makeSecurity, SECURITY_OPS } = require("./ops-security");
 const { makeMappings, MAPPING_OPS, integChangedLater } = require("./ops-mappings");
 const { makeTexts, TEXT_OPS } = require("./ops-texts");
@@ -131,6 +132,7 @@ const OPS = {
             brand: "optional text or Module.Images.Logo at the start of the top bar (default: the module name; \"\" = none)", bottomBar: "optional native copy: true/false shows the native bottom bar", popup: "optional native copy: true = a pop-up layout (pages open as a modal), false = a normal one", class: "optional CSS class(es) of the layout (default Atlas's: layout-atlas layout-atlas-responsive-default / -topbar)" } },
     createPage: { doc: "Create a page (or with kind userTaskPage a workflow user task page): an edit form for an entity (inputs by attribute type, Save/Cancel), an empty page, or a page from widgets (layout grids, containers, texts, data grids (classic, or a Data grid 2 built from widgets/*.mpk), data views that listen to a grid, list views, buttons, inputs), optionally with a menu item. Uses the layout the project's other pages use.", fields: { ...PAGE_FIELDS, ...USER_TASK_PAGE_FIELDS } },
     ...PAGE_EDIT_OPS,
+    ...WIDGET_EDIT_OPS,
     addMenuItem: { doc: "Add a menu item that opens a page, runs a microflow or another action (sign out, open a link, call a flow) to a navigation profile's menu or a menu document; a native page becomes a bottom bar item of the native profile.", fields: { ...MENU_FIELDS, ...MENU_EXTRA } },
     setHomePage: { doc: "Set the home page (or home microflow) of a navigation profile, for everyone or for some user roles (native profile: a native page or nanoflow).", fields: HOME_FIELDS },
     ...NAV_OPS,
@@ -901,6 +903,8 @@ function bind(model, client) {
         moveWidget: o => pageEdit.moveWidget(o),
         changePage: o => pageEdit.changePage(o),
         convertGrid: o => pageEdit.convertGrid(o),
+        convertWidget: o => pageEdit.convertWidget(o),
+        createLoginPage: o => pageEdit.createLoginPage(o, impl),
         addMenuItem: o => (extendedMenuItem(o) && !nativeMenuItem(o) ? navOps.addMenuItem(o) : pageOps.addMenuItem(o)),
         ...navOps.impl,
         ...themeOps.impl,
@@ -1184,7 +1188,7 @@ function bind(model, client) {
         if (!name && hint) throw new Error(`${where}: unknown op '${o.op}': ${OP_HINTS[hint]}`);
         if (!name) fail(`${where}: unknown op '${o.op}'`, o.op, Object.keys(OPS));
         if (name === "addMenuItem" && o.roles !== undefined) throw new Error(`${where} (addMenuItem): ${NO_MENU_ROLES(o.page)}`);
-        for (const [k, hint] of Object.entries({ ...(DOMAIN_SYNONYMS[name] || {}), ...(FIELD_SYNONYMS[name] || {}), ...(SCAFFOLD_SYNONYMS[name] || {}), ...(SMALL_SYNONYMS[name] || {}), ...(COMPOSITE_SYNONYMS[name] || {}), ...(DOCS_SYNONYMS[name] || {}), ...(SERVICE_SYNONYMS[name] || {}) })) if (o[k] !== undefined && !OPS[name].fields[k]) throw new Error(`${where} (${name}): unknown field '${k}': ${hint}`);
+        for (const [k, hint] of Object.entries({ ...(DOMAIN_SYNONYMS[name] || {}), ...(FIELD_SYNONYMS[name] || {}), ...(SCAFFOLD_SYNONYMS[name] || {}), ...(SMALL_SYNONYMS[name] || {}), ...(COMPOSITE_SYNONYMS[name] || {}), ...(DOCS_SYNONYMS[name] || {}), ...(WIDGET_EDIT_SYNONYMS[name] || {}), ...(SERVICE_SYNONYMS[name] || {}) })) if (o[k] !== undefined && !OPS[name].fields[k]) throw new Error(`${where} (${name}): unknown field '${k}': ${hint}`);
         validate("op", name, OPS[name], o, where);
         return { name, where };
     }
@@ -1224,9 +1228,11 @@ function bind(model, client) {
             const opposite = { grantAccess: "revokeAccess", revokeAccess: "grantAccess" }[name];
             const undone = opposite && rest.some(x => x.op === opposite && x.document === o.document);
             // a later page edit of the same page that deletes, moves or renames one of this op's widgets (or changes it again)
-            const mine = PAGE_EDIT_NAMES.includes(name) ? pageEdit.touched(o) : [];
-            const undoes = x => ["deleteWidget", "moveWidget"].includes(x.op) || (x.op === "changeWidget" && (x.name !== undefined || name === "changeWidget"));
-            const reworked = mine.length && rest.some(x => x.page === o.page && undoes(x) && pageEdit.touched(x).some(n => mine.includes(n)));
+            const mine = PAGE_EDIT_NAMES.includes(name) || name === "convertWidget" ? pageEdit.touched(o) : [];
+            const undoes = x => ["deleteWidget", "moveWidget", "convertWidget"].includes(x.op) || (x.op === "changeWidget" && (x.name !== undefined || name === "changeWidget"));
+            // a later convertWidget changes the kinds createPage counted
+            const converted = name === "createPage" && rest.some(x => x.op === "convertWidget" && x.page === `${o.module}.${o.name}`);
+            const reworked = converted || (mine.length && rest.some(x => x.page === o.page && undoes(x) && pageEdit.touched(x).some(n => mine.includes(n))));
             if ((later && name !== "rename" && name !== "delete") || edited || undone || reworked || changedLater(name, o, rest) || smallChangedLater(name, o, rest) || workflowChangedLater(name, o, rest) || integChangedLater(name, o, rest) || docsChangedLater(name, o, rest) || servicesChangedLater(name, o, rest) || nativeChangedLater(name, o, rest)) continue;
             try {
                 failed.push(...(await checks[name](name === "setTranslations" ? o : await textOps.prepare(o, false))).map(f => `${i + 1}. ${name}: ${f}`));
