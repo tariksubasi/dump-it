@@ -2207,6 +2207,141 @@
           "ACT_Order_Sync\\.txt$": "(?s)notify.*COMMIT.*commit failed"
         }
       }
+    },
+    {
+      "id": "docregex",
+      "text": "Posta kodu için PostCode adında bir regular expression oluştur (4 rakam, isteğe bağlı boşluk, 2 büyük harf; örn. 1234 AB) ve Order entity'sine PostCode adında String attribute ekleyip bu ifadeyle doğrulama kuralı koy: mesaj 'Geçerli bir posta kodu girin'.",
+      "checks": {
+        "find": [
+          "MyFirstModule.PostCode",
+          "MyFirstModule.Order.PostCode"
+        ]
+      },
+      "ops": [
+        "createRegularExpression",
+        "addAttribute",
+        "addValidationRule"
+      ],
+      "families": [
+        "app"
+      ]
+    },
+    {
+      "id": "docqueue",
+      "text": "InvoiceQueue adında, tüm cluster için 2 thread'li bir task queue oluştur; Order parametreli ACT_QueueInvoice microflow'u, Order'ı commit eden SUB_Invoice microflow'unu bu kuyrukta çağırsın (3 deneme, 30 saniye arayla).",
+      "checks": {
+        "find": [
+          "MyFirstModule.InvoiceQueue",
+          "MyFirstModule.ACT_QueueInvoice",
+          "MyFirstModule.SUB_Invoice"
+        ]
+      },
+      "ops": [
+        "createTaskQueue",
+        "createMicroflow"
+      ],
+      "families": [
+        "app",
+        "flows"
+      ]
+    },
+    {
+      "id": "docodatachange",
+      "text": "OrderOData servisinde Order entity'sine Note attribute'unu da yayınla, Total'ı yayından kaldır ve sayfalamayı kapat.",
+      "setup": [
+        {
+          "op": "addAttribute",
+          "entity": "MyFirstModule.Order",
+          "name": "Note",
+          "type": "String(200)"
+        },
+        {
+          "op": "publishOData",
+          "module": "MyFirstModule",
+          "name": "OrderOData",
+          "entities": [
+            {
+              "entity": "MyFirstModule.Order",
+              "attributes": [
+                "Number",
+                "Total"
+              ],
+              "pageSize": 100
+            }
+          ]
+        }
+      ],
+      "checks": {
+        "find": [
+          "MyFirstModule.OrderOData"
+        ]
+      },
+      "ops": [
+        "changePublishedOData"
+      ],
+      "families": [
+        "odata"
+      ]
+    },
+    {
+      "id": "docbizevents",
+      "text": "OrderEvents adında bir business event servisi tanımla: OrderPlaced event'i (OrderId metin, Total ondalık) ve OrderShipped event'i (OrderId metin).",
+      "checks": {
+        "find": [
+          "MyFirstModule.OrderEvents"
+        ]
+      },
+      "ops": [
+        "createBusinessEventService"
+      ],
+      "families": [
+        "services"
+      ]
+    },
+    {
+      "id": "docwebservice",
+      "text": "Order numarası (String) alıp Order nesnesini döndüren WS_GetOrder microflow'unu yaz ve OrderService adında bir SOAP published web service olarak yayınla; kimlik doğrulama olmasın.",
+      "checks": {
+        "find": [
+          "MyFirstModule.OrderService",
+          "MyFirstModule.WS_GetOrder"
+        ]
+      },
+      "ops": [
+        "createMicroflow",
+        "publishWebService"
+      ],
+      "families": [
+        "services"
+      ]
+    },
+    {
+      "id": "docdataset",
+      "text": "Order'ları Total değeri verilen bir alt sınırın üstünde olanlarla listeleyen BigOrders adında bir OQL data set oluştur (Min adında Decimal parametre); User rolü çalıştırabilsin.",
+      "checks": {
+        "find": [
+          "MyFirstModule.BigOrders"
+        ]
+      },
+      "ops": [
+        "createDataSet"
+      ],
+      "families": [
+        "app"
+      ]
+    },
+    {
+      "id": "docdbrefuse",
+      "text": "PostgreSQL veritabanına bağlanan bir external database connection oluştur ve müşteri tablosunu sorgula.",
+      "checks": {
+        "gap": true
+      },
+      "ops": [
+        "createDatabaseConnection"
+      ],
+      "families": [
+        "app"
+      ]
     }
   ]
 }

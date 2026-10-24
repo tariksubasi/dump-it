@@ -30,6 +30,7 @@ async function runPhase(env, s, plan, verify) {
     const { reopen, copy, layout, layoutProblems } = env;
     const problems = [];
     const before = new Set(s.ctx.project.units.keys());
+    if (plan.changeFile) s.client.changeFile = plan.changeFile; // files of the plan (images, fonts) are relative to its folder
     // ops that must be refused (with the Studio Pro steps) and change nothing
     for (const o of plan.refuse || []) {
         let msg = "";

@@ -23,9 +23,10 @@ const ODATA_OPS = {
         }
     },
     changePublishedOData: {
-        doc: "Change a published OData service: add or replace entities (same fields as publishOData), remove entities, version, path, roles, authentication, summary, description. Navigation properties are made again.",
+        doc: "Change a published OData service: add or replace entities (same fields as publishOData), change one (add/remove attributes, insert/update/delete, count, top/skip, paging), remove entities, version, path, roles, authentication, summary, description. Navigation properties are made again.",
         fields: {
             service: "R Module.Service", entities: "optional entities to add, or to replace when already published: " + ENTITY_FIELDS, remove: "optional [ \"Module.Entity\" ] to stop publishing",
+            change: "optional [ { \"entity\": \"Module.Entity\", \"addAttributes\": [ \"Attr\" ], \"removeAttributes\": [ \"Attr\" ], \"insert\" / \"update\" / \"delete\": true | false | \"Module.Microflow\", \"count\", \"topSkip\", \"pageSize\": number | null, \"exposedName\", \"key\" } ]: change a published entity, the rest stays",
             version: "optional", path: "optional location", authentication: "optional [ \"Basic\" | \"Session\" | \"Microflow\" | \"Guest\" ] (replaces)", roles: "optional [ \"Module.Role\" ] (replaces)",
             summary: "optional", description: "optional"
         }
@@ -43,7 +44,7 @@ const ODATA_OPS = {
         fields: { module: "optional module name", name: "optional", wsdl: "optional WSDL file or URL" }
     },
     createBusinessEvent: {
-        doc: "NOT SUPPORTED (refused with the Studio Pro steps): publish or consume business events.",
+        doc: "NOT SUPPORTED (refused with the Studio Pro steps): publish or consume business events (define events: createBusinessEventService).",
         fields: { module: "optional module name", name: "optional", entity: "optional", consume: "optional" }
     }
 };
@@ -52,7 +53,7 @@ const REFUSALS = {
     updateConsumedODataService: "A consumed OData service is updated by Studio Pro from the new $metadata (or the Catalog): it compares the contract, changes the external entities, their attributes, keys and associations and stores the new contract; no test project has a Studio Pro-saved consumed OData service to build that from. In Studio Pro: open the consumed OData service document, click Update (or Update from file for a $metadata file), review the changes, then drag new external entities from the Integration pane into the domain model. Removing an external entity works with ops: { \"op\": \"delete\", \"target\": \"Module.Entity\" }.",
     consumeODataService: "Consumed OData services are not written by ops: Studio Pro reads the $metadata, stores it, makes the external entities with their remote types and keys and keeps them in step; a hand-made copy breaks on the first update. In Studio Pro: right-click the module > Add other > Consumed OData service, choose the $metadata file (or the Catalog), then drag the external entities from the Integration pane into the domain model and give module roles access.",
     consumeWebService: "Consumed SOAP web services are not written by ops: Studio Pro imports the WSDL and its schemas and builds the operations from them. In Studio Pro: right-click the module > Add other > Consumed web service, import the WSDL, then call an operation with the 'Call web service' microflow action and map the result with an import mapping (createXmlImportMapping works on its XML schema too).",
-    createBusinessEvent: "Business events are not written by ops: they need the Business Events module from the Marketplace and an AsyncAPI contract that Studio Pro generates (published) or imports (consumed). In Studio Pro: add the Business Events module, right-click your module > Add other > Business event service, define the events (entities inherit from BusinessEvents.PublishedBusinessEvent / ConsumedBusinessEvent) and publish them with the 'Publish business event' action."
+    createBusinessEvent: "Publishing or consuming business events is not written by ops: it needs the Business Events module from the Marketplace, and Studio Pro makes the event entities (they inherit from BusinessEvents.PublishedBusinessEvent / ConsumedBusinessEvent) and imports contracts of other apps (AsyncAPI). Ops can define the events of this app: createBusinessEventService / changeBusinessEventService. In Studio Pro: add the Business Events module, open the business event service, tick Publish / Subscribe per event (or Add other > Business event service > use an existing contract), and publish with the 'Publish business event' action."
 };
 
 const EDM = { String: "Edm.String", HashedString: null, Integer: "Edm.Int32", Long: "Edm.Int64", AutoNumber: "Edm.Int64", Decimal: "Edm.Decimal", Boolean: "Edm.Boolean", DateTime: "Edm.DateTimeOffset", Binary: null };
@@ -170,6 +171,43 @@ function makeOData(h) {
         }
     }
 
+    // The publishOData spec of an entity as it is published now (to change part of it and publish it again).
+    function currentSpec(svc, t) {
+        const set = svc.entitySets.find(x => x.entityType === t);
+        const attrs = t.childMembers.filter(m => m instanceof od.PublishedAttribute).map(m => m.attributeQualifiedName.split(".").pop());
+        const keyAttrs = t.childMembers.filter(m => m instanceof od.PublishedAttribute && m.isPartOfKey).map(m => m.attributeQualifiedName.split(".").pop());
+        const mode = m => (m instanceof od.CallMicroflowToChange ? m.microflowQualifiedName : m instanceof od.ChangeSource);
+        const spec = { entity: t.entityQualifiedName, exposedName: t.exposedName, attributes: attrs, key: t.childMembers.some(m => m instanceof od.PublishedId) ? "ID" : keyAttrs };
+        if (set) {
+            Object.assign(spec, { insert: mode(set.insertMode), update: mode(set.updateMode), delete: mode(set.deleteMode) });
+            if (set.queryOptions) Object.assign(spec, { count: set.queryOptions.countable, topSkip: set.queryOptions.topSupported });
+            if (set.usePaging) spec.pageSize = set.pageSize;
+        }
+        return spec;
+    }
+
+    const CHANGE_KEYS = ["entity", "addAttributes", "removeAttributes", "insert", "update", "delete", "count", "topSkip", "pageSize", "exposedName", "key"];
+    function changedSpec(svc, t, c, where) {
+        for (const k of Object.keys(c)) if (!CHANGE_KEYS.includes(k)) fail(`${where}: unknown change field '${k}'`, k, CHANGE_KEYS);
+        const spec = currentSpec(svc, t);
+        const had = [...spec.attributes];
+        for (const a of [].concat(c.removeAttributes || [])) {
+            if (!had.includes(a)) fail(`${where}: ${c.entity} does not publish attribute '${a}'`, a, had);
+            if (Array.isArray(spec.key) && spec.key.includes(a) && c.key === undefined) throw new Error(`${where}: ${a} is part of the key of ${c.entity}; give a new "key" too`);
+        }
+        spec.attributes = had.filter(a => ![].concat(c.removeAttributes || []).includes(a));
+        for (const a of [].concat(c.addAttributes || [])) {
+            if (had.includes(a)) throw new Error(`${where}: ${c.entity} already publishes '${a}'`);
+            spec.attributes.push(a);
+        }
+        for (const k of ["insert", "update", "delete", "count", "topSkip", "exposedName", "key"]) if (c[k] !== undefined) spec[k] = c[k];
+        if (c.pageSize !== undefined) {
+            if (c.pageSize === null || c.pageSize === false) delete spec.pageSize;
+            else spec.pageSize = c.pageSize;
+        }
+        return spec;
+    }
+
     const impl = {
         async publishOData(o) {
             if (!atLeast("10.4.0")) throw new Error(`published OData services of this kind need Mendix 10.4 (this project is ${version}); publish it in Studio Pro`);
@@ -216,11 +254,18 @@ function makeOData(h) {
                 known.delete(qn);
             };
             const specs = [].concat(o.entities || []).map(raw => (typeof raw === "string" ? { entity: raw } : raw));
+            for (const [i, c] of [].concat(o.change || []).entries()) {
+                const w = `${where} change ${i + 1}`;
+                if (!c || !c.entity) throw new Error(`${w}: { "entity": "Module.Entity", ... }`);
+                if (!known.has(c.entity)) fail(`${w}: ${c.entity} is not published in ${o.service}; add it with "entities"`, c.entity, [...known.keys()]);
+                if (specs.some(x => x && x.entity === c.entity)) throw new Error(`${w}: ${c.entity} is both in entities and change`);
+                specs.push(changedSpec(svc, known.get(c.entity), c, w));
+            }
             for (const r of [].concat(o.remove || [])) {
                 if (!known.has(r)) fail(`${where}: ${r} is not published in ${o.service}`, r, [...known.keys()]);
                 if (specs.some(x => x && x.entity === r)) throw new Error(`${where}: ${r} is both in entities and remove`);
             }
-            if (!specs.length && !o.remove && ["version", "path", "authentication", "roles", "summary", "description"].every(k => o[k] === undefined)) throw new Error(`${where}: nothing to change`);
+            if (!specs.length && !o.remove && !o.change && ["version", "path", "authentication", "roles", "summary", "description"].every(k => o[k] === undefined)) throw new Error(`${where}: nothing to change`);
             for (const r of [].concat(o.remove || [])) {
                 removeType(r);
                 lines.push(`removed ${r}`);
@@ -288,6 +333,16 @@ function makeOData(h) {
             const have = s.entityTypes.map(t => t.entityQualifiedName);
             const r = [].concat(o.remove || []).filter(x => have.includes(x)).map(x => `${o.service} still publishes ${x}`);
             for (const x of [].concat(o.entities || [])) if (!have.includes(typeof x === "string" ? x : x.entity)) r.push(`${o.service} does not publish ${typeof x === "string" ? x : x.entity}`);
+            for (const c of [].concat(o.change || [])) {
+                const t = s.entityTypes.find(x => x.entityQualifiedName === c.entity);
+                if (!t) {
+                    r.push(`${o.service} does not publish ${c.entity}`);
+                    continue;
+                }
+                const names = t.childMembers.filter(m => m instanceof od.PublishedAttribute).map(m => m.attributeQualifiedName.split(".").pop());
+                for (const a of [].concat(c.addAttributes || [])) if (!names.includes(a)) r.push(`${c.entity}: ${a} is not published`);
+                for (const a of [].concat(c.removeAttributes || [])) if (names.includes(a)) r.push(`${c.entity}: ${a} is still published`);
+            }
             if (s.entitySets.length !== s.entityTypes.length) r.push(`${o.service}: ${s.entityTypes.length} entity types, ${s.entitySets.length} sets`);
             return r;
         },

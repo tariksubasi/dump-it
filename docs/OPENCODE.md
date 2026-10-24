@@ -994,6 +994,7 @@ date/time formats of a language. System texts (App > Language > System texts) ar
 | `setConfiguration` | **name**, applicationRootUrl, constants `{"Module.Constant": "value"}` (`null` = use the default), customSettings `{"Name": "value"}` (`null` = remove) | App > Settings > Configurations. A new name creates a configuration like the first one (without its database password). Database settings: Studio Pro |
 | `createImageCollection` | **module**, **name**, folder | |
 | `addImage` | **collection**, **file**, name (default the file name), replace | A PNG, JPG or SVG file inside the export folder (e.g. copy it to `edits/logo.png`), at most 2 MB; the kind is read from the content. Use it in a static image widget or button by `Module.Collection.Image` |
+| `deleteImage` | **image** (`Module.Collection.Image`) | Lists the widgets, buttons and enumeration values that still show it (STILL USED BY). Replace an image instead: `addImage` with `"replace": true` and the same name. Example: `{ "ops": [ { "op": "deleteImage", "image": "Sales.Images.old_logo" } ] }` |
 
 ### Constants, scheduled events, REST
 
@@ -1212,11 +1213,19 @@ The export shows a structure as `json/path: Name type` lines and a mapping as `j
 | `createMessageDefinition` | **module**, **name** (collection), **entity**, definition (default the entity name), attributes, associations `["Module.Assoc"]`, folder | A list of the entity (`<Entity>s` with items `<Entity>`), its attributes (all but binary) and per association the other entity with its attributes. Layout of the Mendix 8.18 sample |
 | `createXmlImportMapping` | **module**, **name**, xmlSchema + rootElement, or messageDefinition (`Module.Collection.Definition`), entity, entities, attributes, skip, keys, create, persistable, folder | Like `createImportMapping`, over an XML schema element or a message definition. Paths are the element names joined with `/` from the root: `Order/Line/Sku`. A message definition says its entities (no entity/entities/create). XSD support: sequences/all-groups of elements with built-in types, named and anonymous complex types, repeated complex elements; attributes, choices, extensions and repeated simple elements are refused |
 | `createXmlExportMapping` | same fields, no keys | Like `createExportMapping` |
-| `changePublishedOData` | **service**, entities (add, or replace when published: same fields as publishOData), remove `["Module.Entity"]`, version, path, authentication, roles, summary, description | Navigation properties are made again; enumerations nobody publishes any more are removed |
+| `changePublishedOData` | **service**, entities (add, or replace when published: same fields as publishOData), change, remove `["Module.Entity"]`, version, path, authentication, roles, summary, description | change: `[{ "entity": "Module.Entity", "addAttributes": ["Attr"], "removeAttributes": ["Attr"], "insert": true, "update": "Module.Microflow", "delete": false, "count": true, "topSkip": true, "pageSize": 500 }]` changes part of a published entity (`"pageSize": null` = no paging); the rest stays. Navigation properties are made again; enumerations nobody publishes any more are removed |
 | `changeXmlSchema` | **schema**, file (default: the file it came from) | Imports the `.xsd` again. Lists added/removed elements and, per mapping over it, the changed paths and the update op |
 | `changeMessageDefinition` | **definition** (`Module.Collection.Definition`), attributes (`[..]` or `"all"`), associations | Rebuilds the definition from its entity; what you leave out stays. Lists the mappings to update (`prune` when members are gone) |
 | `updateConsumedODataService` | | Not supported: refused with the Studio Pro steps (Update from the new `$metadata`). Removing an external entity: `delete` |
-| `consumeODataService`, `consumeWebService`, `createBusinessEvent` | | Not supported: refused with the Studio Pro steps (consumed OData from `$metadata`, consumed SOAP web services from a WSDL, business events). They are contracts Studio Pro reads and keeps in sync |
+| `consumeODataService`, `consumeWebService`, `createBusinessEvent` | | Not supported: refused with the Studio Pro steps (consumed OData from `$metadata`, consumed SOAP web services from a WSDL, publishing/consuming business events). They are contracts Studio Pro reads and keeps in sync. Define this app's events with `createBusinessEventService` (below) |
+
+Change part of a published entity (here: publish Note, stop publishing Qty, insert through a microflow):
+
+```json
+{ "ops": [
+  { "op": "changePublishedOData", "service": "Sales.OrderOData", "change": [ { "entity": "Sales.Order", "addAttributes": ["Note"], "removeAttributes": ["Qty"], "insert": "Sales.ODATA_InsertOrder" } ] }
+] }
+```
 
 Delete any of these documents (structure, mapping, XML schema, message definition, published or consumed service,
 web service, business event service) with `delete` (`STILL USED BY` lists who uses it).
@@ -1233,6 +1242,65 @@ Pro (if a path does not match, Studio Pro shows an error on the mapping; right-c
     "entity": "Sales.OrderIn", "entities": { "Order/Line": "Sales.OrderLineIn" }, "create": true },
   { "op": "createMessageDefinition", "module": "Sales", "name": "MD_Orders", "entity": "Sales.Order", "associations": ["Sales.Order_Customer"] },
   { "op": "createXmlExportMapping", "module": "Sales", "name": "EXM_OrdersXml", "messageDefinition": "Sales.MD_Orders.Order" }
+] }
+```
+
+### App documents (regular expressions, task queues, ...)
+
+These are documents of Studio Pro's "Add other" menu. The test projects have no Studio Pro sample of them, so the
+dry run says "check it in Studio Pro" (first use).
+
+| Op | Fields | Notes |
+|---|---|---|
+| `createRegularExpression` | **module**, **name**, **pattern**, examples `{ "valid": [..], "invalid": [..] }`, folder | Java regex syntax. The whole value must match (as in a validation rule). Examples are checked before anything is written. Use it: `addValidationRule` rule `regex`, `"regex": "Module.Name"` (a String attribute) |
+| `changeRegularExpression` | **regularExpression** (`Module.Name`), **pattern**, examples | The dry run lists the validation rules that use it |
+| `createTaskQueue` | **module**, **name**, threads (number or expression like `@Module.Constant`, default 1), scope (`node` default, or `cluster`), folder | A call runs in it with `"queue": "Module.Queue"` on a `call` or `callJava` action |
+| `changeTaskQueue` | **queue**, threads, scope | The dry run lists the calls in it |
+| `importIconCollection` | **module**, **name**, **font** (`.ttf`/`.otf` in the export folder), **icons** (JSON file or map `{ "home": "e900" }`; IcoMoon `selection.json` works), prefix, class, tags `{ "home": ["house"] }`, folder | Mendix 9.22+. Every code must have a glyph in the font (checked). WOFF files are refused: use the `.ttf`. Icons are named like Atlas icons: `Module.Collection.home` |
+
+| `createDataSet` | **module**, **name**, **oql**, parameters `[{ "name": "Min", "type": "Decimal" }]`, roles `["Module.Role"]`, folder | OQL (entity and attribute names, not SQL). Every `$Name` in the query must be a parameter and every parameter used. roles: Mendix 10 (newer Mendix 11 versions store no role access in a data set: refused there). Example: `{ "ops": [ { "op": "createDataSet", "module": "Sales", "name": "BigOrders", "oql": "SELECT o.Number AS Number FROM Sales.Order AS o WHERE o.Total > $Min", "parameters": [ { "name": "Min", "type": "Decimal" } ], "roles": ["Sales.Manager"] } ] }` |
+| `createDatabaseConnection`, `createDataTransformer`, `createMLModelMapping`, `createChangeDataCaptureService`, `createDataImporter`, `importDocument` | | Not supported: refused with the Studio Pro steps (and the Mendix version each needs). Studio Pro builds these from a live database, a JSON sample run through JSLT, an ONNX model, a generated contract, an Excel/CSV sample, or an export file without a sample |
+| `createExcelImportTemplate` | | Not supported: Excel Importer templates are data in the running app, not model documents. The refusal says how to install the module (`importModulePackage`) and make the template in the app |
+| `createDocumentTemplate` | | Not supported: refused with the Studio Pro steps. Document templates are deprecated and their styles store colors no test project has a sample of. Use the Document Generation module (Marketplace) for new PDFs |
+| Kafka services | | No op: consumed/published Kafka services were removed in Mendix 10.2 (the SDK has them up to 10.1). Use the Kafka connector from the Marketplace (Java actions: `callJava`) |
+
+A call in a task queue (`call` or `callJava` in a microflow, field `queue`) runs later in the background: it has no
+`variable`, and a queued Java action must return nothing. `retry`: `{ "retries": 3, "interval": 10, "unit": "Seconds" }`
+(fixed) or `{ "retries": 3, "initialInterval": 10, "maximumInterval": 600, "unit": "Minutes" }` (exponential).
+Change it later with `changeAction` (`"queue": "Module.Queue"`, `"queue": "none"` runs it directly again, `retry`).
+
+```json
+{ "ops": [
+  { "op": "createRegularExpression", "module": "Sales", "name": "PostCode", "pattern": "^[0-9]{4} ?[A-Z]{2}$", "examples": { "valid": ["1234 AB"], "invalid": ["12345"] } },
+  { "op": "addValidationRule", "entity": "Sales.Customer", "attribute": "PostCode", "rule": "regex", "regex": "Sales.PostCode", "message": "Use a postcode like 1234 AB" },
+  { "op": "changeRegularExpression", "regularExpression": "Sales.PostCode", "pattern": "^[0-9]{4}[A-Z]{2}$" },
+  { "op": "createTaskQueue", "module": "Sales", "name": "InvoiceQueue", "threads": 2, "scope": "cluster" },
+  { "op": "changeTaskQueue", "queue": "Sales.InvoiceQueue", "threads": 4 },
+  { "op": "importIconCollection", "module": "Sales", "name": "BrandIcons", "font": "edits/brand.ttf", "icons": { "home": "e900", "cart": "e901" } },
+  { "op": "createMicroflow", "module": "Sales", "name": "ACT_SendInvoices", "parameters": [ { "name": "Order", "type": "Sales.Order" } ], "actions": [
+    { "action": "call", "microflow": "Sales.SUB_SendInvoice", "args": { "Order": "$Order" }, "queue": "Sales.InvoiceQueue", "retry": { "retries": 3, "interval": 30, "unit": "Seconds" } } ] }
+] }
+```
+
+### Business events and SOAP web services
+
+No test project has a Studio Pro sample of these: the dry run says "check it in Studio Pro".
+
+| Op | Fields | Notes |
+|---|---|---|
+| `createBusinessEventService` | **module**, **name**, **events**, serviceName, eventNamePrefix, summary, description, folder | Mendix 10+. Defines the events of this app: `[{ "name": "OrderPlaced", "attributes": { "OrderId": "String" }, "publish": true, "subscribe": true }]`. Attribute types: String, Integer, Long, Decimal, Boolean, DateTime. Publishing or subscribing (the event entities, the Business Events module) is done in Studio Pro |
+| `changeBusinessEventService` | **service**, addEvents, removeEvents `["Event"]`, addAttributes `{ "Event": { "Attr": "Type" } }`, removeAttributes `{ "Event": ["Attr"] }`, summary, description, force | Only services this app defines. A consumed service (contract of another app) is refused with the Studio Pro steps. An event this app implements is removed only with `"force": true`; the dry run lists the entities to bring in step in Studio Pro |
+| `publishWebService` | **module**, **name**, **operations**, namespace, authentication (None, UsernamePassword (default), Custom + headerMicroflow), description, validate, folder | Each operation: `"Module.Microflow"` or `{ "microflow", "name", "description", "optional": ["Param"] }`. Parameters and results: primitive types, an object or a list (all attributes of the entity are published) |
+| `changeWebService` | **service**, operations (add, or replace by name), remove `["Operation"]`, namespace, authentication, headerMicroflow, description, validate | A service with more than one version is refused (change it in Studio Pro) |
+| `updateConsumedWebService` | **service**, **wsdl** | Read-only check: lists added and removed operations of the new WSDL and the Call web service actions that use them, then refuses with the Studio Pro steps (Update from file) |
+
+```json
+{ "ops": [
+  { "op": "createBusinessEventService", "module": "Sales", "name": "OrderEvents", "events": [ { "name": "OrderPlaced", "attributes": { "OrderId": "String", "Total": "Decimal" } } ] },
+  { "op": "changeBusinessEventService", "service": "Sales.OrderEvents", "addAttributes": { "OrderPlaced": { "Paid": "Boolean" } }, "addEvents": [ { "name": "OrderShipped", "attributes": { "OrderId": "String" } } ] },
+  { "op": "publishWebService", "module": "Sales", "name": "OrderService", "operations": [ "Sales.WS_GetOrder", { "microflow": "Sales.WS_ListOrders", "name": "ListOrders", "optional": ["Max"] } ] },
+  { "op": "changeWebService", "service": "Sales.OrderService", "remove": ["ListOrders"], "authentication": "None" },
+  { "op": "updateConsumedWebService", "service": "Sales.StockService", "wsdl": "edits/stock-v2.wsdl" }
 ] }
 ```
 
