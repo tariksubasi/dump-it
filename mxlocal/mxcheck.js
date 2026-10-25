@@ -319,7 +319,7 @@ function copyProject(mpr, tmpRoot) {
                 continue; // dangling link
             }
             if (st.isDirectory()) walk(p, path.join(to, e.name), rel ? path.join(rel, e.name) : e.name);
-            else if (st.isFile()) fs.copyFileSync(p, path.join(to, e.name));
+            else if (st.isFile()) fs.copyFileSync(p, path.join(to, e.name), fs.constants.COPYFILE_FICLONE); // APFS/Btrfs/ReFS: a clone, else a copy
         }
     };
     walk(src, dst, "");
@@ -583,29 +583,65 @@ function cachePut(projectDir, key, res) {
     }
 }
 
+// <key>.running while a process checks that state, so a second process (the background warm-up of mx.py refresh and
+// an apply at the same time) waits for its result instead of copying and checking the same model again.
+const runningFile = (projectDir, key) => path.join(projectDir, CACHE_DIR, key + ".running");
+
+function markRunning(projectDir, key) {
+    const f = runningFile(projectDir, key);
+    try {
+        fs.mkdirSync(path.dirname(f), { recursive: true });
+        fs.writeFileSync(f, String(process.pid));
+    } catch {
+        return () => {};
+    }
+    return () => fs.rmSync(f, { force: true });
+}
+
+function awaitRunning(projectDir, key, timeoutSec) {
+    const f = runningFile(projectDir, key);
+    const started = Date.now();
+    while (isFile(f) && Date.now() - started < timeoutSec * 1000) {
+        try {
+            if (Date.now() - fs.statSync(f).mtimeMs > timeoutSec * 1000) break; // a killed process left its marker
+        } catch {
+            break;
+        }
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500);
+        const hit = cacheGet(projectDir, key);
+        if (hit) return hit;
+    }
+    return null;
+}
+
 // ------------------------------------------------------------------------------------------------ check
 
 // mx check of the project mpr, on a copy. prepare(copyMpr) changes the copy first (the pending change of a dry run).
 // opts: { found (find() result), timeout, tmp, keep, cache: "use" | "store" | false }
+// The result is cached under the state mx checked: the saved model, or the copy with the change, which is the saved
+// model after that change is applied, so apply --check after a dry run --check finds its result ready.
 function check(mpr, opts = {}) {
     mpr = path.resolve(mpr);
     const found = opts.found;
     const projectDir = path.dirname(mpr);
+    const timeout = opts.timeout || DEFAULT_TIMEOUT;
     const key = !opts.prepare && opts.cache ? stateKey(mpr, found.mx) : null;
     if (key && opts.cache === "use") {
-        const hit = cacheGet(projectDir, key);
+        const hit = cacheGet(projectDir, key) || awaitRunning(projectDir, key, timeout);
         if (hit) return { ...hit, cached: true };
     }
+    const done = key ? markRunning(projectDir, key) : () => {};
     const copy = copyProject(mpr, opts.tmp);
     try {
         if (opts.prepare) opts.prepare(copy.mpr);
-        const res = rewrite(runCheck(found.mx, copy.mpr, opts.timeout || DEFAULT_TIMEOUT), copy.dir, projectDir);
+        const res = rewrite(runCheck(found.mx, copy.mpr, timeout), copy.dir, projectDir);
         res.mx = found.mx;
         res.mxVersion = found.version;
-        if (key) cachePut(projectDir, key, res);
+        cachePut(projectDir, key || stateKey(copy.mpr, found.mx), res);
         if (opts.keepCopy) res.copy = copy.dir;
         return res;
     } finally {
+        done();
         if (!opts.keepCopy) copy.cleanup();
     }
 }
@@ -660,7 +696,7 @@ const countText = c => `${plural(c.errors, "error")}, ${plural(c.warnings, "warn
 
 // The STUDIO PRO CHECK block. what: "the saved model" / "the model with this change"; before: baseline result or null
 function report(res, { what, before, norm, max = 25, undo } = {}) {
-    const head = `STUDIO PRO CHECK (mx check ${res.mxVersion || ""} on a copy of ${what || "the project"}${res.cached ? ", cached" : ""}):`;
+    const head = `STUDIO PRO CHECK (mx check ${res.mxVersion || ""} on a copy of ${what || "the project"}${res.cached ? ", cached" : res.seconds ? `, ${Math.round(res.seconds)}s` : ""}):`;
     const lines = [head];
     if (res.status === "failed") {
         lines.push(`  ! mx check FAILED: ${res.reason}`);

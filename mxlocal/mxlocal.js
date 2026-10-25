@@ -37,10 +37,10 @@ const USAGE = `mxlocal - Mendix Model SDK offline on a local .mpr (v2)
   node mxlocal.js apply --code <CODE> --project <app.mpr|folder> [--check]
         Writes the change of the last dry run (Studio Pro closed). CODE comes from that dry run.
         --check: mx check on a copy of the saved model; errors that were not there before are listed as NEW.
-  node mxlocal.js check --project <app.mpr|folder> [--mx <path>] [--check-timeout <s>]
+  node mxlocal.js check --project <app.mpr|folder> [--mx <path>] [--check-timeout <s>] [--warm]
         STUDIO PRO CHECK: Mendix's own consistency check (mx check, Studio Pro's Errors pane) on a temporary copy
         (read-only). mx: --mx, MX_PATH, MENDIX_MX, .mxlocal.json "mx", or found (Studio Pro / MxBuild of the
-        project's version).
+        project's version). --warm: silent, only caches the result of the saved model (skipped when cached).
   node mxlocal.js restore --project <app.mpr|folder> [--backup <name>] [--force]
         Undoes the last (or the given) apply. Refuses when the model changed after that apply (it would erase
         that work) unless --force.
@@ -378,7 +378,8 @@ function studioCheck(mpr, opts, kind, enc, before) {
     try {
         if (kind === "before") return { result: C.check(mpr, { ...base, cache: "use" }), found: l.found };
         const baseline = before || C.check(mpr, { ...base, cache: "use" });
-        const after = kind === "run" ? C.check(mpr, { ...base, prepare: copy => new Project(copy).writeEncoded(enc) }) : C.check(mpr, { ...base, cache: "store" });
+        // apply: cached when the dry run ran --check (it checked the copy with this change = the saved model now)
+        const after = kind === "run" ? C.check(mpr, { ...base, prepare: copy => new Project(copy).writeEncoded(enc) }) : C.check(mpr, { ...base, cache: "use" });
         const undo = kind === "run" ? "Fix the change file and dry run again (or apply anyway only if the user agrees)." : "Undo with restore (python mx.py undo), fix the change, dry run again.";
         const r = C.report(after, { what: kind === "run" ? "the model with this change" : "the saved model", before: baseline, undo, norm: opts.norm });
         if (l.found.note) r.text += `\n  (note: ${l.found.note})`;
@@ -402,6 +403,12 @@ function wantCheck(a, mpr, cmd) {
 function checkCmd(mpr, a) {
     const C = require("./mxcheck");
     const l = C.locate(mpr, a);
+    // --warm (mx.py refresh, in the background): only fill the cache for the saved model, so the next apply --check
+    // finds its baseline; silent, nothing to run when the result is cached already
+    if (a.warm) {
+        if (l.found) C.check(mpr, { found: l.found, timeout: l.timeout, cache: "use" });
+        return;
+    }
     if (!l.found) return out(l.line);
     out(`mx ${l.found.version || "(version unknown)"}: ${l.found.mx} (${l.found.source}); project Mendix ${l.version}`);
     const res = C.check(mpr, { found: l.found, timeout: l.timeout, cache: "store" });

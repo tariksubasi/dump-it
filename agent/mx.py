@@ -105,10 +105,32 @@ def mxlocal(*args, project=True):
     return run(node_cmd() + list(args) + (["--project", CONFIG["mpr"]] if project else []))
 
 
-def refresh():
-    code = run([sys.executable, CONFIG["mxcontext"], CONFIG["mpr"], "-o", HERE] + CONFIG["export_flags"])
-    if code:
-        return code
+def export_proc():
+    """The export, started so other work (apply's mx check) can run meanwhile; refresh() prints it when done."""
+    return subprocess.Popen([sys.executable, CONFIG["mxcontext"], CONFIG["mpr"], "-o", HERE] + CONFIG["export_flags"],
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
+
+
+def warm_check():
+    """STUDIO PRO CHECK of the saved model in the background, so the next apply --check finds its baseline cached.
+    Silent; exits at once when the result is cached already or no mx is installed."""
+    if not shutil.which("node") or not os.path.isfile(CONFIG["mxlocal"]):
+        return
+    detach = {"creationflags": 0x00000008 | 0x00000200} if os.name == "nt" else {"start_new_session": True}
+    try:
+        subprocess.Popen(node_cmd() + ["check", "--warm", *mx_args(), "--project", CONFIG["mpr"]], stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **detach)
+    except OSError:
+        pass
+
+
+def refresh(proc=None):
+    proc = proc or export_proc()
+    lines = [line for line in (proc.communicate()[0] or "").splitlines() if "ExperimentalWarning" not in line]
+    if lines:
+        say("\n".join(lines))
+    if proc.returncode:
+        return proc.returncode
     git = shutil.which("git")
     if git:
         p = subprocess.run([git, "diff", "--cached", "--stat"], cwd=HERE, capture_output=True, text=True,
@@ -119,6 +141,7 @@ def refresh():
             say("\n".join(lines[:40] + (["... %d more" % (len(lines) - 40)] if len(lines) > 40 else [])))
         else:
             say("No model changes since the last checked state.")
+    warm_check()
     return 0
 
 
@@ -331,14 +354,25 @@ def main(argv):
         if not rest:
             say("Usage: python mx.py apply <CODE>  (the code from the dry run, after the user approved it)")
             return 1
-        code = mxlocal("apply", "--code", rest[0], "--check", *mx_args())
-        m = re.search(r"Backup: (\S+)", last_output)
+        # the model is written when "Backup:" is printed; the export (read-only) runs while mx check follows
+        p = subprocess.Popen(node_cmd() + ["apply", "--code", rest[0], "--check", *mx_args(), "--project", CONFIG["mpr"]],
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
+        export, lines = None, []
+        for line in p.stdout:
+            line = line.rstrip("\r\n")
+            lines.append(line)
+            if "ExperimentalWarning" not in line and "--trace-warnings" not in line:
+                say(line)
+            if export is None and "Backup: " in line:
+                export = export_proc()
+        code = p.wait()
+        m = re.search(r"Backup: (\S+)", "\n".join(lines))
         journal(cmd="apply", code=rest[0], backup=m.group(1) if m else None, ok=code == 0)
-        if not m:  # nothing written
+        if export is None:  # nothing written
             return code
         # written: the export must follow the model even when CHECK FAILED or the STUDIO PRO CHECK found new errors
         say("")
-        refresh()
+        refresh(export)
         return code
     if cmd == "undo":
         code = mxlocal("restore", *(["--force"] if "--force" in rest else []))
