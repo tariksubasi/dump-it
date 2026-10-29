@@ -21,6 +21,31 @@ function overlay(tmp, dir) {
     walk(tmp, dir);
 }
 
+// mx check cannot resolve a configuration constant value at all: whatever constant it names (one the selftest made,
+// one Studio Pro made, or no constant) it reports CE1613 "The selected constant 'Dummy.Constant' no longer exists"
+// (measured on 10.24 and 11.12 with scripts/mxcheck-variants.js). Such an error is set aside only when every constant
+// value of every configuration names a constant that exists in the copy; it is reported as a NOTE.
+const DUMMY_CONSTANT = i => i.code === "CE1613" && /'Dummy\.Constant'/.test(i.message || "") && /Settings/.test(i.document || "");
+function constantValuesResolve(tmp) {
+    const { toPlain } = require("./convert");
+    const bson = require("./bson");
+    const units = [];
+    const walk = d => {
+        for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+            const p = path.join(d, e.name);
+            if (e.isDirectory()) walk(p);
+            else if (e.name.endsWith(".mxunit")) units.push(toPlain(bson.decode(fs.readFileSync(p))));
+        }
+    };
+    walk(path.join(tmp, "mprcontents"));
+    const constants = new Set(units.filter(u => u.$Type === "Constants$Constant").map(u => u.Name));
+    const settings = units.find(u => u.$Type === "Settings$ProjectSettings");
+    const confs = settings ? (settings.Settings.find(x => x.$Type === "Settings$ConfigurationSettings") || { Configurations: [] }).Configurations : [];
+    const refs = confs.flatMap(c => c.ConstantValues.map(v => v.Constant));
+    const missing = refs.filter(r => !constants.has(String(r).split(".").pop()));
+    return { refs, missing };
+}
+
 const selftestDoc = i => /(^|\.)Zz|ZzTest|zz[A-Z_]/.test(`${i.document} ${i.element}`);
 
 // -> { ran: boolean }; pushes an OK/FAIL/SKIP line and the details into results
@@ -62,7 +87,16 @@ function run({ src, tmp, mod, check, results, opts = {} }) {
         return { ran: true };
     }
     const d = C.diff(before, after, norm);
-    const fresh = d.fresh.filter(i => i.severity === "error");
+    let fresh = d.fresh.filter(i => i.severity === "error");
+    const dummy = fresh.filter(DUMMY_CONSTANT);
+    if (dummy.length) {
+        const cv = constantValuesResolve(tmp);
+        if (!cv.missing.length && cv.refs.length) {
+            fresh = fresh.filter(i => !DUMMY_CONSTANT(i));
+            d.freshCount -= dummy.length;
+            results.push(`NOTE mx check: ${dummy.length} CE1613 'Dummy.Constant' on configuration constant values set aside (mx check resolves no configuration constant value; the selftest checked that ${cv.refs.join(", ")} exist): check constant overrides in Studio Pro`);
+        } else if (cv.missing.length) results.push(`  configuration constant values name constants that do not exist: ${cv.missing.join(", ")}`);
+    }
     const byDoc = new Map();
     for (const i of fresh) {
         const k = norm(i.document) || "(no document)";

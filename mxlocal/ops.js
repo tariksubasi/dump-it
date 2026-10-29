@@ -40,6 +40,7 @@ const { makeComposite, COMPOSITE_OPS, COMPOSITE_SYNONYMS } = require("./ops-comp
 const { makeGeneral, GENERAL_OPS } = require("./ops-general");
 const { makeDocs, DOCS_OPS, DOCS_SYNONYMS, docsChangedLater } = require("./ops-docs");
 const { makeServices, SERVICE_OPS, SERVICE_SYNONYMS, servicesChangedLater } = require("./ops-services");
+const { makeScreens, SCREEN_OPS } = require("./ops-screens");
 const { makeFolders, FOLDER_OPS, FOLDER_SYNONYMS } = require("./ops-folders");
 const { makeApp, APP_OPS, APP_SYNONYMS } = require("./ops-app");
 
@@ -160,6 +161,7 @@ const OPS = {
     ...GENERAL_OPS,
     ...DOCS_OPS,
     ...SERVICE_OPS,
+    ...SCREEN_OPS,
     ...FOLDER_OPS,
     ...APP_OPS,
     moveDocument: { doc: "Move a document to another folder of the same module.", fields: { document: "R Module.Document", folder: "optional folder path, e.g. Orders/Actions (missing or \"\" = the module root)" } },
@@ -517,6 +519,7 @@ function bind(model, client) {
     const odataOps = makeOData({ model, client, get, exists, entity, folder, version, persistable, attributeChain, loadParents, authMicroflow: (...a) => restOps.authenticationMicroflow(...a) });
     const docsOps = makeDocs({ model, client, get, exists, entity, folder, version, text, attributeChain, loadParents, dataType });
     const serviceOps = makeServices({ model, client, get, exists, entity, folder, version, attributeChain, loadParents });
+    const screenOps = makeScreens({ model, client, get, exists, entity, attributeChain, loadParents, impl: () => impl });
     const xmlOps = makeXml({ model, client, get, exists, entity, folder, version, attributeChain, loadParents, mappingInternals: mappingOps.internals });
     const workflowOps = makeWorkflows({ model, client, get, exists, entity, folder, version, persistable, attributeChain, loadParents, grantAccess: o => impl.grantAccess(o), impl: () => impl,
         textAll: (owner, prop, value) => pageOps.internals.templateAll(owner, prop, value, null, "", true) });
@@ -1021,6 +1024,7 @@ function bind(model, client) {
         ...xmlOps.impl,
         ...docsOps.impl,
         ...serviceOps.impl,
+        ...screenOps.impl,
         ...workflowOps.impl,
         ...scaffoldOps.impl,
         ...compositeOps.impl,
@@ -1232,6 +1236,7 @@ function bind(model, client) {
         ...xmlOps.checks,
         ...docsOps.checks,
         ...serviceOps.checks,
+        ...screenOps.checks,
         ...scaffoldOps.checks,
         ...compositeOps.checks,
         ...smallOps.checks,

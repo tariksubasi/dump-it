@@ -67,6 +67,9 @@ const USAGE = `mxlocal - Mendix Model SDK offline on a local .mpr (v2)
                                         security overview, read-only: level, administrator, guest, demo users, user
                                         roles; issues: entities without access rules, used pages/flows no role may
                                         use, module roles no user role has
+  node mxlocal.js screens [category|template]
+                                        the screen template catalog (no project): categories; a category's templates
+                                        with phone/desktop sketches, slots and an example createScreen; one template
   node mxlocal.js contract <file> [--module M] [--name Service] [--out <folder>] [--no-mappings]
                                         an API contract, read-only: OpenAPI 2/3 (JSON, YAML) -> its operations and a
                                         createConsumedRestService plan; WSDL -> operations and its XML schemas as .xsd;
@@ -337,6 +340,8 @@ async function run(file, mpr, allowJs, ctx, opts = {}) {
     layoutCheck(ops, change, file, say, opts);
     const a11y = require("./ui").a11yLint(client);
     if (a11y.length) say("A11Y CHECK (accessibility of the new or changed widgets; warnings, nothing refused):\n" + a11y.map(w => "  ! " + w).join("\n"));
+    const ux = change.plan ? require("./uxcheck").uxLint(change.plan) : [];
+    if (ux.length) say("UX CHECK (design rules of guides/UI_DESIGN.md; warnings, nothing refused):\n" + ux.map(w => "  ! " + w).join("\n"));
     // STYLE CHECK: the theme compiled as Studio Pro builds it (when a .scss changed), classes, inline styles, contrast
     const strict = !!(change.plan && (change.plan.styleCheck === "strict" || change.plan.ops.some(o => o && o.op === "setTokens" && o.strict === true)));
     const style = await require("./stylecheck").styleCheck(client, model, { strict, mode: change.plan && change.plan.styleCheck });
@@ -566,6 +571,14 @@ async function main() {
     const cmd = a._[0];
     if (!cmd || a.help) return out(USAGE);
     if (cmd === "ops") return out(require("./ops").help(a._[1]));
+    if (cmd === "screens") {
+        const reg = require("./screens");
+        const arg = a._[1];
+        if (!arg) return out(reg.catalog());
+        const text = reg.categoryText(arg) || reg.templateText(arg);
+        if (!text) throw new Error(`screens: no category or template '${arg}'. Categories: ${reg.categories.map(c => c.id).join(", ")}`);
+        return out(text);
+    }
     if (cmd === "contract") {
         if (!a._[1]) throw new Error("contract needs an OpenAPI (.json/.yaml), WSDL or $metadata file, e.g. contract petstore.yaml --module Sales --out edits");
         return out(require("./contract").inspectContract(path.resolve(a._[1]), { module: a.module === true ? undefined : a.module, name: a.name === true ? undefined : a.name, out: a.out && a.out !== true ? path.resolve(a.out) : undefined, mappings: a["no-mappings"] ? false : undefined }).text);

@@ -68,6 +68,7 @@ Run all of these from the export folder.
 | `python mx.py widgets <Module.Page>` | Lists the widget tree of a page or snippet: names, kinds, entity of each data view / list view, and where new widgets can go (`[into]`, layout grid column paths). For `addWidgets`, `changeWidget`, `deleteWidget`, `moveWidget` | no |
 | `python mx.py preview <Module.Page>` | APPROXIMATE picture of a page with the compiled theme: `edits/preview/<Module.Page>.html`, and phone / tablet / desktop `.png` screenshots when Playwright is installed (see "Design system") | no |
 | `python mx.py mapping-test <Module.ImportMapping> <sample.json>` | Shows what a sample JSON would make with an import mapping: each object (created, found by keys, from a microflow, the parameter), each attribute value, values that would fail at runtime (text in a number, a bad date, too long), sample keys the mapping ignores. Static: no database, no microflows run. The file may be in `edits/` | no |
+| `python mx.py screens [category\|template]` | The screen template catalog (no project needed): no argument = the categories with their keywords; a category (`time`, `list`, `record`, `request`, `task`, `crm`, `shop`, `doc`, `notice`, `dash`, `report`, `settings`, `state`, `home`, `auth`, `native`) = its templates, each with a small sketch to show the user; a template id = phone and desktop sketches, its slots and an example `createScreen` | no |
 | `python mx.py security [Module]` | Security overview: level, administrator, guest access, demo users, every user role with its module roles. ISSUES: guest = administrator's role, a guest role that manages users, entities without an access rule, pages and client-called microflows/nanoflows no module role may use, module roles no user role has. Run it before a production deployment | no |
 | `python mx.py contract <file> [Module]` | Reads an API contract file: OpenAPI 2/3 (`.json` or `.yaml`), a SOAP WSDL, or an OData `$metadata`. Lists its operations (or entity sets, keys, actions). With a module it also writes a change plan to `edits/<file>-plan.json`: OpenAPI -> `createConsumedRestService` with every operation (path, query and header parameters, bearer / basic / API key authentication, body and response mappings from the schemas); WSDL -> its XML schemas as `.xsd` files and `createXmlSchema`; `$metadata` -> JSON structures and import mappings that read each entity set with `callRest`. Dry run the plan like any change file. The file may be in `edits/` | no |
 | `python mx.py texts [Module\|Module.Doc\|menu] [--missing <lang>]` | Lists translatable texts (page titles, widget captions/texts/labels/placeholders, enumeration captions, show-message and validation feedback texts, validation messages, menu captions) as `where [part]` with their text in every project language; `--missing tr_TR`: only those without Turkish. For `setTranslations` | no |
@@ -523,6 +524,25 @@ FLOW CHECK (dry run, for new or changed steps; `steps`, for the whole flow) give
 | `custom error handler without rollback: what was committed before it fails stays committed` | Check the handler leaves the data consistent, or use `"rollback": true` |
 | `nanoflow error handlers never roll back` | Undo object changes with a `rollback` action in the handler when needed |
 | `an error event outside an error handler` | Use `end`, or move it into the handler |
+
+### Ready screens (createScreen)
+
+The screen catalog has ~100 templates of whole screens. Steps: `python mx.py screens` (categories) → `python mx.py
+screens <category>` (sketches; show the user 3-5 and let them pick a number) → `python mx.py screens <template id>`
+(slots) → one `createScreen`. Slots you leave out are guessed from the attribute types (the dry run lists them); a page
+the template opens (an edit page) is made when it is missing; buttons get their microflows (clock in / out, approve,
+mark as read, ...).
+
+| Op | Fields | Notes |
+|---|---|---|
+| `createScreen` | **module**, **name**, **template**, slots, title, density (`comfortable` / `compact`), cardClass, menu, roles, folder | slots: `{ "entity": "Module.Entity", "<slot>": "Attribute" }`. Charts, galleries, badges and pop-up menus need their Marketplace widget: the dry run says so and names the fallback. Native templates (`native.*`) make native pages |
+
+```json
+{ "ops": [
+  { "op": "createScreen", "module": "MyFirstModule", "name": "TimeClock", "template": "time.clock.big", "slots": { "entity": "MyFirstModule.TimeEntry" } },
+  { "op": "createScreen", "module": "MyFirstModule", "name": "Customers", "template": "list.table", "slots": { "entity": "MyFirstModule.Customer", "title": "Name" }, "menu": "Responsive" }
+] }
+```
 
 ### Pages and navigation
 

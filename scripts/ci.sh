@@ -111,6 +111,9 @@ if [ "${#PROJECTS[@]}" -eq 0 ] && [ -n "${CI_ONLY:-}" ]; then say "FAIL CI_ONLY=
 if stage docs; then
 say "== docs"
 node "$MXLOCAL" doccheck || fail=1
+node "$ROOT/scripts/check-ui-kit.js" || fail=1
+node "$ROOT/scripts/gen-screens.js" --check || fail=1
+node "$ROOT/scripts/check-screens.js" || fail=1
 fi
 
 if stage guard; then

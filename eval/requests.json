@@ -2700,6 +2700,35 @@
         "createWorkflow",
         "createPage"
       ]
+    },
+    {
+      "id": "screenclock",
+      "text": "Çalışanlar için giriş çıkış ekranı yap, TimeEntry entity'sini kullan. Önce bana seçenekleri göster, ben seçeyim.",
+      "checks": {
+        "find": [
+          "MyFirstModule.TimeEntry"
+        ]
+      },
+      "ops": [
+        "createScreen"
+      ],
+      "setup": [
+        {
+          "op": "createEntity",
+          "module": "MyFirstModule",
+          "name": "TimeEntry",
+          "attributes": [
+            {
+              "name": "ClockIn",
+              "type": "DateTime"
+            },
+            {
+              "name": "ClockOut",
+              "type": "DateTime"
+            }
+          ]
+        }
+      ]
     }
   ]
 }
