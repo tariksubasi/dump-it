@@ -149,11 +149,12 @@ function makeScreens(h) {
                 if (d.kind !== "page" || s[k] !== null || !d.auto) continue;
                 const ent = s[d.of];
                 if (!ent) continue;
-                const pageName = `${ent.split(".")[1]}_${d.auto === "edit" ? "Edit" : "Details"}`;
+                const native = d.auto === "editNative";
+                const pageName = `${ent.split(".")[1]}_${native ? "EditNative" : d.auto === "edit" ? "Edit" : "Details"}`;
                 s[k] = `${o.module}.${pageName}`;
                 if (await exists(s[k])) continue;
                 const fields = info[d.of].attrs.filter(a => kindOf(a) !== "Binary" && kindOf(a) !== "AutoNumber").slice(0, 8).map(a => a.name);
-                await run({ op: "createPage", module: o.module, name: pageName, title: `${d.auto === "edit" ? "Edit" : ""} ${ent.split(".")[1]}`.trim(), entity: ent, fields, ...(o.folder ? { folder: o.folder } : {}) });
+                await run({ op: "createPage", module: o.module, name: pageName, title: `${d.auto === "details" ? "" : "Edit"} ${ent.split(".")[1]}`.trim(), entity: ent, fields, ...(native ? { native: true } : {}), ...(o.folder ? { folder: o.folder } : {}) });
             }
             const ctx = {
                 s, t, m: o.module, name: o.name, d: o.density || "comfortable", kit,

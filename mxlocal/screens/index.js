@@ -13,10 +13,15 @@ const categories = [];
 const byId = new Map();
 for (const f of FILES) {
     const m = require(path.join(__dirname, f));
-    categories.push({ ...m.category, templates: m.templates });
-    for (const t of m.templates) {
-        if (byId.has(t.id)) throw new Error(`screens: template id ${t.id} twice`);
-        byId.set(t.id, { ...t, category: m.category.id });
+    for (const g of m.groups || [m]) {
+        // a category met again (an extension file): its templates join the first one
+        const known = categories.find(x => x.id === g.category.id);
+        if (known) known.templates.push(...g.templates);
+        else categories.push({ ...g.category, templates: [...g.templates] });
+        for (const t of g.templates) {
+            if (byId.has(t.id)) throw new Error(`screens: template id ${t.id} twice`);
+            byId.set(t.id, { ...t, category: g.category.id });
+        }
     }
 }
 
