@@ -26,6 +26,35 @@ const SCREEN_OPS = {
 };
 
 const NUMBER = ["Integer", "Long", "Decimal", "AutoNumber"];
+
+// Marketplace widgets a template may use, and what stands in for them when the project has no .mpk of them
+const WIDGET_IDS = { badge: "com.mendix.widget.custom.badge.Badge", popupMenu: "com.mendix.widget.web.popupmenu.PopupMenu", gallery: "com.mendix.widget.web.gallery.Gallery" };
+function degrade(widgets, has, notes) {
+    const one = w => {
+        if (!w || typeof w !== "object") return [w];
+        const x = { ...w };
+        for (const k of ["widgets", "footer", "trigger"]) if (x[k]) x[k] = degrade(x[k], has, notes);
+        if (x.rows) x.rows = x.rows.map(r => ({ ...r, columns: (r.columns || []).map(c => (c && typeof c === "object" ? { ...c, widgets: degrade(c.widgets || [], has, notes) } : c)) }));
+        if (x.tabs) x.tabs = x.tabs.map(t => ({ ...t, widgets: degrade(t.widgets || [], has, notes) }));
+        if (x.groups) x.groups = x.groups.map(g => ({ ...g, widgets: degrade(g.widgets || [], has, notes) }));
+        if (x.widget === "badge" && !has(WIDGET_IDS.badge)) {
+            notes.add("no Badge widget: status labels are bold text");
+            return [{ widget: "text", text: x.text, class: "text-bold" }];
+        }
+        if (x.widget === "popupMenu" && !has(WIDGET_IDS.popupMenu)) {
+            notes.add("no Pop-up menu widget: its items are icon buttons");
+            return (x.items || []).filter(i => i && typeof i === "object").map(i => ({ widget: "actionButton", ...i.action, caption: i.caption, iconOnly: true, tooltip: i.caption, icon: /delete/i.test(i.action && i.action.action) ? "mx-icon-trash-can" : "mx-icon-pencil" }));
+        }
+        if (x.widget === "gallery" && !has(WIDGET_IDS.gallery)) {
+            notes.add("no Gallery widget: the cards are a list view");
+            const rest = Object.fromEntries(Object.entries(x).filter(([k]) => !["columns", "headerFilters", "paging", "emptyMessage", "onClickTrigger", "selection", "tabletColumns", "phoneColumns"].includes(k)));
+            const paging = x.paging;
+            return [{ ...rest, widget: "listView", pageSize: (paging && paging.pageSize) || 12 }];
+        }
+        return [x];
+    };
+    return [].concat(widgets || []).flatMap(one);
+}
 const kindOf = a => a.type.structureTypeName.split("$")[1].replace("AttributeType", "");
 const typeOk = (want, k) => !want || want === "Any" || [].concat(want).some(t => t === k || (t === "Number" && NUMBER.includes(k)) || (t === "Text" && ["String", "HashString"].includes(k)));
 
@@ -172,6 +201,11 @@ function makeScreens(h) {
                 stat: (label, val) => kit.stat(label, val, { kitClass: o.cardClass })
             };
             const built = tpl.build(ctx);
+            // Marketplace widgets the project lacks: their stand-ins (bold text, icon buttons, a list view)
+            const dir = h.client && h.client.project && h.client.project.dir;
+            const inst = dir ? require("./pluggable").installed(dir) : null;
+            const notes = new Set();
+            if (inst && built.widgets) built.widgets = degrade(built.widgets, id => inst.has(id), notes);
             for (const pre of built.pre || []) await run(pre);
             const page = built.op || {
                 op: "createPage", module: o.module, name: o.name, title: o.title || built.title || tpl.name, widgets: built.widgets,
@@ -181,7 +215,7 @@ function makeScreens(h) {
             for (const k of ["menu", "roles", "folder"]) if (o[k] !== undefined) page[k] = o[k];
             if (built.op) Object.assign(page, { module: o.module, name: o.name });
             await run(page);
-            return `${o.module}.${o.name} from ${tpl.id} (${tpl.name})` + (guessed.length ? `\n      slots guessed: ${guessed.join("; ")}` : "") + lines.map(l => "\n      " + l).join("");
+            return `${o.module}.${o.name} from ${tpl.id} (${tpl.name})` + (guessed.length ? `\n      slots guessed: ${guessed.join("; ")}` : "") + [...notes].map(n => `\n      ${n}`).join("") + lines.map(l => "\n      " + l).join("");
         }
     };
     const checks = {
