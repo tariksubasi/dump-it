@@ -106,6 +106,8 @@ CHANGING OR CHECKING THE MODEL
   (new ones with grids, data views, list views, forms; widgets on existing pages and snippets: add, change, move,
   delete), menu items, home pages, roles, user roles, access, languages and translations, renames, deletes): read
   guides/EDIT.txt first and follow it step by step. The user may also type /degistir.
+- The user asks for a page, screen, form, list or a nicer design: read guides/UI_KIT.md first (ready recipes with
+  phone/desktop sketches and working JSON) and build the page from its recipes; do not read MANUAL.md for that.
 - The user changed the model in Studio Pro and asks for a check: read guides/CHECK.txt and follow it (/kontrol).
 - Short commands, run from this folder: {py} mx.py help
 - Full manual (commands, operations, outputs, errors): guides/MANUAL.md. Read it when you are unsure.
@@ -330,6 +332,11 @@ class Exporter:
             self._write("guides/MANUAL.md", f.read())
         if can_edit:
             self._write("guides/EDIT.txt", fill(self._agent_template("EDIT.txt")))
+            # the UI kit: a guide, and the same text as a skill for OpenCode and Claude Code (front matter on top)
+            kit = self._agent_template("UI_KIT.md")
+            self._write("guides/UI_KIT.md", kit)
+            self._write(".opencode/skill/mendix-ui-kit/SKILL.md", kit)
+            self._write(".claude/skills/mendix-ui-kit/SKILL.md", kit)
         os.makedirs(os.path.join(self.out, "edits"), exist_ok=True)
 
         flags = [flag for flag, on in (("--include-marketplace", self.args.include_marketplace),
