@@ -340,6 +340,8 @@ async function run(file, mpr, allowJs, ctx, opts = {}) {
     layoutCheck(ops, change, file, say, opts);
     const a11y = require("./ui").a11yLint(client);
     if (a11y.length) say("A11Y CHECK (accessibility of the new or changed widgets; warnings, nothing refused):\n" + a11y.map(w => "  ! " + w).join("\n"));
+    const ux = change.plan ? require("./uxcheck").uxLint(change.plan) : [];
+    if (ux.length) say("UX CHECK (design rules of guides/UI_DESIGN.md; warnings, nothing refused):\n" + ux.map(w => "  ! " + w).join("\n"));
     // STYLE CHECK: the theme compiled as Studio Pro builds it (when a .scss changed), classes, inline styles, contrast
     const strict = !!(change.plan && (change.plan.styleCheck === "strict" || change.plan.ops.some(o => o && o.op === "setTokens" && o.strict === true)));
     const style = await require("./stylecheck").styleCheck(client, model, { strict, mode: change.plan && change.plan.styleCheck });

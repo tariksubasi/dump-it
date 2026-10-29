@@ -6,7 +6,7 @@
 const fs = require("fs");
 const path = require("path");
 const kit = require("./kit");
-const { sideBySideSketch } = require("./sketch");
+const { sideBySideSketch, thumbnail } = require("./sketch");
 
 const FILES = fs.readdirSync(__dirname).filter(f => /^cat-.*\.js$/.test(f)).sort();
 const categories = [];
@@ -67,12 +67,15 @@ function catalog() {
     return out.join("\n");
 }
 
+const slotSummary = t => Object.entries(t.slots || {}).map(([k, d]) => `${k}${d.optional || d.auto || d.kind === "text" ? "?" : ""}`).join(", ") || "none";
+
+// the category: a thumbnail per template to choose from (the full sketches: templateText)
 function categoryText(id) {
     const c = categories.find(x => x.id === id);
     if (!c) return null;
-    const out = [`CATEGORY ${c.id}: ${c.title} (${c.templates.length} templates)`, ""];
+    const out = [`CATEGORY ${c.id}: ${c.title} (${c.templates.length} templates)`, "Show the user 3-5 of these (number + name + thumbnail), let them pick, then: python mx.py screens <template id>", ""];
     c.templates.forEach((t, i) => {
-        out.push(`${i + 1}. ${t.id} - ${t.name}: ${t.desc}`, "```", ...sketchOf(t), "```", "slots:", ...Object.entries(t.slots || {}).map(([k, d]) => slotLine(k, d)), `example: ${exampleOp(t)}`, "");
+        out.push(`${i + 1}. ${t.id} - ${t.name}: ${t.desc}`, "```", ...thumbnail(widgetsOf(t), t.name), "```", `slots (? = optional or guessed): ${slotSummary(t)}`, "");
     });
     return out.join("\n");
 }
@@ -83,4 +86,4 @@ function templateText(id) {
     return [`TEMPLATE ${t.id} - ${t.name}`, t.desc, "", "```", ...sketchOf(t), "```", "slots:", ...Object.entries(t.slots || {}).map(([k, d]) => slotLine(k, d)), "", `example: ${exampleOp(t)}`].join("\n");
 }
 
-module.exports = { categories, byId, catalog, categoryText, templateText, sketchOf, sampleCtx, exampleOp };
+module.exports = { categories, byId, catalog, categoryText, templateText, sketchOf, sampleCtx, exampleOp, widgetsOf };

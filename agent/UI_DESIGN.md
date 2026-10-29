@@ -12,6 +12,17 @@ You design the page yourself from small parts. This file gives you three things:
 
 Full example pages are in guides/UI_RECIPES.md. Open it only when you want to copy a whole screen.
 
+## First: is there a ready screen?
+
+For a whole screen (clock in / out, a customer list, a dashboard, a sign-in page, a request form, ...) use the screen
+catalog first: `guides/screens/INDEX.md` (or `python mx.py screens`) routes to a category; show the user 3-5 numbered
+thumbnails of it, let them pick, then one `createScreen` builds the page (and its microflows) with their entity.
+Design the page yourself with the rest of this file only when no template fits, or to change a page afterwards.
+
+```json
+{ "ops": [ { "op": "createScreen", "module": "MyFirstModule", "name": "TimeClock", "template": "time.clock.big", "slots": { "entity": "MyFirstModule.TimeEntry" } } ] }
+```
+
 ## Workflow (do this every time)
 
 1. Write the page as a tree in plain words first: `page > header > [title, action] ; section > card > form`.

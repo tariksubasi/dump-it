@@ -108,7 +108,8 @@ CHANGING OR CHECKING THE MODEL
   guides/EDIT.txt first and follow it step by step. The user may also type /degistir.
 - The user asks for a page, screen, form, list or a nicer design: read guides/UI_DESIGN.md first (principles, the
   exact JSON of every small part, how they combine, phone/tablet/desktop rules) and design the page from it; whole
-  example screens are in guides/UI_RECIPES.md. Do not read MANUAL.md for that.
+  example screens are in guides/UI_RECIPES.md. For a whole screen (a clock-in page, a customer list, a dashboard, ...)
+  use the screen catalog: guides/screens/INDEX.md, then let the user pick a sketch. Do not read MANUAL.md for that.
 - The user changed the model in Studio Pro and asks for a check: read guides/CHECK.txt and follow it (/kontrol).
 - Short commands, run from this folder: {py} mx.py help
 - Full manual (commands, operations, outputs, errors): guides/MANUAL.md. Read it when you are unsure.
@@ -126,7 +127,7 @@ CHANGING OR CHECKING THE MODEL
 
 AGENT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent")
 # mx.py commands an agent may run without asking: lookups, dry runs and the export's own history. apply/undo always ask.
-SAFE_MX_COMMANDS = ("help", "refresh", "find", "usages", "unused", "steps", "widgets", "widgettype", "mapping-test", "contract", "security", "texts", "ops", "api", "dryrun", "rerun", "gap", "check", "ok",
+SAFE_MX_COMMANDS = ("help", "refresh", "find", "usages", "unused", "steps", "widgets", "widgettype", "mapping-test", "contract", "security", "screens", "texts", "ops", "api", "dryrun", "rerun", "gap", "check", "ok",
                     "selftest", "mergecheck", "mergefix", "clean")
 # Tools of the mxlocal MCP server (mxlocal/serve.js) that may run without asking: none of them writes the model.
 MCP_TOOLS = ("find", "usages", "unused", "steps", "widgets", "widgettype", "mapping_test", "texts", "ops", "api", "plan", "dryrun", "check", "gap", "mergecheck",
@@ -340,6 +341,13 @@ class Exporter:
             self._write(".opencode/skill/mendix-ui-design/SKILL.md", design)
             self._write(".claude/skills/mendix-ui-design/SKILL.md", design)
             self._write("guides/UI_RECIPES.md", self._agent_template("UI_RECIPES.md"))
+            # the screen catalog: the router and one file per category, as guides and as skills (front matter on top)
+            for f in sorted(os.listdir(os.path.join(AGENT_DIR, "screens"))):
+                text = self._agent_template("screens", f)
+                self._write("guides/screens/" + f, text)
+                skill = "mendix-screens" if f == "INDEX.md" else "mendix-screens-" + f[:-3]
+                self._write(".opencode/skill/%s/SKILL.md" % skill, text)
+                self._write(".claude/skills/%s/SKILL.md" % skill, text)
         os.makedirs(os.path.join(self.out, "edits"), exist_ok=True)
 
         flags = [flag for flag, on in (("--include-marketplace", self.args.include_marketplace),

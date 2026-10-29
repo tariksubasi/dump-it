@@ -39,6 +39,8 @@ function tools(allowApply) {
             inputSchema: { type: "object", properties: { page: str("qualified name, e.g. Sales.Customer_Edit") }, required: ["page"] } },
         { name: "mapping_test", description: "What a sample JSON would make with an import mapping: objects (create / find by keys / custom / parameter), attribute values, type problems, sample keys the mapping ignores. A static simulation, read-only.",
             inputSchema: { type: "object", properties: { mapping: str("import mapping, e.g. Sales.IMM_Order"), json: str("the sample JSON text") }, required: ["mapping", "json"] } },
+        { name: "screens", description: "The screen template catalog (no project needed): no argument = categories with keywords; a category = its templates with thumbnails to show the user; a template id = phone/desktop sketches, slots and an example createScreen.",
+            inputSchema: { type: "object", properties: { name: str("optional category (e.g. time) or template id (e.g. time.clock.big)") } } },
         { name: "security", description: "Security overview, read-only: level, administrator, guest access, demo users, user roles with their module roles, and issues: entities without access rules, pages/flows used from the client that no module role may use, module roles no user role has, guest = administrator.",
             inputSchema: { type: "object", properties: { module: str("optional own module to check, e.g. Sales") } } },
         { name: "contract", description: "An API contract file, read-only: OpenAPI 2/3 (JSON or YAML) -> its operations and a createConsumedRestService plan; WSDL -> its operations, SOAPActions and XML schemas; OData $metadata -> entity sets, keys, actions and a JSON structure / import mapping plan. Dry run the plan like any change.",
@@ -183,6 +185,11 @@ class Server {
                     } finally {
                         this.settle(client);
                     }
+                    break;
+                }
+                case "screens": {
+                    const reg = require("./screens");
+                    lines.push(a.name ? reg.categoryText(String(a.name)) || reg.templateText(String(a.name)) || `no category or template '${a.name}'` : reg.catalog());
                     break;
                 }
                 case "security": {

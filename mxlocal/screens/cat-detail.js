@@ -48,7 +48,7 @@ const forms = [
     { id: "form.help", name: "Form with help panel", desc: "the form left (8/12) and a help card right (4/12) that explains the fields", keywords: ["help", "guidance", "explain"],
         slots: { ...SLOTS, help: { kind: "text", default: "Fill in the fields marked with * and press Save.", desc: "the help text" } },
         build: c => ({ title: `Edit ${c.short(c.s.entity).toLowerCase()}`, entity: c.s.entity, widgets: [c.kit.h(`Edit ${c.short(c.s.entity).toLowerCase()}`, 2),
-            c.kit.cols([[8, c.card([P.form(c)]), 12], [4, c.card([c.kit.h("Help", 4), c.kit.muted(c.s.help)], { class: "background-secondary" }), 12]])] }) },
+            c.kit.cols([[8, c.card([P.form(c)]), 12], [4, c.kit.tile([c.kit.h("Help", 4), c.kit.muted(c.s.help)]), 12]])] }) },
     { id: "form.steps", name: "Form in numbered steps", desc: "the fields grouped as 1, 2, 3 on one page (step boxes), Save at the end", keywords: ["wizard", "steps", "adım"],
         build: c => {
             const groups = [0, 1, 2].map(i => c.s.fields.filter((f, k) => k % 3 === i)).filter(g => g.length);

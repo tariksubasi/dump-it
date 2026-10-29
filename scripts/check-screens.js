@@ -27,6 +27,8 @@ for (const t of reg.byId.values()) {
         if (!lines.length) problems.push(`${t.id}: empty sketch`);
         for (const k of ["id", "name", "desc", "build"]) if (!t[k]) problems.push(`${t.id}: no ${k}`);
         if (!t.example) problems.push(`${t.id}: no example slots`);
+        // the design rules (UX CHECK) hold for every template
+        for (const f of require(path.join(ROOT, "mxlocal", "uxcheck")).uxLint({ ops: [{ op: "createPage", module: "M", name: t.id, widgets: reg.widgetsOf(t) }] })) problems.push(`${t.id}: UX CHECK ${f}`);
     } catch (e) {
         problems.push(`${t.id}: does not build: ${e.message}`);
     }

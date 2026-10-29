@@ -70,6 +70,13 @@ export const mapping_test = {
     execute: (args, context) => mx(context, ["mapping-test", args.mapping, args.file])
 };
 
+export const screens = {
+    description: "The screen template catalog: \"\" = categories; a category (e.g. time) = its templates with " +
+        "thumbnails to show the user; a template id = full sketches, slots and an example createScreen.",
+    args: { name: text("category, template id, or \"\" for the categories") },
+    execute: (args, context) => mx(context, ["screens", ...(args.name ? [args.name] : [])])
+};
+
 export const security = {
     description: "Security overview, read-only: level, administrator, guest, demo users, user roles and issues " +
         "(entities without access rules, used pages/flows no role may use, module roles nobody has).",

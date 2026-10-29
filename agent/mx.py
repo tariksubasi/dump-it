@@ -18,6 +18,9 @@ Copied into the export folder by mxcontext.py with CONFIG filled in, so the agen
     python mx.py mapping-test <Module.ImportMapping> <sample.json>
                                       what a sample JSON would make with an import mapping (objects, values, find or
                                       create, type problems); static, read-only; the file may be in edits/
+    python mx.py screens [category|template]
+                                      the screen template catalog: categories; a category's templates with sketches;
+                                      one template with phone/desktop sketches, slots and an example createScreen
     python mx.py security [Module]    security overview: level, administrator, guest, demo users, user roles, and
                                       issues (entities without access rules, used pages/flows no role may use)
     python mx.py contract <file> [Module]
@@ -72,7 +75,7 @@ for stream in (sys.stdout, sys.stderr):
     except (AttributeError, ValueError):
         pass
 EDITS = os.path.join(HERE, "edits")
-COMMANDS = ("refresh", "find", "usages", "unused", "steps", "widgets", "preview", "widgettype", "mapping-test", "contract", "security", "texts", "ops", "api", "dryrun", "rerun", "gap", "apply", "undo", "undoplan", "check", "ok",
+COMMANDS = ("refresh", "find", "usages", "unused", "steps", "widgets", "preview", "widgettype", "mapping-test", "contract", "security", "screens", "texts", "ops", "api", "dryrun", "rerun", "gap", "apply", "undo", "undoplan", "check", "ok",
             "selftest", "mergecheck", "mergefix", "clean")
 last_output = ""
 
@@ -296,6 +299,8 @@ def main(argv):
             say("Usage: python mx.py mapping-test <Module.ImportMapping> <sample.json> (the file may be in edits/)")
             return 1
         return mxlocal("mapping-test", rest[0], "--json", change_file(rest[1]))
+    if cmd == "screens":
+        return mxlocal("screens", *rest[:1], project=False)
     if cmd == "security":
         return mxlocal("security", *rest[:1])
     if cmd == "contract":

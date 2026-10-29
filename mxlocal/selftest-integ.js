@@ -703,4 +703,46 @@ function settingsProblems(project, T, version) {
     return r;
 }
 
-module.exports = { runPhase, restPlan, restProblems, workflowPlan, workflowProblems, odataPlan, odataProblems, changePlan, changeProblems, settingsPlan, settingsProblems, unitsNamed, walk };
+// ---------------------------------------------------------------- screen templates (createScreen)
+
+// Templates that need no Marketplace widget, on an entity of their own: clock in/out (two microflows), master-detail,
+// a two-column form, request approval (status microflows), a task inbox (toggle microflow), big stats (a KPI
+// entity + microflow), a state screen and a home page with tiles.
+function screensPlan(mod, T) {
+    const E = `${mod}.${T}`;
+    const sc = (name, template, slots = {}) => ({ op: "createScreen", module: mod, name: `${T}_Scr${name}`, template, slots, folder: "ZzScreens" });
+    return { ops: [
+        { op: "createEnumeration", module: mod, name: `${T}ScrStatus`, values: ["Draft", "Submitted", "Approved", "Rejected"], folder: "ZzScreens" },
+        { op: "createEntity", module: mod, name: `${T}ScrEntry`, attributes: [{ name: "Title", type: "String(100)" }, { name: "StartAt", type: "DateTime" }, { name: "EndAt", type: "DateTime" },
+            { name: "Amount", type: "Decimal" }, { name: "Done", type: "Boolean" }, { name: "Status", type: `Enum(${E}ScrStatus)` }] },
+        sc("Clock", "time.clock.big", { entity: `${E}ScrEntry` }),
+        sc("Master", "list.masterDetail", { entity: `${E}ScrEntry` }),
+        sc("Form", "form.twoColumns", { entity: `${E}ScrEntry` }),
+        sc("Approve", "request.approve", { entity: `${E}ScrEntry` }),
+        sc("Inbox", "task.inbox", { entity: `${E}ScrEntry` }),
+        sc("Stats", "dash.statsOnly", { entity: `${E}ScrEntry` }),
+        sc("Empty", "state.empty"),
+        sc("Home", "home.tiles", { p1: `${E}_ScrClock` })
+    ], reject: [
+        { op: { op: "createScreen", module: mod, name: `${T}_ScrBad`, template: "time.clock.bigg", slots: { entity: `${E}ScrEntry` } }, expect: /no template 'time\.clock\.bigg'.*Did you mean: time\.clock\.big/ },
+        { op: { op: "createScreen", module: mod, name: `${T}_ScrBad2`, template: "time.clock.big", slots: { entity: `${E}ScrEntry`, start: "Title" } }, expect: /Title is String; this slot takes DateTime/ }
+    ] };
+}
+
+function screensProblems(project, T) {
+    const r = [];
+    const u = unitsNamed(project, `${T}_Scr`);
+    for (const n of ["Clock", "Master", "Form", "Approve", "Inbox", "Stats", "Empty", "Home", "Clock_ClockIn", "Clock_ClockOut", "Approve_Approve", "Approve_Reject", "Inbox_Toggle", "Stats_Kpis"]) if (!u[`${T}_Scr${n}`]) r.push(`${T}_Scr${n} missing`);
+    const clockOut = u[`${T}_ScrClock_ClockOut`];
+    const sets = [];
+    walk(clockOut || {}, o => o.$Type === "Microflows$ChangeActionItem" && sets.push(o.Attribute));
+    if (!sets.some(a => /EndAt$/.test(a))) r.push(`clock out does not set EndAt (${sets})`);
+    const appr = u[`${T}_ScrApprove_Approve`];
+    let v = null;
+    walk(appr || {}, o => o.$Type === "Microflows$ChangeActionItem" && (v = o.Value));
+    if (!/ScrStatus\.Approved$/.test(v || "")) r.push(`approve sets ${v}`);
+    if (!unitsNamed(project, `${T}ScrEntry_Edit`)[`${T}ScrEntry_Edit`]) r.push("the edit page the master-detail opens was not made");
+    return r;
+}
+
+module.exports = { screensPlan, screensProblems, runPhase, restPlan, restProblems, workflowPlan, workflowProblems, odataPlan, odataProblems, changePlan, changeProblems, settingsPlan, settingsProblems, unitsNamed, walk };

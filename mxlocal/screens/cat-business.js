@@ -53,7 +53,7 @@ const tasks = [
         build: c => {
             const vals = c.enumValues(c.s.priority).slice(0, 4);
             return { title: "Board", widgets: [header(c, "Board", null, [P.newAction(c, "New task")]),
-                c.kit.cols(vals.map(v => [Math.floor(12 / vals.length), c.card([c.kit.h(P.label(v), 4), { widget: "listView", entity: c.s.entity, xpath: `[${c.s.priority} = '${v}'][${c.s.done} = false()]`, pageSize: 10, widgets: [c.card(P.titleOf(c), { class: "background-secondary" })] }]), 6, 12]))] };
+                c.kit.cols(vals.map(v => [Math.floor(12 / vals.length), c.card([c.kit.h(P.label(v), 4), { widget: "listView", entity: c.s.entity, xpath: `[${c.s.priority} = '${v}'][${c.s.done} = false()]`, pageSize: 10, widgets: [c.kit.tile(P.titleOf(c))] }]), 6, 12]))] };
         } },
     { id: "task.today", name: "Due soon", desc: "tasks due in the next 7 days, sorted by date", keywords: ["due", "deadline", "today", "upcoming"],
         build: c => ({ title: "Due soon", widgets: [header(c, "Due soon", "The next 7 days"),
@@ -74,7 +74,7 @@ const crm = [
         build: c => {
             const vals = c.enumValues(c.s.stage).slice(0, 4);
             return { title: "Pipeline", widgets: [header(c, "Pipeline", null, [P.newAction(c, "New deal")]),
-                c.kit.cols(vals.map(v => [Math.floor(12 / vals.length), c.card([c.kit.h(P.label(v), 4), { widget: "listView", entity: c.s.entity, xpath: `[${c.s.stage} = '${v}']`, pageSize: 10, onClick: P.open(c), widgets: [c.card([...P.titleOf(c), ...P.meta(c)], { class: "background-secondary" })] }]), 6, 12]))] };
+                c.kit.cols(vals.map(v => [Math.floor(12 / vals.length), c.card([c.kit.h(P.label(v), 4), { widget: "listView", entity: c.s.entity, xpath: `[${c.s.stage} = '${v}']`, pageSize: 10, onClick: P.open(c), widgets: [c.kit.tile([...P.titleOf(c), ...P.meta(c)])] }]), 6, 12]))] };
         } },
     { id: "crm.deals", name: "Deals with stage tabs", desc: "deals in tabs per stage, each a table", keywords: ["deals", "opportunities", "tabs"], slots: OPP, example: OPP_EX,
         build: c => ({ title: "Deals", widgets: [header(c, "Deals", null, [P.newAction(c, "New deal")]), { widget: "tabContainer", tabs: c.enumValues(c.s.stage).slice(0, 5).map(v => ({ caption: P.label(v), widgets: [P.table(c, { xpath: `[${c.s.stage} = '${v}']`, statusFilter: false })] })) }] }) }

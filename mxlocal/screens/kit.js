@@ -56,6 +56,8 @@ const badge = attr => ({ widget: "badge", text: `{${attr}}`, type: "label" });
 // a card: a raised surface (Atlas background-default + soft shadow + inner spacing), or the company kit's card class
 const CARD = "background-default shadow-small spacing-inner-medium spacing-outer-bottom-medium";
 const card = (widgets, extra = {}) => ({ widget: "container", class: cls(extra.kitClass || CARD, extra.class), widgets });
+// a tile: an item inside a card (one surface level down, no shadow): board columns, nested items
+const tile = (widgets, extra = {}) => ({ widget: "container", class: cls("background-secondary spacing-inner-medium spacing-outer-bottom-medium", extra.class), widgets });
 // a section: one surface level below the page
 const section = (widgets, extra = {}) => ({ widget: "container", renderMode: "section", class: cls("background-secondary spacing-inner-medium", extra.class), widgets });
 
@@ -99,4 +101,4 @@ function emptyState(title, body, action, kitClass) {
     return card([h(title, 3), muted(body), ...(action ? [button({ ...action, style: "Primary" })] : [])], { kitClass, class: "text-center spacing-inner-large" });
 }
 
-module.exports = { cls, gap, text, h, muted, value, input, button, responsiveButton, badge, card, section, cols, grid, header, fieldPairs, stat, emptyState, omit };
+module.exports = { cls, gap, text, h, muted, value, input, button, responsiveButton, badge, card, tile, section, cols, grid, header, fieldPairs, stat, emptyState, omit };

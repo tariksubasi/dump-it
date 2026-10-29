@@ -169,4 +169,10 @@ function sideBySideSketch(widgets, title) {
     return sideBySide([{ w: 32, lines: ["PHONE", ...s.phone] }, { w: 64, lines: ["DESKTOP", ...s.desktop] }]).map(l => l.trimEnd());
 }
 
-module.exports = { sketch, sideBySideSketch, render };
+// a small desktop thumbnail (for choosing): narrow, at most maxLines lines
+function thumbnail(widgets, title, width = 46, maxLines = 12) {
+    const lines = box(kids2(widgets, width - 2, "desktop"), width, title);
+    return lines.length <= maxLines ? lines : [...lines.slice(0, maxLines - 2), BOX.v + fit(" …", width - 2) + BOX.v, lines[lines.length - 1]];
+}
+
+module.exports = { sketch, sideBySideSketch, thumbnail, render };
