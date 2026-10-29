@@ -1,11 +1,7 @@
----
-name: mendix-ui-kit
-description: Enterprise UI recipes for Mendix pages (web and native) - page header, cards, KPI tiles, forms, lists, master-detail, tabs, dashboard, sign-in, time clock, empty state, status badge, row menu. Each recipe has a phone and desktop sketch, the Mendix widget for every part, the rules, and a JSON change that works. Use it whenever the user asks for a page, a screen, a form, a list or a nicer design.
----
+# UI recipes: whole enterprise pages for Mendix, ready to copy
 
-# UI kit: enterprise pages for Mendix, step by step
-
-Read this file before you make or change a page. Do not read guides/MANUAL.md for page design.
+Optional. The principles and atoms are in guides/UI_DESIGN.md (read that first). Open this file only when the user
+wants one of these screens and you want to copy it whole. Do not read guides/MANUAL.md for page design.
 
 ## How to use this file (5 steps)
 
