@@ -12,7 +12,11 @@
 // offset or order per device, no tooltip on inputs and no aria label on buttons: those are refused with what to use.
 const sdk = require("mendixmodelsdk");
 const { fail, bool, enumValue, suggest } = require("./ops-util");
-const GLYPHS = require("./glyphicons.json"); // Bootstrap 3 glyphicon name -> code, as Studio Pro's icon picker
+const GLYPHS = require("./glyphicons.json");
+// Atlas icon names -> the Bootstrap glyph of the same meaning (projects without the Atlas icon collection)
+const MX_TO_GLYPH = { add: "plus", "add-circle": "plus-sign", pencil: "pencil", "trash-can": "trash", "play-circle": "play-circle", "controls-stop": "stop", "controls-pause": "pause",
+    checkmark: "ok", "checkmark-circle": "ok-sign", "time-clock": "time", stopwatch: "time", hourglass: "hourglass", home: "home", search: "search", user: "user", calendar: "calendar",
+    logout: "log-out", "floppy-disk-checkmark": "floppy-disk", "notes-paper-edit": "edit", "synchronize-arrow-clock": "refresh", "cog-play": "cog" }; // Bootstrap 3 glyphicon name -> code, as Studio Pro's icon picker
 
 const { pages, customwidgets: cw, images, customicons } = sdk;
 
@@ -172,6 +176,14 @@ function makeUi(h, getI) {
             for (const c of order) {
                 const icon = c.icons.find(x => x.name === m[2].toLowerCase());
                 if (icon) return fromCollection(c, icon);
+            }
+        }
+        // no Atlas icon collection (older Atlas): an Atlas icon name falls back to the glyph of the same meaning
+        if (m && !colls.length) {
+            const g = MX_TO_GLYPH[m[2].toLowerCase()] || (GLYPHS[m[2].toLowerCase()] ? m[2].toLowerCase() : null);
+            if (g && GLYPHS[g]) {
+                if (h.client) h.client.warn(`${where}: this project has no Atlas icon collection; icon '${s}' is shown as glyphicon-${g}`);
+                return glyph(GLYPHS[g]);
             }
         }
         const names = [...new Set([...colls.flatMap(c => c.icons.map(x => "mx-icon-" + x.name)), ...Object.keys(GLYPHS).map(k => "glyphicon-" + k)])];
