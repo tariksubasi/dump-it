@@ -1,0 +1,30 @@
+name: research-native-back
+# One-off: find how the Mendix 10.24 native client handles the Android back button and navigation.
+on:
+  push:
+    branches: [research/native-back]
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: MxBuild
+        run: bash scripts/get-mxbuild.sh 10.24.13 "$HOME/mxb" | tail -1
+      - name: Scan
+        run: |
+          R="$HOME/mxb"
+          echo "== files mentioning hardwareBackPress"
+          grep -rl --include=*.js "hardwareBackPress" "$R" | head -40 || true
+          echo "== navigation packages bundled"
+          find "$R" -type d -path "*node_modules/@react-navigation/*" -maxdepth 12 | head -40 || true
+          find "$R" -name package.json -path "*react-navigation*" -maxdepth 14 -exec grep -H '"version"' {} \; | head -40 || true
+          for f in $(grep -rl --include=*.js "hardwareBackPress" "$R" | grep -v "/node_modules/react-native/" | head -8); do
+            echo "=================== $f"
+            grep -o ".\{600\}hardwareBackPress.\{900\}" "$f" | head -6
+          done
+          echo "== close page / goBack snippets"
+          for f in $(grep -rlE --include=*.js "closePage|goBack\(" "$R" | grep -iv "node_modules/react-native/\|test" | head -6); do
+            echo "=================== $f"
+            grep -oE ".{300}(BackHandler|canGoBack).{500}" "$f" | head -6
+          done
