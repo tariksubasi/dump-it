@@ -22,6 +22,10 @@
                     <caption>iOS swipe back</caption>
                     <description>Allow the edge swipe on iOS to go to the previous page.</description>
                 </property>
+                <property key="debugMode" type="boolean" defaultValue="false">
+                    <caption>Diagnostic mode</caption>
+                    <description>Show what the widget sees on every back press (Android toast + console). Turn off before release.</description>
+                </property>
                 <property key="debounceMs" type="integer" defaultValue="400">
                     <caption>Repeat guard (ms)</caption>
                     <description>Ignore a second back press inside this time. Stops double page closes.</description>

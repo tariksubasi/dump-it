@@ -14,6 +14,7 @@ export interface BackNavigationProps<Style> {
     enabled: DynamicValue<boolean>;
     onBack?: ActionValue;
     iosSwipeBack: boolean;
+    debugMode: boolean;
     debounceMs: number;
     rootBehavior: RootBehaviorEnum;
     onRootBack?: ActionValue;
@@ -39,6 +40,7 @@ export interface BackNavigationPreviewProps {
     enabled: string;
     onBack: {} | null;
     iosSwipeBack: boolean;
+    debugMode: boolean;
     debounceMs: number | null;
     rootBehavior: RootBehaviorEnum;
     onRootBack: {} | null;

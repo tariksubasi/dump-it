@@ -16,6 +16,36 @@ function textOf(value: DynamicValue<string> | undefined, fallback: string): stri
     return value?.status === ValueStatus.Available && value.value ? value.value : fallback;
 }
 
+type NavLike = {
+    getState?: () => { type?: string; index?: number; routes?: Array<{ name?: string }> } | undefined;
+    getParent?: () => NavLike | undefined;
+    canGoBack?: () => boolean;
+};
+
+// One line per navigator, from the page up to the root: type, index/count, route names.
+function describeNavigation(nav: NavLike | undefined): string {
+    if (!nav) {
+        return "NO NAVIGATION CONTEXT";
+    }
+    const parts: string[] = [];
+    let cur: NavLike | undefined = nav;
+    for (let depth = 0; cur && depth < 6; depth++) {
+        try {
+            const st = cur.getState?.();
+            const names = (st?.routes ?? []).map(r => r.name ?? "?").join(",");
+            parts.push(
+                `${st?.type ?? "?"}[${st?.index ?? "?"}/${st?.routes?.length ?? 0}] back=${
+                    cur.canGoBack?.() ?? "?"
+                } (${names})`
+            );
+        } catch (e) {
+            parts.push(`error: ${String(e)}`);
+        }
+        cur = cur.getParent?.();
+    }
+    return parts.join("\n");
+}
+
 function runAction(action: ActionValue | undefined): boolean {
     if (action?.canExecute && !action.isExecuting) {
         action.execute();
@@ -115,6 +145,13 @@ export function BackNavigation(props: BackNavigationProps<undefined>): ReactElem
                     lastExitHintAt: lastExitHintAt.current,
                     exitWindowMs: EXIT_WINDOW_MS
                 });
+                if (p.debugMode) {
+                    const info = `BackNavigation\nfocused=${
+                        nav ? nav.isFocused() : "-"
+                    } decision=${decision}\n${describeNavigation(nav as unknown as NavLike)}`;
+                    console.info(info);
+                    ToastAndroid.show(info, ToastAndroid.LONG);
+                }
                 if (decision === "pass") {
                     return false;
                 }
@@ -159,6 +196,12 @@ export function BackNavigation(props: BackNavigationProps<undefined>): ReactElem
             subscription?.remove();
             // Re-adding on focus puts this page's handler on top of the stack.
             subscription = BackHandler.addEventListener("hardwareBackPress", onHardwareBack);
+            if (propsRef.current.debugMode) {
+                ToastAndroid.show(
+                    `BackNavigation active\n${describeNavigation(navRef.current as unknown as NavLike)}`,
+                    ToastAndroid.SHORT
+                );
+            }
         };
         const unsubscribe = (): void => {
             subscription?.remove();
