@@ -1,0 +1,57 @@
+import { BackState, decide, swipeAllowed } from "../backLogic";
+
+const base: BackState = {
+    enabled: true,
+    focused: true,
+    canGoBack: true,
+    hasCustomAction: false,
+    customActionBusy: false,
+    rootBehavior: "system",
+    hasRootAction: false,
+    rootActionBusy: false,
+    now: 10_000,
+    lastPressAt: 0,
+    debounceMs: 400,
+    lastExitHintAt: 0,
+    exitWindowMs: 2000
+};
+
+describe("decide", () => {
+    it("goes back when there is a previous page", () => expect(decide(base)).toBe("goBack"));
+    it("passes when disabled", () => expect(decide({ ...base, enabled: false })).toBe("pass"));
+    it("passes when the page is not focused", () => expect(decide({ ...base, focused: false })).toBe("pass"));
+    it("swallows a fast double press", () => expect(decide({ ...base, lastPressAt: 9_800 })).toBe("swallow"));
+    it("allows a press after the guard", () => expect(decide({ ...base, lastPressAt: 9_500 })).toBe("goBack"));
+    it("negative guard acts as zero", () =>
+        expect(decide({ ...base, lastPressAt: 9_999, debounceMs: -5 })).toBe("goBack"));
+    it("runs the custom action", () => expect(decide({ ...base, hasCustomAction: true })).toBe("customAction"));
+    it("swallows while the custom action runs", () =>
+        expect(decide({ ...base, hasCustomAction: true, customActionBusy: true })).toBe("swallow"));
+    it("root + system passes to the OS", () => expect(decide({ ...base, canGoBack: false })).toBe("pass"));
+    it("root + block swallows", () =>
+        expect(decide({ ...base, canGoBack: false, rootBehavior: "block" })).toBe("swallow"));
+    it("root + action without action passes", () =>
+        expect(decide({ ...base, canGoBack: false, rootBehavior: "action" })).toBe("pass"));
+    it("root + action runs it", () =>
+        expect(decide({ ...base, canGoBack: false, rootBehavior: "action", hasRootAction: true })).toBe("rootAction"));
+    it("root + double press: first shows hint", () =>
+        expect(decide({ ...base, canGoBack: false, rootBehavior: "doublePress" })).toBe("exitHint"));
+    it("root + double press: second exits", () =>
+        expect(decide({ ...base, canGoBack: false, rootBehavior: "doublePress", lastExitHintAt: 9_000 })).toBe(
+            "exitApp"
+        ));
+    it("root + double press: late second shows hint again", () =>
+        expect(decide({ ...base, canGoBack: false, rootBehavior: "doublePress", lastExitHintAt: 7_000 })).toBe(
+            "exitHint"
+        ));
+});
+
+describe("swipeAllowed", () => {
+    const on = { iosSwipeBack: true, enabled: true, hasCustomAction: false, confirmActive: false };
+    it("on by default", () => expect(swipeAllowed(on)).toBe(true));
+    it("off when the property is off", () => expect(swipeAllowed({ ...on, iosSwipeBack: false })).toBe(false));
+    it("off with a custom action", () => expect(swipeAllowed({ ...on, hasCustomAction: true })).toBe(false));
+    it("off while confirm is active", () => expect(swipeAllowed({ ...on, confirmActive: true })).toBe(false));
+    it("widget disabled keeps app default", () =>
+        expect(swipeAllowed({ ...on, enabled: false, iosSwipeBack: false })).toBe(true));
+});

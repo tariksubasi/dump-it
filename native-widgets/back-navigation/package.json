@@ -1,0 +1,23 @@
+{
+  "name": "back-navigation",
+  "widgetName": "BackNavigation",
+  "version": "1.0.0",
+  "description": "Android hardware back and iOS swipe back for Mendix native pages",
+  "license": "Apache-2.0",
+  "packagePath": "dumpit",
+  "config": {
+    "projectPath": "../../tests/testProject",
+    "mendixHost": "http://localhost:8080",
+    "developmentPort": 3000
+  },
+  "scripts": {
+    "build": "pluggable-widgets-tools build:native",
+    "release": "pluggable-widgets-tools release:native",
+    "lint": "pluggable-widgets-tools lint",
+    "test": "pluggable-widgets-tools test:unit:native"
+  },
+  "devDependencies": {
+    "@mendix/pluggable-widgets-tools": "10.24.1",
+    "@react-navigation/native": "^6.1.18"
+  }
+}

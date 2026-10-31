@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<widget id="dumpit.backnavigation.BackNavigation" pluginWidget="true" needsEntityContext="false" offlineCapable="true"
+        supportedPlatform="Native"
+        xmlns="http://www.mendix.com/widget/1.0/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.mendix.com/widget/1.0/ ../node_modules/mendix/custom_widget.xsd">
+    <name>Back navigation</name>
+    <description>Android hardware back and iOS swipe back. Goes to the previous page; at the first page it keeps the normal system behavior.</description>
+    <studioProCategory>Navigation</studioProCategory>
+    <helpUrl>https://github.com/tariksubasi/dump-it/tree/feature/local-sdk/native-widgets/back-navigation</helpUrl>
+    <properties>
+        <propertyGroup caption="General">
+            <propertyGroup caption="Behavior">
+                <property key="enabled" type="expression" defaultValue="true">
+                    <caption>Enabled</caption>
+                    <description>False: the widget does nothing and the normal back behavior runs.</description>
+                    <returnType type="Boolean" />
+                </property>
+                <property key="onBack" type="action" required="false">
+                    <caption>Custom back action</caption>
+                    <description>Optional. Runs instead of "go to the previous page". Use it to save or to close the page yourself. iOS swipe is off while this is set, so the swipe cannot skip your action.</description>
+                </property>
+                <property key="iosSwipeBack" type="boolean" defaultValue="true">
+                    <caption>iOS swipe back</caption>
+                    <description>Allow the edge swipe on iOS to go to the previous page.</description>
+                </property>
+                <property key="debounceMs" type="integer" defaultValue="400">
+                    <caption>Repeat guard (ms)</caption>
+                    <description>Ignore a second back press inside this time. Stops double page closes.</description>
+                </property>
+            </propertyGroup>
+            <propertyGroup caption="First page (no previous page)">
+                <property key="rootBehavior" type="enumeration" defaultValue="system">
+                    <caption>On the first page</caption>
+                    <description>What Android back does when there is no previous page.</description>
+                    <enumerationValues>
+                        <enumerationValue key="system">Normal system behavior (close app)</enumerationValue>
+                        <enumerationValue key="doublePress">Press back twice to close app</enumerationValue>
+                        <enumerationValue key="block">Do nothing</enumerationValue>
+                        <enumerationValue key="action">Run an action</enumerationValue>
+                    </enumerationValues>
+                </property>
+                <property key="onRootBack" type="action" required="false">
+                    <caption>First page action</caption>
+                    <description>Used when "On the first page" is "Run an action".</description>
+                </property>
+                <property key="exitHint" type="textTemplate" required="false">
+                    <caption>Exit hint</caption>
+                    <description>Short message for "Press back twice".</description>
+                    <translations>
+                        <translation lang="en_US">Press back again to exit</translation>
+                        <translation lang="tr_TR">Çıkmak için tekrar geri basın</translation>
+                    </translations>
+                </property>
+            </propertyGroup>
+        </propertyGroup>
+        <propertyGroup caption="Confirm">
+            <propertyGroup caption="Unsaved changes">
+                <property key="confirmWhen" type="expression" defaultValue="false">
+                    <caption>Ask before leaving</caption>
+                    <description>True: ask the user before going back (for example when there are unsaved changes). iOS swipe is off while this is true.</description>
+                    <returnType type="Boolean" />
+                </property>
+                <property key="confirmTitle" type="textTemplate" required="false">
+                    <caption>Title</caption>
+                    <translations>
+                        <translation lang="en_US">Leave this page?</translation>
+                        <translation lang="tr_TR">Sayfadan çıkılsın mı?</translation>
+                    </translations>
+                </property>
+                <property key="confirmMessage" type="textTemplate" required="false">
+                    <caption>Message</caption>
+                    <translations>
+                        <translation lang="en_US">Your changes are not saved.</translation>
+                        <translation lang="tr_TR">Değişiklikleriniz kaydedilmedi.</translation>
+                    </translations>
+                </property>
+                <property key="confirmYes" type="textTemplate" required="false">
+                    <caption>Leave button</caption>
+                    <translations>
+                        <translation lang="en_US">Leave</translation>
+                        <translation lang="tr_TR">Çık</translation>
+                    </translations>
+                </property>
+                <property key="confirmNo" type="textTemplate" required="false">
+                    <caption>Stay button</caption>
+                    <translations>
+                        <translation lang="en_US">Stay</translation>
+                        <translation lang="tr_TR">Kal</translation>
+                    </translations>
+                </property>
+            </propertyGroup>
+        </propertyGroup>
+    </properties>
+</widget>
