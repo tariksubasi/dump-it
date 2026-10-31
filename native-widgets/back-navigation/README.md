@@ -9,7 +9,7 @@ Tested with: Mendix 10.24.x, Native Template 14.x (React Native 0.77), React Nav
 
 ## Install
 
-1. Copy `dist/1.0.0/dumpit.BackNavigation.mpk` to `<your app>/widgets/`.
+1. Copy `dist/1.0.1/dumpit.BackNavigation.mpk` to `<your app>/widgets/`.
 2. In Studio Pro: **App → Synchronize App Directory** (F4).
 3. Drag **Back navigation** (category *Navigation*) onto a native page or onto the native layout.
    Put it on the layout to cover every page with one widget.
@@ -54,5 +54,5 @@ Tested with: Mendix 10.24.x, Native Template 14.x (React Native 0.77), React Nav
 npm install
 npm test      # 20 unit tests for the decision logic
 npm run lint
-npm run release   # → dist/1.0.0/dumpit.BackNavigation.mpk
+npm run release   # → dist/1.0.1/dumpit.BackNavigation.mpk
 ```
