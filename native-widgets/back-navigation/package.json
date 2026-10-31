@@ -12,9 +12,10 @@
   },
   "scripts": {
     "build": "pluggable-widgets-tools build:native",
-    "release": "pluggable-widgets-tools release:native",
+    "release": "npm run validate && pluggable-widgets-tools release:native",
     "lint": "pluggable-widgets-tools lint",
-    "test": "pluggable-widgets-tools test:unit:native"
+    "test": "pluggable-widgets-tools test:unit:native",
+    "validate": "xmllint --noout --schema node_modules/mendix/custom_widget.xsd src/BackNavigation.xml"
   },
   "devDependencies": {
     "@mendix/pluggable-widgets-tools": "10.24.1",

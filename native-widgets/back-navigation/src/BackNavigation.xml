@@ -62,6 +62,7 @@
                 </property>
                 <property key="confirmTitle" type="textTemplate" required="false">
                     <caption>Title</caption>
+                    <description>Dialog title.</description>
                     <translations>
                         <translation lang="en_US">Leave this page?</translation>
                         <translation lang="tr_TR">Sayfadan çıkılsın mı?</translation>
@@ -69,6 +70,7 @@
                 </property>
                 <property key="confirmMessage" type="textTemplate" required="false">
                     <caption>Message</caption>
+                    <description>Dialog message.</description>
                     <translations>
                         <translation lang="en_US">Your changes are not saved.</translation>
                         <translation lang="tr_TR">Değişiklikleriniz kaydedilmedi.</translation>
@@ -76,6 +78,7 @@
                 </property>
                 <property key="confirmYes" type="textTemplate" required="false">
                     <caption>Leave button</caption>
+                    <description>Caption of the button that leaves the page.</description>
                     <translations>
                         <translation lang="en_US">Leave</translation>
                         <translation lang="tr_TR">Çık</translation>
@@ -83,6 +86,7 @@
                 </property>
                 <property key="confirmNo" type="textTemplate" required="false">
                     <caption>Stay button</caption>
+                    <description>Caption of the button that stays on the page.</description>
                     <translations>
                         <translation lang="en_US">Stay</translation>
                         <translation lang="tr_TR">Kal</translation>
