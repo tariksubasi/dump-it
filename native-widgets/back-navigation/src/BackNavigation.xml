@@ -6,7 +6,6 @@
     <name>Back navigation</name>
     <description>Android hardware back and iOS swipe back. Goes to the previous page; at the first page it keeps the normal system behavior.</description>
     <studioProCategory>Navigation</studioProCategory>
-    <helpUrl>https://github.com/tariksubasi/dump-it/tree/feature/local-sdk/native-widgets/back-navigation</helpUrl>
     <properties>
         <propertyGroup caption="General">
             <propertyGroup caption="Behavior">
