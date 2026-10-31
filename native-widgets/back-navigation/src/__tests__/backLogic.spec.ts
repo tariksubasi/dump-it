@@ -1,4 +1,4 @@
-import { BackState, decide, swipeAllowed } from "../backLogic";
+import { BackState, decide, MAX_TAB_HISTORY, previousTab, recordTabVisit, swipeAllowed } from "../backLogic";
 
 const base: BackState = {
     enabled: true,
@@ -27,7 +27,7 @@ describe("decide", () => {
     it("runs the custom action", () => expect(decide({ ...base, hasCustomAction: true })).toBe("customAction"));
     it("swallows while the custom action runs", () =>
         expect(decide({ ...base, hasCustomAction: true, customActionBusy: true })).toBe("swallow"));
-    it("root + system passes to the OS", () => expect(decide({ ...base, canGoBack: false })).toBe("pass"));
+    it("root + system leaves the app", () => expect(decide({ ...base, canGoBack: false })).toBe("exitApp"));
     it("root + block swallows", () =>
         expect(decide({ ...base, canGoBack: false, rootBehavior: "block" })).toBe("swallow"));
     it("root + action without action passes", () =>
@@ -54,4 +54,30 @@ describe("swipeAllowed", () => {
     it("off while confirm is active", () => expect(swipeAllowed({ ...on, confirmActive: true })).toBe(false));
     it("widget disabled keeps app default", () =>
         expect(swipeAllowed({ ...on, enabled: false, iosSwipeBack: false })).toBe(true));
+});
+
+describe("tab history", () => {
+    it("records visits without repeats", () => {
+        let h: string[] = [];
+        for (const t of ["2", "2", "3", "4", "4"]) {
+            h = recordTabVisit(h, t);
+        }
+        expect(h).toEqual(["2", "3", "4"]);
+    });
+    it("keeps at most MAX_TAB_HISTORY entries", () => {
+        let h: string[] = [];
+        for (let i = 0; i < MAX_TAB_HISTORY + 5; i++) {
+            h = recordTabVisit(h, String(i));
+        }
+        expect(h).toHaveLength(MAX_TAB_HISTORY);
+        expect(h[h.length - 1]).toBe(String(MAX_TAB_HISTORY + 4));
+    });
+    it("goes back to the previously visited tab", () =>
+        expect(previousTab(["2", "3", "4"], "4")).toEqual({ tab: "3", history: ["2", "3"] }));
+    it("A → B → A → back goes to B", () =>
+        expect(previousTab(["A", "B", "A"], "A")).toEqual({ tab: "B", history: ["A", "B"] }));
+    it("first tab visited: no previous tab", () => expect(previousTab(["2"], "2")).toBeUndefined());
+    it("empty history: no previous tab", () => expect(previousTab([], "2")).toBeUndefined());
+    it("current not recorded yet: previous is last", () =>
+        expect(previousTab(["2", "3"], "4")).toEqual({ tab: "3", history: ["2", "3"] }));
 });

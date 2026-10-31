@@ -1,7 +1,7 @@
 {
   "name": "back-navigation",
   "widgetName": "BackNavigation",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Android hardware back and iOS swipe back for Mendix native pages",
   "license": "Apache-2.0",
   "packagePath": "dumpit",

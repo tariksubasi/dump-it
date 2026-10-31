@@ -4,7 +4,7 @@ import { NavigationContext } from "@react-navigation/native";
 import { ActionValue, DynamicValue, ValueStatus } from "mendix";
 
 import { BackNavigationProps } from "../typings/BackNavigationProps";
-import { decide, Decision, swipeAllowed } from "./backLogic";
+import { decide, Decision, previousTab, recordTabVisit, swipeAllowed } from "./backLogic";
 
 const EXIT_WINDOW_MS = 2000;
 
@@ -16,34 +16,126 @@ function textOf(value: DynamicValue<string> | undefined, fallback: string): stri
     return value?.status === ValueStatus.Available && value.value ? value.value : fallback;
 }
 
+type NavState = { key?: string; type?: string; index?: number; routes?: Array<{ name?: string }> };
 type NavLike = {
-    getState?: () => { type?: string; index?: number; routes?: Array<{ name?: string }> } | undefined;
+    getState?: () => NavState | undefined;
     getParent?: () => NavLike | undefined;
     canGoBack?: () => boolean;
+    goBack?: () => void;
+    navigate?: (name: string) => void;
 };
 
-// One line per navigator, from the page up to the root: type, index/count, route names.
+const MAX_DEPTH = 8;
+
+function stateOf(nav: NavLike | undefined): NavState | undefined {
+    try {
+        return nav?.getState?.();
+    } catch {
+        return undefined;
+    }
+}
+
+// Mendix: Drawer > BottomTabs > (per tab) Stack [STACK, POPUP] > Popup stack.
+// A page (or the popup it is in) can be closed when one of the stacks above it, up to the tabs, has history.
+function stackHasHistory(nav: NavLike | undefined): boolean {
+    let cur = nav;
+    for (let depth = 0; cur && depth < MAX_DEPTH; depth++) {
+        const st = stateOf(cur);
+        if (st?.type !== "stack") {
+            return false;
+        }
+        if ((st.index ?? 0) > 0) {
+            return true;
+        }
+        cur = cur.getParent?.();
+    }
+    return false;
+}
+
+function findTabNavigator(nav: NavLike | undefined): NavLike | undefined {
+    let cur = nav;
+    for (let depth = 0; cur && depth < MAX_DEPTH; depth++) {
+        if (stateOf(cur)?.type === "tab") {
+            return cur;
+        }
+        cur = cur.getParent?.();
+    }
+    return undefined;
+}
+
+function currentTabName(tabNav: NavLike | undefined): string | undefined {
+    const st = stateOf(tabNav);
+    return st?.routes?.[st.index ?? 0]?.name;
+}
+
+// Bottom bar tab history, shared by all pages (Mendix has one bottom bar).
+let tabHistory: string[] = [];
+let tabHistoryOwner: string | undefined;
+
+function syncTabHistory(tabNav: NavLike | undefined): void {
+    const key = stateOf(tabNav)?.key;
+    if (key !== tabHistoryOwner) {
+        tabHistory = []; // new bottom bar (e.g. after logout and login)
+        tabHistoryOwner = key;
+    }
+}
+
+function recordCurrentTab(nav: NavLike | undefined): void {
+    const tabNav = findTabNavigator(nav);
+    const tab = currentTabName(tabNav);
+    if (tabNav && tab !== undefined) {
+        syncTabHistory(tabNav);
+        tabHistory = recordTabVisit(tabHistory, tab);
+    }
+}
+
+// Close this page, or go to the previously visited tab. False when there is no previous page.
+function goBackOwn(nav: NavLike | undefined): boolean {
+    if (stackHasHistory(nav)) {
+        nav?.goBack?.();
+        return true;
+    }
+    const tabNav = findTabNavigator(nav);
+    const tab = currentTabName(tabNav);
+    if (tabNav && tab !== undefined) {
+        syncTabHistory(tabNav);
+        const prev = previousTab(tabHistory, tab);
+        if (prev) {
+            tabHistory = prev.history;
+            tabNav.navigate?.(prev.tab);
+            return true;
+        }
+    }
+    return false;
+}
+
+function hasOwnHistory(nav: NavLike | undefined): boolean {
+    if (stackHasHistory(nav)) {
+        return true;
+    }
+    const tabNav = findTabNavigator(nav);
+    const tab = currentTabName(tabNav);
+    if (!tabNav || tab === undefined) {
+        return false;
+    }
+    syncTabHistory(tabNav);
+    return previousTab(tabHistory, tab) !== undefined;
+}
+
+// One line per navigator, from the page up to the root, plus the tab history.
 function describeNavigation(nav: NavLike | undefined): string {
     if (!nav) {
         return "NO NAVIGATION CONTEXT";
     }
     const parts: string[] = [];
     let cur: NavLike | undefined = nav;
-    for (let depth = 0; cur && depth < 6; depth++) {
-        try {
-            const st = cur.getState?.();
-            const names = (st?.routes ?? []).map(r => r.name ?? "?").join(",");
-            parts.push(
-                `${st?.type ?? "?"}[${st?.index ?? "?"}/${st?.routes?.length ?? 0}] back=${
-                    cur.canGoBack?.() ?? "?"
-                } (${names})`
-            );
-        } catch (e) {
-            parts.push(`error: ${String(e)}`);
-        }
+    for (let depth = 0; cur && depth < MAX_DEPTH; depth++) {
+        const st = stateOf(cur);
+        const names = (st?.routes ?? []).map(r => r.name ?? "?").join(",");
+        parts.push(`${st?.type ?? "?"} ${st?.index ?? "?"}/${st?.routes?.length ?? 0} (${names})`);
         cur = cur.getParent?.();
     }
-    return parts.join("\n");
+    return `${parts.join(" › ")}\ntabs: ${tabHistory.join(">") || "-"} own=${hasOwnHistory(nav)}`;
 }
 
 function runAction(action: ActionValue | undefined): boolean {
@@ -80,11 +172,9 @@ export function BackNavigation(props: BackNavigationProps<undefined>): ReactElem
             return undefined;
         }
 
+        const nav = (): NavLike | undefined => navRef.current as unknown as NavLike | undefined;
         const goBackOrExit = (): void => {
-            const nav = navRef.current;
-            if (nav?.canGoBack()) {
-                nav.goBack();
-            } else {
+            if (!goBackOwn(nav())) {
                 BackHandler.exitApp();
             }
         };
@@ -103,8 +193,7 @@ export function BackNavigation(props: BackNavigationProps<undefined>): ReactElem
                     }
                     return true;
                 case "goBack":
-                    navRef.current?.goBack();
-                    return true;
+                    return goBackOwn(nav());
                 case "rootAction":
                     if (!runAction(p.onRootBack)) {
                         return false;
@@ -116,7 +205,8 @@ export function BackNavigation(props: BackNavigationProps<undefined>): ReactElem
                     return true;
                 case "exitApp":
                     lastExitHintAt.current = 0;
-                    return false; // let the OS close the app the normal way
+                    BackHandler.exitApp(); // the default Android back of the activity
+                    return true;
                 default:
                     return false;
             }
@@ -133,7 +223,7 @@ export function BackNavigation(props: BackNavigationProps<undefined>): ReactElem
                 const decision = decide({
                     enabled: boolOf(p.enabled, true),
                     focused: nav ? nav.isFocused() : true,
-                    canGoBack: nav ? nav.canGoBack() : false,
+                    canGoBack: hasOwnHistory(nav as unknown as NavLike),
                     hasCustomAction: !!p.onBack,
                     customActionBusy: !!p.onBack?.isExecuting,
                     rootBehavior: p.rootBehavior,
@@ -150,7 +240,7 @@ export function BackNavigation(props: BackNavigationProps<undefined>): ReactElem
                         nav ? nav.isFocused() : "-"
                     } decision=${decision}\n${describeNavigation(nav as unknown as NavLike)}`;
                     console.info(info);
-                    ToastAndroid.show(info, ToastAndroid.LONG);
+                    Alert.alert("BackNavigation (diagnostic)", info);
                 }
                 if (decision === "pass") {
                     return false;
@@ -196,11 +286,9 @@ export function BackNavigation(props: BackNavigationProps<undefined>): ReactElem
             subscription?.remove();
             // Re-adding on focus puts this page's handler on top of the stack.
             subscription = BackHandler.addEventListener("hardwareBackPress", onHardwareBack);
+            recordCurrentTab(nav());
             if (propsRef.current.debugMode) {
-                ToastAndroid.show(
-                    `BackNavigation active\n${describeNavigation(navRef.current as unknown as NavLike)}`,
-                    ToastAndroid.SHORT
-                );
+                ToastAndroid.show(`BackNavigation active\n${describeNavigation(nav())}`, ToastAndroid.LONG);
             }
         };
         const unsubscribe = (): void => {
