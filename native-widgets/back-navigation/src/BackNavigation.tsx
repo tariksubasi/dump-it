@@ -240,7 +240,30 @@ export function BackNavigation(props: BackNavigationProps<undefined>): ReactElem
                         nav ? nav.isFocused() : "-"
                     } decision=${decision}\n${describeNavigation(nav as unknown as NavLike)}`;
                     console.info(info);
-                    Alert.alert("BackNavigation (diagnostic)", info);
+                    // Hold the decision until the dialog is read; otherwise "exitApp" closes it at once.
+                    dialogOpen.current = true;
+                    const close = (): void => {
+                        dialogOpen.current = false;
+                    };
+                    Alert.alert(
+                        "BackNavigation (diagnostic)",
+                        info,
+                        [
+                            { text: "Cancel", style: "cancel", onPress: close },
+                            {
+                                text: "Run",
+                                onPress: () => {
+                                    close();
+                                    lastPressAt.current = 0;
+                                    if (decision !== "pass") {
+                                        perform(decision);
+                                    }
+                                }
+                            }
+                        ],
+                        { cancelable: true, onDismiss: close }
+                    );
+                    return true;
                 }
                 if (decision === "pass") {
                     return false;
