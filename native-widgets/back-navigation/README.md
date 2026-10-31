@@ -5,18 +5,24 @@ Android hardware back + iOS swipe back. Put it on a page. No UI.
 - There is a previous page → go to it.
 - There is no previous page → normal system behavior (or the option you select).
 
-Previous page means:
+Previous page means (Android back):
 
-1. The page stack of the current bottom bar tab (pages opened with *Open page*, pop-ups).
-2. Then the bottom bar tab the user visited before. React Navigation tabs go back to the FIRST tab, so the
-   widget keeps its own tab history. Put the widget on the **layout** so every tab page records its visit.
-3. Then the first-page behavior (default: leave the app like the normal Android back).
+1. Close the open pop-up or the page opened with *Show page* inside the current tab.
+2. **Back between tabs** (property):
+   - *Previous tab, then home tab* (default): Ana Sayfa → Profilim → Menü → back → Profilim → back → Ana Sayfa → back → leave.
+     Each tab is in the history once (A→B→A→B is A, B), so back never loops and ends in at most 5 presses.
+   - *Home tab*: any tab → Ana Sayfa → leave (Android guideline).
+   - *Mendix default*: React Navigation goes to the FIRST tab (Görevlerim), because Mendix sets no backBehavior.
+3. On the home tab: the "On the first page" behavior (normal leave, press twice, block, or an action).
+
+The home tab is the first tab the app shows (the Mendix home page). Put the widget on the bottom bar **layout**
+so every tab visit is recorded.
 
 Built for: Mendix 10.24.x, Native Template 14.x (React Native 0.77), React Navigation 6/7 API.
 
 ## Install
 
-1. Copy `dist/1.0.4/dumpit.BackNavigation.mpk` to `<your app>/widgets/`.
+1. Copy `dist/1.0.5/dumpit.BackNavigation.mpk` to `<your app>/widgets/`.
 2. In Studio Pro: **App → Synchronize App Directory** (F4).
 3. Drag **Back navigation** (category *Navigation*) onto a native page or onto the native layout.
    Put it on the layout to cover every page with one widget.
@@ -51,7 +57,10 @@ Built for: Mendix 10.24.x, Native Template 14.x (React Native 0.77), React Navig
 | Any runtime error | Caught, logged, default behavior runs |
 | Expression still loading | Treated as default (enabled, no confirm) |
 | Pop-up page | `goBack()` closes the pop-up |
-| Bottom tabs | Tab stack first, then the previously visited tab (Ana Sayfa → Profilim → back → Ana Sayfa) |
+| Bottom tabs | Tab stack first, then the previous tab, then the home tab, then leave |
+| Tab visited again (A→B→A→B) | Kept once, back cannot loop |
+| App opened on a non-home tab (deep link, push notification) | History runs out → home tab → leave |
+| A tab has open pages when you leave it | Coming back shows them; back closes them first |
 | A tab page without the widget | Its visit is not recorded; put the widget on the layout |
 | Logout / new bottom bar | Tab history resets |
 | iOS header back button | Not intercepted (Mendix handles it) |
@@ -63,5 +72,5 @@ Built for: Mendix 10.24.x, Native Template 14.x (React Native 0.77), React Navig
 npm install
 npm test      # 20 unit tests for the decision logic
 npm run lint
-npm run release   # → dist/1.0.4/dumpit.BackNavigation.mpk
+npm run release   # → dist/1.0.5/dumpit.BackNavigation.mpk
 ```

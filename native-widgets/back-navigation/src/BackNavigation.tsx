@@ -4,7 +4,7 @@ import { NavigationContext } from "@react-navigation/native";
 import { ActionValue, DynamicValue, ValueStatus } from "mendix";
 
 import { BackNavigationProps } from "../typings/BackNavigationProps";
-import { decide, Decision, previousTab, recordTabVisit, swipeAllowed } from "./backLogic";
+import { decide, Decision, previousTab, recordTabVisit, swipeAllowed, TabBackMode } from "./backLogic";
 
 const EXIT_WINDOW_MS = 2000;
 
@@ -71,12 +71,16 @@ function currentTabName(tabNav: NavLike | undefined): string | undefined {
 // Bottom bar tab history, shared by all pages (Mendix has one bottom bar).
 let tabHistory: string[] = [];
 let tabHistoryOwner: string | undefined;
+// Home tab: the first tab seen after the bottom bar mounts (Mendix opens the home page's tab first).
+let homeTab: string | undefined;
+let tabBackMode: TabBackMode = "history";
 
 function syncTabHistory(tabNav: NavLike | undefined): void {
     const key = stateOf(tabNav)?.key;
     if (key !== tabHistoryOwner) {
         tabHistory = []; // new bottom bar (e.g. after logout and login)
         tabHistoryOwner = key;
+        homeTab = undefined;
     }
 }
 
@@ -85,6 +89,7 @@ function recordCurrentTab(nav: NavLike | undefined): void {
     const tab = currentTabName(tabNav);
     if (tabNav && tab !== undefined) {
         syncTabHistory(tabNav);
+        homeTab ??= tab;
         tabHistory = recordTabVisit(tabHistory, tab);
     }
 }
@@ -99,7 +104,7 @@ function goBackOwn(nav: NavLike | undefined): boolean {
     const tab = currentTabName(tabNav);
     if (tabNav && tab !== undefined) {
         syncTabHistory(tabNav);
-        const prev = previousTab(tabHistory, tab);
+        const prev = previousTab(tabHistory, tab, homeTab, tabBackMode);
         if (prev) {
             tabHistory = prev.history;
             tabNav.navigate?.(prev.tab);
@@ -119,7 +124,7 @@ function hasOwnHistory(nav: NavLike | undefined): boolean {
         return false;
     }
     syncTabHistory(tabNav);
-    return previousTab(tabHistory, tab) !== undefined;
+    return previousTab(tabHistory, tab, homeTab, tabBackMode) !== undefined;
 }
 
 // One line per navigator, from the page up to the root, plus the tab history.
@@ -135,7 +140,9 @@ function describeNavigation(nav: NavLike | undefined): string {
         parts.push(`${st?.type ?? "?"} ${st?.index ?? "?"}/${st?.routes?.length ?? 0} (${names})`);
         cur = cur.getParent?.();
     }
-    return `${parts.join(" › ")}\ntabs: ${tabHistory.join(">") || "-"} own=${hasOwnHistory(nav)}`;
+    return `${parts.join(" › ")}\ntabs: ${tabHistory.join(">") || "-"} home=${
+        homeTab ?? "-"
+    } mode=${tabBackMode} own=${hasOwnHistory(nav)}`;
 }
 
 function runAction(action: ActionValue | undefined): boolean {
@@ -156,6 +163,7 @@ export function BackNavigation(props: BackNavigationProps<undefined>): ReactElem
     useLayoutEffect(() => {
         propsRef.current = props;
         navRef.current = navigation;
+        tabBackMode = props.tabBackMode ?? "history";
     });
 
     const lastPressAt = useRef(0);

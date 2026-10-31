@@ -57,12 +57,12 @@ describe("swipeAllowed", () => {
 });
 
 describe("tab history", () => {
-    it("records visits without repeats", () => {
+    it("records each tab once, most recent last", () => {
         let h: string[] = [];
-        for (const t of ["2", "2", "3", "4", "4"]) {
+        for (const t of ["2", "2", "3", "2", "4"]) {
             h = recordTabVisit(h, t);
         }
-        expect(h).toEqual(["2", "3", "4"]);
+        expect(h).toEqual(["3", "2", "4"]);
     });
     it("keeps at most MAX_TAB_HISTORY entries", () => {
         let h: string[] = [];
@@ -72,12 +72,27 @@ describe("tab history", () => {
         expect(h).toHaveLength(MAX_TAB_HISTORY);
         expect(h[h.length - 1]).toBe(String(MAX_TAB_HISTORY + 4));
     });
-    it("goes back to the previously visited tab", () =>
-        expect(previousTab(["2", "3", "4"], "4")).toEqual({ tab: "3", history: ["2", "3"] }));
-    it("A → B → A → back goes to B", () =>
-        expect(previousTab(["A", "B", "A"], "A")).toEqual({ tab: "B", history: ["A", "B"] }));
-    it("first tab visited: no previous tab", () => expect(previousTab(["2"], "2")).toBeUndefined());
-    it("empty history: no previous tab", () => expect(previousTab([], "2")).toBeUndefined());
-    it("current not recorded yet: previous is last", () =>
-        expect(previousTab(["2", "3"], "4")).toEqual({ tab: "3", history: ["2", "3"] }));
+    it("Ana Sayfa > Profilim > Menü: back goes to Profilim", () =>
+        expect(previousTab(["2", "3", "4"], "4", "2")).toEqual({ tab: "3", history: ["2", "3"] }));
+    it("then Ana Sayfa, then leave the app", () => {
+        expect(previousTab(["2", "3"], "3", "2")).toEqual({ tab: "2", history: ["2"] });
+        expect(previousTab(["2"], "2", "2")).toBeUndefined();
+    });
+    it("A > B > A > B never loops: B, A, then out", () => {
+        let h: string[] = [];
+        for (const t of ["A", "B", "A", "B"]) {
+            h = recordTabVisit(h, t);
+        }
+        const first = previousTab(h, "B", "A");
+        expect(first).toEqual({ tab: "A", history: ["A"] });
+        expect(previousTab(first!.history, "A", "A")).toBeUndefined();
+    });
+    it("history exhausted on a non-home tab goes to home (e.g. app opened from a deep link)", () =>
+        expect(previousTab(["0"], "0", "2")).toEqual({ tab: "2", history: ["2"] }));
+    it("home mode: any tab goes to home, home leaves", () => {
+        expect(previousTab(["2", "3", "4"], "4", "2", "home")).toEqual({ tab: "2", history: ["2"] });
+        expect(previousTab(["2"], "2", "2", "home")).toBeUndefined();
+    });
+    it("none mode never handles tabs", () => expect(previousTab(["2", "3"], "3", "2", "none")).toBeUndefined());
+    it("unknown home and empty history: nothing", () => expect(previousTab([], "2")).toBeUndefined());
 });

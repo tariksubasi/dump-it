@@ -31,6 +31,17 @@
                     <description>Ignore a second back press inside this time. Stops double page closes.</description>
                 </property>
             </propertyGroup>
+            <propertyGroup caption="Bottom bar">
+                <property key="tabBackMode" type="enumeration" defaultValue="history">
+                    <caption>Back between tabs</caption>
+                    <description>Where back goes after the pages of the current tab are closed. Put the widget on the bottom bar layout so every tab visit is seen.</description>
+                    <enumerationValues>
+                        <enumerationValue key="history">Previous tab, then home tab</enumerationValue>
+                        <enumerationValue key="home">Home tab</enumerationValue>
+                        <enumerationValue key="none">Mendix default (first tab)</enumerationValue>
+                    </enumerationValues>
+                </property>
+            </propertyGroup>
             <propertyGroup caption="First page (no previous page)">
                 <property key="rootBehavior" type="enumeration" defaultValue="system">
                     <caption>On the first page</caption>

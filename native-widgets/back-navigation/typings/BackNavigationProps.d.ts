@@ -6,6 +6,8 @@
 import { ActionValue, DynamicValue } from "mendix";
 import { CSSProperties } from "react";
 
+export type TabBackModeEnum = "history" | "home" | "none";
+
 export type RootBehaviorEnum = "system" | "doublePress" | "block" | "action";
 
 export interface BackNavigationProps<Style> {
@@ -16,6 +18,7 @@ export interface BackNavigationProps<Style> {
     iosSwipeBack: boolean;
     debugMode: boolean;
     debounceMs: number;
+    tabBackMode: TabBackModeEnum;
     rootBehavior: RootBehaviorEnum;
     onRootBack?: ActionValue;
     exitHint?: DynamicValue<string>;
@@ -42,6 +45,7 @@ export interface BackNavigationPreviewProps {
     iosSwipeBack: boolean;
     debugMode: boolean;
     debounceMs: number | null;
+    tabBackMode: TabBackModeEnum;
     rootBehavior: RootBehaviorEnum;
     onRootBack: {} | null;
     exitHint: string;
