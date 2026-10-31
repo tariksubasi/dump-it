@@ -15,14 +15,14 @@ jobs:
         run: |
           F="$HOME/mxb/10.24.13/modeler/tools/node/node_modules/mendix/native.js"
           ls -la "$F"
-          for pat in 'const goBack=' 'goBack=(' 'getTopLevelNavigator=' 'bottomBarStackIndex=' 'returnBackToSidebarIfPossible=' 'useBackButton' 'hardwareBackPress' 'BackHandler' 'closePage' 'StackActions' 'CommonActions.reset' '.reset(' 'StackActions.push' 'StackActions.replace' 'createNativeStackNavigator' 'createStackNavigator' 'createBottomTabNavigator' 'NavigationContainer' 'openPage' 'isFirstRouteInParent' 'gestureEnabled' 'exitApp'; do
+          for pat in 'BottomBar.Navigator' 'backBehavior' 'createDrawerNavigator()' 'Drawer.Navigator' 'RootNavigator=' 'useRootNavigator' 'SIDEBAR_DEFAULT",component' 'name:"BOTTOM_BAR"' 'name:"STACK"' 'inRootNavigation'; do
             echo "################ $pat  (count: $(grep -oF -- "$pat" "$F" | wc -l))"
             python3 - "$F" "$pat" <<'PY'
           import sys
           s=open(sys.argv[1],encoding="utf-8",errors="replace").read(); p=sys.argv[2]; i=0; n=0
-          while n<4:
+          while n<3:
               i=s.find(p,i)
               if i<0: break
-              print("---", i); print(s[max(0,i-700):i+1300]); i+=len(p); n+=1
+              print("---", i); print(s[max(0,i-1200):i+2200]); i+=len(p); n+=1
           PY
           done
