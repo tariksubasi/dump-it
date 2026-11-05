@@ -1,5 +1,6 @@
 import { render } from "@testing-library/react-native";
 import { createElement } from "react";
+import { Alert } from "react-native";
 import { ValueStatus } from "mendix";
 
 import { HtmlViewer } from "../HtmlViewer";
@@ -66,5 +67,31 @@ describe("HtmlViewer diagnostic mode is visible in every state", () => {
     it("renders nothing when empty and diagnostic mode is off", () => {
         const r = render(createElement(HtmlViewer, props(value(ValueStatus.Available, ""), { debugMode: false })));
         expect(r.toJSON()).toBeNull();
+    });
+});
+
+describe("HtmlViewer diagnostic dialog", () => {
+    beforeEach(() => jest.useFakeTimers());
+    afterEach(() => jest.useRealTimers());
+
+    it("shows everything in one dialog after 4 s", () => {
+        const alert = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
+        render(createElement(HtmlViewer, props(value(ValueStatus.Unavailable))));
+        expect(alert).not.toHaveBeenCalled();
+        jest.advanceTimersByTime(4000);
+        expect(alert).toHaveBeenCalledTimes(1);
+        const [title, message] = alert.mock.calls[0];
+        expect(title).toMatch(/HtmlViewer 1\.0\.4 diagnostic/);
+        expect(message).toMatch(/no context object/);
+        expect(message).toMatch(/settings height=content/);
+        alert.mockRestore();
+    });
+
+    it("shows no dialog when diagnostic mode is off", () => {
+        const alert = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
+        render(createElement(HtmlViewer, props(value(ValueStatus.Available, "<p>x</p>"), { debugMode: false })));
+        jest.advanceTimersByTime(10000);
+        expect(alert).not.toHaveBeenCalled();
+        alert.mockRestore();
     });
 });

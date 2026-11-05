@@ -33,8 +33,9 @@ import { FrameMessage, HtmlFrame } from "./HtmlFrame";
 import { boxHeight, buildDocument, classifyLink, HeightGuard, isEmptyHtml, makeNonce, SizeMode } from "./htmlDocument";
 import { HtmlViewerStyle, mergeStyles } from "./ui/styles";
 
-const VERSION = "1.0.3"; // shown in diagnostic mode: proves which build the app runs
+const VERSION = "1.0.4"; // shown in diagnostic mode: proves which build the app runs
 const PLACEHOLDER_HEIGHT = 48;
+const DIAG_DELAY_MS = 4000; // wait for load and height first
 const SPINNER_DELAY_MS = 250;
 const READY_TIMEOUT_MS = 8000;
 const LINK_REPEAT_MS = 1000;
@@ -113,6 +114,7 @@ function ErrorView(props: { styles: Styles; text: string; retryText: string; onR
 // ---- crash guard: a render error never breaks the Mendix page ----------------------
 
 interface BoundaryProps {
+    debugMode: boolean;
     styles: Styles;
     text: string;
     retryText: string;
@@ -124,6 +126,10 @@ class Boundary extends Component<BoundaryProps, { error?: Error; generation: num
 
     componentDidCatch(error: Error): void {
         console.error("HtmlViewer: render failed.", error);
+        if (this.props.debugMode) {
+            const stack = (error.stack ?? "").split("\n").slice(0, 8).join("\n");
+            Alert.alert(`HtmlViewer ${VERSION} render error`, `${error.message}\n\n${stack}`);
+        }
     }
 
     render(): ReactNode {
@@ -476,28 +482,51 @@ function Viewer(props: Props & { styles: Styles }): ReactElement | null {
             : status === ValueStatus.Loading
             ? " (still loading)"
             : "";
+    const diagText = [
+        `HtmlViewer ${VERSION} ${Platform.OS} ${Platform.Version} mode=${mode}${fallback ? " (fill->fit)" : ""}`,
+        `html status ${status}${statusHint}, ${html === undefined ? "no value" : `${h.length} chars`}${
+            empty ? " = EMPTY" : ""
+        }`,
+        `<img> ${(h.match(/<img\b/gi) ?? []).length}, base64 ${
+            (h.match(/data:[^"')\s]*;base64,/gi) ?? []).length
+        }, escaped ${/&lt;\s*img/i.test(h) ? "YES" : "no"}, starts "${h.slice(0, 40).replace(/\s+/g, " ")}"`,
+        `box ${Math.round(width)}${forcedWidth ? "(forced)" : ""} x ${
+            mode === "parent" ? "flex" : Math.round(contentBox)
+        } content h=${contentHeight ?? "-"}${noHeight ? " NO HEIGHT" : ""}`,
+        `loadEnd ${diag.loadEnd} msgs ${diag.msgs} last ${diag.last} ready ${ready ? "yes" : "no"} failed ${
+            failed ? "yes" : "no"
+        }`,
+        `jsError ${diag.jsError} fail ${diag.fail}`,
+        `settings height=${props.sizeMode} zoom=${props.zoomable ? "on" : "off"} scripts=${
+            props.allowScripts ? "on" : "off"
+        } baseUrl=${baseUrl ? "set" : "-"} screen ${Math.round(win.width)}x${Math.round(win.height)}`
+    ].join("\n");
     const diagBox = props.debugMode ? (
         <Text style={styles.diag} selectable>
-            {[
-                `HtmlViewer ${VERSION} ${Platform.OS} ${Platform.Version} mode=${mode}${
-                    fallback ? " (fill->fit)" : ""
-                }`,
-                `html status ${status}${statusHint}, ${html === undefined ? "no value" : `${h.length} chars`}${
-                    empty ? " = EMPTY" : ""
-                }`,
-                `<img> ${(h.match(/<img\b/gi) ?? []).length}, base64 ${
-                    (h.match(/data:[^"')\s]*;base64,/gi) ?? []).length
-                }, escaped ${/&lt;\s*img/i.test(h) ? "YES" : "no"}, starts "${h.slice(0, 40).replace(/\s+/g, " ")}"`,
-                `box ${Math.round(width)}${forcedWidth ? "(forced)" : ""} x ${
-                    mode === "parent" ? "flex" : Math.round(contentBox)
-                } content h=${contentHeight ?? "-"}${noHeight ? " NO HEIGHT" : ""}`,
-                `loadEnd ${diag.loadEnd} msgs ${diag.msgs} last ${diag.last} ready ${ready ? "yes" : "no"} failed ${
-                    failed ? "yes" : "no"
-                }`,
-                `jsError ${diag.jsError} fail ${diag.fail}`
-            ].join("\n")}
+            {diagText}
         </Text>
     ) : null;
+
+    // Diagnostic mode: everything in one dialog that stays until OK, so a screenshot is easy.
+    const diagRef = useRef(diagText);
+    useLayoutEffect(() => {
+        diagRef.current = diagText;
+    });
+    const debugMode = props.debugMode;
+    useEffect(() => {
+        if (!debugMode) {
+            return undefined;
+        }
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const show = (): void => {
+            Alert.alert(`HtmlViewer ${VERSION} diagnostic`, diagRef.current, [
+                { text: "Again in 5 s", onPress: () => (timer = setTimeout(show, 5000)) },
+                { text: "OK", style: "cancel" }
+            ]);
+        };
+        timer = setTimeout(show, DIAG_DELAY_MS);
+        return () => clearTimeout(timer);
+    }, [debugMode]);
 
     if (html === undefined) {
         return (
@@ -597,6 +626,7 @@ export function HtmlViewer(props: Props): ReactElement {
     const merged = useMemo(() => mergeStyles(props.style), [props.style]);
     return (
         <Boundary
+            debugMode={props.debugMode}
             styles={merged}
             text={textOf(props.errorText, "The content cannot be shown.")}
             retryText={textOf(props.retryText, "Try again")}
