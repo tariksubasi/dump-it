@@ -1,0 +1,26 @@
+.widget-card-list { --cl-surface:#FFFFFF; --cl-sunken:#F6F8FB; --cl-text:#1B2430; --cl-muted:#4F5B69;
+  --cl-border:#D7DEE6; --cl-primary:#1558B0; container-type:inline-size; color:var(--cl-text); }
+.widget-card-list__search { position:relative; margin-bottom:12px; }
+.widget-card-list__search input { width:100%; min-height:44px; border-radius:8px; }
+.widget-card-list__busy { position:absolute; right:12px; top:50%; width:16px; height:16px; margin-top:-8px;
+  border:2px solid var(--cl-border); border-top-color:var(--cl-primary); border-radius:50%; animation:cl-spin .8s linear infinite; }
+@keyframes cl-spin { to { transform:rotate(360deg); } }
+.widget-card-list__status { color:var(--cl-muted); padding:8px 0; }
+.widget-card-list__status:empty { display:none; }
+.widget-card-list__grid { list-style:none; margin:0; padding:0; display:grid; gap:12px; grid-template-columns:1fr; }
+@container (min-width: 600px) { .widget-card-list__grid { grid-template-columns:repeat(2, minmax(0, 1fr)); gap:16px; } }
+@container (min-width: 840px) { .widget-card-list__grid { grid-template-columns:repeat(3, minmax(0, 1fr)); } }
+@container (min-width: 1200px) { .widget-card-list__grid { grid-template-columns:repeat(4, minmax(0, 1fr)); } }
+.widget-card-list__card { background:var(--cl-surface); border:1px solid var(--cl-border); border-radius:12px;
+  box-shadow:0 1px 2px rgba(16,24,40,.06), 0 1px 3px rgba(16,24,40,.10); min-width:0;
+  content-visibility:auto; contain-intrinsic-size:auto 88px; }
+.widget-card-list__card.is-skeleton { height:88px; background:linear-gradient(90deg,var(--cl-sunken),#EDF1F5,var(--cl-sunken)); }
+.widget-card-list__hit { all:unset; box-sizing:border-box; display:flex; flex-direction:column; gap:4px; width:100%;
+  padding:16px; min-height:44px; cursor:pointer; border-radius:12px; }
+.widget-card-list__hit:disabled { cursor:default; }
+.widget-card-list__hit:focus-visible { outline:2px solid var(--cl-primary); outline-offset:2px; }
+.widget-card-list__title { font-size:16px; font-weight:600; overflow-wrap:anywhere; }
+.widget-card-list__subtitle { font-size:14px; color:var(--cl-muted); overflow-wrap:anywhere; }
+.widget-card-list__sentinel { height:1px; }
+.widget-card-list__more { display:block; margin:16px auto 0; min-height:44px; }
+@media (prefers-reduced-motion: reduce) { .widget-card-list__busy { animation:none; } }

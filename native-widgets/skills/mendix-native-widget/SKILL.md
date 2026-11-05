@@ -194,7 +194,7 @@ No xmllint (Windows)? Use `"release": "pluggable-widgets-tools release:native"`.
 
 **.eslintrc.js** — `module.exports = require("@mendix/pluggable-widgets-tools/configs/eslint.ts.base.json");`
 **.prettierrc** — `"@mendix/pluggable-widgets-tools/configs/prettier.base.json"`
-**.gitignore** — `node_modules/` and `dist/tmp/`
+**.gitignore** — `node_modules/`, `dist/tmp/` and `dist/coverage/` (Jest writes coverage there unless `CI=true`)
 
 **src/package.xml**
 ```xml
@@ -720,6 +720,39 @@ Adding a native module that is NOT in the app:
 |---|---|
 | `native-widgets/back-navigation` | `NavigationContext`, `BackHandler`, focus/blur subscription, editorConfig hide/check, pure logic + tests |
 | `native-widgets/html-viewer` | native npm dependency (`react-native-webview`), style merge, error boundary, modal, diagnostic dialog, render tests with mocks, browser tests of generated HTML |
+
+---
+
+## 17a. Verified recipe: searchable card list (native)
+
+| Mode | Structure | Verified |
+|---|---|---|
+| **Full-screen** (widget is the page content, page has no other scroll) | one `FlatList`: `ListHeaderComponent` = search `TextInput`, `onEndReached` → `ds.setLimit(nextLimit)`, `RefreshControl` → `ds.reload()`, `ListEmptyComponent` (spinner / "No items" / "No results"), `keyboardShouldPersistTaps="handled"`, `keyboardDismissMode="on-drag"`, `initialNumToRender`, `windowSize`, `removeClippedSubviews` | tsc + render test (debounced `setFilter`, `endReached` → limit 20 → 40) |
+| **Embedded** (inside a scrolling page) | cards with `items.map(...)` (no FlatList), "Load more" `Pressable` at the end, search `TextInput` on top | same logic |
+
+Share the pure logic with web: `searchLogic.ts` and `useDebounced.ts` from `native-widgets/card-list/src/` work
+unchanged in native (no DOM). Cards: `Pressable` with `android_ripple`, border `#D7DEE6`, radius 12, elevation 2 + iOS
+shadow, min height 48. Use a Database/XPath data source for server-side search (offline apps: the device database).
+
+## 17b. Limits and things people forget
+
+| # | Need | Covered? | How / workaround | Risk |
+|---|---|---|---|---|
+| 1 | List + search box + debounce + server-side search + load more | ✅ verified recipe | `contains`/`or`/`and` filter on **Database/XPath** sources; `setLimit` paging | low |
+| 2 | Search when the data source is a microflow/nanoflow | ⚠ client-side only | The client loads all rows and filters in memory. For big data use a Database/XPath source, or a "search object" pattern: a non-persistent helper object with a `SearchText` attribute (attribute property), the widget calls `setValue` then `ds.reload()`, the microflow reads it (runtime UNVERIFIED — test it) | medium |
+| 3 | Search in an attribute over an association (`Customer/Name`) | ⚠ | Depends on what Studio Pro lets you pick for the linked attribute; otherwise add a filter attribute on the entity | medium |
+| 4 | Case-insensitive / accent-insensitive search | ⚠ | `contains` behavior comes from the database (most are case-insensitive); accents differ per DB — test with real data | low |
+| 5 | True virtualization (10 000+ rows in the DOM / native list) | ⚠ | Web embedded: paging + `content-visibility:auto` (done). A virtualizer (react-window) needs its own scroll container → only for a full-screen widget. Native: `FlatList` only in full-screen mode | medium |
+| 6 | Edit fields inside list items | ❌ via list API | `ListAttributeValue.get(item)` is read-only. Use a `widgets` property per item (Mendix inputs inside) or open an edit popup page from the item action | — |
+| 7 | Get a result back from a microflow | ❌ | Actions return nothing to the widget; `actionVariables` only pass values in. Results come back as attribute values / a refreshed data source | — |
+| 8 | Upload a file or image from the widget | ❌ | No binary write API; use Mendix's file/image uploader (web) or an image-picker JS action (native) | — |
+| 9 | Charts | ⚠ not in skill | Web: a React chart library (bundle size!), or Mendix Charts; native: `react-native-svg` based libraries | medium |
+| 10 | Live updates from other users | ⚠ | No push; `ds.reload()` on focus / on a timer / after actions | low |
+| 11 | Total count ("1 234 results") | ✅ costly | `requestTotalCount(true)` only when shown; not every source supports it | low |
+| 12 | Sorting UI, multi-select + bulk actions, highlight matches | ✅ API, no recipe | `setSortOrder` (check `sortable`), `selection` property, highlight = split text by the query | low |
+| 13 | Unit-test filters | ✅ with care | The tools' `mendix/filters/builders` mock has `attribute, literal, or, and, equals, notEqual, contains, startsWith, endsWith, greaterThan(OrEqual), lessThan(OrEqual)` — **not** `empty`, `not`, `association`, `day*` (mock them yourself); the mocks return `undefined` until you `mockImplementation` | low |
+| 14 | Unit-test `mendix/hooks` | ✅ with care | No JS file in the typings package: `jest.mock("mendix/hooks", () => ({ usePersistentState: (_k, v) => jest.requireActual("react").useState(v) }), { virtual: true })` | low |
+| 15 | Infinite scroll in an embedded native widget | ❌ | No `onEndReached` without its own FlatList (nested scroll). Use "Load more", or make the widget full-screen | — |
 
 ---
 

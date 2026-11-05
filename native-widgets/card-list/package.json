@@ -1,0 +1,26 @@
+{
+  "name": "card-list",
+  "widgetName": "CardList",
+  "version": "1.0.0",
+  "description": "Cards with debounced server-side search and load-on-scroll (web)",
+  "license": "Apache-2.0",
+  "packagePath": "dumpit",
+  "config": {
+    "projectPath": "../../MendixProject"
+  },
+  "scripts": {
+    "start": "pluggable-widgets-tools start:web",
+    "build": "pluggable-widgets-tools build:web",
+    "release": "npm run validate && pluggable-widgets-tools release:web",
+    "lint": "pluggable-widgets-tools lint",
+    "lint:fix": "pluggable-widgets-tools lint:fix",
+    "test": "pluggable-widgets-tools test:unit:web",
+    "validate": "xmllint --noout --schema node_modules/mendix/custom_widget.xsd src/CardList.xml"
+  },
+  "dependencies": {
+    "classnames": "^2.5.1"
+  },
+  "devDependencies": {
+    "@mendix/pluggable-widgets-tools": "10.24.1"
+  }
+}

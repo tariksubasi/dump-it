@@ -166,7 +166,7 @@ No xmllint: `"release": "pluggable-widgets-tools release:web"`.
   "compilerOptions": { "baseUrl": "./", "types": ["jest"] }, "include": ["./src", "./typings"] }
 ```
 `.eslintrc.js`: `module.exports = require("@mendix/pluggable-widgets-tools/configs/eslint.ts.base.json");`
-`.prettierrc`: `"@mendix/pluggable-widgets-tools/configs/prettier.base.json"` — `.gitignore`: `node_modules/`, `dist/tmp/`
+`.prettierrc`: `"@mendix/pluggable-widgets-tools/configs/prettier.base.json"` — `.gitignore`: `node_modules/`, `dist/tmp/`, `dist/coverage/` (Jest writes coverage there unless `CI=true`)
 
 **src/package.xml**
 ```xml
@@ -548,6 +548,44 @@ paging (`setLimit` called), filter (`setFilter` called), keyboard (Enter/Space).
 | Widget unchanged in browser | version bump, F4, Ctrl+F5 |
 | "Invalid hook call" | a dependency bundles React; use a peer-dependency library |
 | CSS not applied | CSS imported in the widget entry? class names under `widget-<name>`? |
+
+---
+
+## 14a. Verified recipe: card list with debounced server-side search and load on scroll
+
+Reference widget: `native-widgets/card-list` (release, lint and 7 tests pass; columns 1/2/3/4 by widget width checked in
+Chromium with no overflow). Copy its pieces:
+
+| Piece | File | Key point |
+|---|---|---|
+| XML | `src/CardList.xml` | `ds` datasource + linked `title`/`subtitle`/`onClick`; object list `searchFields` with `dataSource="../ds"` |
+| Filter | `src/searchLogic.ts` | `normalizeQuery` (trim, min chars), `buildSearchFilter` (every word must match one field; skip non-`filterable`), `nextLimit` |
+| Debounce | `src/useDebounced.ts` | `setTimeout` in an effect, state set in the timer callback (lint-safe) |
+| Apply once per text | `src/CardList.tsx` | ref `applied`: `setFilter` + `setLimit(pageSize)` only when the effective text changes; on mount keep a restored filter |
+| Persist search text | `usePersistentState(props.name + ":search", "")` from `mendix/hooks` | text survives back navigation like the data source filter |
+| Load on scroll | `IntersectionObserver` on a sentinel (`rootMargin: "400px"`) + "Load more" button fallback | the page is the only scroll owner |
+| Cheap virtualization | CSS `content-visibility: auto; contain-intrinsic-size: auto 88px` on cards | no inner scroll container |
+| States | skeleton on first load, spinner in the search box on later loads, "No items" vs "No results" | `aria-live`, `aria-busy` |
+| Tests | `src/__tests__/CardList.spec.tsx` | fake timers for debounce, mocked builders, virtual `mendix/hooks` mock |
+
+## 14b. Limits and things people forget
+
+| # | Need | Covered? | How / workaround | Risk |
+|---|---|---|---|---|
+| 1 | List + search box + debounce + server-side search + load more | ✅ verified recipe | `contains`/`or`/`and` filter on **Database/XPath** sources; `setLimit` paging | low |
+| 2 | Search when the data source is a microflow/nanoflow | ⚠ client-side only | The client loads all rows and filters in memory. For big data use a Database/XPath source, or a "search object" pattern: a non-persistent helper object with a `SearchText` attribute (attribute property), the widget calls `setValue` then `ds.reload()`, the microflow reads it (runtime UNVERIFIED — test it) | medium |
+| 3 | Search in an attribute over an association (`Customer/Name`) | ⚠ | Depends on what Studio Pro lets you pick for the linked attribute; otherwise add a filter attribute on the entity | medium |
+| 4 | Case-insensitive / accent-insensitive search | ⚠ | `contains` behavior comes from the database (most are case-insensitive); accents differ per DB — test with real data | low |
+| 5 | True virtualization (10 000+ rows in the DOM / native list) | ⚠ | Web embedded: paging + `content-visibility:auto` (done). A virtualizer (react-window) needs its own scroll container → only for a full-screen widget. Native: `FlatList` only in full-screen mode | medium |
+| 6 | Edit fields inside list items | ❌ via list API | `ListAttributeValue.get(item)` is read-only. Use a `widgets` property per item (Mendix inputs inside) or open an edit popup page from the item action | — |
+| 7 | Get a result back from a microflow | ❌ | Actions return nothing to the widget; `actionVariables` only pass values in. Results come back as attribute values / a refreshed data source | — |
+| 8 | Upload a file or image from the widget | ❌ | No binary write API; use Mendix's file/image uploader (web) or an image-picker JS action (native) | — |
+| 9 | Charts | ⚠ not in skill | Web: a React chart library (bundle size!), or Mendix Charts; native: `react-native-svg` based libraries | medium |
+| 10 | Live updates from other users | ⚠ | No push; `ds.reload()` on focus / on a timer / after actions | low |
+| 11 | Total count ("1 234 results") | ✅ costly | `requestTotalCount(true)` only when shown; not every source supports it | low |
+| 12 | Sorting UI, multi-select + bulk actions, highlight matches | ✅ API, no recipe | `setSortOrder` (check `sortable`), `selection` property, highlight = split text by the query | low |
+| 13 | Unit-test filters | ✅ with care | The tools' `mendix/filters/builders` mock has `attribute, literal, or, and, equals, notEqual, contains, startsWith, endsWith, greaterThan(OrEqual), lessThan(OrEqual)` — **not** `empty`, `not`, `association`, `day*` (mock them yourself); the mocks return `undefined` until you `mockImplementation` | low |
+| 14 | Unit-test `mendix/hooks` | ✅ with care | No JS file in the typings package: `jest.mock("mendix/hooks", () => ({ usePersistentState: (_k, v) => jest.requireActual("react").useState(v) }), { virtual: true })` | low |
 
 ---
 

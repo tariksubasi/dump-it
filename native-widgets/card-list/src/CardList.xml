@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<widget id="dumpit.cardlist.CardList" pluginWidget="true" needsEntityContext="true" offlineCapable="true"
+        supportedPlatform="Web"
+        xmlns="http://www.mendix.com/widget/1.0/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.mendix.com/widget/1.0/ ../node_modules/mendix/custom_widget.xsd">
+    <name>Card list</name>
+    <description>Cards with server-side search (debounced) and load-on-scroll.</description>
+    <studioProCategory>Data</studioProCategory>
+    <properties>
+        <propertyGroup caption="General">
+            <propertyGroup caption="Data">
+                <property key="ds" type="datasource" isList="true"><caption>Data source</caption><description>Use Database or XPath for server-side search and paging.</description></property>
+                <property key="title" type="attribute" dataSource="ds"><caption>Title</caption><description>Card title.</description>
+                    <attributeTypes><attributeType name="String" /></attributeTypes></property>
+                <property key="subtitle" type="expression" dataSource="ds" required="false"><caption>Subtitle</caption><description>Second line.</description><returnType type="String" /></property>
+                <property key="onClick" type="action" dataSource="ds" required="false"><caption>On click</caption><description>Open a page, call a flow.</description></property>
+            </propertyGroup>
+            <propertyGroup caption="Search">
+                <property key="searchFields" type="object" isList="true" required="false"><caption>Search in</caption><description>Attributes searched with contains (or).</description>
+                    <properties>
+                        <propertyGroup caption="Field">
+                            <property key="attr" type="attribute" dataSource="../ds"><caption>Attribute</caption><description>String attribute.</description>
+                                <attributeTypes><attributeType name="String" /></attributeTypes></property>
+                        </propertyGroup>
+                    </properties>
+                </property>
+                <property key="debounceMs" type="integer" defaultValue="300"><caption>Delay (ms)</caption><description>Wait after typing.</description></property>
+                <property key="minChars" type="integer" defaultValue="2"><caption>Minimum characters</caption><description>Shorter text = no filter.</description></property>
+                <property key="placeholder" type="textTemplate" required="false"><caption>Placeholder</caption><description>Search box hint.</description>
+                    <translations><translation lang="en_US">Search</translation><translation lang="tr_TR">Ara</translation></translations></property>
+            </propertyGroup>
+            <propertyGroup caption="Paging">
+                <property key="pageSize" type="integer" defaultValue="20"><caption>Page size</caption><description>Items per load.</description></property>
+                <property key="loadMoreText" type="textTemplate" required="false"><caption>Load more text</caption><description>Button under the cards.</description>
+                    <translations><translation lang="en_US">Load more</translation><translation lang="tr_TR">Daha fazla</translation></translations></property>
+                <property key="emptyText" type="textTemplate" required="false"><caption>Empty text</caption><description>No items.</description>
+                    <translations><translation lang="en_US">No items</translation><translation lang="tr_TR">Kayıt yok</translation></translations></property>
+                <property key="noResultsText" type="textTemplate" required="false"><caption>No results text</caption><description>Search found nothing.</description>
+                    <translations><translation lang="en_US">No results</translation><translation lang="tr_TR">Sonuç bulunamadı</translation></translations></property>
+            </propertyGroup>
+        </propertyGroup>
+        <propertyGroup caption="Common">
+            <systemProperty key="Name" />
+            <systemProperty key="Visibility" />
+        </propertyGroup>
+    </properties>
+</widget>
