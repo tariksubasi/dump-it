@@ -8,7 +8,7 @@ Shows HTML on a Mendix native page (Mendix 10.24, Native Template 14, React Nati
 - Size, padding, margin and text style come from the native theme (JS style).
 - It survives network loss, broken images, crashes of the web process and bad HTML.
 
-Package: `dist/1.0.2/dumpit.HtmlViewer.mpk`. Copy it to the `widgets` folder of the app, then press F4 in Studio Pro.
+Package: `dist/1.0.3/dumpit.HtmlViewer.mpk`. Copy it to the `widgets` folder of the app, then press F4 in Studio Pro.
 
 ## Native dependency
 
@@ -37,7 +37,7 @@ The widget uses `react-native-webview` **13.15.0** (supports React Native 0.77).
 | Links | On link tap | Open in the browser or app | Or: run an action (URL in "Store link in"), or do nothing. The viewer never navigates away. |
 | Events | On load / On error | — | On load runs once per new HTML. |
 | Network | Use cached images offline | Yes | Android cache mode `LOAD_CACHE_ELSE_NETWORK`. |
-| Diagnostics | Diagnostic mode | No | Shows a yellow box under the content: size, HTML length, `<img>` and base64 count, escaped HTML, load and message counts, errors. |
+| Diagnostics | Diagnostic mode | No | Shows a yellow box above the content in every state (also loading, empty, no access): version, HTML status, size, HTML length, `<img>` and base64 count, escaped HTML, load and message counts, errors. |
 | Texts | Empty, error, retry, link error, labels | en_US + tr_TR | Translatable. |
 
 ## Style (native theme)
@@ -102,8 +102,8 @@ export const htmlCard = { container: { height: 320 } }; // with Height = Fill pa
 
 ```bash
 npm install
-npm run release        # XSD check + build -> dist/1.0.2/dumpit.HtmlViewer.mpk
-npm test               # 46 unit tests
+npm run release        # XSD check + build -> dist/1.0.3/dumpit.HtmlViewer.mpk
+npm test               # 52 unit + render tests
 npm run test:browser   # 110 checks in Chromium at 320, 360, 768, 800 (landscape) and 1280 px
 npm run lint
 ```

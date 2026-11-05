@@ -33,6 +33,7 @@ import { FrameMessage, HtmlFrame } from "./HtmlFrame";
 import { boxHeight, buildDocument, classifyLink, HeightGuard, isEmptyHtml, makeNonce, SizeMode } from "./htmlDocument";
 import { HtmlViewerStyle, mergeStyles } from "./ui/styles";
 
+const VERSION = "1.0.3"; // shown in diagnostic mode: proves which build the app runs
 const PLACEHOLDER_HEIGHT = 48;
 const SPINNER_DELAY_MS = 250;
 const READY_TIMEOUT_MS = 8000;
@@ -453,34 +454,6 @@ function Viewer(props: Props & { styles: Styles }): ReactElement | null {
     const errorText = textOf(props.errorText, "The content cannot be shown.");
     const retryText = textOf(props.retryText, "Try again");
 
-    if (html === undefined) {
-        return (
-            <View style={[s.container, styles.center, { minHeight: PLACEHOLDER_HEIGHT }]} testID={props.name}>
-                <ActivityIndicator color={s.loadingIndicator.color} accessibilityLabel="Loading" />
-            </View>
-        );
-    }
-    if (empty) {
-        const text = textOf(props.emptyText, "");
-        return text ? (
-            <View style={s.container} testID={props.name}>
-                <Text style={s.empty}>{text}</Text>
-            </View>
-        ) : null;
-    }
-    if (failed) {
-        return (
-            <View style={s.container} testID={props.name}>
-                <ErrorView
-                    styles={s}
-                    text={errorText}
-                    retryText={retryText}
-                    onRetry={() => setGeneration(g => g + 1)}
-                />
-            </View>
-        );
-    }
-
     const noHeight = mode === "content" && noHeightFor === loadKey;
     const fallbackHeight = Math.round(win.height * 0.6);
     const contentBox = noHeight
@@ -495,8 +468,73 @@ function Viewer(props: Props & { styles: Styles }): ReactElement | null {
     const scrollable = mode === "parent" || noHeight || (maxHeight > 0 && (contentHeight ?? 0) > maxHeight);
     const showButton = props.fullscreenButton || (props.zoomable && mode === "content");
 
+    // Diagnostic mode: shown in every state, also when there is nothing to show.
+    const h = html ?? "";
+    const statusHint =
+        status === ValueStatus.Unavailable
+            ? " (no context object, wrong attribute or no read access)"
+            : status === ValueStatus.Loading
+            ? " (still loading)"
+            : "";
+    const diagBox = props.debugMode ? (
+        <Text style={styles.diag} selectable>
+            {[
+                `HtmlViewer ${VERSION} ${Platform.OS} ${Platform.Version} mode=${mode}${
+                    fallback ? " (fill->fit)" : ""
+                }`,
+                `html status ${status}${statusHint}, ${html === undefined ? "no value" : `${h.length} chars`}${
+                    empty ? " = EMPTY" : ""
+                }`,
+                `<img> ${(h.match(/<img\b/gi) ?? []).length}, base64 ${
+                    (h.match(/data:[^"')\s]*;base64,/gi) ?? []).length
+                }, escaped ${/&lt;\s*img/i.test(h) ? "YES" : "no"}, starts "${h.slice(0, 40).replace(/\s+/g, " ")}"`,
+                `box ${Math.round(width)}${forcedWidth ? "(forced)" : ""} x ${
+                    mode === "parent" ? "flex" : Math.round(contentBox)
+                } content h=${contentHeight ?? "-"}${noHeight ? " NO HEIGHT" : ""}`,
+                `loadEnd ${diag.loadEnd} msgs ${diag.msgs} last ${diag.last} ready ${ready ? "yes" : "no"} failed ${
+                    failed ? "yes" : "no"
+                }`,
+                `jsError ${diag.jsError} fail ${diag.fail}`
+            ].join("\n")}
+        </Text>
+    ) : null;
+
+    if (html === undefined) {
+        return (
+            <View style={s.container} testID={props.name}>
+                {diagBox}
+                <View style={[styles.center, { minHeight: PLACEHOLDER_HEIGHT }]}>
+                    <ActivityIndicator color={s.loadingIndicator.color} accessibilityLabel="Loading" />
+                </View>
+            </View>
+        );
+    }
+    if (empty) {
+        const text = textOf(props.emptyText, "");
+        return text || diagBox ? (
+            <View style={s.container} testID={props.name}>
+                {diagBox}
+                {text ? <Text style={s.empty}>{text}</Text> : null}
+            </View>
+        ) : null;
+    }
+    if (failed) {
+        return (
+            <View style={s.container} testID={props.name}>
+                {diagBox}
+                <ErrorView
+                    styles={s}
+                    text={errorText}
+                    retryText={retryText}
+                    onRetry={() => setGeneration(g => g + 1)}
+                />
+            </View>
+        );
+    }
+
     return (
         <View style={[s.container, mode === "parent" && styles.flex]} testID={props.name}>
+            {diagBox}
             <View style={box} onLayout={onBoxLayout}>
                 {width > 0 ? (
                     <HtmlFrame
@@ -536,21 +574,6 @@ function Viewer(props: Props & { styles: Styles }): ReactElement | null {
                     </Pressable>
                 ) : null}
             </View>
-            {props.debugMode ? (
-                <Text style={styles.diag} selectable>
-                    {[
-                        `HtmlViewer ${Platform.OS} ${Platform.Version} mode=${mode}${fallback ? " (fill->fit)" : ""}`,
-                        `box ${Math.round(width)}${forcedWidth ? "(forced)" : ""} x ${Math.round(
-                            mode === "parent" ? 0 : contentBox
-                        )} content h=${contentHeight ?? "-"}${noHeight ? " NO HEIGHT" : ""}`,
-                        `html ${html.length} chars, <img> ${(html.match(/<img\b/gi) ?? []).length}, base64 ${
-                            (html.match(/data:[^"')\s]*;base64,/gi) ?? []).length
-                        }, escaped ${/&lt;\s*img/i.test(html) ? "YES" : "no"}`,
-                        `loadEnd ${diag.loadEnd} msgs ${diag.msgs} last ${diag.last} ready ${ready ? "yes" : "no"}`,
-                        `jsError ${diag.jsError} fail ${diag.fail}`
-                    ].join("\n")}
-                </Text>
-            ) : null}
             {showButton ? (
                 <Fullscreen
                     visible={fullscreen}
@@ -591,7 +614,7 @@ const styles = StyleSheet.create({
     closeButton: { width: 44, height: 44, alignItems: "center", justifyContent: "center", borderRadius: 22 },
     modalError: { flex: 1, padding: 16, justifyContent: "center" },
     diag: {
-        marginTop: 6,
+        marginBottom: 6,
         padding: 8,
         borderRadius: 6,
         backgroundColor: "#fff8e1",
