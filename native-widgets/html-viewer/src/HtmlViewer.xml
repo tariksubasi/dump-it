@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<widget id="dumpit.htmlviewer.HtmlViewer" pluginWidget="true" needsEntityContext="true" offlineCapable="true"
+        supportedPlatform="Native"
+        xmlns="http://www.mendix.com/widget/1.0/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.mendix.com/widget/1.0/ ../node_modules/mendix/custom_widget.xsd">
+    <name>HTML viewer</name>
+    <description>Shows HTML. Images and tables fit the width, the content never overflows, pinch zoom, and it survives network loss.</description>
+    <studioProCategory>Display</studioProCategory>
+    <properties>
+        <propertyGroup caption="General">
+            <propertyGroup caption="Content">
+                <property key="html" type="expression" required="true">
+                    <caption>HTML</caption>
+                    <description>The HTML to show. A fragment (for example "&lt;p&gt;Hi&lt;/p&gt;") or a full document. Usually an attribute: $currentObject/Body.</description>
+                    <returnType type="String" />
+                </property>
+                <property key="baseUrl" type="expression" required="false">
+                    <caption>Base URL</caption>
+                    <description>Optional. Relative image and link addresses start from this URL, for example "https://cdn.example.com/". Leave empty when all addresses are absolute.</description>
+                    <returnType type="String" />
+                </property>
+                <property key="css" type="string" required="false" multiline="true">
+                    <caption>Extra CSS</caption>
+                    <description>Optional CSS added after the built-in rules, for example "h1 { font-size: 22px; }".</description>
+                </property>
+                <property key="allowScripts" type="boolean" defaultValue="false">
+                    <caption>Run scripts in the HTML</caption>
+                    <description>No (safe): script tags and onclick attributes in the HTML do not run. The viewer itself still works.</description>
+                </property>
+            </propertyGroup>
+            <propertyGroup caption="Size">
+                <property key="sizeMode" type="enumeration" defaultValue="content">
+                    <caption>Height</caption>
+                    <description>Fit content: the viewer grows with the HTML and the page scrolls (no nested scrolling). Fill parent: the viewer takes the parent height (or the style height) and scrolls inside.</description>
+                    <enumerationValues>
+                        <enumerationValue key="content">Fit content</enumerationValue>
+                        <enumerationValue key="parent">Fill parent</enumerationValue>
+                    </enumerationValues>
+                </property>
+                <property key="maxHeight" type="integer" defaultValue="0">
+                    <caption>Maximum height</caption>
+                    <description>Fit content only. 0 = no limit. A taller content scrolls inside the viewer.</description>
+                </property>
+                <property key="wideTables" type="enumeration" defaultValue="fit">
+                    <caption>Wide tables</caption>
+                    <description>Fit: the columns shrink to the screen width. Scroll: a wide table keeps readable columns and scrolls sideways in its own box. The page never scrolls sideways.</description>
+                    <enumerationValues>
+                        <enumerationValue key="fit">Fit</enumerationValue>
+                        <enumerationValue key="scroll">Scroll sideways</enumerationValue>
+                    </enumerationValues>
+                </property>
+            </propertyGroup>
+            <propertyGroup caption="Zoom">
+                <property key="zoomable" type="boolean" defaultValue="true">
+                    <caption>Zoom</caption>
+                    <description>Fill parent: pinch to zoom in place. Fit content: pinch zoom opens in full screen, so the page scroll never fights the zoom.</description>
+                </property>
+                <property key="fullscreenButton" type="boolean" defaultValue="true">
+                    <caption>Full screen button</caption>
+                    <description>Show a small button that opens the content full screen. With Height = Fit content and Zoom = Yes the button always shows, because zoom happens in full screen.</description>
+                </property>
+                <property key="maxZoom" type="integer" defaultValue="5">
+                    <caption>Maximum zoom</caption>
+                    <description>From 1 to 10.</description>
+                </property>
+            </propertyGroup>
+        </propertyGroup>
+        <propertyGroup caption="Links">
+            <propertyGroup caption="Links">
+                <property key="linkMode" type="enumeration" defaultValue="external">
+                    <caption>On link tap</caption>
+                    <description>The viewer never navigates away from the HTML.</description>
+                    <enumerationValues>
+                        <enumerationValue key="external">Open in the browser or app</enumerationValue>
+                        <enumerationValue key="action">Run an action</enumerationValue>
+                        <enumerationValue key="none">Do nothing</enumerationValue>
+                    </enumerationValues>
+                </property>
+                <property key="linkAttribute" type="attribute" required="false">
+                    <caption>Store link in</caption>
+                    <description>Optional. Gets the tapped address before the action runs.</description>
+                    <attributeTypes>
+                        <attributeType name="String" />
+                    </attributeTypes>
+                </property>
+                <property key="onLinkPress" type="action" required="false">
+                    <caption>Link action</caption>
+                    <description>Runs when a link is tapped (On link tap = Run an action).</description>
+                </property>
+            </propertyGroup>
+        </propertyGroup>
+        <propertyGroup caption="Events">
+            <propertyGroup caption="Events">
+                <property key="onLoad" type="action" required="false">
+                    <caption>On load</caption>
+                    <description>Runs once each time new HTML is shown.</description>
+                </property>
+                <property key="onError" type="action" required="false">
+                    <caption>On error</caption>
+                    <description>Runs when the content cannot be shown. The widget also shows the error text and a retry button.</description>
+                </property>
+            </propertyGroup>
+        </propertyGroup>
+        <propertyGroup caption="Advanced">
+            <propertyGroup caption="Network">
+                <property key="offlineCache" type="boolean" defaultValue="true">
+                    <caption>Use cached images offline</caption>
+                    <description>Android: show images from the cache when there is no network. Broken images retry by themselves when the network comes back, when the app comes back to the front, or on tap.</description>
+                </property>
+            </propertyGroup>
+            <propertyGroup caption="Texts">
+                <property key="emptyText" type="textTemplate" required="false">
+                    <caption>Empty text</caption>
+                    <description>Shown when the HTML is empty. Empty = show nothing.</description>
+                </property>
+                <property key="errorText" type="textTemplate" required="false">
+                    <caption>Error text</caption>
+                    <description>Shown when the content cannot be shown.</description>
+                    <translations>
+                        <translation lang="en_US">The content cannot be shown.</translation>
+                        <translation lang="tr_TR">İçerik gösterilemiyor.</translation>
+                    </translations>
+                </property>
+                <property key="retryText" type="textTemplate" required="false">
+                    <caption>Retry text</caption>
+                    <description>The retry button.</description>
+                    <translations>
+                        <translation lang="en_US">Try again</translation>
+                        <translation lang="tr_TR">Tekrar dene</translation>
+                    </translations>
+                </property>
+                <property key="linkErrorText" type="textTemplate" required="false">
+                    <caption>Link error text</caption>
+                    <description>Shown when a link cannot be opened.</description>
+                    <translations>
+                        <translation lang="en_US">This link cannot be opened.</translation>
+                        <translation lang="tr_TR">Bu bağlantı açılamıyor.</translation>
+                    </translations>
+                </property>
+                <property key="openLabel" type="textTemplate" required="false">
+                    <caption>Full screen label</caption>
+                    <description>Screen reader label of the full screen button.</description>
+                    <translations>
+                        <translation lang="en_US">Open full screen</translation>
+                        <translation lang="tr_TR">Tam ekran aç</translation>
+                    </translations>
+                </property>
+                <property key="closeLabel" type="textTemplate" required="false">
+                    <caption>Close label</caption>
+                    <description>Screen reader label of the close button in full screen.</description>
+                    <translations>
+                        <translation lang="en_US">Close</translation>
+                        <translation lang="tr_TR">Kapat</translation>
+                    </translations>
+                </property>
+            </propertyGroup>
+        </propertyGroup>
+    </properties>
+</widget>

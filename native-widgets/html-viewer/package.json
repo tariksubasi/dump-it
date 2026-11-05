@@ -1,0 +1,27 @@
+{
+  "name": "html-viewer",
+  "widgetName": "HtmlViewer",
+  "version": "1.0.0",
+  "description": "Shows HTML in a Mendix native page: fits the screen, zoomable, resilient to network loss",
+  "license": "Apache-2.0",
+  "packagePath": "dumpit",
+  "config": {
+    "projectPath": "../../tests/testProject",
+    "mendixHost": "http://localhost:8080",
+    "developmentPort": 3000
+  },
+  "scripts": {
+    "build": "pluggable-widgets-tools build:native",
+    "release": "npm run validate && pluggable-widgets-tools release:native",
+    "lint": "pluggable-widgets-tools lint",
+    "test": "pluggable-widgets-tools test:unit:native",
+    "validate": "xmllint --noout --schema node_modules/mendix/custom_widget.xsd src/HtmlViewer.xml",
+    "test:browser": "tsc src/htmlDocument.ts --outDir dist/browser --module commonjs --target es2019 --skipLibCheck && node scripts/browser-test.js"
+  },
+  "dependencies": {
+    "react-native-webview": "13.13.2"
+  },
+  "devDependencies": {
+    "@mendix/pluggable-widgets-tools": "10.24.1"
+  }
+}
