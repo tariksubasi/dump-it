@@ -63,7 +63,9 @@ npm run release                               # XML kontrol + build + mpk
 
 **Sürüm kuralı:** yeni mpk için `package.json` → `version` **ve** `src/package.xml` → `version="…"` aynı yeni değere çıkar. Aynı sürümle Studio Pro / Make It Native eski kodu kullanabilir.
 
-**Projeye otomatik kopyalama:** `package.json` → `config.projectPath` alanına Mendix proje klasörünü yazarsan (örn. `"C:/Mendix/MyApp"`), build mpk'yı `widgets/` klasörüne kendisi kopyalar.
+**Projeye otomatik kopyalama:** `package.json` → `config.projectPath` alanına Mendix proje klasörünü yazarsan (örn. `"C:/Mendix/MyApp"`), `npm run build` ve `npm start` mpk'yı `widgets/` klasörüne kendisi kopyalar. **`npm run release` kopyalamaz**; release mpk'sını elle kopyala. `mendixHost` ve `developmentPort` alanlarını araç kullanmıyor.
+
+**XML değiştiyse:** Studio Pro'da F4 → sayfadaki widget'a sağ tık → **Update widget**.
 
 ---
 
@@ -73,11 +75,11 @@ npm run release                               # XML kontrol + build + mpk
 
 | Yol | Ne zaman | Komut |
 |---|---|---|
-| A. Mendix generator | İnternet var, standart iskelet istiyorsun | `npx @mendix/generator-widget MyWidget` (sorulara cevap ver: web/native, TypeScript, boş şablon) |
+| A. Mendix generator | İnternet var, standart iskelet istiyorsun | `npx @mendix/generator-widget@10.24-latest MyWidget` (sorulara cevap ver: web/native, TypeScript, boş şablon). `@latest` yazma, o Mendix 11 sürümünü getirir. |
 | B. Elle (skill'deki şablon) | Kontrol sende, ajan yapacak | Skill'deki "Scaffold" bölümündeki dosyaları oluştur → `npm install` → `npm run release` |
 | C. Var olanı kopyala | En hızlı native başlangıç | `back-navigation`'ı kopyala, isimleri değiştir (skill'deki "rename checklist") |
 
-Klasör adı **küçük harf ve tire** (`my-widget`), widget adı **PascalCase** (`MyWidget`), `packagePath` **küçük harf** (`dumpit`).
+Klasör adı **küçük harf ve tire** (`my-widget`), widget adı **PascalCase ve sadece harf** (`MyWidget`), `packagePath` **küçük harf, tiresiz** (`dumpit`).
 
 ---
 
@@ -149,3 +151,7 @@ Ask me only what you cannot find in the code or the skill (max 5 questions).
 | Prettier XML'i bozuyor | `prettier --write .` | Sadece `src/**/*.{ts,tsx}` |
 | Native modül bulunamadı (uygulama açılırken çöker) | Native npm paketi uygulamada yok | Native Template `package.json`'a ekle + uygulamayı yeniden derle; Make It Native sadece içindeki modülleri bilir |
 | Widget değişmiyor | Aynı sürüm / eski mpk | Sürümü artır, eski mpk'yı sil, F4 |
+| Her komutta "Update dependencies?" sorusu | `react`, `react-native` veya `@types/react` package.json'a yazılmış | Onları sil (uygulama zaten sağlar). Soruyu atlamak için `CI=true` |
+| `TS7016 Could not find a declaration file` | Tipleri olmayan npm paketi | `typings/modules.d.ts` içine `declare module "paket";` |
+| Make It Native'de native paket çalışmıyor | Paket Make It Native'in içinde yok | Make It Native (10.24) içindeki paketler ve sürümleri native skill'in 9.3 bölümünde listelendi; listede olmayan paket için kendi dev uygulamanı derle |
+| Lint yüzlerce hata | Windows CRLF satır sonu | `git config core.autocrlf input`, dosyaları LF yap |

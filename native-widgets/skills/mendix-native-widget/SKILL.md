@@ -43,6 +43,13 @@ sections when a step needs them. If something is not in this file, say **"NOT IN
 | 23 | `textTemplate` / `expression` values are `DynamicValue<string>`; they can be `Loading` or `Unavailable` | Empty text, crash |
 | 24 | Native style is an **array** of style objects (`props.style: Style[]`); merge it key by key | Theme styles ignored |
 | 25 | Never leave a widget invisible: render loading / empty / unavailable / error states explicitly | "It shows nothing" with no clue why |
+| 26 | `widgetName` letters only; `packagePath` lower-case without `-` | runtime load errors |
+| 27 | Never put `react`, `react-native`, `@types/react*` in dependencies/devDependencies | every tools command asks "Update dependencies?" (default Yes) and rewrites package.json; skip with env `CI=true` |
+| 28 | `release` does **not** copy to `config.projectPath`; only `build` / `start` do | copy the mpk yourself |
+| 29 | Untyped npm package → `typings/modules.d.ts` with `declare module "pkg";` (or `@types/pkg`) | TS7016 breaks the build |
+| 30 | Rollup warnings are errors in build/release (except circular, this-is-undefined, unused external import) | build exits 1 |
+| 31 | LF line endings | lint fails on CRLF (Windows: `git config core.autocrlf input`) |
+| 32 | `.prettierignore` must list `config.projectPath` when it is inside the widget (`tests/testProject/`) and `dist/` | hundreds of lint errors |
 
 ---
 
@@ -172,7 +179,9 @@ Replace `MyWidget` / `mywidget` / `my-widget`. Then run `npm install`, `npm run 
 }
 ```
 No xmllint (Windows)? Use `"release": "pluggable-widgets-tools release:native"`.
-`config.projectPath`: path to the Mendix project; build/release copy the mpk into its `widgets/` folder.
+`config.projectPath`: path to the Mendix project (or env `MX_PROJECT_PATH`; default `./tests/testProject`). Only
+`build` and `start` copy into `<project>/widgets/` and `deployment/native/widgets`; `release` does not.
+`mendixHost` and `developmentPort` are not read by tools 10.24.1 (harmless).
 
 **tsconfig.json**
 ```json
@@ -264,8 +273,10 @@ Copy-from-existing alternative: copy `native-widgets/back-navigation`, then rena
 function name + typings import), `src/<W>.editorConfig.ts`, `src/package.xml` (`name`, `widgetFile`, `file path`),
 delete `typings/` and `dist/`, then `npm install && npm run release`.
 
-Generator alternative (needs internet): `npx @mendix/generator-widget MyWidget` → choose Native, TypeScript, empty
-template, then align versions with section 1.
+Generator alternative (needs internet): `npx @mendix/generator-widget@10.24-latest MyWidget` (never `@latest`, that is
+11.x) → choose Native, TypeScript, function component, empty template. It creates the files above plus README, LICENSE,
+`prettier.config.js`, `.prettierignore`, `.gitattributes` (LF), tests. Its scripts: `start` = `start:native`,
+`test` = `test:unit:native --no-cache --ci`, `prerelease` = `npm run lint`.
 
 ---
 
@@ -275,8 +286,9 @@ template, then align versions with section 1.
 |---|---|---|
 | `npm install` | install tools + dependencies (once per clone) | `node_modules/` |
 | `npm run build` | dev build, regenerates typings | `dist/tmp/widgets/…`, `typings/` |
-| `npm run release` | XSD check + production build + mpk | `dist/<version>/<packagePath>.<Widget>.mpk` |
-| `npm start` | watch mode (rebuild on save, copies to `projectPath`) | — |
+| `npm run release` | XSD check + production build (minified, licenses) + mpk; **no copy** to the project | `dist/<version>/<packagePath>.<Widget>.mpk` |
+| XML changed | save → typings regenerate → Studio Pro F4 → right-click widget → **Update widget** (or Update all widgets) | |
+| `npm start` | `start:native` = rollup watch; copies to `projectPath` (`widgets/` + `deployment/native/widgets`); then reload the app | — |
 | `npm test` | Jest (react-native preset) | — |
 | `npm run lint` / `lint:fix` | Prettier check + ESLint | — |
 | `npx prettier --write "src/**/*.{ts,tsx}"` | format TS only | — |
@@ -484,7 +496,9 @@ export function getPreview(): object {
 
 | Item | Rule |
 |---|---|
-| Default theme style | in the app theme (`theme/native/main.js` or a custom file): `export const dumpit_mywidget_MyWidget = { container: {…}, text: {…} };` (widget id, dots → `_`) |
+| Default theme style | in the app theme `theme/native/main.js`: `export const dumpit_mywidget_MyWidget = { container: {…}, text: {…} };` (widget id, dots → `_`; verify on a device that it applies) |
+| Theme variables | copy from `themesource/atlas_core/native/variables.js` to `theme/native/custom-variables.js`; never edit `atlas_core` |
+| Custom fonts | belong to the app (Native Template), not the widget; use one `fontFamily` per weight file |
 | Per instance | Studio Pro → Appearance → Class `myClass`; theme: `export const myClass = { container: {…} }` |
 | In code | `props.style` is `Style[]` (default → class → design props → inline). Merge each key in order |
 | Merge helper | `import { mergeNativeStyles } from "@mendix/pluggable-widgets-tools"` → `mergeNativeStyles(defaultStyle, props.style)` (verified: bundles fine, ~6 KB) or `Object.assign({}, defaults.container, ...props.style.map(s => s?.container ?? {}))` |
@@ -505,7 +519,8 @@ export function getPreview(): object {
 | Lists | `FlatList` (`keyExtractor`, `onEndReached`, `initialNumToRender`, `getItemLayout`) | never nest a vertical list in a vertical `ScrollView` |
 | Scroll | `ScrollView` (`nestedScrollEnabled` on Android) | Mendix pages already scroll: avoid nested vertical scroll |
 | Input | `TextInput` (`keyboardType`, `returnKeyType`, `onSubmitEditing`, `secureTextEntry`) | keyboard covers inputs: `KeyboardAvoidingView` (`behavior="padding"` on iOS) |
-| Images | `Image` (`resizeMode="contain"`), or `mendix/components/native/Image` | give a size; remote images need https |
+| Images | `Image` (`resizeMode="contain"`), or `mendix/components/native/Image` | give a size; remote images need https; `import x from "./img.png"` in native code is **inlined as base64** (big bundle) — prefer `image`/`icon` properties |
+| Toolbox icon | `src/<W>.icon.png` (64×64), `src/<W>.tile.png` (256×192), `*.dark.png` variants | copied into the mpk automatically |
 | Modal | `Modal` (`onRequestClose` = Android back, `supportedOrientations` for iOS landscape, `statusBarTranslucent`) | |
 | Spinner | `ActivityIndicator` | delay ~250 ms to avoid flicker |
 | Alerts | `Alert.alert(title, message, buttons)` | Android `ToastAndroid` is 2 lines max on Android 12+ |
@@ -529,7 +544,25 @@ export function getPreview(): object {
 | External libs (react, react-native, mendix, big.js, @react-navigation/*, gesture-handler, reanimated, fast-image, svg, vector-icons, safe-area-context) | devDependency for types only, or none | not bundled | already in the app |
 | Native module (has `android/`, `ios/`, `.podspec`) e.g. `react-native-webview` | `npm i react-native-webview@<version the app has>` (dependencies, exact) | copied to `node_modules/` inside the mpk + `<W>.json` `{ "nativeDependencies": { "pkg": "ver" } }` | must be compiled into the app (see below) |
 
-Native Template 14.1.x already contains (usable without a rebuild, import normally):
+**Make It Native for 10.24** (the preview app; Mendix docs: for Mendix 10 build your own from the `mendix/make-it-native`
+repository, branch `mx/10.24`, or use a custom developer app) contains these native modules (React Native 0.77.3):
+`@gorhom/bottom-sheet ^5.1.1`, `@op-engineering/op-sqlite 9.2.7`, `@react-native-async-storage/async-storage 2.0.0`,
+`@react-native-camera-roll/camera-roll 7.4.0`, `@react-native-community/datetimepicker 8.2.0`,
+`@react-native-community/geolocation 3.4.0`, `@react-native-community/netinfo 11.4.1`,
+`@react-native-community/push-notification-ios 1.10.1`, `@react-native-firebase/{app,analytics,crashlytics,messaging,ml} 20.1.0`,
+`@react-native-masked-view/masked-view 0.3.1`, `@react-native-picker/picker 2.11.0`, `@swan-io/react-native-browser 0.4.1`,
+`react-native-ble-plx 2.0.3`, `react-native-blob-util 0.21.2`, `react-native-calendar-events 2.1.0`,
+`react-native-device-info 13.0.0`, `react-native-edge-to-edge 1.7.0`, `react-native-fast-image 8.6.3`,
+`react-native-file-viewer 2.1.5`, `react-native-geocoder 0.5.0`, `react-native-gesture-handler 2.23.1`,
+`react-native-image-picker 7.2.3`, `react-native-inappbrowser-reborn 3.6.3`, `react-native-linear-gradient 2.5.6`,
+`react-native-localize 3.2.1`, `react-native-maps 1.14.0`, `react-native-pager-view 6.4.1`, `react-native-permissions 4.1.5`,
+`react-native-push-notification 8.1.1`, `react-native-reanimated 3.16.1`, `react-native-safe-area-context 5.2.0`,
+`react-native-screens 4.6.0`, `react-native-sound 0.11.0`, `react-native-svg 15.11.1`, `react-native-system-navigation-bar 2.6.3`,
+`react-native-tab-view 3.5.2`, `react-native-touch-id 4.4.1`, `react-native-vector-icons 10.2.0`, `react-native-video 6.10.0`,
+`react-native-view-shot 4.0.3`, `react-native-vision-camera 4.7.3`, `react-native-webview 13.13.2`.
+Pin the **same versions** in your widget. A module that is not in this list does not work in Make It Native.
+
+Native Template 14.1.x (your production app base) already contains (usable without a rebuild, import normally):
 `@react-native-async-storage/async-storage 2.0.0`, `@react-native-camera-roll/camera-roll 7.4.0`,
 `@react-native-community/datetimepicker 8.2.0`, `@react-native-community/push-notification-ios 1.10.1`,
 `@react-native-masked-view/masked-view 0.3.1`, `@react-native-picker/picker 2.11.0`, `@react-navigation/native 7.0.14`,
@@ -719,7 +752,7 @@ Adding a native module that is NOT in the app:
 | 23 | Mendix | Languages | Translations per `lang` code in XML (`en_US`, `tr_TR`, `nl_NL`) |
 | 24 | Mendix | Native navigation | Pages are React Navigation screens (stack per tab, popups) |
 | 25 | Mendix | Progress | Blocking progress overlays the page and swallows back |
-| 26 | Mendix | Make It Native | Test app with a fixed set of native modules; reload JS from Studio Pro |
+| 26 | Mendix | Make It Native | Test app with a fixed set of native modules (list in 9.3, built from `mendix/make-it-native` branch `mx/10.24`); reload JS from Studio Pro |
 | 27 | Mendix | Custom dev app | Built from Native Template; needed for new native modules |
 | 28 | Mendix | Native Template | The React Native project Mendix builds; `package.json` = available native modules |
 | 29 | Mendix | Build Native Mobile App | Studio Pro/Native Builder adds `nativeDependencies` from widgets |
@@ -738,11 +771,11 @@ Adding a native module that is NOT in the app:
 | 42 | Tooling | Bundling | Pure-JS dependencies are inlined into `<W>.android.js`/`.ios.js` |
 | 43 | Tooling | Native deps | Copied into the mpk + `<W>.json` `nativeDependencies` (exact versions) |
 | 44 | Tooling | Licenses | `dependencies.txt` / `.json` list bundled package licenses |
-| 45 | Tooling | `config.projectPath` | Auto-copy to the Mendix project `widgets/` |
+| 45 | Tooling | `config.projectPath` | Auto-copy to the Mendix project (build/start only, not release) |
 | 46 | Tooling | Node engine | `^22.18.0` enforced |
 | 47 | Tooling | xmllint | Validates XML against `node_modules/mendix/custom_widget.xsd` |
 | 48 | Tooling | Custom rollup | `rollup.config.mjs` in the widget root can change the default config (advanced) |
-| 49 | Tooling | Generator | `npx @mendix/generator-widget` scaffolds a project |
+| 49 | Tooling | Generator | `npx @mendix/generator-widget@10.24-latest` scaffolds a project |
 | 50 | Tooling | Git | Commit sources, typings, `dist/<v>/*.mpk`; ignore `node_modules`, `dist/tmp` |
 | 51 | TypeScript | Strict mode | Base tsconfig is strict; handle `undefined` |
 | 52 | TypeScript | Union narrowing | `status` narrows `DynamicValue.value` |

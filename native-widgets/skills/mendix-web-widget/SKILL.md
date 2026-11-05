@@ -43,6 +43,12 @@ say **"NOT IN SKILL"** and ask; never invent an API.
 | 23 | Version in both `package.json` and `src/package.xml` | old code stays |
 | 24 | Accessible markup: labels, `aria-*`, keyboard | fails WCAG, unusable without mouse |
 | 25 | Never render nothing silently: loading / empty / unavailable / error states | "it shows nothing" |
+| 26 | `widgetName` letters only; `packagePath` lower-case without `-` | load errors |
+| 27 | Never list `react`, `react-dom`, `@types/react*` in dependencies/devDependencies | tools ask "Update dependencies?" and rewrite package.json; skip with `CI=true` |
+| 28 | `release` does **not** copy to `config.projectPath`; `build` / `start` do | copy the mpk yourself |
+| 29 | Untyped package / SVG import → `typings/modules.d.ts`: `declare module "pkg";` and `declare module "*.svg" { const url: string; export default url; }` | TS7016 / TS2307 |
+| 30 | Rollup warnings fail build/release | fix the warning |
+| 31 | LF line endings; `.prettierignore` lists `dist/` and an inside `projectPath` | lint errors |
 
 ---
 
@@ -151,6 +157,8 @@ my-widget/
 }
 ```
 No xmllint: `"release": "pluggable-widgets-tools release:web"`.
+`config.projectPath` (or env `MX_PROJECT_PATH`, default `./tests/testProject`) is used only by `build`/`start`: they copy to
+`<project>/widgets/` and unzip into `deployment/web/widgets`. `mendixHost` / `developmentPort` are not read by tools 10.24.1.
 
 **tsconfig.json**, **.eslintrc.js**, **.prettierrc**, **.gitignore**: same as the native skill:
 ```json
@@ -272,8 +280,10 @@ Then: `npm install` → `npm run build` → `npm run release`. The mpk contains 
 `MyWidget.editorPreview.js`, `dumpit/mywidget/MyWidget.js` + `.mjs` + `.css`, `dependencies.json` + `dependencies.txt`
 (licenses of bundled packages).
 
-Generator alternative: `npx @mendix/generator-widget MyWidget` → Web, TypeScript, empty/full template; then align
-versions with section 1.
+Generator alternative: `npx @mendix/generator-widget@10.24-latest MyWidget` (never `@latest` = 11.x) → Web,
+TypeScript, function component, empty template. Its scripts: `start` = `start:server` (same as `start:web`), `dev` =
+`start:web`, `prerelease` = `npm run lint`, `test:e2e` = `npx cypress open --browser chrome --e2e` (the tools' own e2e
+commands were removed).
 
 ---
 
@@ -283,8 +293,9 @@ versions with section 1.
 |---|---|
 | `npm install` | once per clone |
 | `npm run build` | dev build + typings → `dist/tmp/widgets/` (and copy to `projectPath` if set) |
-| `npm run release` | production build → `dist/<version>/<packagePath>.<Widget>.mpk` |
-| `npm start` | watch + dev server (`developmentPort`) proxying `mendixHost`; reload the browser |
+| `npm run release` | production build (babel, terser, licenses) → `dist/<version>/<packagePath>.<Widget>.mpk`; no copy |
+| `npm start` | `start:web` = rollup watch; copies into the running app's `deployment/web/widgets` (needs `projectPath`); refresh the browser (disable cache in devtools) |
+| XML changed | F4 in Studio Pro → right-click the widget → Update widget |
 | `npm test` | Jest (jsdom) |
 | `npm run lint` / `lint:fix` | Prettier + ESLint |
 | `npx tsc --noEmit -p .` | type check |
@@ -425,7 +436,9 @@ Helpers: `import { hidePropertyIn, hidePropertiesIn, changePropertyIn, Propertie
 |---|---|---|
 | Pure JS / React libs (`classnames`, `date-fns`, chart libs, `react-select`…) | `npm i <pkg>` (dependencies) | bundled into `<W>.js` / `.mjs`; licenses in `dependencies.txt` / `dependencies.json` |
 | External (`react`, `react-dom`, `react/jsx-runtime`, `mendix`, `big.js`) | none (types come with the tools) | not bundled |
-| Library with CSS | import its CSS in the widget (`import "lib/dist/style.css"`) | bundled |
+| Library with CSS | import its CSS in the widget (`import "lib/dist/style.css"`) | bundled into `<W>.css` |
+| Assets | `src/assets/x.png`; in SCSS `url(../assets/x.png)`; in TS `import x from "../assets/x.svg"` (URL string, needs the `*.svg` shim) | copied, path rewritten |
+| Toolbox icon | `src/<W>.icon.png` (64×64), `src/<W>.tile.png` (256×192), `*.dark.png` | copied into the mpk |
 | Library that needs `window`/DOM at import time | fine on web; not in editorPreview (guard) | |
 | Large library | check bundle size in `dist/tmp/widgets/**/<W>.js`; prefer tree-shakeable imports | |
 
@@ -566,7 +579,7 @@ paging (`setLimit` called), filter (`setFilter` called), keyboard (Enter/Space).
 | 22 | Mendix | Design properties | classes appended to `props.class` |
 | 23 | Mendix | Label system property | Mendix renders the label; widget gets `id` instead of `class`/`style` |
 | 24 | Mendix | `mx-name-<name>` class | added automatically; used by tests (Selenium/Playwright) |
-| 25 | Mendix | Live reload | `npm start` + `mendixHost`; or build + refresh |
+| 25 | Mendix | Dev loop | `npm start` (watch, copies to the running app via `projectPath`) + browser refresh |
 | 26 | Mendix | Cache | browser caches widget files; Ctrl+F5 after updates |
 | 27 | Mendix | Security | client code is visible; never enforce rights in the widget |
 | 28 | Mendix | Logging | browser console |
@@ -579,9 +592,9 @@ paging (`setLimit` called), filter (`setFilter` called), keyboard (Enter/Space).
 | 35 | Tooling | Bundled deps | everything else in `dependencies`; licenses in `dependencies.txt/json` |
 | 36 | Tooling | Assets | images/fonts imported from `src` are copied to the package (`assets/`) |
 | 37 | Tooling | CSS/SCSS | import in the entry; built into `<W>.css` |
-| 38 | Tooling | `config.projectPath` | auto-copy into the project |
+| 38 | Tooling | `config.projectPath` | auto-copy into the project (build/start only) |
 | 39 | Tooling | xmllint | XSD check |
-| 40 | Tooling | Generator | `npx @mendix/generator-widget` |
+| 40 | Tooling | Generator | `npx @mendix/generator-widget@10.24-latest` |
 | 41 | TypeScript | strict | handle `undefined` |
 | 42 | TypeScript | Narrowing | by `status`, by `ListAttributeValue.type` for unions |
 | 43 | TypeScript | DOM types | `HTMLInputElement`, `KeyboardEvent`, `ChangeEvent` |
