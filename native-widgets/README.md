@@ -1,6 +1,6 @@
 # Mendix pluggable widget'ları (native + web)
 
-Bu klasörde Mendix **10.24** için yazılmış pluggable widget'lar ve onları yapay zekâ ajanıyla (OpenCode + DeepSeek gibi) geliştirmek için iki **skill** dosyası var.
+Bu klasörde Mendix **10.24** için yazılmış pluggable widget'lar ve onları yapay zekâ ajanıyla (OpenCode + DeepSeek gibi) geliştirmek ve eski sayfaları özel widget'larla yeniden tasarlamak için **skill** dosyaları ve komutlar var.
 
 | Klasör / dosya | Ne |
 |---|---|
@@ -8,6 +8,10 @@ Bu klasörde Mendix **10.24** için yazılmış pluggable widget'lar ve onları 
 | `html-viewer/` | Native: HTML gösterir, ekrana sığar, zoom, internet kesintisine dayanıklı. `dist/1.0.5/dumpit.HtmlViewer.mpk` |
 | `skills/mendix-native-widget/SKILL.md` | Ajan için: native (React Native) widget yazma, build, test, paketleme — eksiksiz kurallar ve tablolar |
 | `skills/mendix-web-widget/SKILL.md` | Ajan için: web (React) widget yazma, build, test, paketleme |
+| `skills/mendix-widget-ui-design/` | Ajan için: kurumsal, responsive, okunur tasarım kuralları + `tools/contrast.py` |
+| `skills/mendix-legacy-page-redesign/SKILL.md` | Ajan için: eski sayfayı özel widget'larla uçtan uca yeniden yapma süreci |
+| `opencode/commands/` | `/sayfa-tasarla`, `/widget-yap` komutları |
+| `WIDGETS.md` | Yazılan widget kataloğu |
 
 ---
 
@@ -85,25 +89,36 @@ Klasör adı **küçük harf ve tire** (`my-widget`), widget adı **PascalCase v
 
 ## 5. Ajanla (OpenCode / DeepSeek) çalışmak
 
-### 5.1 Skill'leri ajana tanıtmak
+### 5.1 Skill seti (puanlı)
 
-En garantili yol: proje kökündeki `opencode.json` dosyasına ekle (yoksa oluştur):
+| Skill / dosya | Nerede | Ne işe yarar | Değer (1-10) |
+|---|---|---|---|
+| `mendix-legacy-page-redesign` | `skills/` | Eski sayfayı oku → envanter → davranış eşleme (parity) → tasarım → widget → yerleştir → doğrula. Süreci yönetir | **10** |
+| `mendix-widget-ui-design` | `skills/` | Renk (kontrastı hesaplanmış), iç içe yüzeyler, yumuşak border/gölge, boyut sınıfları, metin→ikon, klavye, tek scroll, z-index, QA matrisi | **10** |
+| `mendix-web-widget` | `skills/` | Web widget build kuralları, API, test, paket | **9** |
+| `mendix-native-widget` | `skills/` | Native widget build kuralları, Make It Native paket listesi | **9** (native sayfalar varsa) |
+| dump-it export rehberleri (`AI_GUIDE.txt`, `guides/MANUAL.md`, `guides/EDIT.txt`, `mendix-ui-design`, `mendix-screens`) | export klasörü | Sayfa/flow/entity okuma, model değişikliği (dry run + onay kodu) | **9** |
+| `WIDGETS.md` (katalog) | bu klasör | Yazılan widget'lar; ajan önce yeniden kullanır | **8** |
+| `opencode/commands/sayfa-tasarla.md`, `widget-yap.md` | bu klasör | Tek satırla tüm süreci başlatır | **8** |
+| `skills/mendix-widget-ui-design/tools/contrast.py` | bu klasör | Yeni renk çiftini WCAG'e göre ölçer (`--tokens` tüm paleti kontrol eder) | **7** |
+| `mx-skills-md/` (expression, XPath referansları) | repo kökü | Widget özelliklerindeki koşul/expression'lar | 6 |
+| `docs/skills/mendix-javascript-action` | repo kökü | Widget'ın tetiklediği nanoflow'a JS action gerekirse | 4 |
 
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "instructions": [
-    "native-widgets/skills/mendix-native-widget/SKILL.md",
-    "native-widgets/skills/mendix-web-widget/SKILL.md"
-  ]
-}
-```
+### 5.2 Kurulum (bir kez)
 
-Alternatif: dosyaları `.opencode/skill/<isim>/SKILL.md` (OpenCode skill klasörü) veya `.claude/skills/<isim>/SKILL.md` altına kopyala. Skill dosyalarının başındaki `name` / `description` alanları bu formata uygun.
+OpenCode'u **dump-it export klasöründe** (`<App>-context`) çalıştır; widget repo'su ayrı bir klasör olabilir.
+
+1. Skill'leri export'a kopyala (gerektiğinde yüklenir, bağlamı doldurmaz):
+   `native-widgets/skills/<isim>/` → `<export>/.opencode/skill/<isim>/` (4 klasörün hepsi).
+2. Komutları kopyala: `native-widgets/opencode/commands/*.md` → `<export>/.opencode/commands/`.
+3. Export yenilendikten sonra bu dosyalar silinmişse tekrar kopyala.
+
+Alternatif (her istekte hepsi yüklenir, ~34 bin token): `opencode.json` → `"instructions": ["<yol>/SKILL.md", …]`.
+Sadece o an kullandığın 1-2 skill için uygundur.
 
 > Gizlilik: Bulut bir model kullanıyorsan proje kodu ve veriler o servise gider. Gizli müşteri verisi, şifre, token içeren dosyaları ajana verme.
 
-### 5.2 İlk kurulum prompt'u (kopyala-yapıştır)
+### 5.3 İlk kurulum prompt'u (kopyala-yapıştır)
 
 ```text
 You are a senior Mendix 10.24 pluggable-widget engineer. Read native-widgets/skills/mendix-native-widget/SKILL.md
@@ -123,7 +138,7 @@ Rules: one step at a time; never delete files outside native-widgets/; stop afte
 never invent Mendix APIs — if the skill does not cover something, say "NOT IN SKILL" and ask.
 ```
 
-### 5.3 Günlük iş prompt'u (yeni widget / değişiklik)
+### 5.4 Günlük iş prompt'u (yeni widget / değişiklik)
 
 ```text
 Read the skill for this widget type (native-widgets/skills/mendix-<native|web>-widget/SKILL.md). Answer in Turkish.
@@ -137,6 +152,31 @@ Follow the skill workflow exactly:
 5. Bump version in package.json AND src/package.xml, run release/test/lint, show results in a table.
 Ask me only what you cannot find in the code or the skill (max 5 questions).
 ```
+
+### 5.5 Eski sayfayı özel widget'larla yeniden yapmak (en az prompt)
+
+Komutlar kuruluysa tek satır yeter:
+
+```text
+/sayfa-tasarla Orders.Order_Overview web
+/widget-yap web StatusChip Durum attribute'unu renkli, ikonlu bir etiket olarak gösterir
+```
+
+Komut yoksa bu prompt'u yapıştır (sadece ilk satırı değiştir):
+
+```text
+[PAGE] Orders.Order_Overview   [PLATFORM] web   [NOTES] saha ekibi telefondan, ofis masaüstünden kullanıyor
+Load the skills mendix-legacy-page-redesign, mendix-widget-ui-design and mendix-web-widget (or mendix-native-widget)
+and follow mendix-legacy-page-redesign from section 0 to 10. Read WIDGETS.md first and reuse widgets.
+You do the analysis, the plan, the layout and component design for every size class (xs to large, portrait and
+landscape), the building, the placing and the checks. Keep behavior parity: no change to entities, microflows or
+nanoflows unless I ask. Answer in Turkish, short sentences, tables.
+Stop only: for missing inputs (max 5 questions), for my approval after the design step, and before every apply
+(I give the code).
+```
+
+Ajanın sana göstereceği tablolar: envanter, davranış eşleme (parity), risk tablosu (64 madde), boyut sınıfı başına
+ASCII yerleşim, widget sözleşmeleri, build sonuçları, QA matrisi, son rapor.
 
 ---
 
