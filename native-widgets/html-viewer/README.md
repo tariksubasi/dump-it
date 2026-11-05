@@ -8,7 +8,7 @@ Shows HTML on a Mendix native page (Mendix 10.24, Native Template 14, React Nati
 - Size, padding, margin and text style come from the native theme (JS style).
 - It survives network loss, broken images, crashes of the web process and bad HTML.
 
-Package: `dist/1.0.1/dumpit.HtmlViewer.mpk`. Copy it to the `widgets` folder of the app, then press F4 in Studio Pro.
+Package: `dist/1.0.2/dumpit.HtmlViewer.mpk`. Copy it to the `widgets` folder of the app, then press F4 in Studio Pro.
 
 ## Native dependency
 
@@ -37,6 +37,7 @@ The widget uses `react-native-webview` **13.15.0** (supports React Native 0.77).
 | Links | On link tap | Open in the browser or app | Or: run an action (URL in "Store link in"), or do nothing. The viewer never navigates away. |
 | Events | On load / On error | — | On load runs once per new HTML. |
 | Network | Use cached images offline | Yes | Android cache mode `LOAD_CACHE_ELSE_NETWORK`. |
+| Diagnostics | Diagnostic mode | No | Shows a yellow box under the content: size, HTML length, `<img>` and base64 count, escaped HTML, load and message counts, errors. |
 | Texts | Empty, error, retry, link error, labels | en_US + tr_TR | Translatable. |
 
 ## Style (native theme)
@@ -93,13 +94,15 @@ export const htmlCard = { container: { height: 320 } }; // with Height = Fill pa
 | 28 | Full screen button over content | Small 36 px, soft shadow, top right, only after load; own `zIndex` inside the widget only. | design |
 | 29 | Dark mode on the device | `color-scheme: light`; colors from the theme. | code |
 | 30 | Files behind Mendix login (`/file?guid=`) | Not loaded (no session in the web view). Use public URLs or base64 `data:` images. | limit |
+| 31a | The page never reports its height (script blocked, old WebView) | Measures again at load end, +1.5 s, +4 s; after 5 s shows the content in a scrollable box of 60 % of the screen, never an empty box. | code |
+| 31b | Parent gives no width (row container) | Uses the screen width and warns. | code |
 | 31 | Very large HTML (several MB) | Works, but slow on old phones. Keep it under 1 MB. | limit |
 
 ## Commands
 
 ```bash
 npm install
-npm run release        # XSD check + build -> dist/1.0.1/dumpit.HtmlViewer.mpk
+npm run release        # XSD check + build -> dist/1.0.2/dumpit.HtmlViewer.mpk
 npm test               # 46 unit tests
 npm run test:browser   # 110 checks in Chromium at 320, 360, 768, 800 (landscape) and 1280 px
 npm run lint

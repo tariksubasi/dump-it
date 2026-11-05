@@ -108,6 +108,12 @@
                     <description>Android: show images from the cache when there is no network. Broken images retry by themselves when the network comes back, when the app comes back to the front, or on tap.</description>
                 </property>
             </propertyGroup>
+            <propertyGroup caption="Diagnostics">
+                <property key="debugMode" type="boolean" defaultValue="false">
+                    <caption>Diagnostic mode</caption>
+                    <description>Show what the viewer sees under the content: size, HTML length, images, messages and errors. Turn off before release.</description>
+                </property>
+            </propertyGroup>
             <propertyGroup caption="Texts">
                 <property key="emptyText" type="textTemplate" required="false">
                     <caption>Empty text</caption>

@@ -23,6 +23,7 @@ import {
     StyleSheet,
     Text,
     ToastAndroid,
+    useWindowDimensions,
     View
 } from "react-native";
 import { ActionValue, DynamicValue, ValueStatus } from "mendix";
@@ -36,6 +37,8 @@ const PLACEHOLDER_HEIGHT = 48;
 const SPINNER_DELAY_MS = 250;
 const READY_TIMEOUT_MS = 8000;
 const LINK_REPEAT_MS = 1000;
+// No height from the page after this time: show the content in a scrollable box instead of an empty one.
+const NO_HEIGHT_MS = 5000;
 const ORIENTATIONS: Array<"portrait" | "portrait-upside-down" | "landscape" | "landscape-left" | "landscape-right"> = [
     "portrait",
     "portrait-upside-down",
@@ -254,7 +257,9 @@ function Viewer(props: Props & { styles: Styles }): ReactElement | null {
             ? props.baseUrl.value.trim()
             : undefined;
 
+    const win = useWindowDimensions();
     const [width, setWidth] = useState(0);
+    const [forcedWidth, setForcedWidth] = useState(0); // the parent gave no width (a row container)
     const [fallback, setFallback] = useState(false); // "Fill parent" without a parent height
     const mode: SizeMode = props.sizeMode === "parent" && !fallback ? "parent" : "content";
     const maxHeight = mode === "content" && props.maxHeight > 0 ? props.maxHeight : 0;
@@ -268,6 +273,16 @@ function Viewer(props: Props & { styles: Styles }): ReactElement | null {
     const [spinnerFor, setSpinnerFor] = useState("");
     const [failedFor, setFailedFor] = useState("");
     const [fullscreen, setFullscreen] = useState(false);
+    const [noHeightFor, setNoHeightFor] = useState("");
+    const heightFor = useRef("");
+    // Diagnostic mode counters
+    type Diag = { msgs: number; last: string; loadEnd: number; jsError: string; fail: string };
+    const [diag, setDiag] = useState<Diag>({ msgs: 0, last: "-", loadEnd: 0, jsError: "-", fail: "-" });
+    const note = useCallback((change: (d: Diag) => Partial<Diag>) => {
+        if (propsRef.current.debugMode) {
+            setDiag(d => ({ ...d, ...change(d) }));
+        }
+    }, []);
 
     const nonce = useMemo(() => makeNonce(), []);
     const empty = html !== undefined && isEmptyHtml(html);
@@ -335,11 +350,18 @@ function Viewer(props: Props & { styles: Styles }): ReactElement | null {
         }
         const spin = setTimeout(() => setSpinnerFor(loadKey), SPINNER_DELAY_MS);
         const giveUp = setTimeout(() => setReadyFor(loadKey), READY_TIMEOUT_MS);
+        const noHeight = setTimeout(() => {
+            if (mode === "content" && heightFor.current !== loadKey) {
+                console.warn("HtmlViewer: the page did not report its height. Showing it in a scrollable box.");
+                setNoHeightFor(loadKey);
+            }
+        }, NO_HEIGHT_MS);
         return () => {
             clearTimeout(spin);
             clearTimeout(giveUp);
+            clearTimeout(noHeight);
         };
-    }, [loadKey]);
+    }, [loadKey, mode]);
 
     useEffect(() => {
         if (ready) {
@@ -349,7 +371,13 @@ function Viewer(props: Props & { styles: Styles }): ReactElement | null {
 
     const onMessage = useCallback(
         (msg: FrameMessage) => {
+            note(d => ({
+                msgs: d.msgs + 1,
+                last: msg.t === "h" ? `h=${msg.v}` : msg.t,
+                jsError: msg.t === "jsError" ? String(msg.m ?? "").slice(0, 120) : d.jsError
+            }));
             if (msg.t === "h") {
+                heightFor.current = loadKeyRef.current;
                 const next = guard.current.next(heightRef.current, msg.v, Date.now());
                 if (next !== undefined) {
                     heightRef.current = next;
@@ -362,7 +390,7 @@ function Viewer(props: Props & { styles: Styles }): ReactElement | null {
                 markReady();
             }
         },
-        [mode, markReady]
+        [mode, markReady, note]
     );
 
     const lastLink = useRef({ url: "", at: 0 });
@@ -390,15 +418,23 @@ function Viewer(props: Props & { styles: Styles }): ReactElement | null {
         Linking.openURL(url).catch(() => notify(textOf(p.linkErrorText, "This link cannot be opened.")));
     }, []);
 
-    const onFail = useCallback((reason: string) => {
-        console.warn(`HtmlViewer: ${reason}`);
-        setFailedFor(loadKeyRef.current);
-        runAction(propsRef.current.onError);
-    }, []);
+    const onFail = useCallback(
+        (reason: string) => {
+            console.warn(`HtmlViewer: ${reason}`);
+            note(() => ({ fail: reason }));
+            setFailedFor(loadKeyRef.current);
+            runAction(propsRef.current.onError);
+        },
+        [note]
+    );
 
     const onBoxLayout = useCallback(
         (e: LayoutChangeEvent) => {
             const { width: w, height: h } = e.nativeEvent.layout;
+            if (w < 1 && forcedWidth === 0) {
+                console.warn("HtmlViewer: the parent gives no width (row container?). Using the screen width.");
+                setForcedWidth(win.width);
+            }
             if (Math.abs(w - width) >= 1) {
                 guard.current.reset(); // rotation or a new parent width: the height changes for real
                 setWidth(w);
@@ -410,7 +446,7 @@ function Viewer(props: Props & { styles: Styles }): ReactElement | null {
                 setFallback(true);
             }
         },
-        [width, fallback, props.sizeMode]
+        [width, fallback, forcedWidth, win.width, props.sizeMode]
     );
 
     // ---- render ----
@@ -445,8 +481,18 @@ function Viewer(props: Props & { styles: Styles }): ReactElement | null {
         );
     }
 
-    const box = mode === "parent" ? styles.flex : { height: boxHeight(contentHeight, maxHeight, PLACEHOLDER_HEIGHT) };
-    const scrollable = mode === "parent" || (maxHeight > 0 && (contentHeight ?? 0) > maxHeight);
+    const noHeight = mode === "content" && noHeightFor === loadKey;
+    const fallbackHeight = Math.round(win.height * 0.6);
+    const contentBox = noHeight
+        ? maxHeight > 0
+            ? Math.min(fallbackHeight, maxHeight)
+            : fallbackHeight
+        : boxHeight(contentHeight, maxHeight, PLACEHOLDER_HEIGHT);
+    const box = [
+        mode === "parent" ? styles.flex : { height: contentBox },
+        forcedWidth > 0 ? { width: forcedWidth } : null
+    ];
+    const scrollable = mode === "parent" || noHeight || (maxHeight > 0 && (contentHeight ?? 0) > maxHeight);
     const showButton = props.fullscreenButton || (props.zoomable && mode === "content");
 
     return (
@@ -462,7 +508,12 @@ function Viewer(props: Props & { styles: Styles }): ReactElement | null {
                         scrollable={scrollable}
                         offlineCache={props.offlineCache}
                         onMessage={onMessage}
-                        onLoadEnd={() => mode === "parent" && markReady()}
+                        onLoadEnd={() => {
+                            note(d => ({ loadEnd: d.loadEnd + 1 }));
+                            if (mode === "parent") {
+                                markReady();
+                            }
+                        }}
                         onLink={onLink}
                         onFail={onFail}
                         testID={`${props.name}$web`}
@@ -485,6 +536,21 @@ function Viewer(props: Props & { styles: Styles }): ReactElement | null {
                     </Pressable>
                 ) : null}
             </View>
+            {props.debugMode ? (
+                <Text style={styles.diag} selectable>
+                    {[
+                        `HtmlViewer ${Platform.OS} ${Platform.Version} mode=${mode}${fallback ? " (fill->fit)" : ""}`,
+                        `box ${Math.round(width)}${forcedWidth ? "(forced)" : ""} x ${Math.round(
+                            mode === "parent" ? 0 : contentBox
+                        )} content h=${contentHeight ?? "-"}${noHeight ? " NO HEIGHT" : ""}`,
+                        `html ${html.length} chars, <img> ${(html.match(/<img\b/gi) ?? []).length}, base64 ${
+                            (html.match(/data:[^"')\s]*;base64,/gi) ?? []).length
+                        }, escaped ${/&lt;\s*img/i.test(html) ? "YES" : "no"}`,
+                        `loadEnd ${diag.loadEnd} msgs ${diag.msgs} last ${diag.last} ready ${ready ? "yes" : "no"}`,
+                        `jsError ${diag.jsError} fail ${diag.fail}`
+                    ].join("\n")}
+                </Text>
+            ) : null}
             {showButton ? (
                 <Fullscreen
                     visible={fullscreen}
@@ -523,5 +589,15 @@ const styles = StyleSheet.create({
     expand: { position: "absolute", top: 8, right: 8, zIndex: 2 },
     pressed: { opacity: 0.7 },
     closeButton: { width: 44, height: 44, alignItems: "center", justifyContent: "center", borderRadius: 22 },
-    modalError: { flex: 1, padding: 16, justifyContent: "center" }
+    modalError: { flex: 1, padding: 16, justifyContent: "center" },
+    diag: {
+        marginTop: 6,
+        padding: 8,
+        borderRadius: 6,
+        backgroundColor: "#fff8e1",
+        color: "#5d4300",
+        fontSize: 11,
+        lineHeight: 15,
+        fontFamily: Platform.select({ ios: "Menlo", default: "monospace" })
+    }
 });

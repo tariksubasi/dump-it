@@ -96,9 +96,10 @@ export function HtmlFrame(props: HtmlFrameProps): ReactElement {
         }
         if (msg.t === "link" && typeof msg.href === "string") {
             latest.current.onLink(msg.href);
-        } else if (msg.t === "jsError") {
-            console.warn("HtmlViewer: script error in the HTML:", msg.m);
         } else {
+            if (msg.t === "jsError") {
+                console.warn("HtmlViewer: script error in the HTML:", msg.m);
+            }
             latest.current.onMessage(msg);
         }
     }, []);
@@ -119,6 +120,17 @@ export function HtmlFrame(props: HtmlFrameProps): ReactElement {
         latest.current.onLink(e.nativeEvent.targetUrl);
     }, []);
 
+    // Measure again after the load, also when the page script started too early or not at all.
+    const timers = useRef<Array<ReturnType<typeof setTimeout>>>([]);
+    useEffect(() => () => timers.current.forEach(clearTimeout), []);
+    const onLoadEnd = useCallback(() => {
+        const script = `${bootstrapScript(latest.current.mode)}\ntrue;`;
+        ref.current?.injectJavaScript(script);
+        timers.current.forEach(clearTimeout);
+        timers.current = [1500, 4000].map(ms => setTimeout(() => ref.current?.injectJavaScript(script), ms));
+        latest.current.onLoadEnd();
+    }, []);
+
     const { scrollable, zoom } = props;
     return (
         <WebView
@@ -133,7 +145,7 @@ export function HtmlFrame(props: HtmlFrameProps): ReactElement {
             onMessage={onMessage}
             onShouldStartLoadWithRequest={onShouldStartLoadWithRequest}
             onOpenWindow={onOpenWindow}
-            onLoadEnd={() => latest.current.onLoadEnd()}
+            onLoadEnd={onLoadEnd}
             onError={onError}
             onRenderProcessGone={() => recover("Android web view process stopped")}
             onContentProcessDidTerminate={() => recover("iOS web content process stopped")}

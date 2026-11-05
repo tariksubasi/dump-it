@@ -31,6 +31,7 @@ export interface HtmlViewerProps<Style> {
     onLoad?: ActionValue;
     onError?: ActionValue;
     offlineCache: boolean;
+    debugMode: boolean;
     emptyText?: DynamicValue<string>;
     errorText?: DynamicValue<string>;
     retryText?: DynamicValue<string>;
@@ -66,6 +67,7 @@ export interface HtmlViewerPreviewProps {
     onLoad: {} | null;
     onError: {} | null;
     offlineCache: boolean;
+    debugMode: boolean;
     emptyText: string;
     errorText: string;
     retryText: string;
