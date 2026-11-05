@@ -11,7 +11,8 @@ Bu klasörde Mendix **10.24** için yazılmış pluggable widget'lar ve onları 
 | `skills/mendix-web-widget/SKILL.md` | Ajan için: web (React) widget yazma, build, test, paketleme |
 | `skills/mendix-widget-ui-design/` | Ajan için: kurumsal, responsive, okunur tasarım kuralları + `tools/contrast.py` |
 | `skills/mendix-legacy-page-redesign/SKILL.md` | Ajan için: eski sayfayı özel widget'larla uçtan uca yeniden yapma süreci |
-| `opencode/commands/` | `/sayfa-tasarla`, `/widget-yap` komutları |
+| `skills/mendix-readonly-widgets/SKILL.md` | Ajan için: salt okunur ekranları kapatan 13 genel widget'ın kataloğu ve sözleşmeleri |
+| `opencode/commands/` | `/sayfa-envanteri`, `/sayfa-tasarla`, `/widget-yap` komutları |
 | `WIDGETS.md` | Yazılan widget kataloğu |
 
 ---
@@ -98,6 +99,7 @@ Klasör adı **küçük harf ve tire** (`my-widget`), widget adı **PascalCase v
 | `mendix-widget-ui-design` | `skills/` | Renk (kontrastı hesaplanmış), iç içe yüzeyler, yumuşak border/gölge, boyut sınıfları, metin→ikon, klavye, tek scroll, z-index, QA matrisi | **10** |
 | `mendix-web-widget` | `skills/` | Web widget build kuralları, API, test, paket | **9** |
 | `mendix-native-widget` | `skills/` | Native widget build kuralları, Make It Native paket listesi | **9** (native sayfalar varsa) |
+| `mendix-readonly-widgets` | `skills/` | Az sayıda genel salt okunur widget ile çok sayfa: SectionCard, FieldList, DetailHeader, KpiTiles… | **10** |
 | dump-it export rehberleri (`AI_GUIDE.txt`, `guides/MANUAL.md`, `guides/EDIT.txt`, `mendix-ui-design`, `mendix-screens`) | export klasörü | Sayfa/flow/entity okuma, model değişikliği (dry run + onay kodu) | **9** |
 | `WIDGETS.md` (katalog) | bu klasör | Yazılan widget'lar; ajan önce yeniden kullanır | **8** |
 | `opencode/commands/sayfa-tasarla.md`, `widget-yap.md` | bu klasör | Tek satırla tüm süreci başlatır | **8** |
@@ -110,11 +112,11 @@ Klasör adı **küçük harf ve tire** (`my-widget`), widget adı **PascalCase v
 OpenCode'u **dump-it export klasöründe** (`<App>-context`) çalıştır; widget repo'su ayrı bir klasör olabilir.
 
 1. Skill'leri export'a kopyala (gerektiğinde yüklenir, bağlamı doldurmaz):
-   `native-widgets/skills/<isim>/` → `<export>/.opencode/skill/<isim>/` (4 klasörün hepsi).
+   `native-widgets/skills/<isim>/` → `<export>/.opencode/skill/<isim>/` (5 klasörün hepsi).
 2. Komutları kopyala: `native-widgets/opencode/commands/*.md` → `<export>/.opencode/commands/`.
 3. Export yenilendikten sonra bu dosyalar silinmişse tekrar kopyala.
 
-Alternatif (her istekte hepsi yüklenir, ~34 bin token): `opencode.json` → `"instructions": ["<yol>/SKILL.md", …]`.
+Alternatif (her istekte hepsi yüklenir, ~37 bin token): `opencode.json` → `"instructions": ["<yol>/SKILL.md", …]`.
 Sadece o an kullandığın 1-2 skill için uygundur.
 
 > Gizlilik: Bulut bir model kullanıyorsan proje kodu ve veriler o servise gider. Gizli müşteri verisi, şifre, token içeren dosyaları ajana verme.
@@ -178,6 +180,42 @@ Stop only: for missing inputs (max 5 questions), for my approval after the desig
 
 Ajanın sana göstereceği tablolar: envanter, davranış eşleme (parity), risk tablosu (64 madde), boyut sınıfı başına
 ASCII yerleşim, widget sözleşmeleri, build sonuçları, QA matrisi, son rapor.
+
+### 5.6 İlk gün planı (eski, tasarımı kötü bir uygulamada başlarken)
+
+**Hazırla (ajan bunları alırsa çok daha hızlı çalışır):**
+
+| # | Ajana ver | Neden | Etki |
+|---|---|---|---|
+| 1 | Güncel dump-it export'u (`python mx.py refresh`) | Sayfa, flow, entity, rol bilgisini kendisi okur | 10 |
+| 2 | Hedef platform (web / native) ve hedef cihazlar (saha telefonu, ofis masaüstü, tablet) | Boyut sınıfı öncelikleri | 9 |
+| 3 | Marka renkleri (2–3 hex) ve logo | Token'lar; renkleri `contrast.py` ile ölçtür | 8 |
+| 4 | Mevcut sayfalardan 3–5 ekran görüntüsü (telefon + masaüstü) | "Önce" hali, sorunları görür | 8 |
+| 5 | Beğendiğin 1–2 örnek ekran (resim) | Görsel hedef, daha az tur | 7 |
+| 6 | En çok kullanılan 5 sayfanın adı | Öncelik; envanter komutu da bulur | 8 |
+| 7 | Test kullanıcısı (her rol) ve örnek veri (uzun isim, boş alan, 100+ kayıt) | Kenar durumlarını gerçek veriyle görür | 8 |
+| 8 | Widget repo yolu, Node 22.18+, `npm install` yapılmış | Build ilk denemede çalışır | 9 |
+| 9 | "Dokunma" listesi (değişmemesi gereken sayfa/flow) | Risk sıfır | 7 |
+
+**Sıra:**
+
+1. `/sayfa-envanteri` → öncelik listesi + hangi genel widget'lar gerekli.
+2. `/widget-yap native SectionCard …` → ilk widget. Hemen bir sayfada dene (en büyük görsel kazanç, sıfır mantık riski).
+3. Sonra FieldList → DetailHeader → StatusChip → KpiTiles (`mendix-readonly-widgets` sırası).
+4. `/sayfa-tasarla <Sayfa>` → widget'ları sayfaya uygula; onay kodu ile.
+5. Her widget sonrası `WIDGETS.md` güncel, mpk commit'li.
+
+**OpenCode'da çalışma şekli:**
+
+| Kural | Neden |
+|---|---|
+| Bir oturum = bir widget veya bir sayfa | Bağlam temiz kalır, ajan dağılmaz |
+| Uzun oturumda `/compact` veya yeni oturum | Eski tahminler yeni işi bozmaz |
+| Her widget için ayrı git branch ve commit | Geri almak kolay |
+| Önce tasarım tablosunu onayla, sonra kod | Yanlış tasarımı kodlamaya zaman harcanmaz |
+| Ajan "NOT IN SKILL" derse dur, bana / dokümana sor | Uydurma API riski |
+| Aynı hata 3 kez → dur, hatayı tam göster | Döngüye girmez |
+| Gerçek cihazda dene: telefon dikey + yatay, tablet | Tarayıcı simülasyonu klavye ve kaydırmayı tam göstermez |
 
 ---
 
