@@ -8,7 +8,7 @@ Shows HTML on a Mendix native page (Mendix 10.24, Native Template 14, React Nati
 - Size, padding, margin and text style come from the native theme (JS style).
 - It survives network loss, broken images, crashes of the web process and bad HTML.
 
-Package: `dist/1.0.4/dumpit.HtmlViewer.mpk`. Copy it to the `widgets` folder of the app, then press F4 in Studio Pro.
+Package: `dist/1.0.5/dumpit.HtmlViewer.mpk`. Copy it to the `widgets` folder of the app, then press F4 in Studio Pro.
 
 ## Native dependency
 
@@ -102,7 +102,7 @@ export const htmlCard = { container: { height: 320 } }; // with Height = Fill pa
 
 ```bash
 npm install
-npm run release        # XSD check + build -> dist/1.0.4/dumpit.HtmlViewer.mpk
+npm run release        # XSD check + build -> dist/1.0.5/dumpit.HtmlViewer.mpk
 npm test               # 54 unit + render tests
 npm run test:browser   # 110 checks in Chromium at 320, 360, 768, 800 (landscape) and 1280 px
 npm run lint

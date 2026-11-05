@@ -1,7 +1,7 @@
 {
   "name": "html-viewer",
   "widgetName": "HtmlViewer",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Shows HTML in a Mendix native page: fits the screen, zoomable, resilient to network loss",
   "license": "Apache-2.0",
   "packagePath": "dumpit",

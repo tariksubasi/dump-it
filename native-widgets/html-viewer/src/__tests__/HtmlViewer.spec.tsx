@@ -51,6 +51,8 @@ describe("HtmlViewer diagnostic mode is visible in every state", () => {
     it("empty string", () => {
         const r = render(createElement(HtmlViewer, props(value(ValueStatus.Available, ""))));
         expect(r.getByText(/0 chars = EMPTY/)).toBeTruthy();
+        expect(r.getByText(/check the attribute, not the widget/)).toBeTruthy();
+        expect(r.queryByText(/NO HEIGHT/)).toBeNull();
     });
 
     it("escaped HTML is reported", () => {
@@ -81,7 +83,7 @@ describe("HtmlViewer diagnostic dialog", () => {
         jest.advanceTimersByTime(4000);
         expect(alert).toHaveBeenCalledTimes(1);
         const [title, message] = alert.mock.calls[0];
-        expect(title).toMatch(/HtmlViewer 1\.0\.4 diagnostic/);
+        expect(title).toMatch(/HtmlViewer 1\.0\.5 diagnostic/);
         expect(message).toMatch(/no context object/);
         expect(message).toMatch(/settings height=content/);
         alert.mockRestore();

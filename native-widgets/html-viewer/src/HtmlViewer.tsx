@@ -33,7 +33,7 @@ import { FrameMessage, HtmlFrame } from "./HtmlFrame";
 import { boxHeight, buildDocument, classifyLink, HeightGuard, isEmptyHtml, makeNonce, SizeMode } from "./htmlDocument";
 import { HtmlViewerStyle, mergeStyles } from "./ui/styles";
 
-const VERSION = "1.0.4"; // shown in diagnostic mode: proves which build the app runs
+const VERSION = "1.0.5"; // shown in diagnostic mode: proves which build the app runs
 const PLACEHOLDER_HEIGHT = 48;
 const DIAG_DELAY_MS = 4000; // wait for load and height first
 const SPINNER_DELAY_MS = 250;
@@ -460,7 +460,7 @@ function Viewer(props: Props & { styles: Styles }): ReactElement | null {
     const errorText = textOf(props.errorText, "The content cannot be shown.");
     const retryText = textOf(props.retryText, "Try again");
 
-    const noHeight = mode === "content" && noHeightFor === loadKey;
+    const noHeight = mode === "content" && loadKey !== "" && noHeightFor === loadKey;
     const fallbackHeight = Math.round(win.height * 0.6);
     const contentBox = noHeight
         ? maxHeight > 0
@@ -490,9 +490,11 @@ function Viewer(props: Props & { styles: Styles }): ReactElement | null {
         `<img> ${(h.match(/<img\b/gi) ?? []).length}, base64 ${
             (h.match(/data:[^"')\s]*;base64,/gi) ?? []).length
         }, escaped ${/&lt;\s*img/i.test(h) ? "YES" : "no"}, starts "${h.slice(0, 40).replace(/\s+/g, " ")}"`,
-        `box ${Math.round(width)}${forcedWidth ? "(forced)" : ""} x ${
-            mode === "parent" ? "flex" : Math.round(contentBox)
-        } content h=${contentHeight ?? "-"}${noHeight ? " NO HEIGHT" : ""}`,
+        !doc
+            ? "box - (nothing to show: the HTML value is empty; check the attribute, not the widget)"
+            : `box ${Math.round(width)}${forcedWidth ? "(forced)" : ""} x ${
+                  mode === "parent" ? "flex" : Math.round(contentBox)
+              } content h=${contentHeight ?? "-"}${noHeight ? " NO HEIGHT" : ""}`,
         `loadEnd ${diag.loadEnd} msgs ${diag.msgs} last ${diag.last} ready ${ready ? "yes" : "no"} failed ${
             failed ? "yes" : "no"
         }`,
