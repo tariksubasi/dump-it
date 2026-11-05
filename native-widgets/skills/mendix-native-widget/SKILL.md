@@ -687,3 +687,150 @@ Adding a native module that is NOT in the app:
 |---|---|
 | `native-widgets/back-navigation` | `NavigationContext`, `BackHandler`, focus/blur subscription, editorConfig hide/check, pure logic + tests |
 | `native-widgets/html-viewer` | native npm dependency (`react-native-webview`), style merge, error boundary, modal, diagnostic dialog, render tests with mocks, browser tests of generated HTML |
+
+---
+
+## 18. Knowledge map (what the agent must know; check each before claiming "done")
+
+| # | Area | Topic | Must know |
+|---|---|---|---|
+| 1 | Mendix | Pluggable widget | A React (Native) component + XML definition packaged as `.mpk`; Studio Pro reads the XML, the client runs the JS |
+| 2 | Mendix | `widgets/` folder | Studio Pro loads every `.mpk` there on F4; duplicates of one widget id conflict |
+| 3 | Mendix | Widget id | Unique, stable; changing it breaks every page that uses the widget |
+| 4 | Mendix | Property key | Becomes the prop name; renaming it loses the configured value on pages |
+| 5 | Mendix | Data view context | `needsEntityContext="true"` widgets read attributes from the surrounding object |
+| 6 | Mendix | List context | Inside a list/gallery item, the context object is that item |
+| 7 | Mendix | Page parameters | 10.23+: attribute properties may use page parameters without a data view |
+| 8 | Mendix | Entity access | Read/write rights per attribute decide `readOnly` and availability |
+| 9 | Mendix | Editability | Conditional editability sets every `EditableValue.readOnly` |
+| 10 | Mendix | Visibility | Mendix hides the whole widget; no prop needed |
+| 11 | Mendix | Validation | Domain-model rules + `setValidator` (one custom validator) show in `validation` |
+| 12 | Mendix | Commit | Widgets never commit; a microflow/nanoflow action does |
+| 13 | Mendix | Microflow vs nanoflow | Native/offline logic runs in nanoflows; microflows need the server |
+| 14 | Mendix | Offline-first | Native apps use a local database; synchronization decides what data exists on the device |
+| 15 | Mendix | Sync settings | Navigation → Native → offline sync per entity (all objects / by XPath / nothing) |
+| 16 | Mendix | Enumerations | Value = key string; caption via `formatter.format(value)`; `universe` lists keys |
+| 17 | Mendix | Decimal precision | `Big` keeps precision; never convert money to `number` for maths |
+| 18 | Mendix | DateTime | JS `Date`; time zone = device/user; use the formatter for display |
+| 19 | Mendix | Associations | `ReferenceValue` / `ReferenceSetValue`; options come from `selectableObjects` datasource |
+| 20 | Mendix | Datasource kinds | Database/XPath (server paging), Association, Microflow, Nanoflow (client-side processing) |
+| 21 | Mendix | Listen to / selection | Selection values can drive other widgets (10.4+), expressions (10.6+) |
+| 22 | Mendix | Text templates | Translatable, may include parameters; value can be Loading |
+| 23 | Mendix | Languages | Translations per `lang` code in XML (`en_US`, `tr_TR`, `nl_NL`) |
+| 24 | Mendix | Native navigation | Pages are React Navigation screens (stack per tab, popups) |
+| 25 | Mendix | Progress | Blocking progress overlays the page and swallows back |
+| 26 | Mendix | Make It Native | Test app with a fixed set of native modules; reload JS from Studio Pro |
+| 27 | Mendix | Custom dev app | Built from Native Template; needed for new native modules |
+| 28 | Mendix | Native Template | The React Native project Mendix builds; `package.json` = available native modules |
+| 29 | Mendix | Build Native Mobile App | Studio Pro/Native Builder adds `nativeDependencies` from widgets |
+| 30 | Mendix | Theme (native) | JS style objects exported from `theme/native` / `themesource/<module>/native` |
+| 31 | Mendix | Atlas native | Default design system; reuse its variables (colors, spacing, font sizes) |
+| 32 | Mendix | Design properties | JSON per module; classes → style objects |
+| 33 | Mendix | Marketplace | Publish `.mpk` with docs; versioning semver |
+| 34 | Mendix | Native Mobile Resources | Mendix's widget set (Web view, Bottom sheet, …); avoid duplicating them |
+| 35 | Mendix | Security | Widget code runs on the device; never trust it for authorization |
+| 36 | Mendix | Logging | `console.info/warn/error` → Studio Pro console / Metro / device log |
+| 37 | Mendix | Errors | A thrown render error shows a red box in dev; use an error boundary |
+| 38 | Mendix | Version mapping | tools 10.24.1 ↔ Studio Pro 10.24 ↔ NT 14 ↔ RN 0.77 |
+| 39 | Tooling | `pluggable-widgets-tools` | Rollup build, typings generator, jest/eslint/prettier presets |
+| 40 | Tooling | Typings generator | Reads XML; writes `typings/<W>Props.d.ts` on build |
+| 41 | Tooling | Rollup externals | Native: mendix, react, react-native, big.js, @react-navigation, gesture-handler, reanimated, fast-image, svg, vector-icons, safe-area-context |
+| 42 | Tooling | Bundling | Pure-JS dependencies are inlined into `<W>.android.js`/`.ios.js` |
+| 43 | Tooling | Native deps | Copied into the mpk + `<W>.json` `nativeDependencies` (exact versions) |
+| 44 | Tooling | Licenses | `dependencies.txt` / `.json` list bundled package licenses |
+| 45 | Tooling | `config.projectPath` | Auto-copy to the Mendix project `widgets/` |
+| 46 | Tooling | Node engine | `^22.18.0` enforced |
+| 47 | Tooling | xmllint | Validates XML against `node_modules/mendix/custom_widget.xsd` |
+| 48 | Tooling | Custom rollup | `rollup.config.mjs` in the widget root can change the default config (advanced) |
+| 49 | Tooling | Generator | `npx @mendix/generator-widget` scaffolds a project |
+| 50 | Tooling | Git | Commit sources, typings, `dist/<v>/*.mpk`; ignore `node_modules`, `dist/tmp` |
+| 51 | TypeScript | Strict mode | Base tsconfig is strict; handle `undefined` |
+| 52 | TypeScript | Union narrowing | `status` narrows `DynamicValue.value` |
+| 53 | TypeScript | `Option<T>` | `T \| undefined` |
+| 54 | TypeScript | `as const`, literal types | for enum props |
+| 55 | TypeScript | Generics | `Props<Style>` for native |
+| 56 | TypeScript | `unknown` over `any` | lint discourages `any` |
+| 57 | TypeScript | Type-only imports | `import type { X }` for types from native modules |
+| 58 | React | Function components | One exported component per widget entry |
+| 59 | React | JSX transform | automatic runtime; no `createElement` import |
+| 60 | React | `useState` | local UI state only; Mendix values come from props |
+| 61 | React | `useMemo` | derived data (merged styles, filtered items) |
+| 62 | React | `useCallback` | stable handlers for lists/children |
+| 63 | React | `useRef` | latest props for listeners; DOM/native refs |
+| 64 | React | `useLayoutEffect` | write refs; measure layout |
+| 65 | React | `useEffect` | subscribe/unsubscribe; no sync setState in body |
+| 66 | React | Effect cleanup | remove listeners, clear timers |
+| 67 | React | Derived state | compute from props instead of syncing |
+| 68 | React | Keys | `item.id`, never index for dynamic lists |
+| 69 | React | `React.memo` | pure rows |
+| 70 | React | Error boundaries | class component only |
+| 71 | React | Context | `NavigationContext` read with `useContext` |
+| 72 | React | Strict effects | effects may run twice in dev; make them idempotent |
+| 73 | React | Controlled inputs | value from `EditableValue`, write with `setValue`/`setTextValue` |
+| 74 | React | Batching | several setState calls in one event render once |
+| 75 | React | Concurrent safety | no side effects in render |
+| 76 | React Native | Core components | View, Text, Image, TextInput, Pressable, ScrollView, FlatList, SectionList, Modal, ActivityIndicator, Switch, KeyboardAvoidingView |
+| 77 | React Native | Flexbox | column default, `flex`, `alignItems`, `justifyContent`, `flexWrap`, `gap` |
+| 78 | React Native | Units | density-independent pixels; no `%` for font sizes |
+| 79 | React Native | Text rules | text only inside `<Text>`; nested Text inherits style |
+| 80 | React Native | StyleSheet | `StyleSheet.create`, arrays merge left→right |
+| 81 | React Native | Platform code | `Platform.OS`, `Platform.select`, `.android.tsx` / `.ios.tsx` |
+| 82 | React Native | Dimensions | `useWindowDimensions` (updates on rotation) |
+| 83 | React Native | Safe areas | notch/home indicator; NT 14 Android edge-to-edge |
+| 84 | React Native | Keyboard | `Keyboard` events, `KeyboardAvoidingView`, `keyboardShouldPersistTaps` |
+| 85 | React Native | Touch | `Pressable`, `hitSlop`, `pressRetentionOffset`, `delayLongPress` |
+| 86 | React Native | Gesture conflicts | Pressable inside ScrollView: keep taps short; avoid nested scroll |
+| 87 | React Native | Lists | `FlatList` virtualization props, `onEndReachedThreshold`, `ListEmptyComponent` |
+| 88 | React Native | Images | `resizeMode`, caching, remote https, `onError` fallback |
+| 89 | React Native | Animations | `Animated` with `useNativeDriver: true` for transform/opacity |
+| 90 | React Native | Reanimated | external; worklets; version 3.16 in NT 14 |
+| 91 | React Native | Gesture handler | external; `GestureDetector` |
+| 92 | React Native | Modal | `onRequestClose`, `supportedOrientations`, `statusBarTranslucent`, `transparent` |
+| 93 | React Native | Alert / Toast | `Alert.alert` cross-platform; `ToastAndroid` Android only, short |
+| 94 | React Native | Linking | `openURL`, `canOpenURL` (Android 11 package visibility) |
+| 95 | React Native | AppState | foreground/background events |
+| 96 | React Native | BackHandler | Android hardware back; subscribe on focus |
+| 97 | React Native | Accessibility | roles, labels, `accessibilityState`, font scaling (`allowFontScaling`) |
+| 98 | React Native | Color scheme | `useColorScheme()` |
+| 99 | React Native | i18n / RTL | `I18nManager.isRTL`; logical `start`/`end` |
+| 100 | React Native | Performance | avoid inline heavy work, large images, many re-renders; use the profiler |
+| 101 | React Native | New architecture | TurboModules/Fabric; a missing native module fails at import |
+| 102 | React Native | Native module versions | JS and native versions must match (app vs widget) |
+| 103 | React Native | WebView | `react-native-webview` (not in NT 14 by default; NMR adds it) |
+| 104 | React Native | SVG | `react-native-svg` external |
+| 105 | React Native | Vector icons | `react-native-vector-icons` external; Mendix icons via `mendix/components/native/Icon` |
+| 106 | React Native | Storage | `@react-native-async-storage/async-storage` in NT 14 |
+| 107 | React Native | Permissions | `react-native-permissions` in NT 14; ask with a clear reason |
+| 108 | React Native | Device info | `react-native-device-info` in NT 14 |
+| 109 | React Native | Date picker | `@react-native-community/datetimepicker` in NT 14 |
+| 110 | React Native | Bottom sheet | `@gorhom/bottom-sheet` in NT 14 |
+| 111 | React Native | Video | `react-native-video` in NT 14 |
+| 112 | React Native | Pager / tabs | `react-native-pager-view`, `react-native-tab-view` in NT 14 |
+| 113 | React Native | Android 16 back | predictive back needs `enableOnBackInvokedCallback="false"` with RN 0.77 |
+| 114 | React Native | iOS gestures | swipe back = navigator `gestureEnabled` |
+| 115 | Testing | Jest preset | tools' native preset; `@testing-library/react-native` |
+| 116 | Testing | Mocks | `jest.mock` native modules; plain objects for Mendix values |
+| 117 | Testing | Fake timers | debounce, delayed spinners, timeouts |
+| 118 | Testing | Snapshot | avoid large snapshots; assert text/roles |
+| 119 | Testing | Coverage | logic files near 100%; states in render tests |
+| 120 | Testing | Device test | acceptance steps on Android + iOS, portrait + landscape |
+| 121 | UX | States | loading, empty, error, success, read-only, disabled |
+| 122 | UX | Feedback | press feedback, progress, toasts for non-blocking info |
+| 123 | UX | Touch size | ≥ 44 px |
+| 124 | UX | Contrast | text 4.5:1 |
+| 125 | UX | Spacing | 4/8 px grid; soft borders; Material elevation |
+| 126 | UX | Overflow | no horizontal overflow; wrap long words |
+| 127 | UX | Orientation | layouts adapt to portrait/landscape/tablet |
+| 128 | UX | Keyboard | inputs visible, next/done keys |
+| 129 | UX | Nested scroll | avoid |
+| 130 | UX | Z-order | overlays inside the widget; modals for full screen |
+| 131 | UX | Icons vs labels | icons with accessibility labels on small screens |
+| 132 | UX | Diagnostics | optional debug mode showing versions and value status |
+| 133 | Security | Untrusted HTML/text | never execute it; sanitize; CSP in web views |
+| 134 | Security | Secrets | never in widget code or XML defaults |
+| 135 | Security | Links | allow-list schemes (https, mailto, tel); block `javascript:`, `file:`, `intent:` |
+| 136 | Release | Semver | patch = fix, minor = feature, major = breaking XML change |
+| 137 | Release | Two version fields | `package.json` and `src/package.xml` |
+| 138 | Release | Changelog | note behavior and XML changes |
+| 139 | Release | Breaking XML changes | renaming/removing keys or types breaks pages; 10.24 converts some types automatically |
+| 140 | Release | Distribution | commit `dist/<v>/*.mpk`; users copy to `widgets/` |

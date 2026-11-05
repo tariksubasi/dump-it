@@ -535,3 +535,111 @@ paging (`setLimit` called), filter (`setFilter` called), keyboard (Enter/Space).
 | Widget unchanged in browser | version bump, F4, Ctrl+F5 |
 | "Invalid hook call" | a dependency bundles React; use a peer-dependency library |
 | CSS not applied | CSS imported in the widget entry? class names under `widget-<name>`? |
+
+---
+
+## 15. Knowledge map (what the agent must know; check each before claiming "done")
+
+| # | Area | Topic | Must know |
+|---|---|---|---|
+| 1 | Mendix | Pluggable widget | React component + XML definition in a `.mpk`; Studio Pro reads XML, the React client runs JS |
+| 2 | Mendix | React client | 10.18+ GA (opt-in); widgets must not depend on Dojo or `mx.*` globals |
+| 3 | Mendix | `widgets/` folder | F4 loads all `.mpk`; one widget id = one mpk |
+| 4 | Mendix | Widget id / property keys | stable forever; renames break pages |
+| 5 | Mendix | Data context | `needsEntityContext` widgets read the surrounding object |
+| 6 | Mendix | List item context | inside Data grid / List view / Gallery items |
+| 7 | Mendix | Page parameters | 10.23+ attribute properties without a data view |
+| 8 | Mendix | Entity access | decides `readOnly`, availability, list content |
+| 9 | Mendix | Editability / Visibility | system properties; Mendix applies them |
+| 10 | Mendix | Validation | domain rules + one `setValidator`; show `validation` text |
+| 11 | Mendix | Commit / rollback | widgets do not commit; actions do |
+| 12 | Mendix | Microflow vs nanoflow | server vs client logic; actions call either |
+| 13 | Mendix | Datasource kinds | Database/XPath (server paging/sort/filter), Association, Microflow, Nanoflow (client-side) |
+| 14 | Mendix | Selection | 10.7+ `selection` property; drives Listen-to and expressions |
+| 15 | Mendix | Enumerations | key string; caption via formatter; `universe` |
+| 16 | Mendix | Big numbers | `Big` for Integer/Long/Decimal/AutoNumber |
+| 17 | Mendix | DateTime | `Date`; display via formatter (locale, time zone) |
+| 18 | Mendix | Associations | Reference / ReferenceSet values; `selectableObjects` |
+| 19 | Mendix | Text templates & translations | `DynamicValue<string>`, `<translations>` defaults |
+| 20 | Mendix | Atlas UI | Bootstrap-like classes, theme SCSS variables, spacing helpers |
+| 21 | Mendix | Theme folders | `theme/web`, `themesource/<module>/web` (SCSS, design-properties.json) |
+| 22 | Mendix | Design properties | classes appended to `props.class` |
+| 23 | Mendix | Label system property | Mendix renders the label; widget gets `id` instead of `class`/`style` |
+| 24 | Mendix | `mx-name-<name>` class | added automatically; used by tests (Selenium/Playwright) |
+| 25 | Mendix | Live reload | `npm start` + `mendixHost`; or build + refresh |
+| 26 | Mendix | Cache | browser caches widget files; Ctrl+F5 after updates |
+| 27 | Mendix | Security | client code is visible; never enforce rights in the widget |
+| 28 | Mendix | Logging | browser console |
+| 29 | Mendix | Marketplace | publish mpk + docs, semver |
+| 30 | Mendix | Built-in widgets | Data grid 2, Gallery, Combo box, … — reuse instead of rewriting |
+| 31 | Tooling | tools 10.24.1 | rollup, typings, jest (jsdom), eslint, prettier |
+| 32 | Tooling | Node | `^22.18.0` enforced |
+| 33 | Tooling | Outputs | `<W>.js` (AMD/CJS for the client), `<W>.mjs` (ES module), `<W>.css`, `<W>.editorPreview.js`, `<W>.editorConfig.js` |
+| 34 | Tooling | Externals | `react`, `react-dom`, `react/jsx-runtime`, `mendix`, `big.js` |
+| 35 | Tooling | Bundled deps | everything else in `dependencies`; licenses in `dependencies.txt/json` |
+| 36 | Tooling | Assets | images/fonts imported from `src` are copied to the package (`assets/`) |
+| 37 | Tooling | CSS/SCSS | import in the entry; built into `<W>.css` |
+| 38 | Tooling | `config.projectPath` | auto-copy into the project |
+| 39 | Tooling | xmllint | XSD check |
+| 40 | Tooling | Generator | `npx @mendix/generator-widget` |
+| 41 | TypeScript | strict | handle `undefined` |
+| 42 | TypeScript | Narrowing | by `status`, by `ListAttributeValue.type` for unions |
+| 43 | TypeScript | DOM types | `HTMLInputElement`, `KeyboardEvent`, `ChangeEvent` |
+| 44 | React | Function components | entry exports `function <W>(props: <W>ContainerProps)` |
+| 45 | React | JSX automatic runtime | no `createElement` import |
+| 46 | React | Hooks | `useState`, `useMemo`, `useCallback`, `useRef`, `useEffect`, `useLayoutEffect`, `useId` |
+| 47 | React | `useId` | stable ids for label/aria wiring |
+| 48 | React | Effects | subscribe/cleanup; no sync setState in body |
+| 49 | React | Derived state | compute, do not sync |
+| 50 | React | Keys | `item.id` |
+| 51 | React | Memo | `React.memo` rows; `useMemo` heavy lists |
+| 52 | React | Portals | `createPortal` for popovers/dialogs |
+| 53 | React | Error boundary | class component |
+| 54 | React | Controlled inputs | value from Mendix, `setValue`/`setTextValue` on change |
+| 55 | React | Debounce | search inputs before `setFilter` |
+| 56 | React | Suspense/lazy | allowed for heavy parts; keep fallback small |
+| 57 | React | Strict mode | effects may run twice in dev |
+| 58 | Web | Semantic HTML | `button`, `label`, `table`, `ul/li`, headings |
+| 59 | Web | Forms | `form-control`, `form-group`, `aria-describedby` |
+| 60 | Web | CSS layout | flexbox, grid, `minmax`, `clamp`, `aspect-ratio` |
+| 61 | Web | Responsive | Atlas breakpoints 576/768/992/1200; container queries |
+| 62 | Web | Overflow | `min-width: 0` on flex children, `overflow-wrap: anywhere` |
+| 63 | Web | Images | `max-width: 100%`, `object-fit`, `loading="lazy"`, `alt` |
+| 64 | Web | Tables | responsive: scroll container or stacked cards on mobile |
+| 65 | Web | Focus | visible `:focus-visible` ring; focus trap in dialogs |
+| 66 | Web | Keyboard | Tab, Shift+Tab, Enter, Space, Escape, arrows for lists/menus |
+| 67 | Web | ARIA | roles/states only when native HTML cannot express it |
+| 68 | Web | Live regions | `aria-live="polite"` for async updates |
+| 69 | Web | Color | contrast 4.5:1; not color-only signals |
+| 70 | Web | Motion | `prefers-reduced-motion` |
+| 71 | Web | Dark mode | `prefers-color-scheme` if the theme supports it |
+| 72 | Web | z-index | stacking contexts; parents with `overflow: hidden` clip popups → portal |
+| 73 | Web | Scroll | one scroll container; `overscroll-behavior: contain` for inner panels |
+| 74 | Web | Virtualization | for thousands of rows (react-window etc.) |
+| 75 | Web | Fetch | avoid; get data through datasources; if needed, `AbortController` |
+| 76 | Web | Storage | `usePersistentState` (mendix/hooks) for view state; avoid localStorage for data |
+| 77 | Web | Third-party libs | peer-dep React libs only; check size and license |
+| 78 | Web | Charts/maps | wrap in a component that reacts to resize (`ResizeObserver`) |
+| 79 | Web | Print | `@media print` if relevant |
+| 80 | Web | i18n | text from text templates; `Intl` for numbers/dates if no formatter |
+| 81 | Web | RTL | logical properties |
+| 82 | Web | Touch | 44 px targets; hover is optional |
+| 83 | Web | Mobile browsers | virtual keyboard resizes viewport; `100dvh` |
+| 84 | Testing | jsdom | no layout; test behavior, not pixels |
+| 85 | Testing | Testing Library | query by role/label/text; `fireEvent` / `userEvent` |
+| 86 | Testing | Mendix mocks | plain objects with `jest.fn()` setters |
+| 87 | Testing | Lists | mock `ListValue` with `items`, `setLimit`, `setFilter`, linked `get` |
+| 88 | Testing | Fake timers | debounce, delays |
+| 89 | Testing | E2E | `mx-name-*` classes; Playwright in a running app |
+| 90 | UX | States | loading skeleton, empty, error, read-only, disabled, success |
+| 91 | UX | Feedback | busy state while `isExecuting` |
+| 92 | UX | Forms | label + help + error near the field |
+| 93 | UX | Small screens | labels → icons with tooltip/aria-label |
+| 94 | UX | Soft look | soft borders, light shadows, 8 px grid |
+| 95 | UX | Consistency | Atlas classes, theme variables |
+| 96 | Security | XSS | never `dangerouslySetInnerHTML` with user data unless sanitized (e.g. DOMPurify) |
+| 97 | Security | Links | `rel="noopener noreferrer"` with `target="_blank"`; allow-list schemes |
+| 98 | Security | Secrets | never in client code |
+| 99 | Release | Semver + both version fields | `package.json`, `src/package.xml` |
+| 100 | Release | Breaking XML | removing/renaming keys breaks pages |
+| 101 | Release | Distribution | commit `dist/<v>/*.mpk` |
