@@ -6,6 +6,7 @@ Bu klasörde Mendix **10.24** için yazılmış pluggable widget'lar ve onları 
 |---|---|
 | `back-navigation/` | Native: Android geri tuşu + iOS kaydırarak geri. `dist/1.0.5/dumpit.BackNavigation.mpk` |
 | `html-viewer/` | Native: HTML gösterir, ekrana sığar, zoom, internet kesintisine dayanıklı. `dist/1.0.5/dumpit.HtmlViewer.mpk` |
+| `card-list/` | Web: kartlı liste, debounce'lu sunucu taraflı arama, kaydırdıkça yükleme. `dist/1.0.0/dumpit.CardList.mpk` |
 | `skills/mendix-native-widget/SKILL.md` | Ajan için: native (React Native) widget yazma, build, test, paketleme — eksiksiz kurallar ve tablolar |
 | `skills/mendix-web-widget/SKILL.md` | Ajan için: web (React) widget yazma, build, test, paketleme |
 | `skills/mendix-widget-ui-design/` | Ajan için: kurumsal, responsive, okunur tasarım kuralları + `tools/contrast.py` |
