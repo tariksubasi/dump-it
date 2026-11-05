@@ -8,17 +8,17 @@ Shows HTML on a Mendix native page (Mendix 10.24, Native Template 14, React Nati
 - Size, padding, margin and text style come from the native theme (JS style).
 - It survives network loss, broken images, crashes of the web process and bad HTML.
 
-Package: `dist/1.0.0/dumpit.HtmlViewer.mpk`. Copy it to the `widgets` folder of the app, then press F4 in Studio Pro.
+Package: `dist/1.0.1/dumpit.HtmlViewer.mpk`. Copy it to the `widgets` folder of the app, then press F4 in Studio Pro.
 
 ## Native dependency
 
-The widget uses `react-native-webview` **13.13.2**. That is the same version as the Mendix "Web view" widget for React Native 0.77 (Native Mobile Resources). The mpk declares it, so the Mendix build adds it.
+The widget uses `react-native-webview` **13.15.0** (supports React Native 0.77). The mpk declares it, so the Mendix build adds it. Native Mobile Resources' "Web view" widget declares 13.13.2 or 13.16.1, depending on its version: when both are in the app, keep one version in the native template (see below).
 
 | Where you run the app | What to do |
 |---|---|
 | Make It Native app | Nothing. The Web view module is in it. |
 | Your own build (Build Native Mobile App) | Nothing. The build reads the dependency from the mpk. |
-| Your own dev app / Native Template repo | Check that `react-native-webview` is in `package.json`. If not: `npm i react-native-webview@13.13.2`, `cd ios && pod install`, and build the app again. |
+| Your own dev app / Native Template repo | Check that `react-native-webview` is in `package.json`. If not: `npm i react-native-webview@13.15.0`, `cd ios && pod install`, and build the app again. |
 
 ## Properties
 
@@ -99,7 +99,7 @@ export const htmlCard = { container: { height: 320 } }; // with Height = Fill pa
 
 ```bash
 npm install
-npm run release        # XSD check + build -> dist/1.0.0/dumpit.HtmlViewer.mpk
+npm run release        # XSD check + build -> dist/1.0.1/dumpit.HtmlViewer.mpk
 npm test               # 46 unit tests
 npm run test:browser   # 110 checks in Chromium at 320, 360, 768, 800 (landscape) and 1280 px
 npm run lint

@@ -1,7 +1,7 @@
 {
   "name": "html-viewer",
   "widgetName": "HtmlViewer",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Shows HTML in a Mendix native page: fits the screen, zoomable, resilient to network loss",
   "license": "Apache-2.0",
   "packagePath": "dumpit",
@@ -19,7 +19,7 @@
     "test:browser": "tsc src/htmlDocument.ts --outDir dist/browser --module commonjs --target es2019 --skipLibCheck && node scripts/browser-test.js"
   },
   "dependencies": {
-    "react-native-webview": "13.13.2"
+    "react-native-webview": "13.15.0"
   },
   "devDependencies": {
     "@mendix/pluggable-widgets-tools": "10.24.1"
