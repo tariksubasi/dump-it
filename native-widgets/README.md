@@ -8,7 +8,7 @@ Bu klasörde Mendix **10.24** için yazılmış pluggable widget'lar ve onları 
 | `html-viewer/` | Native: HTML gösterir, ekrana sığar, zoom, internet kesintisine dayanıklı. `dist/1.0.5/dumpit.HtmlViewer.mpk` |
 | `card-list/` | Web: kartlı liste, debounce'lu sunucu taraflı arama, kaydırdıkça yükleme. `dist/1.0.0/dumpit.CardList.mpk` |
 | `network-activity/` | Native: sunucu isteği olunca kendiliğinden çıkan, bloklayan, animasyonlu (dönen halka) yükleme ekranı. `dist/1.0.1/dumpit.NetworkActivity.mpk` |
-| `client-cache/` | Native: seçilen salt okunur microflow (ör. REST) cevaplarını birkaç saniye bellekte tutar (React Query gibi). `dist/1.0.0/dumpit.ClientCache.mpk` |
+| `client-cache/` | Native: seçilen salt okunur microflow (ör. REST) cevaplarını birkaç saniye bellekte tutar (React Query gibi). `dist/1.0.1/dumpit.ClientCache.mpk` |
 | `skills/mendix-native-widget/SKILL.md` | Ajan için: native (React Native) widget yazma, build, test, paketleme — eksiksiz kurallar ve tablolar |
 | `skills/mendix-web-widget/SKILL.md` | Ajan için: web (React) widget yazma, build, test, paketleme |
 | `skills/mendix-widget-ui-design/` | Ajan için: kurumsal, responsive, okunur tasarım kuralları + `tools/contrast.py` |

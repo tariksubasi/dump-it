@@ -33,6 +33,7 @@ it("wraps the global fetch: the second call within the TTL does not reach the se
             style={[]}
             enabled={{ status: ValueStatus.Available, value: true }}
             rules={"opRest=30"}
+            clearOn="otherMicroflows"
             debugMode
         />
     );
@@ -59,6 +60,26 @@ it("enabled = false sends every call to the server", async () => {
         />
     );
     await call();
+    await call();
+    expect(server).toHaveBeenCalledTimes(2);
+});
+
+it("a JavaScript action can clear the cache through globalThis.dumpitClientCache", async () => {
+    server.mockClear();
+    render(
+        <ClientCache
+            name="cc"
+            style={[]}
+            enabled={{ status: ValueStatus.Available, value: true }}
+            rules={"opRest=30"}
+            clearOn="otherMicroflows"
+            debugMode={false}
+        />
+    );
+    await call();
+    await call();
+    expect(server).toHaveBeenCalledTimes(1);
+    (globalThis as any).dumpitClientCache.clear("pull to refresh");
     await call();
     expect(server).toHaveBeenCalledTimes(2);
 });

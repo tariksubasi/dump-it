@@ -16,6 +16,9 @@ export interface CacheStats {
 export interface CacheConfig {
     enabled: boolean;
     rules: CacheRule[];
+    /** otherMicroflows (safest): any microflow that is not in the list clears the cache before it runs.
+     *  writes: only when its answer shows a write (commits, deletes, new objects). */
+    clearOn: "otherMicroflows" | "writes";
 }
 
 type FetchFn = (input: any, init?: any) => Promise<any>;
@@ -33,7 +36,7 @@ export class FetchCache {
         log: [],
         seen: new Map()
     };
-    config: CacheConfig = { enabled: true, rules: [] };
+    config: CacheConfig = { enabled: true, rules: [], clearOn: "otherMicroflows" };
     private inflight = new Map<string, Promise<{ status: number; text: string; headers: Record<string, string> }>>();
     private generation = 0; // bumps on every invalidation: late responses of older requests are not stored
 
@@ -97,7 +100,10 @@ export class FetchCache {
                 return original(input, init);
             }
             if (decision.kind === "watch") {
-                // another microflow: run it, then clear the cache if its response shows a write
+                // another microflow: it may change data on the server or in an external system (REST POST/PUT)
+                if (this.config.clearOn === "otherMicroflows") {
+                    this.invalidate(`microflow ${String(decision.opId).slice(0, 12)} is not in the list`);
+                }
                 const started = this.now();
                 const res = await original(input, init);
                 try {

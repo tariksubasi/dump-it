@@ -40,7 +40,7 @@ function setup(
         return new WhatwgResponse(text, { status, headers: { "content-type": "application/json" } });
     });
     const cache = new FetchCache(makeResponse, () => t.now);
-    cache.config = { enabled: true, rules: parseRules("opRead=30\nopRead2=5") };
+    cache.config = { enabled: true, rules: parseRules("opRead=30\nopRead2=5"), clearOn: "otherMicroflows" };
     return { cache, fetch: cache.wrap(server), server, t };
 }
 
@@ -135,8 +135,9 @@ describe("FetchCache with the Mendix client's fetch use", () => {
         expect(server).toHaveBeenCalledTimes(2);
     });
 
-    it("another microflow that writes clears the cache; one that only reads keeps it", async () => {
-        const { fetch, server } = setup({ opRead: CLEAN, opSave: WRITE, opOther: CLEAN });
+    it("writes mode: another microflow that writes clears the cache; one that only reads keeps it", async () => {
+        const { fetch, server, cache } = setup({ opRead: CLEAN, opSave: WRITE, opOther: CLEAN });
+        cache.config = { ...cache.config, clearOn: "writes" };
         await mendixPost(fetch, op("opRead"));
         await mendixPost(fetch, op("opOther"));
         await mendixPost(fetch, op("opRead"));
@@ -144,6 +145,36 @@ describe("FetchCache with the Mendix client's fetch use", () => {
         await mendixPost(fetch, op("opSave"));
         await mendixPost(fetch, op("opRead"));
         expect(server).toHaveBeenCalledTimes(4); // opSave wrote data: the cache was cleared, opRead went to the server
+    });
+
+    it("default: any other microflow clears first (a REST POST/PUT save without a Mendix commit)", async () => {
+        const { fetch, server } = setup({ opRead: CLEAN, opRestSave: CLEAN });
+        await mendixPost(fetch, op("opRead"));
+        await mendixPost(fetch, op("opRead")); // from the cache
+        await mendixPost(fetch, op("opRestSave")); // answer looks clean, but it is not in the list
+        await mendixPost(fetch, op("opRead")); // must be fresh
+        expect(server.mock.calls.map(c => JSON.parse(c[1].body).operationId)).toEqual([
+            "opRead",
+            "opRestSave",
+            "opRead"
+        ]);
+    });
+
+    it("the app can clear the cache (refresh button, pull to refresh)", async () => {
+        const { fetch, server, cache } = setup({ opRead: CLEAN });
+        await mendixPost(fetch, op("opRead"));
+        cache.invalidate("refresh button");
+        await mendixPost(fetch, op("opRead"));
+        expect(server).toHaveBeenCalledTimes(2);
+    });
+
+    it("device clock going back makes the entry stale", async () => {
+        const { fetch, server, t } = setup({ opRead: CLEAN });
+        t.now = 100_000;
+        await mendixPost(fetch, op("opRead"));
+        t.now = 50_000;
+        await mendixPost(fetch, op("opRead"));
+        expect(server).toHaveBeenCalledTimes(2);
     });
 
     it.each(["commit", "delete", "synchronize_objects", "login", "logout"])("%s clears the cache", async action => {
@@ -182,7 +213,7 @@ describe("FetchCache with the Mendix client's fetch use", () => {
             return new WhatwgResponse(b.action === "commit" ? "{}" : CLEAN, { status: 200 });
         });
         const cache = new FetchCache(makeResponse, () => t.now);
-        cache.config = { enabled: true, rules: parseRules("opRead=30") };
+        cache.config = { enabled: true, rules: parseRules("opRead=30"), clearOn: "otherMicroflows" };
         const f = cache.wrap(server);
         const slow = mendixPost(f, op("opRead"));
         await mendixPost(f, body({ action: "commit" }));

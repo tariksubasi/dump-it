@@ -176,7 +176,9 @@ export class ResponseStore {
         if (!e) {
             return undefined;
         }
-        if (e.expiresAt <= this.now()) {
+        const t = this.now();
+        // expired, or the device clock went back (then the age is unknown): treat as stale
+        if (e.expiresAt <= t || t < e.storedAt) {
             this.map.delete(key);
             return undefined;
         }

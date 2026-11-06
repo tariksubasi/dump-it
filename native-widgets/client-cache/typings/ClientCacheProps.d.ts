@@ -6,11 +6,14 @@
 import { DynamicValue } from "mendix";
 import { CSSProperties } from "react";
 
+export type ClearOnEnum = "otherMicroflows" | "writes";
+
 export interface ClientCacheProps<Style> {
     name: string;
     style: Style[];
     enabled: DynamicValue<boolean>;
     rules: string;
+    clearOn: ClearOnEnum;
     debugMode: boolean;
 }
 
@@ -27,5 +30,6 @@ export interface ClientCachePreviewProps {
     translate: (text: string) => string;
     enabled: string;
     rules: string;
+    clearOn: ClearOnEnum;
     debugMode: boolean;
 }

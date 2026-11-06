@@ -18,6 +18,14 @@
                     <caption>Cached microflows</caption>
                     <description>One per line: operationId=seconds (max 600). Find the operationId in Diagnostic mode: call the microflow, tap the Cache label, copy the id marked "clean read". Only listed microflows are cached, and only when their answer is a clean read.</description>
                 </property>
+                <property key="clearOn" type="enumeration" defaultValue="otherMicroflows">
+                    <caption>Clear the cache</caption>
+                    <description>Safest: whenever a microflow that is not in the list runs (it may save data on the server or call a REST POST/PUT). Writes only: when an answer shows a commit, delete or new object (more hits, but a REST write without a Mendix commit is not seen).</description>
+                    <enumerationValues>
+                        <enumerationValue key="otherMicroflows">On any other microflow (safest)</enumerationValue>
+                        <enumerationValue key="writes">Only on writes seen in answers</enumerationValue>
+                    </enumerationValues>
+                </property>
                 <property key="debugMode" type="boolean" defaultValue="false">
                     <caption>Diagnostic mode</caption>
                     <description>Shows a small Cache label on the page: tap it for hits, misses and the microflow calls seen (with operationId, time, size, clean read). Turn off before release.</description>

@@ -7,7 +7,7 @@ import { ClientCacheProps } from "../typings/ClientCacheProps";
 import { parseRules } from "./cacheRules";
 import { FetchCache, isWrapped } from "./fetchCache";
 
-const VERSION = "1.0.0";
+const VERSION = "1.0.1";
 
 function makeResponse(text: string, status: number, headers: Record<string, string>): any {
     const R = (globalThis as any).Response;
@@ -31,6 +31,11 @@ export const cache = new FetchCache(makeResponse);
 
 function install(): boolean {
     const g = globalThis as any;
+    // For a JavaScript action "ClearClientCache" (refresh buttons, pull to refresh): globalThis.dumpitClientCache.clear()
+    g.dumpitClientCache ??= {
+        clear: (reason?: string) => cache.invalidate(reason ?? "cleared by the app"),
+        stats: () => ({ ...cache.stats, entries: cache.store.size })
+    };
     if (typeof g.fetch !== "function" || isWrapped(g.fetch)) {
         return false;
     }
@@ -69,7 +74,7 @@ export function ClientCache(props: ClientCacheProps<object>): ReactElement | nul
         if (!enabled && cache.config.enabled) {
             cache.invalidate("disabled");
         }
-        cache.config = { enabled, rules: parseRules(props.rules) };
+        cache.config = { enabled, rules: parseRules(props.rules), clearOn: props.clearOn };
     });
     useEffect(() => {
         install();
