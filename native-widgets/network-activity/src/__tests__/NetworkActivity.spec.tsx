@@ -3,6 +3,13 @@ import { AccessibilityInfo, Animated } from "react-native";
 import { ValueStatus } from "mendix";
 import { FakeXhr } from "./fakeXhr";
 
+jest.mock("react-native-svg", () => {
+    const { View } = jest.requireActual("react-native");
+    const { createElement: h } = jest.requireActual("react");
+    const C = (p: any): any => h(View, p);
+    return { __esModule: true, default: C, Svg: C, Circle: C, Defs: C, LinearGradient: C, Stop: C };
+});
+
 class Xhr extends FakeXhr {}
 (globalThis as any).XMLHttpRequest = Xhr; // eslint-disable-line no-undef
 
@@ -79,7 +86,7 @@ describe("animation", () => {
         const r = showWith({});
         expect(r.getByTestId("network-activity-ring")).toBeTruthy();
         expect(r.queryByTestId("network-activity-native")).toBeNull();
-        expect(loop).toHaveBeenCalled();
+        expect(loop).toHaveBeenCalledTimes(3); // outer ring, inner ring, pulse
         act(() => (r as any).finishRequest());
         act(() => jest.advanceTimersByTime(1000));
         loop.mockRestore();
@@ -105,4 +112,23 @@ describe("animation", () => {
         act(() => jest.advanceTimersByTime(1000));
         spy.mockRestore();
     });
+});
+
+it("rings rotate with the native driver (UI thread) and start in a layout effect", () => {
+    jest.useFakeTimers();
+    const timing = jest.spyOn(Animated, "timing");
+    const loop = jest.spyOn(Animated, "loop");
+    const r = render(<NetworkActivity {...props} spinner="ring" />);
+    const x = req();
+    act(() => jest.advanceTimersByTime(400));
+    expect(r.getByTestId("network-activity-ring")).toBeTruthy();
+    expect(loop).toHaveBeenCalledTimes(2); // two rings, no pulse in "ring"
+    const rotations = timing.mock.calls.filter(c => (c[1] as any).easing && (c[1] as any).duration >= 900);
+    expect(rotations.length).toBeGreaterThanOrEqual(2);
+    expect(timing.mock.calls.every(c => (c[1] as any).useNativeDriver === true)).toBe(true);
+    act(() => x.finish("load"));
+    act(() => jest.advanceTimersByTime(1000));
+    timing.mockRestore();
+    loop.mockRestore();
+    jest.useRealTimers();
 });

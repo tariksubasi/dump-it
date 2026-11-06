@@ -2,7 +2,7 @@
 
 A blocking, animated loading overlay that appears **by itself** while the app waits for the server — every microflow
 call, retrieve, synchronize and REST call that goes through React Native networking (`XMLHttpRequest`, also used by
-`fetch`). Put it **once on each layout** (with the BackNavigation widget). Package: `dist/1.0.2/dumpit.NetworkActivity.mpk`.
+`fetch`). Put it **once on each layout** (with the BackNavigation widget). Package: `dist/1.1.0/dumpit.NetworkActivity.mpk`.
 
 | Rule | Value (default) | Why |
 |---|---|---|
@@ -16,10 +16,10 @@ call, retrieve, synchronize and REST call that goes through React Native network
 | Ignore | regex on `METHOD url body`, default `symbolicate|:8081/|keepalive` | dev tools and background pings |
 | Several layouts | one overlay | only the last focused instance draws it |
 | Blocking | RN `Modal` + dim backdrop; Android back blocked until "slow" | no double taps during save |
-| Animation | **Spinning ring** (light track + rotating arc, same on iOS and Android, native driver), optional soft pulse; or the system spinner. Reduced motion on the device (also "animation scale off" in Android developer options) → the ring keeps spinning, only the pulse is left out (the system spinner would stand still and look like a static icon) | property *Animation* |
+| Animation | **Two gradient rings** drawn with `react-native-svg` (in Make It Native and Native Template 14): an outer arc and a thinner inner arc turning the other way, rounded ends, blue → light-blue gradient, soft pulse; rotation on the UI thread (native driver), started right after mount so it turns even while the app is busy; or the system spinner. Reduced motion on the device (also "animation scale off" in Android developer options) → the ring keeps spinning, only the pulse is left out (the system spinner would stand still and look like a static icon) | property *Animation* |
 | Accessibility | `progressbar` role, label = message, live region | |
 
-Styles (native theme, `dumpit_networkactivity_NetworkActivity`): `backdrop`, `card`, `indicator.color`, `indicator.trackColor`, `text`,
+Styles (native theme, `dumpit_networkactivity_NetworkActivity`): `backdrop`, `card`, `indicator.color`, `indicator.colorEnd` (gradient end), `indicator.trackColor`, `text`,
 `button`, `buttonText`.
 
 Diagnostic mode: logs the open request count and adds a **Details** link on the overlay with the last 15 requests
@@ -30,5 +30,5 @@ seen; offline nanoflows make no request, so no overlay (correct). Mendix's own "
 show at the same time — set those buttons to "None" if you rely on this widget.
 
 ```bash
-npm install && npm run release   # npm test: 41 tests (20 on React Native's real XMLHttpRequest)
+npm install && npm run release   # npm test: 42 tests (20 on React Native's real XMLHttpRequest)
 ```

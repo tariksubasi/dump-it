@@ -15,6 +15,7 @@ import {
     ViewStyle
 } from "react-native";
 import { NavigationContext } from "@react-navigation/native";
+import Svg, { Circle, Defs, LinearGradient, Stop } from "react-native-svg";
 import { DynamicValue, ValueStatus } from "mendix";
 
 import { NetworkActivityProps } from "../typings/NetworkActivityProps";
@@ -25,13 +26,13 @@ import * as registry from "./registry";
 export interface NetworkActivityStyle {
     backdrop?: ViewStyle;
     card?: ViewStyle;
-    indicator?: { color?: string; trackColor?: string };
+    indicator?: { color?: string; colorEnd?: string; trackColor?: string };
     text?: TextStyle;
     button?: ViewStyle;
     buttonText?: TextStyle;
 }
 
-const VERSION = "1.0.2";
+const VERSION = "1.1.0";
 
 // ---- one tracker and one controller for the whole app ----------------------------
 export const tracker = new NetworkTracker();
@@ -99,74 +100,130 @@ let nextInstance = 1;
 
 type SpinnerKind = "ring" | "ringPulse" | "native";
 
-// Material-like spinning ring: a light track and a thick arc that rotates (native driver, both platforms).
-function Ring({ color, track, size }: { color: string; track: string; size: number }): ReactElement {
+let gradientSeq = 0;
+
+/** Start a looping native-driver animation synchronously after mount (not in a passive effect: while the Mendix
+ *  client is busy with the response, a passive effect can run too late). The loop then runs on the UI thread. */
+function useLoop(value: Animated.Value, make: () => Animated.CompositeAnimation, enabled = true): void {
+    useLayoutEffect(() => {
+        if (!enabled) {
+            return undefined;
+        }
+        let anim: Animated.CompositeAnimation | undefined;
+        try {
+            anim = Animated.loop(make());
+            anim.start();
+        } catch (e) {
+            console.warn("NetworkActivity: animation could not start", e);
+        }
+        return () => anim?.stop();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [value, enabled]);
+}
+
+/** A gradient arc on a light track, drawn with react-native-svg (in Make It Native and Native Template 14). */
+function GradientRing(props: {
+    size: number;
+    stroke: number;
+    from: string;
+    to: string;
+    track?: string;
+    arc: number; // part of the circle, 0..1
+    durationMs: number;
+    reverse?: boolean;
+    testID?: string;
+}): ReactElement {
     const [spin] = useState(() => new Animated.Value(0));
-    useEffect(() => {
-        const loop = Animated.loop(
-            Animated.timing(spin, { toValue: 1, duration: 900, easing: Easing.linear, useNativeDriver: true })
-        );
-        loop.start();
-        return () => loop.stop();
-    }, [spin]);
-    const rotate = spin.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
-    const ring = { width: size, height: size, borderRadius: size / 2, borderWidth: Math.max(3, Math.round(size / 12)) };
+    const [gid] = useState(() => `naGrad${++gradientSeq}`);
+    useLoop(spin, () =>
+        Animated.timing(spin, { toValue: 1, duration: props.durationMs, easing: Easing.linear, useNativeDriver: true })
+    );
+    const rotate = spin.interpolate({
+        inputRange: [0, 1],
+        outputRange: props.reverse ? ["360deg", "0deg"] : ["0deg", "360deg"]
+    });
+    const { size, stroke } = props;
+    const r = (size - stroke) / 2;
+    const c = 2 * Math.PI * r;
     return (
-        <View style={{ width: size, height: size }} testID="network-activity-ring">
-            <View style={[ring, { borderColor: track }]} />
-            <Animated.View
-                style={[ring, styles.arc, { borderTopColor: color, borderRightColor: color, transform: [{ rotate }] }]}
-            />
-        </View>
+        <Animated.View
+            testID={props.testID}
+            style={{ position: "absolute", width: size, height: size, transform: [{ rotate }] }}
+        >
+            <Svg width={size} height={size}>
+                <Defs>
+                    <LinearGradient id={gid} x1="0" y1="0" x2="1" y2="1">
+                        <Stop offset="0" stopColor={props.to} stopOpacity="1" />
+                        <Stop offset="1" stopColor={props.from} stopOpacity="1" />
+                    </LinearGradient>
+                </Defs>
+                {props.track ? (
+                    <Circle cx={size / 2} cy={size / 2} r={r} stroke={props.track} strokeWidth={stroke} fill="none" />
+                ) : null}
+                <Circle
+                    cx={size / 2}
+                    cy={size / 2}
+                    r={r}
+                    stroke={`url(#${gid})`}
+                    strokeWidth={stroke}
+                    strokeLinecap="round"
+                    strokeDasharray={`${c * props.arc} ${c}`}
+                    fill="none"
+                />
+            </Svg>
+        </Animated.View>
     );
 }
 
-function Spinner(props: { kind: SpinnerKind; color?: string; track?: string; reduceMotion: boolean }): ReactElement {
-    const color = props.color ?? "#1558B0";
-    const track = props.track ?? "rgba(21,88,176,0.15)";
-    const [v] = useState(() => new Animated.Value(0));
-    const pulse = props.kind === "ringPulse" && !props.reduceMotion;
-    useEffect(() => {
-        if (!pulse) {
-            return undefined;
-        }
-        const loop = Animated.loop(
+function Spinner(props: {
+    kind: SpinnerKind;
+    color?: string;
+    colorEnd?: string;
+    track?: string;
+    reduceMotion: boolean;
+}): ReactElement {
+    const from = props.color ?? "#1558B0";
+    const to = props.colorEnd ?? "#38BDF8";
+    const track = props.track ?? "rgba(21,88,176,0.12)";
+    const [pulse] = useState(() => new Animated.Value(0));
+    const pulsing = props.kind === "ringPulse" && !props.reduceMotion;
+    useLoop(
+        pulse,
+        () =>
             Animated.sequence([
-                Animated.timing(v, {
+                Animated.timing(pulse, {
                     toValue: 1,
-                    duration: 700,
+                    duration: 900,
                     easing: Easing.inOut(Easing.ease),
                     useNativeDriver: true
                 }),
-                Animated.timing(v, {
+                Animated.timing(pulse, {
                     toValue: 0,
-                    duration: 700,
+                    duration: 900,
                     easing: Easing.inOut(Easing.ease),
                     useNativeDriver: true
                 })
-            ])
-        );
-        loop.start();
-        return () => loop.stop();
-    }, [v, pulse]);
-    // "native" only when chosen. Reduced motion (on Android also "animation scale off" in developer options) keeps the
-    // ring - a progress indicator is essential motion - and only drops the pulse. The system spinner would stand
-    // still with animations off and look like a static icon.
+            ]),
+        pulsing
+    );
+    // "native" only when chosen. Reduced motion keeps the rings (a progress indicator is essential motion) and only
+    // drops the pulse; the system spinner stands still on Android when animations are turned off.
     if (props.kind === "native") {
         return (
             <View style={styles.pulseBox}>
-                <ActivityIndicator size="large" color={color} testID="network-activity-native" />
+                <ActivityIndicator size="large" color={from} testID="network-activity-native" />
             </View>
         );
     }
-    const scale = v.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.15] });
-    const opacity = v.interpolate({ inputRange: [0, 1], outputRange: [0.22, 0.08] });
+    const scale = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.86, 1.1] });
+    const opacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.18, 0.04] });
     return (
-        <View style={styles.pulseBox}>
-            {pulse ? (
-                <Animated.View style={[styles.halo, { backgroundColor: color, opacity, transform: [{ scale }] }]} />
+        <View style={styles.pulseBox} testID="network-activity-ring">
+            {pulsing ? (
+                <Animated.View style={[styles.halo, { backgroundColor: to, opacity, transform: [{ scale }] }]} />
             ) : null}
-            <Ring color={color} track={track} size={48} />
+            <GradientRing size={60} stroke={6} from={from} to={to} track={track} arc={0.3} durationMs={900} />
+            <GradientRing size={40} stroke={3} from={to} to={from} arc={0.22} durationMs={1500} reverse />
         </View>
     );
 }
@@ -208,9 +265,14 @@ export function NetworkActivity(props: NetworkActivityProps<NetworkActivityStyle
         const offFocus = navigation?.addListener("focus", () => registry.setFocused(me, true));
         const offBlur = navigation?.addListener("blur", () => registry.setFocused(me, false));
         overlayListeners.add(setState);
-        AccessibilityInfo.isReduceMotionEnabled()
-            .then(setReduceMotion)
-            .catch(() => undefined);
+        // never let this break the overlay: some platforms or mocks return nothing or throw
+        try {
+            Promise.resolve(AccessibilityInfo.isReduceMotionEnabled?.())
+                .then(v => setReduceMotion(v === true))
+                .catch(() => undefined);
+        } catch {
+            // ignore
+        }
         return () => {
             overlayListeners.delete(setState);
             offFocus?.();
@@ -265,6 +327,7 @@ export function NetworkActivity(props: NetworkActivityProps<NetworkActivityStyle
                     <Spinner
                         kind={props.spinner}
                         color={s.indicator.color}
+                        colorEnd={s.indicator.colorEnd}
                         track={s.indicator.trackColor}
                         reduceMotion={reduceMotion}
                     />
@@ -319,9 +382,8 @@ const styles = StyleSheet.create({
             }
         })
     },
-    pulseBox: { width: 72, height: 72, alignItems: "center", justifyContent: "center" },
-    halo: { position: "absolute", width: 72, height: 72, borderRadius: 36 },
-    arc: { position: "absolute", top: 0, left: 0, borderColor: "transparent" },
+    pulseBox: { width: 76, height: 76, alignItems: "center", justifyContent: "center" },
+    halo: { position: "absolute", width: 76, height: 76, borderRadius: 38 },
     text: { marginTop: 12, fontSize: 16, lineHeight: 23, color: "#1B2430", textAlign: "center" },
     button: {
         marginTop: 16,
