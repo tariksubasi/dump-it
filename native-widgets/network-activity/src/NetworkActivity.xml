@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<widget id="dumpit.networkactivity.NetworkActivity" pluginWidget="true" needsEntityContext="false" offlineCapable="true"
+        supportedPlatform="Native"
+        xmlns="http://www.mendix.com/widget/1.0/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.mendix.com/widget/1.0/ ../node_modules/mendix/custom_widget.xsd">
+    <name>Network activity</name>
+    <description>Shows a blocking, animated loading overlay automatically while the app waits for the server. Put it on the layouts.</description>
+    <studioProCategory>Feedback</studioProCategory>
+    <properties>
+        <propertyGroup caption="General">
+            <propertyGroup caption="Behavior">
+                <property key="enabled" type="expression" defaultValue="true">
+                    <caption>Enabled</caption>
+                    <description>False: no overlay (requests are still counted).</description>
+                    <returnType type="Boolean" />
+                </property>
+                <property key="showDelayMs" type="integer" defaultValue="400">
+                    <caption>Show after (ms)</caption>
+                    <description>Requests shorter than this never show the overlay (no flicker).</description>
+                </property>
+                <property key="minVisibleMs" type="integer" defaultValue="500">
+                    <caption>Minimum visible (ms)</caption>
+                    <description>Once shown, stay at least this long (no flash).</description>
+                </property>
+                <property key="slowAfterMs" type="integer" defaultValue="8000">
+                    <caption>Slow after (ms)</caption>
+                    <description>Then show the slow text and a Hide button; Android back also hides it.</description>
+                </property>
+                <property key="maxVisibleMs" type="integer" defaultValue="30000">
+                    <caption>Hide after (ms)</caption>
+                    <description>Hard limit: the overlay hides even if a request is still running, and stays hidden until all requests end.</description>
+                </property>
+                <property key="requestTimeoutMs" type="integer" defaultValue="60000">
+                    <caption>Forget request after (ms)</caption>
+                    <description>A request without an answer after this time no longer counts (lost callback).</description>
+                </property>
+                <property key="ignorePatterns" type="string" defaultValue="symbolicate|:8081/|keepalive" required="false">
+                    <caption>Ignore requests</caption>
+                    <description>Regular expression (one per line) on "METHOD url body". Matching requests never show the overlay. Use Diagnostic mode to see the requests.</description>
+                </property>
+                <property key="debugMode" type="boolean" defaultValue="false">
+                    <caption>Diagnostic mode</caption>
+                    <description>Log every request and show a Details button with the last requests. Turn off before release.</description>
+                </property>
+            </propertyGroup>
+            <propertyGroup caption="Texts">
+                <property key="message" type="textTemplate" required="false">
+                    <caption>Message</caption>
+                    <description>Under the animation.</description>
+                    <translations>
+                        <translation lang="en_US">Loading…</translation>
+                        <translation lang="tr_TR">Yükleniyor…</translation>
+                    </translations>
+                </property>
+                <property key="slowMessage" type="textTemplate" required="false">
+                    <caption>Slow message</caption>
+                    <description>Shown after "Slow after".</description>
+                    <translations>
+                        <translation lang="en_US">This takes longer than usual…</translation>
+                        <translation lang="tr_TR">Bu işlem normalden uzun sürüyor…</translation>
+                    </translations>
+                </property>
+                <property key="hideText" type="textTemplate" required="false">
+                    <caption>Hide button</caption>
+                    <description>Button in the slow state.</description>
+                    <translations>
+                        <translation lang="en_US">Hide</translation>
+                        <translation lang="tr_TR">Gizle</translation>
+                    </translations>
+                </property>
+            </propertyGroup>
+        </propertyGroup>
+    </properties>
+</widget>

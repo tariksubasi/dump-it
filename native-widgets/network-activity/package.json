@@ -1,0 +1,24 @@
+{
+  "name": "network-activity",
+  "widgetName": "NetworkActivity",
+  "version": "1.0.0",
+  "description": "Automatic blocking loading overlay while the app waits for the server (Mendix native)",
+  "license": "Apache-2.0",
+  "packagePath": "dumpit",
+  "config": {
+    "projectPath": "../../tests/testProject",
+    "mendixHost": "http://localhost:8080",
+    "developmentPort": 3000
+  },
+  "scripts": {
+    "build": "pluggable-widgets-tools build:native",
+    "release": "npm run validate && pluggable-widgets-tools release:native",
+    "lint": "pluggable-widgets-tools lint",
+    "test": "pluggable-widgets-tools test:unit:native",
+    "validate": "xmllint --noout --schema node_modules/mendix/custom_widget.xsd src/NetworkActivity.xml"
+  },
+  "devDependencies": {
+    "@mendix/pluggable-widgets-tools": "10.24.1",
+    "@react-navigation/native": "^6.1.18"
+  }
+}
