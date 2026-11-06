@@ -11,7 +11,7 @@ call, retrieve, synchronize and REST call that goes through React Native network
 | Slow after | 8 s | text "This takes longer than usual…" + **Hide** button; Android back also hides |
 | Hide after | 30 s | hard limit: hides even if still busy; stays hidden until all requests end |
 | Forget request after | 60 s | a request that never answers no longer counts (also checked every 5 s) |
-| Ends on | success, error, timeout, abort, send exception | React Native fires `loadend` for all of them |
+| Ends on | any HTTP status (2xx, 3xx, 4xx, 5xx — tested 200…504), network error, timeout, abort, send exception, a Mendix handler that throws | React Native fires `loadend` for all of them and catches listener errors; tested on React Native's real `XMLHttpRequest` |
 | Parallel requests | counted | hidden only when all are done |
 | Ignore | regex on `METHOD url body`, default `symbolicate|:8081/|keepalive` | dev tools and background pings |
 | Several layouts | one overlay | only the last focused instance draws it |
@@ -30,5 +30,5 @@ seen; offline nanoflows make no request, so no overlay (correct). Mendix's own "
 show at the same time — set those buttons to "None" if you rely on this widget.
 
 ```bash
-npm install && npm run release   # npm test: 18 tests
+npm install && npm run release   # npm test: 38 tests (20 on React Native's real XMLHttpRequest)
 ```
