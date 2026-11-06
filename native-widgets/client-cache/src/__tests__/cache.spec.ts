@@ -45,17 +45,20 @@ function setup(
         rules: parseRules("opRead=30\nopRead2=5"),
         clearOn: "otherMicroflows",
         useFor: "always",
-        pageOpenWindowMs: 3000
+        pageOpenWindowMs: 3000,
+        mode: "list",
+        autoTtlMs: 30000
     };
     return { cache, fetch: cache.wrap(server), server, t };
 }
 
 describe("rules", () => {
-    it("parses opId=seconds, ignores wildcard, junk and caps at 600 s", () => {
+    it("parses opId=seconds (0 = never), ignores wildcard and junk, caps at 600 s", () => {
         expect(parseRules("a=30\n* = 10\nb = 5s # comment\nbad\nc=99999;d=0")).toEqual([
             { operationId: "a", ttlMs: 30000 },
             { operationId: "b", ttlMs: 5000 },
-            { operationId: "c", ttlMs: 600000 }
+            { operationId: "c", ttlMs: 600000 },
+            { operationId: "d", ttlMs: 0 }
         ]);
     });
 
@@ -224,7 +227,9 @@ describe("FetchCache with the Mendix client's fetch use", () => {
             rules: parseRules("opRead=30"),
             clearOn: "otherMicroflows",
             useFor: "always",
-            pageOpenWindowMs: 3000
+            pageOpenWindowMs: 3000,
+            mode: "list",
+            autoTtlMs: 30000
         };
         const f = cache.wrap(server);
         const slow = mendixPost(f, op("opRead"));
@@ -309,5 +314,123 @@ describe("use the cache only for page opens (default)", () => {
         cache.markPageOpen();
         await Promise.all([mendixPost(fetch, op("opRead")), mendixPost(fetch, op("opRead"))]);
         expect(server).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe("automatic mode (no list)", () => {
+    const VOID = JSON.stringify({ objects: [] });
+    const MESSAGE = JSON.stringify({
+        actionResult: { type: "string", value: "x" },
+        instructions: [{ type: "text_message", args: {} }]
+    });
+    function autoSetup(extra: Record<string, string> = {}, rules = ""): ReturnType<typeof setup> {
+        const r = setup({ opA: CLEAN, opB: CLEAN, opVoid: VOID, opWrite: WRITE, opMsg: MESSAGE, ...extra });
+        r.cache.config = {
+            ...r.cache.config,
+            mode: "auto",
+            rules: parseRules(rules),
+            useFor: "always",
+            autoTtlMs: 30000
+        };
+        return r;
+    }
+    const ops = (server: jest.Mock): string[] => server.mock.calls.map(c => JSON.parse(c[1].body).operationId);
+
+    it("page-open loads that return data are cached without any list", async () => {
+        const { fetch, server, cache, t } = autoSetup();
+        cache.markPageOpen();
+        await mendixPost(fetch, op("opA"));
+        await mendixPost(fetch, op("opB"));
+        t.now = 10_000;
+        cache.markPageOpen();
+        await mendixPost(fetch, op("opA"));
+        await mendixPost(fetch, op("opB"));
+        expect(ops(server)).toEqual(["opA", "opB"]);
+    });
+
+    it("ignores 'Always': only page-open loads use the cache", async () => {
+        const { fetch, server, cache } = autoSetup();
+        cache.markPageOpen();
+        await mendixPost(fetch, op("opA"));
+        // no page open now: a later call is a user action
+        (cache as any).windowUntil = -1;
+        await mendixPost(fetch, op("opA"));
+        expect(ops(server)).toEqual(["opA", "opA"]);
+    });
+
+    it("any microflow call on an open page (user action) clears the cache first", async () => {
+        const { fetch, server, cache, t } = autoSetup();
+        cache.markPageOpen();
+        await mendixPost(fetch, op("opA"));
+        t.now = 8_000; // page is open, user taps a button that calls opB (e.g. REST POST behind it)
+        await mendixPost(fetch, op("opB"));
+        t.now = 9_000;
+        cache.markPageOpen(); // goes to another page and back
+        await mendixPost(fetch, op("opA"));
+        expect(ops(server)).toEqual(["opA", "opB", "opA"]);
+    });
+
+    it("a page-load microflow that returns nothing is not cached and clears the cache", async () => {
+        const { fetch, server, cache, t } = autoSetup();
+        cache.markPageOpen();
+        await mendixPost(fetch, op("opA"));
+        await mendixPost(fetch, op("opVoid"));
+        t.now = 5_000;
+        cache.markPageOpen();
+        await mendixPost(fetch, op("opA"));
+        await mendixPost(fetch, op("opVoid"));
+        expect(ops(server)).toEqual(["opA", "opVoid", "opA", "opVoid"]);
+    });
+
+    it("a microflow that wrote once is never cached again in the session", async () => {
+        let first = true;
+        const { cache, t } = autoSetup();
+        const server = jest.fn(async (_u: string, init: any) => {
+            const b = JSON.parse(init.body);
+            const text = b.operationId === "opFlaky" ? (first ? WRITE : CLEAN) : CLEAN;
+            if (b.operationId === "opFlaky") {
+                first = false;
+            }
+            return new WhatwgResponse(text, { status: 200 });
+        });
+        const f = cache.wrap(server);
+        for (let i = 0; i < 3; i++) {
+            t.now = i * 5_000;
+            cache.markPageOpen();
+            await mendixPost(f, op("opFlaky"));
+        }
+        expect(server).toHaveBeenCalledTimes(3);
+        expect(cache.learnedNever.has("opFlaky")).toBe(true);
+    });
+
+    it("a microflow that shows a message is learned as never-cache", async () => {
+        const { fetch, server, cache, t } = autoSetup();
+        cache.markPageOpen();
+        await mendixPost(fetch, op("opMsg"));
+        t.now = 5_000;
+        cache.markPageOpen();
+        await mendixPost(fetch, op("opMsg"));
+        expect(ops(server)).toEqual(["opMsg", "opMsg"]);
+        expect(cache.learnedNever.has("opMsg")).toBe(true);
+    });
+
+    it("opId=0 excludes a microflow; opId=60 keeps it longer", async () => {
+        const { fetch, server, cache, t } = autoSetup({}, "opA=0\nopB=60");
+        cache.markPageOpen();
+        await mendixPost(fetch, op("opA"));
+        await mendixPost(fetch, op("opB"));
+        t.now = 45_000; // after the 30 s default, within opB's 60 s
+        cache.markPageOpen();
+        await mendixPost(fetch, op("opB"));
+        await mendixPost(fetch, op("opA"));
+        expect(ops(server)).toEqual(["opA", "opB", "opA"]);
+    });
+
+    it("errors and unsent changes are handled as in list mode", async () => {
+        const { fetch, server, cache } = autoSetup();
+        cache.markPageOpen();
+        await mendixPost(fetch, op("opA", { changes: { g1: { Name: { value: "x" } } } }));
+        await mendixPost(fetch, op("opA", { changes: { g1: { Name: { value: "x" } } } }));
+        expect(server).toHaveBeenCalledTimes(2);
     });
 });

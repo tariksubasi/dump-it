@@ -1,6 +1,6 @@
 // Wraps window.fetch once. The Mendix 10.24 client calls window.fetch(url, init) for every runtime request
 // (doFetch in the client), reads status 200 and then response.text() -> JSON.parse.
-import { CacheRule, decide, inspectResponse, isStorable, ResponseStore } from "./cacheRules";
+import { CacheRule, decide, inspectResponse, isStorable, ResponseStore, returnsData } from "./cacheRules";
 
 export interface CacheStats {
     hits: number;
@@ -25,6 +25,10 @@ export interface CacheConfig {
     useFor: "pageOpen" | "always";
     /** pageOpen: how long after a page opens its loads may use the cache */
     pageOpenWindowMs: number;
+    /** auto: no list needed - page-open loads of microflows that return data and only read are cached;
+     *  anything the user does on an open page clears the cache. list: only the listed microflows. */
+    mode: "auto" | "list";
+    autoTtlMs: number;
 }
 
 type FetchFn = (input: any, init?: any) => Promise<any>;
@@ -47,8 +51,12 @@ export class FetchCache {
         rules: [],
         clearOn: "otherMicroflows",
         useFor: "pageOpen",
-        pageOpenWindowMs: 3000
+        pageOpenWindowMs: 3000,
+        mode: "auto",
+        autoTtlMs: 30_000
     };
+    /** microflows that wrote, had a side effect or a validation message: never cached again in this session */
+    readonly learnedNever = new Set<string>();
     private windowUntil = Number.NEGATIVE_INFINITY;
     private servedInWindow = new Set<string>();
     private inflight = new Map<string, Promise<{ status: number; text: string; headers: Record<string, string> }>>();
@@ -67,12 +75,16 @@ export class FetchCache {
         this.servedInWindow.clear();
     }
 
-    private mayServe(key: string): boolean {
-        if (this.config.useFor === "always") {
+    private inPageOpenWindow(): boolean {
+        return this.now() <= this.windowUntil;
+    }
+
+    private mayServe(key: string, auto: boolean): boolean {
+        if (!auto && this.config.useFor === "always") {
             return true;
         }
         // once per page opening: a second identical call right after opening is a refresh
-        return this.now() <= this.windowUntil && !this.servedInWindow.has(key);
+        return this.inPageOpenWindow() && !this.servedInWindow.has(key);
     }
 
     private remember(opId: string | undefined, ms: number, status: number, text: string): void {
@@ -116,7 +128,15 @@ export class FetchCache {
                 const url = typeof input === "string" ? input : String(input?.url ?? "");
                 const method = String(init?.method ?? input?.method ?? "GET");
                 const body = typeof init?.body === "string" ? init.body : undefined;
-                decision = this.config.enabled ? decide(method, url, body, this.config.rules) : undefined;
+                decision = this.config.enabled
+                    ? decide(method, url, body, this.config.rules, {
+                          mode: this.config.mode,
+                          autoTtlMs: this.config.autoTtlMs
+                      })
+                    : undefined;
+                if (decision?.kind === "auto" && this.learnedNever.has(decision.opId as string)) {
+                    decision = { kind: "watch", opId: decision.opId, reason: "learned: not a pure read" };
+                }
             } catch {
                 decision = undefined; // never break networking
             }
@@ -129,7 +149,7 @@ export class FetchCache {
             }
             if (decision.kind === "watch") {
                 // another microflow: it may change data on the server or in an external system (REST POST/PUT)
-                if (this.config.clearOn === "otherMicroflows") {
+                if (this.config.mode === "auto" || this.config.clearOn === "otherMicroflows") {
                     this.invalidate(`microflow ${String(decision.opId).slice(0, 12)} is not in the list`);
                 }
                 const started = this.now();
@@ -148,7 +168,13 @@ export class FetchCache {
                 return res;
             }
             const key = decision.key as string;
-            const hit = this.mayServe(key) ? this.store.get(key) : undefined;
+            const auto = decision.kind === "auto";
+            const pageLoad = this.inPageOpenWindow();
+            if (auto && !pageLoad) {
+                // a call on an open page = something the user did (save, refresh, a pop-up button): start clean
+                this.invalidate("user action on an open page");
+            }
+            const hit = this.mayServe(key, auto) ? this.store.get(key) : undefined;
             if (hit) {
                 this.servedInWindow.add(key);
                 this.stats.hits++;
@@ -175,14 +201,21 @@ export class FetchCache {
                 } catch {
                     // ignore
                 }
-                if (gen === this.generation && isStorable(res.status, text)) {
+                const storable = isStorable(res.status, text) && (!auto || returnsData(text));
+                if (gen === this.generation && storable) {
                     this.store.set(key, text, headers, decision.ttlMs as number);
                     this.stats.stored++;
                     this.note(`STORE ${shortKey(key)} ${Math.round((decision.ttlMs as number) / 1000)}s`);
                 } else {
                     const info = inspectResponse(text);
+                    if (info.write || info.sideEffects.length > 0 || info.validation) {
+                        this.learnedNever.add(decision.opId as string);
+                    }
                     if (info.write) {
                         this.invalidate("cached microflow wrote data");
+                    } else if (auto && pageLoad && res.status === 200 && !returnsData(text)) {
+                        // a page-load microflow that returns nothing may have done something: be safe
+                        this.invalidate(`microflow ${String(decision.opId).slice(0, 12)} returned nothing`);
                     }
                     this.note(`MISS ${shortKey(key)} not stored (status ${res.status}${info.write ? ", write" : ""})`);
                 }

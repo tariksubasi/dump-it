@@ -1,16 +1,32 @@
-# ClientCache (native) — React-Query-like cache for read-only microflow calls
+# ClientCache (native) — automatic client cache for Mendix microflow calls
 
-Repeated calls of **chosen read-only microflows** (for example the ones that call REST) are answered from memory for a
-few seconds instead of going to the server. Put it **once on each layout** (in the same snippet as NetworkActivity).
-Package: `dist/1.0.2/dumpit.ClientCache.mpk`.
+Put it **once on each layout** (in the same snippet as NetworkActivity). Nothing else: no list, no JavaScript action,
+no change to pages or flows. Package: `dist/1.1.0/dumpit.ClientCache.mpk`.
 
-**Nothing to add to your pages or flows.** By default the cache only answers the loads right after a page opens or the
-user goes back to it (the widget sees the page's focus). A tap on an open page — a "Refresh data" button, also in a
-pop-up, a pull to refresh — always goes to the server.
+## Automatic mode (default) — what the user gets
 
-**GET only?** At HTTP level every Mendix microflow call is a `POST /xas/` (reads too), so an HTTP-GET rule would cache
-nothing. "Read only" is decided by (1) your list — put there only microflows that **read** (REST **GET**) — and (2) the
-answer itself: an answer that writes or has a side effect is never stored.
+| Moment | Result |
+|---|---|
+| Opens a page again / goes back / switches tab within 30 s | its data loads come from memory: instant, no spinner |
+| Taps anything on an open page (save, "Refresh data" in a pop-up, any button that calls a microflow) | the cache is cleared first, the call goes to the server: always fresh |
+| Pull to refresh right after opening | the same call a second time goes to the server |
+| Saves, syncs, logs in or out | cache cleared |
+| Server error, no network | the same error as without the cache |
+
+How it decides (no configuration):
+
+| Rule | Why it is safe |
+|---|---|
+| Only loads in the first 3 s after a page opens use the cache | side effects (save, e-mail, REST POST) come from taps, not from page loads |
+| Only microflows that **return data** are cached | microflows called for a side effect usually return nothing |
+| Only clean reads (no commit/delete/new object, no message/download/logout instruction, no validation) | checked in every answer |
+| A microflow that **once** writes, shows a message or a validation error is never cached again in the session | learns by itself |
+| A page-load microflow that returns nothing clears the cache | it may have changed something |
+| Any microflow call on an open page clears the cache before it runs | the user always sees fresh data after doing something |
+| Memory only, max 100 answers, 2 MB each, kept 30 s (setting *Keep answers*) | |
+
+Optional fine-tuning (*Microflow settings*): `operationId=0` never caches that microflow, `operationId=60` keeps it 60 s.
+List mode (*Mode = Only listed microflows*) keeps the 1.0 behavior.
 
 ## How it works (verified in the Mendix 10.24.13 native client source)
 
@@ -103,5 +119,5 @@ dump-it can build this (`createEntity`, `callRest` with `"response": "string"`, 
 variable) through the normal dry run + approval code.
 
 ```bash
-npm install && npm run release   # npm test: 31 tests (Mendix fetch use simulated with React Native's Response)
+npm install && npm run release   # npm test: 40 tests (Mendix fetch use simulated with React Native's Response)
 ```

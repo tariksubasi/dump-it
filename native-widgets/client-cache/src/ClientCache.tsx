@@ -8,7 +8,7 @@ import { ClientCacheProps } from "../typings/ClientCacheProps";
 import { parseRules } from "./cacheRules";
 import { FetchCache, isWrapped } from "./fetchCache";
 
-const VERSION = "1.0.2";
+const VERSION = "1.1.0";
 
 function makeResponse(text: string, status: number, headers: Record<string, string>): any {
     const R = (globalThis as any).Response;
@@ -55,13 +55,17 @@ function report(): string {
         .slice(0, 12)
         .map(
             ([op, v]) =>
-                `${v.clean ? "clean read" : "NOT cacheable"}  ${v.ms}ms  ${Math.round(v.bytes / 1024)}KB  x${
-                    v.count
-                }\n${op}`
+                `${
+                    cache.learnedNever.has(op)
+                        ? "NEVER (wrote / side effect)"
+                        : v.clean
+                        ? "clean read"
+                        : "not cacheable"
+                }  ${v.ms}ms  ${Math.round(v.bytes / 1024)}KB  x${v.count}\n${op}`
         )
         .join("\n\n");
     return (
-        `hits ${s.hits}  misses ${s.misses}  stored ${s.stored}  entries ${cache.store.size}\n` +
+        `mode ${cache.config.mode}  hits ${s.hits}  misses ${s.misses}  stored ${s.stored}  entries ${cache.store.size}\n` +
         `deduped ${s.deduped}  cleared ${s.invalidations}\n\nMicroflow calls (newest first):\n\n${
             seen || "-"
         }\n\nLog:\n${s.log.slice(-8).join("\n")}`
@@ -88,7 +92,9 @@ export function ClientCache(props: ClientCacheProps<object>): ReactElement | nul
             rules: parseRules(props.rules),
             clearOn: props.clearOn,
             useFor: props.useFor,
-            pageOpenWindowMs: Math.min(10_000, Math.max(500, props.pageOpenWindowMs))
+            pageOpenWindowMs: Math.min(10_000, Math.max(500, props.pageOpenWindowMs)),
+            mode: props.mode,
+            autoTtlMs: Math.min(600, Math.max(1, props.autoTtlSeconds)) * 1000
         };
     });
     useEffect(() => {

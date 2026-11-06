@@ -10,8 +10,9 @@ export interface CacheRule {
 }
 
 export interface Decision {
-    /** cache: whitelisted read; watch: other microflow (invalidate if its response shows a write); pass; invalidate */
-    kind: "cache" | "watch" | "pass" | "invalidate";
+    /** cache: listed read; auto: candidate in automatic mode; watch: microflow that is not cached (may change data);
+     *  pass: not a microflow call; invalidate: a write action */
+    kind: "cache" | "auto" | "watch" | "pass" | "invalidate";
     key?: string;
     ttlMs?: number;
     opId?: string;
@@ -39,10 +40,8 @@ export function parseRules(text: string | undefined): CacheRule[] {
         const line = raw.replace(/#.*/, "").trim();
         const m = /^([^=\s]+)\s*=\s*(\d+(?:\.\d+)?)\s*s?$/i.exec(line);
         if (m && m[1] !== "*") {
-            const ttlMs = Math.min(MAX_TTL_MS, Math.round(parseFloat(m[2]) * 1000));
-            if (ttlMs > 0) {
-                out.push({ operationId: m[1], ttlMs });
-            }
+            // 0 = never cache this microflow (also in automatic mode)
+            out.push({ operationId: m[1], ttlMs: Math.min(MAX_TTL_MS, Math.round(parseFloat(m[2]) * 1000)) });
         }
     }
     return out;
@@ -84,7 +83,19 @@ export function isRuntimeUrl(url: string): boolean {
  * invalidate: anything that can change data (non-whitelisted microflow, commit, delete, sync, login/logout).
  * pass:       everything else (keepalive, logs, OTA, files, other hosts).
  */
-export function decide(method: string, url: string, bodyText: string | undefined, rules: CacheRule[]): Decision {
+export interface DecideOptions {
+    /** auto: every microflow is a candidate (the response decides); list: only listed microflows */
+    mode: "auto" | "list";
+    autoTtlMs: number;
+}
+
+export function decide(
+    method: string,
+    url: string,
+    bodyText: string | undefined,
+    rules: CacheRule[],
+    options: DecideOptions = { mode: "list", autoTtlMs: 30_000 }
+): Decision {
     if (method.toUpperCase() !== "POST" || !isRuntimeUrl(url)) {
         return { kind: "pass", reason: "not a runtime call" };
     }
@@ -103,18 +114,27 @@ export function decide(method: string, url: string, bodyText: string | undefined
             ? { kind: "invalidate", reason: `action ${action}` }
             : { kind: "pass", reason: `action ${action}` };
     }
+    const opId = String(body.operationId);
     const rule = rules.find(r => r.operationId === body.operationId);
-    if (!rule) {
-        return { kind: "watch", opId: String(body.operationId), reason: "microflow not in the cache list" };
+    const auto = options.mode === "auto";
+    if (rule?.ttlMs === 0) {
+        return { kind: "watch", opId, reason: "excluded (=0)" };
+    }
+    if (!rule && !auto) {
+        return { kind: "watch", opId, reason: "microflow not in the cache list" };
     }
     if (body.asyncid != null && body.asyncid !== "") {
-        return { kind: "pass", reason: "async microflow" };
+        return auto && !rule
+            ? { kind: "watch", opId, reason: "async microflow" }
+            : { kind: "pass", reason: "async microflow" };
     }
     if (!isEmpty(body.changes)) {
         return { kind: "invalidate", reason: "request carries unsent changes" };
     }
     const key = stableStringify({ op: body.operationId, params: body.params ?? null, objects: body.objects ?? null });
-    return { kind: "cache", key, ttlMs: rule.ttlMs, opId: String(body.operationId), reason: "cacheable" };
+    return rule
+        ? { kind: "cache", key, ttlMs: rule.ttlMs, opId, reason: "listed" }
+        : { kind: "auto", key, ttlMs: options.autoTtlMs, opId, reason: "automatic candidate" };
 }
 
 // Response fields (Mendix 10.24.13 client): actionResult, objects, changes, resets, commits, deletes, newpersistable,
@@ -146,6 +166,18 @@ export function inspectResponse(text: string): ResponseInfo {
         };
     } catch {
         return { json: false, write: false, sideEffects: [], validation: false };
+    }
+}
+
+/** The microflow returned something (a value or objects). A microflow called for a side effect usually returns nothing. */
+export function returnsData(text: string): boolean {
+    try {
+        const j = JSON.parse(text);
+        const v = j?.actionResult?.value;
+        const hasValue = v !== undefined && v !== null && v !== "" && !(Array.isArray(v) && v.length === 0);
+        return hasValue || (Array.isArray(j?.objects) && j.objects.length > 0);
+    } catch {
+        return false;
     }
 }
 

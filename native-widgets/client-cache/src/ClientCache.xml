@@ -4,7 +4,7 @@
         xmlns="http://www.mendix.com/widget/1.0/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:schemaLocation="http://www.mendix.com/widget/1.0/ ../node_modules/mendix/custom_widget.xsd">
     <name>Client cache</name>
-    <description>Answers repeated calls of chosen read-only microflows (for example the ones that call REST) from memory for a few seconds. Put it on the layouts.</description>
+    <description>Automatic client cache: when a page opens again, data loads that only read come from memory for a few seconds. Anything the user does on an open page gets fresh data. Put it on the layouts; nothing else to set up.</description>
     <studioProCategory>Data</studioProCategory>
     <properties>
         <propertyGroup caption="General">
@@ -14,9 +14,21 @@
                     <description>False: every call goes to the server (the cache is cleared).</description>
                     <returnType type="Boolean" />
                 </property>
+                <property key="mode" type="enumeration" defaultValue="auto">
+                    <caption>Mode</caption>
+                    <description>Automatic: no list needed. Page-open loads of microflows that return data and only read are cached; a microflow that ever writes or shows a message is never cached again; any microflow call on an open page clears the cache. List: only the microflows in the list below.</description>
+                    <enumerationValues>
+                        <enumerationValue key="auto">Automatic (recommended)</enumerationValue>
+                        <enumerationValue key="list">Only listed microflows</enumerationValue>
+                    </enumerationValues>
+                </property>
+                <property key="autoTtlSeconds" type="integer" defaultValue="30">
+                    <caption>Keep answers (s)</caption>
+                    <description>Automatic mode: how long a page-open answer may be reused (1 to 600).</description>
+                </property>
                 <property key="rules" type="string" required="false" multiline="true">
-                    <caption>Cached microflows</caption>
-                    <description>One per line: operationId=seconds (max 600). Find the operationId in Diagnostic mode: call the microflow, tap the Cache label, copy the id marked "clean read". Only listed microflows are cached, and only when their answer is a clean read.</description>
+                    <caption>Microflow settings (optional)</caption>
+                    <description>One per line: operationId=seconds (max 600), or operationId=0 to never cache it. List mode: only these are cached. Find ids in Diagnostic mode (tap the Cache label).</description>
                 </property>
                 <property key="useFor" type="enumeration" defaultValue="pageOpen">
                     <caption>Use the cache for</caption>

@@ -35,6 +35,8 @@ it("wraps the global fetch: a page opened again within the TTL gets its data fro
             rules={"opRest=30"}
             clearOn="otherMicroflows"
             useFor="pageOpen"
+            mode="list"
+            autoTtlSeconds={30}
             pageOpenWindowMs={3000}
             debugMode
         />
@@ -77,6 +79,8 @@ it("a JavaScript action can clear the cache through globalThis.dumpitClientCache
             rules={"opRest=30"}
             clearOn="otherMicroflows"
             useFor="pageOpen"
+            mode="list"
+            autoTtlSeconds={30}
             pageOpenWindowMs={3000}
             debugMode={false}
         />
@@ -114,6 +118,8 @@ it("a focus event of the page (back navigation, tab switch) opens the cache wind
                 rules={"opRest=30"}
                 clearOn="otherMicroflows"
                 useFor="pageOpen"
+                mode="list"
+                autoTtlSeconds={30}
                 pageOpenWindowMs={3000}
                 debugMode={false}
             />
@@ -129,4 +135,38 @@ it("a focus event of the page (back navigation, tab switch) opens the cache wind
     await call();
     expect(server).toHaveBeenCalledTimes(2);
     jest.useRealTimers();
+});
+
+it("automatic mode works without any list", async () => {
+    server.mockClear();
+    (globalThis as any).dumpitClientCache.clear("test");
+    render(
+        <ClientCache
+            name="cc"
+            style={[]}
+            enabled={{ status: ValueStatus.Available, value: true }}
+            rules={""}
+            clearOn="otherMicroflows"
+            useFor="pageOpen"
+            pageOpenWindowMs={3000}
+            mode="auto"
+            autoTtlSeconds={30}
+            debugMode={false}
+        />
+    );
+    const anyOp = (): Promise<any> =>
+        (globalThis as any).fetch("https://app/xas/", {
+            method: "post",
+            body: JSON.stringify({
+                action: "runtimeOperation",
+                operationId: "opUnlisted",
+                params: {},
+                changes: {},
+                objects: []
+            })
+        });
+    await anyOp(); // page opened on mount: miss, stored (returns data)
+    cache.markPageOpen();
+    await anyOp(); // from the cache
+    expect(server).toHaveBeenCalledTimes(1);
 });
