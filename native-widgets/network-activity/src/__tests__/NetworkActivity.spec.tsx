@@ -1,4 +1,5 @@
 import { act, fireEvent, render } from "@testing-library/react-native";
+import { AccessibilityInfo, Animated } from "react-native";
 import { ValueStatus } from "mendix";
 import { FakeXhr } from "./fakeXhr";
 
@@ -18,7 +19,8 @@ const props = {
     maxVisibleMs: 30000,
     requestTimeoutMs: 60000,
     ignorePatterns: "symbolicate",
-    debugMode: false
+    debugMode: false,
+    spinner: "ringPulse"
 };
 
 function req(): FakeXhr {
@@ -58,4 +60,48 @@ it("enabled = false shows nothing", () => {
     act(() => x.finish("load"));
     act(() => jest.advanceTimersByTime(1000));
     jest.useRealTimers();
+});
+
+describe("animation", () => {
+    function showWith(extra: object): ReturnType<typeof render> {
+        const r = render(<NetworkActivity {...props} {...extra} />);
+        const x = req();
+        act(() => jest.advanceTimersByTime(400));
+        (r as any).finishRequest = () => x.finish("load");
+        return r;
+    }
+
+    beforeEach(() => jest.useFakeTimers());
+    afterEach(() => jest.useRealTimers());
+
+    it("spinning ring by default, and its rotation loop starts", () => {
+        const loop = jest.spyOn(Animated, "loop");
+        const r = showWith({});
+        expect(r.getByTestId("network-activity-ring")).toBeTruthy();
+        expect(r.queryByTestId("network-activity-native")).toBeNull();
+        expect(loop).toHaveBeenCalled();
+        act(() => (r as any).finishRequest());
+        act(() => jest.advanceTimersByTime(1000));
+        loop.mockRestore();
+    });
+
+    it("system spinner when chosen", () => {
+        const r = showWith({ spinner: "native" });
+        expect(r.getByTestId("network-activity-native")).toBeTruthy();
+        expect(r.queryByTestId("network-activity-ring")).toBeNull();
+        act(() => (r as any).finishRequest());
+        act(() => jest.advanceTimersByTime(1000));
+    });
+
+    it("system spinner when the device asks for reduced motion", async () => {
+        const spy = jest.spyOn(AccessibilityInfo, "isReduceMotionEnabled").mockResolvedValue(true);
+        const r = showWith({ spinner: "ring" });
+        await act(async () => {
+            await Promise.resolve();
+        });
+        expect(r.getByTestId("network-activity-native")).toBeTruthy();
+        act(() => (r as any).finishRequest());
+        act(() => jest.advanceTimersByTime(1000));
+        spy.mockRestore();
+    });
 });

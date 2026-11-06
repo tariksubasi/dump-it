@@ -6,6 +6,8 @@
 import { DynamicValue } from "mendix";
 import { CSSProperties } from "react";
 
+export type SpinnerEnum = "ringPulse" | "ring" | "native";
+
 export interface NetworkActivityProps<Style> {
     name: string;
     style: Style[];
@@ -16,6 +18,7 @@ export interface NetworkActivityProps<Style> {
     maxVisibleMs: number;
     requestTimeoutMs: number;
     ignorePatterns: string;
+    spinner: SpinnerEnum;
     debugMode: boolean;
     message?: DynamicValue<string>;
     slowMessage?: DynamicValue<string>;
@@ -40,6 +43,7 @@ export interface NetworkActivityPreviewProps {
     maxVisibleMs: number | null;
     requestTimeoutMs: number | null;
     ignorePatterns: string;
+    spinner: SpinnerEnum;
     debugMode: boolean;
     message: string;
     slowMessage: string;

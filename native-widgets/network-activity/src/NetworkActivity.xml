@@ -38,6 +38,15 @@
                     <caption>Ignore requests</caption>
                     <description>Regular expression (one per line) on "METHOD url body". Matching requests never show the overlay. Use Diagnostic mode to see the requests.</description>
                 </property>
+                <property key="spinner" type="enumeration" defaultValue="ringPulse">
+                    <caption>Animation</caption>
+                    <description>Spinning ring (same on iOS and Android), ring with a soft pulse, or the system spinner. With reduced motion on the device the system spinner is used.</description>
+                    <enumerationValues>
+                        <enumerationValue key="ringPulse">Spinning ring + pulse</enumerationValue>
+                        <enumerationValue key="ring">Spinning ring</enumerationValue>
+                        <enumerationValue key="native">System spinner</enumerationValue>
+                    </enumerationValues>
+                </property>
                 <property key="debugMode" type="boolean" defaultValue="false">
                     <caption>Diagnostic mode</caption>
                     <description>Log every request and show a Details button with the last requests. Turn off before release.</description>

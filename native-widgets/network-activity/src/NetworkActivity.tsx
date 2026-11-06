@@ -25,13 +25,13 @@ import * as registry from "./registry";
 export interface NetworkActivityStyle {
     backdrop?: ViewStyle;
     card?: ViewStyle;
-    indicator?: { color?: string };
+    indicator?: { color?: string; trackColor?: string };
     text?: TextStyle;
     button?: ViewStyle;
     buttonText?: TextStyle;
 }
 
-const VERSION = "1.0.0";
+const VERSION = "1.0.1";
 
 // ---- one tracker and one controller for the whole app ----------------------------
 export const tracker = new NetworkTracker();
@@ -97,10 +97,37 @@ function describeRecent(): string {
 
 let nextInstance = 1;
 
-function Pulse({ color, reduceMotion }: { color?: string; reduceMotion: boolean }): ReactElement {
-    const [v] = useState(() => new Animated.Value(0));
+type SpinnerKind = "ring" | "ringPulse" | "native";
+
+// Material-like spinning ring: a light track and a thick arc that rotates (native driver, both platforms).
+function Ring({ color, track, size }: { color: string; track: string; size: number }): ReactElement {
+    const [spin] = useState(() => new Animated.Value(0));
     useEffect(() => {
-        if (reduceMotion) {
+        const loop = Animated.loop(
+            Animated.timing(spin, { toValue: 1, duration: 900, easing: Easing.linear, useNativeDriver: true })
+        );
+        loop.start();
+        return () => loop.stop();
+    }, [spin]);
+    const rotate = spin.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
+    const ring = { width: size, height: size, borderRadius: size / 2, borderWidth: Math.max(3, Math.round(size / 12)) };
+    return (
+        <View style={{ width: size, height: size }} testID="network-activity-ring">
+            <View style={[ring, { borderColor: track }]} />
+            <Animated.View
+                style={[ring, styles.arc, { borderTopColor: color, borderRightColor: color, transform: [{ rotate }] }]}
+            />
+        </View>
+    );
+}
+
+function Spinner(props: { kind: SpinnerKind; color?: string; track?: string; reduceMotion: boolean }): ReactElement {
+    const color = props.color ?? "#1558B0";
+    const track = props.track ?? "rgba(21,88,176,0.15)";
+    const [v] = useState(() => new Animated.Value(0));
+    const pulse = props.kind === "ringPulse" && !props.reduceMotion;
+    useEffect(() => {
+        if (!pulse) {
             return undefined;
         }
         const loop = Animated.loop(
@@ -121,17 +148,23 @@ function Pulse({ color, reduceMotion }: { color?: string; reduceMotion: boolean 
         );
         loop.start();
         return () => loop.stop();
-    }, [v, reduceMotion]);
+    }, [v, pulse]);
+    // Reduced motion (OS setting) or "native": the system spinner.
+    if (props.kind === "native" || props.reduceMotion) {
+        return (
+            <View style={styles.pulseBox}>
+                <ActivityIndicator size="large" color={color} testID="network-activity-native" />
+            </View>
+        );
+    }
     const scale = v.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.15] });
-    const opacity = v.interpolate({ inputRange: [0, 1], outputRange: [0.35, 0.15] });
+    const opacity = v.interpolate({ inputRange: [0, 1], outputRange: [0.22, 0.08] });
     return (
         <View style={styles.pulseBox}>
-            {reduceMotion ? null : (
-                <Animated.View
-                    style={[styles.halo, { backgroundColor: color ?? "#1558B0", opacity, transform: [{ scale }] }]}
-                />
-            )}
-            <ActivityIndicator size="large" color={color} />
+            {pulse ? (
+                <Animated.View style={[styles.halo, { backgroundColor: color, opacity, transform: [{ scale }] }]} />
+            ) : null}
+            <Ring color={color} track={track} size={48} />
         </View>
     );
 }
@@ -226,7 +259,12 @@ export function NetworkActivity(props: NetworkActivityProps<NetworkActivityStyle
                     accessibilityLabel={message}
                     accessibilityLiveRegion="polite"
                 >
-                    <Pulse color={s.indicator.color} reduceMotion={reduceMotion} />
+                    <Spinner
+                        kind={props.spinner}
+                        color={s.indicator.color}
+                        track={s.indicator.trackColor}
+                        reduceMotion={reduceMotion}
+                    />
                     <Text style={[styles.text, s.text]}>{message}</Text>
                     {slow ? (
                         <Pressable
@@ -275,6 +313,7 @@ const styles = StyleSheet.create({
     },
     pulseBox: { width: 72, height: 72, alignItems: "center", justifyContent: "center" },
     halo: { position: "absolute", width: 72, height: 72, borderRadius: 36 },
+    arc: { position: "absolute", top: 0, left: 0, borderColor: "transparent" },
     text: { marginTop: 12, fontSize: 16, lineHeight: 23, color: "#1B2430", textAlign: "center" },
     button: {
         marginTop: 16,
