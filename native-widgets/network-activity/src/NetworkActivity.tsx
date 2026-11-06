@@ -31,7 +31,7 @@ export interface NetworkActivityStyle {
     buttonText?: TextStyle;
 }
 
-const VERSION = "1.0.1";
+const VERSION = "1.0.2";
 
 // ---- one tracker and one controller for the whole app ----------------------------
 export const tracker = new NetworkTracker();
@@ -149,8 +149,10 @@ function Spinner(props: { kind: SpinnerKind; color?: string; track?: string; red
         loop.start();
         return () => loop.stop();
     }, [v, pulse]);
-    // Reduced motion (OS setting) or "native": the system spinner.
-    if (props.kind === "native" || props.reduceMotion) {
+    // "native" only when chosen. Reduced motion (on Android also "animation scale off" in developer options) keeps the
+    // ring - a progress indicator is essential motion - and only drops the pulse. The system spinner would stand
+    // still with animations off and look like a static icon.
+    if (props.kind === "native") {
         return (
             <View style={styles.pulseBox}>
                 <ActivityIndicator size="large" color={color} testID="network-activity-native" />
@@ -232,6 +234,7 @@ export function NetworkActivity(props: NetworkActivityProps<NetworkActivityStyle
         return null;
     }
     const slow = state.phase === "slow";
+    const spinnerInfo = `animation ${props.spinner}, reduce motion ${reduceMotion ? "on (no pulse)" : "off"}`;
     const message = slow
         ? textOf(props.slowMessage, "This takes longer than usual…")
         : textOf(props.message, "Loading…");
@@ -278,7 +281,12 @@ export function NetworkActivity(props: NetworkActivityProps<NetworkActivityStyle
                     ) : null}
                     {debug ? (
                         <Pressable
-                            onPress={() => Alert.alert(`NetworkActivity ${VERSION}`, describeRecent() || "no requests")}
+                            onPress={() =>
+                                Alert.alert(
+                                    `NetworkActivity ${VERSION}`,
+                                    `${spinnerInfo}\n\n${describeRecent() || "no requests"}`
+                                )
+                            }
                             hitSlop={8}
                             style={styles.details}
                         >

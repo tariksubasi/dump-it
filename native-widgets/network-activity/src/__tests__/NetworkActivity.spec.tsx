@@ -93,13 +93,14 @@ describe("animation", () => {
         act(() => jest.advanceTimersByTime(1000));
     });
 
-    it("system spinner when the device asks for reduced motion", async () => {
+    it("reduced motion (animations off) still shows the spinning ring, only without the pulse", async () => {
         const spy = jest.spyOn(AccessibilityInfo, "isReduceMotionEnabled").mockResolvedValue(true);
         const r = showWith({ spinner: "ring" });
         await act(async () => {
             await Promise.resolve();
         });
-        expect(r.getByTestId("network-activity-native")).toBeTruthy();
+        expect(r.getByTestId("network-activity-ring")).toBeTruthy();
+        expect(r.queryByTestId("network-activity-native")).toBeNull();
         act(() => (r as any).finishRequest());
         act(() => jest.advanceTimersByTime(1000));
         spy.mockRestore();

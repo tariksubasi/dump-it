@@ -2,7 +2,7 @@
 
 A blocking, animated loading overlay that appears **by itself** while the app waits for the server — every microflow
 call, retrieve, synchronize and REST call that goes through React Native networking (`XMLHttpRequest`, also used by
-`fetch`). Put it **once on each layout** (with the BackNavigation widget). Package: `dist/1.0.1/dumpit.NetworkActivity.mpk`.
+`fetch`). Put it **once on each layout** (with the BackNavigation widget). Package: `dist/1.0.2/dumpit.NetworkActivity.mpk`.
 
 | Rule | Value (default) | Why |
 |---|---|---|
@@ -16,7 +16,7 @@ call, retrieve, synchronize and REST call that goes through React Native network
 | Ignore | regex on `METHOD url body`, default `symbolicate|:8081/|keepalive` | dev tools and background pings |
 | Several layouts | one overlay | only the last focused instance draws it |
 | Blocking | RN `Modal` + dim backdrop; Android back blocked until "slow" | no double taps during save |
-| Animation | **Spinning ring** (light track + rotating arc, same on iOS and Android, native driver), optional soft pulse; or the system spinner. Reduced motion on the device → system spinner | property *Animation* |
+| Animation | **Spinning ring** (light track + rotating arc, same on iOS and Android, native driver), optional soft pulse; or the system spinner. Reduced motion on the device (also "animation scale off" in Android developer options) → the ring keeps spinning, only the pulse is left out (the system spinner would stand still and look like a static icon) | property *Animation* |
 | Accessibility | `progressbar` role, label = message, live region | |
 
 Styles (native theme, `dumpit_networkactivity_NetworkActivity`): `backdrop`, `card`, `indicator.color`, `indicator.trackColor`, `text`,

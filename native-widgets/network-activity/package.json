@@ -1,7 +1,7 @@
 {
   "name": "network-activity",
   "widgetName": "NetworkActivity",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Automatic blocking loading overlay while the app waits for the server (Mendix native)",
   "license": "Apache-2.0",
   "packagePath": "dumpit",

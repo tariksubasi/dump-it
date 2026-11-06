@@ -40,7 +40,7 @@
                 </property>
                 <property key="spinner" type="enumeration" defaultValue="ringPulse">
                     <caption>Animation</caption>
-                    <description>Spinning ring (same on iOS and Android), ring with a soft pulse, or the system spinner. With reduced motion on the device the system spinner is used.</description>
+                    <description>Spinning ring (same on iOS and Android), ring with a soft pulse, or the system spinner. With reduced motion (or animations off in Android developer options) the ring keeps spinning and the pulse is left out.</description>
                     <enumerationValues>
                         <enumerationValue key="ringPulse">Spinning ring + pulse</enumerationValue>
                         <enumerationValue key="ring">Spinning ring</enumerationValue>
