@@ -1,7 +1,7 @@
 {
   "name": "client-cache",
   "widgetName": "ClientCache",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "Client-side cache for read-only Mendix microflow calls (native), like React Query staleTime",
   "license": "Apache-2.0",
   "packagePath": "dumpit",

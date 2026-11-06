@@ -336,16 +336,16 @@ describe("automatic mode (no list)", () => {
     }
     const ops = (server: jest.Mock): string[] => server.mock.calls.map(c => JSON.parse(c[1].body).operationId);
 
-    it("page-open loads that return data are cached without any list", async () => {
+    it("page-open loads that return data are cached without any list, after the same answer twice", async () => {
         const { fetch, server, cache, t } = autoSetup();
-        cache.markPageOpen();
-        await mendixPost(fetch, op("opA"));
-        await mendixPost(fetch, op("opB"));
-        t.now = 10_000;
-        cache.markPageOpen();
-        await mendixPost(fetch, op("opA"));
-        await mendixPost(fetch, op("opB"));
-        expect(ops(server)).toEqual(["opA", "opB"]);
+        for (const now of [0, 5_000, 10_000]) {
+            t.now = now;
+            cache.markPageOpen();
+            await mendixPost(fetch, op("opA"));
+            await mendixPost(fetch, op("opB"));
+        }
+        // 1st open: learn, 2nd open: same answer -> stored, 3rd open: from the cache
+        expect(ops(server)).toEqual(["opA", "opB", "opA", "opB"]);
     });
 
     it("ignores 'Always': only page-open loads use the cache", async () => {
@@ -362,12 +362,15 @@ describe("automatic mode (no list)", () => {
         const { fetch, server, cache, t } = autoSetup();
         cache.markPageOpen();
         await mendixPost(fetch, op("opA"));
+        t.now = 4_000;
+        cache.markPageOpen();
+        await mendixPost(fetch, op("opA")); // same answer twice: stored
         t.now = 8_000; // page is open, user taps a button that calls opB (e.g. REST POST behind it)
         await mendixPost(fetch, op("opB"));
         t.now = 9_000;
         cache.markPageOpen(); // goes to another page and back
-        await mendixPost(fetch, op("opA"));
-        expect(ops(server)).toEqual(["opA", "opB", "opA"]);
+        await mendixPost(fetch, op("opA")); // fresh: the tap cleared the cache
+        expect(ops(server)).toEqual(["opA", "opA", "opB", "opA"]);
     });
 
     it("a page-load microflow that returns nothing is not cached and clears the cache", async () => {
@@ -432,5 +435,69 @@ describe("automatic mode (no list)", () => {
         await mendixPost(fetch, op("opA", { changes: { g1: { Name: { value: "x" } } } }));
         await mendixPost(fetch, op("opA", { changes: { g1: { Name: { value: "x" } } } }));
         expect(server).toHaveBeenCalledTimes(2);
+    });
+
+    it("a create (new id in every answer) is never cached and runs on every page open", async () => {
+        const { cache, t } = autoSetup();
+        let n = 0;
+        const server = jest.fn(
+            async () =>
+                new WhatwgResponse(
+                    JSON.stringify({ actionResult: { type: "string", value: `ORD-${++n}` }, objects: [] }),
+                    { status: 200 }
+                )
+        );
+        const f = cache.wrap(server);
+        for (const now of [0, 4_000, 8_000, 12_000]) {
+            t.now = now;
+            cache.markPageOpen();
+            await mendixPost(f, op("opCreateSession"));
+        }
+        expect(server).toHaveBeenCalledTimes(4);
+    });
+
+    it("a read whose Mendix object ids change on every call is still recognised as stable", async () => {
+        const { cache, t } = autoSetup();
+        let id = 281474976710000;
+        const server = jest.fn(async () => {
+            const g = String(++id);
+            return new WhatwgResponse(
+                JSON.stringify({
+                    actionResult: { type: "list", value: [g] },
+                    objects: [{ guid: g, hash: `h${id}`, objectType: "M.Npe", attributes: { Name: { value: "Ali" } } }],
+                    instructions: [{ type: "push_to_client", args: { guids: [g] } }]
+                }),
+                { status: 200 }
+            );
+        });
+        const f = cache.wrap(server);
+        for (const now of [0, 4_000, 8_000]) {
+            t.now = now;
+            cache.markPageOpen();
+            await mendixPost(f, op("opNpeList"));
+        }
+        expect(server).toHaveBeenCalledTimes(2);
+    });
+
+    it("double tap: two identical calls from buttons both reach the server", async () => {
+        const { fetch, server, cache } = autoSetup();
+        (cache as any).windowUntil = -1; // page already open: these are taps
+        await Promise.all([mendixPost(fetch, op("opA")), mendixPost(fetch, op("opA"))]);
+        expect(server).toHaveBeenCalledTimes(2);
+    });
+
+    it("parallel identical page loads are merged only after the call is proven a read", async () => {
+        const { fetch, server, cache, t } = autoSetup();
+        cache.markPageOpen();
+        await Promise.all([mendixPost(fetch, op("opA")), mendixPost(fetch, op("opA"))]);
+        expect(server).toHaveBeenCalledTimes(2); // not proven yet: both ran (and answered the same: now proven)
+        t.now = 4_000;
+        cache.markPageOpen();
+        await mendixPost(fetch, op("opA")); // from the cache
+        expect(server).toHaveBeenCalledTimes(2);
+        t.now = 60_000; // entry expired, still proven
+        cache.markPageOpen();
+        await Promise.all([mendixPost(fetch, op("opA")), mendixPost(fetch, op("opA"))]);
+        expect(server).toHaveBeenCalledTimes(3); // the two parallel calls became one
     });
 });

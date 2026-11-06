@@ -169,6 +169,36 @@ export function inspectResponse(text: string): ResponseInfo {
     }
 }
 
+function normalize(v: unknown): unknown {
+    if (Array.isArray(v)) {
+        return v.map(normalize);
+    }
+    if (v && typeof v === "object") {
+        const out: Record<string, unknown> = {};
+        for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
+            if (k !== "guid" && k !== "hash") {
+                out[k] = normalize(x);
+            }
+        }
+        return out;
+    }
+    // Mendix object ids (also in references and list results) are long digit strings and new on every call
+    return typeof v === "string" && /^\d{10,20}$/.test(v) ? "#id" : v;
+}
+
+/**
+ * The answer without what changes on every call even for a pure read (object ids, hashes).
+ * Two equal fingerprints for the same request = a stable read. A create returns new ids, numbers or times
+ * in its data, so its fingerprints differ and it is never cached automatically.
+ */
+export function fingerprint(text: string): string {
+    try {
+        return stableStringify(normalize(JSON.parse(text)));
+    } catch {
+        return text;
+    }
+}
+
 /** The microflow returned something (a value or objects). A microflow called for a side effect usually returns nothing. */
 export function returnsData(text: string): boolean {
     try {

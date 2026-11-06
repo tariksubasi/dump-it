@@ -8,7 +8,7 @@ import { ClientCacheProps } from "../typings/ClientCacheProps";
 import { parseRules } from "./cacheRules";
 import { FetchCache, isWrapped } from "./fetchCache";
 
-const VERSION = "1.1.1";
+const VERSION = "1.2.0";
 
 function makeResponse(text: string, status: number, headers: Record<string, string>): any {
     const R = (globalThis as any).Response;

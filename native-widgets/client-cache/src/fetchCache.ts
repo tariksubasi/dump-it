@@ -1,6 +1,6 @@
 // Wraps window.fetch once. The Mendix 10.24 client calls window.fetch(url, init) for every runtime request
 // (doFetch in the client), reads status 200 and then response.text() -> JSON.parse.
-import { CacheRule, decide, inspectResponse, isStorable, ResponseStore, returnsData } from "./cacheRules";
+import { CacheRule, decide, fingerprint, inspectResponse, isStorable, ResponseStore, returnsData } from "./cacheRules";
 
 export interface CacheStats {
     hits: number;
@@ -57,6 +57,9 @@ export class FetchCache {
     };
     /** microflows that wrote, had a side effect or a validation message: never cached again in this session */
     readonly learnedNever = new Set<string>();
+    /** automatic mode: last answer fingerprint per request, and requests that answered the same twice */
+    private fingerprints = new Map<string, string>();
+    private provenKeys = new Set<string>();
     private windowUntil = Number.NEGATIVE_INFINITY;
     private servedInWindow = new Set<string>();
     private inflight = new Map<string, Promise<{ status: number; text: string; headers: Record<string, string> }>>();
@@ -181,7 +184,9 @@ export class FetchCache {
                 this.note(`HIT ${shortKey(key)} (${hit.hits})`);
                 return this.makeResponse(hit.text, 200, hit.headers);
             }
-            const pending = this.inflight.get(key);
+            // merge identical parallel calls only when they are proven reads (never two creates into one)
+            const mayMerge = !auto || (pageLoad && this.provenKeys.has(key));
+            const pending = mayMerge ? this.inflight.get(key) : undefined;
             if (pending) {
                 this.stats.deduped++;
                 const r = await pending;
@@ -201,7 +206,24 @@ export class FetchCache {
                 } catch {
                     // ignore
                 }
-                const storable = isStorable(res.status, text) && (!auto || returnsData(text));
+                let storable = isStorable(res.status, text) && (!auto || returnsData(text));
+                if (auto && storable) {
+                    // automatic mode: cache only after the same request answered the same twice (a stable read)
+                    const fp = fingerprint(text);
+                    const stable = this.fingerprints.get(key) === fp;
+                    this.fingerprints.delete(key);
+                    this.fingerprints.set(key, fp);
+                    if (this.fingerprints.size > 300) {
+                        this.fingerprints.delete(this.fingerprints.keys().next().value as string);
+                    }
+                    if (stable) {
+                        this.provenKeys.add(key);
+                    } else {
+                        this.provenKeys.delete(key);
+                        storable = false;
+                        this.note(`LEARN ${shortKey(key)} (needs the same answer twice)`);
+                    }
+                }
                 if (gen === this.generation && storable) {
                     this.store.set(key, text, headers, decision.ttlMs as number);
                     this.stats.stored++;

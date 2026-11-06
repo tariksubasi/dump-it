@@ -1,7 +1,19 @@
 # ClientCache (native) — automatic client cache for Mendix microflow calls
 
 Put it **once on each layout** (in the same snippet as NetworkActivity). Nothing else: no list, no JavaScript action,
-no change to pages or flows. Package: `dist/1.1.1/dumpit.ClientCache.mpk`.
+no change to pages or flows. Package: `dist/1.2.0/dumpit.ClientCache.mpk`.
+
+## How long, and what is never cached
+
+| | |
+|---|---|
+| Kept | 30 s (setting *Keep answers*, max 600), and only used for loads in the first 3 s after a page opens |
+| Create / update / delete from a button (incl. REST POST/PUT/DELETE behind a microflow) | always sent; the cache is cleared before |
+| Mendix commit, delete, rollback, synchronize, login, logout | always sent; cache cleared |
+| A microflow whose answer shows a commit, delete or new object | never stored, never cached again in the session; cache cleared |
+| A page-load microflow that returns nothing | always sent; cache cleared |
+| A page-load microflow that returns data but a different answer each time (e.g. creates something) | always sent (never "the same answer twice") |
+| Errors, async microflows, calls with unsent changes | always sent |
 
 ## Automatic mode (default) — what the user gets
 
@@ -20,6 +32,8 @@ How it decides (no configuration):
 | Only loads in the first 3 s after a page opens use the cache | side effects (save, e-mail, REST POST) come from taps, not from page loads |
 | Only microflows that **return data** are cached | microflows called for a side effect usually return nothing |
 | Only clean reads (no commit/delete/new object, no message/download/logout instruction, no validation) | checked in every answer |
+| Only after **the same request answered the same twice** (Mendix object ids and hashes ignored) | a create returns a new id, number or time each call, so it never qualifies; the first cache hit comes on the 3rd page open |
+| Identical parallel calls are merged only for proven reads on page load; taps are never merged | a double tap on "Create" sends two requests, as without the cache |
 | A microflow that **once** writes, shows a message or a validation error is never cached again in the session | learns by itself |
 | A page-load microflow that returns nothing clears the cache | it may have changed something |
 | Any microflow call on an open page clears the cache before it runs | the user always sees fresh data after doing something |
@@ -119,5 +133,5 @@ dump-it can build this (`createEntity`, `callRest` with `"response": "string"`, 
 variable) through the normal dry run + approval code.
 
 ```bash
-npm install && npm run release   # npm test: 40 tests (Mendix fetch use simulated with React Native's Response)
+npm install && npm run release   # npm test: 44 tests (Mendix fetch use simulated with React Native's Response)
 ```

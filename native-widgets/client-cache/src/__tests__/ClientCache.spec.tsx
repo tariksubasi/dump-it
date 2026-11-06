@@ -165,8 +165,10 @@ it("automatic mode works without any list", async () => {
                 objects: []
             })
         });
-    await anyOp(); // page opened on mount: miss, stored (returns data)
+    await anyOp(); // page opened on mount: learn
+    cache.markPageOpen();
+    await anyOp(); // same answer twice: stored
     cache.markPageOpen();
     await anyOp(); // from the cache
-    expect(server).toHaveBeenCalledTimes(1);
+    expect(server).toHaveBeenCalledTimes(2);
 });
