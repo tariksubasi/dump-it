@@ -18,11 +18,11 @@ export interface ClientCacheProps<Style> {
     enabled: DynamicValue<boolean>;
     mode: ModeEnum;
     autoTtlSeconds: number;
-    rules: string;
     useFor: UseForEnum;
     pageOpenWindowMs: number;
     clearOn: ClearOnEnum;
     debugMode: boolean;
+    rules: string;
 }
 
 export interface ClientCachePreviewProps {
@@ -39,9 +39,9 @@ export interface ClientCachePreviewProps {
     enabled: string;
     mode: ModeEnum;
     autoTtlSeconds: number | null;
-    rules: string;
     useFor: UseForEnum;
     pageOpenWindowMs: number | null;
     clearOn: ClearOnEnum;
     debugMode: boolean;
+    rules: string;
 }

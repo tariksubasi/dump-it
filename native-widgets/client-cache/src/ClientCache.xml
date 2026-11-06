@@ -26,10 +26,6 @@
                     <caption>Keep answers (s)</caption>
                     <description>Automatic mode: how long a page-open answer may be reused (1 to 600).</description>
                 </property>
-                <property key="rules" type="string" required="false" multiline="true">
-                    <caption>Microflow settings (optional)</caption>
-                    <description>One per line: operationId=seconds (max 600), or operationId=0 to never cache it. List mode: only these are cached. Find ids in Diagnostic mode (tap the Cache label).</description>
-                </property>
                 <property key="useFor" type="enumeration" defaultValue="pageOpen">
                     <caption>Use the cache for</caption>
                     <description>Page opens (recommended): only the loads right after a page opens or the user goes back come from the cache; a tap on an open page (for example a refresh button, also in a pop-up) always gets fresh data. Always: every listed call within the time limit.</description>
@@ -53,6 +49,12 @@
                 <property key="debugMode" type="boolean" defaultValue="false">
                     <caption>Diagnostic mode</caption>
                     <description>Shows a small Cache label on the page: tap it for hits, misses and the microflow calls seen (with operationId, time, size, clean read). Turn off before release.</description>
+                </property>
+            </propertyGroup>
+            <propertyGroup caption="Advanced (leave empty)">
+                <property key="rules" type="string" required="false" multiline="true">
+                    <caption>Exceptions (optional, normally empty)</caption>
+                    <description>Leave empty: automatic mode needs nothing. Only if a microflow must never be cached: turn on Diagnostic mode, open the screen, tap the Cache label and copy the newest id, then write id=0 here. id=60 keeps it 60 s. List mode: only the ids here are cached.</description>
                 </property>
             </propertyGroup>
         </propertyGroup>

@@ -1,7 +1,7 @@
 # ClientCache (native) — automatic client cache for Mendix microflow calls
 
 Put it **once on each layout** (in the same snippet as NetworkActivity). Nothing else: no list, no JavaScript action,
-no change to pages or flows. Package: `dist/1.1.0/dumpit.ClientCache.mpk`.
+no change to pages or flows. Package: `dist/1.1.1/dumpit.ClientCache.mpk`.
 
 ## Automatic mode (default) — what the user gets
 
@@ -25,7 +25,7 @@ How it decides (no configuration):
 | Any microflow call on an open page clears the cache before it runs | the user always sees fresh data after doing something |
 | Memory only, max 100 answers, 2 MB each, kept 30 s (setting *Keep answers*) | |
 
-Optional fine-tuning (*Microflow settings*): `operationId=0` never caches that microflow, `operationId=60` keeps it 60 s.
+Optional, normally empty (*Advanced → Exceptions*): `operationId=0` never caches that microflow, `operationId=60` keeps it 60 s.
 List mode (*Mode = Only listed microflows*) keeps the 1.0 behavior.
 
 ## How it works (verified in the Mendix 10.24.13 native client source)
