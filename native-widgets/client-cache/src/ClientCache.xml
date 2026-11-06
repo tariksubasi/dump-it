@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<widget id="dumpit.clientcache.ClientCache" pluginWidget="true" needsEntityContext="false" offlineCapable="true"
+        supportedPlatform="Native"
+        xmlns="http://www.mendix.com/widget/1.0/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.mendix.com/widget/1.0/ ../node_modules/mendix/custom_widget.xsd">
+    <name>Client cache</name>
+    <description>Answers repeated calls of chosen read-only microflows (for example the ones that call REST) from memory for a few seconds. Put it on the layouts.</description>
+    <studioProCategory>Data</studioProCategory>
+    <properties>
+        <propertyGroup caption="General">
+            <propertyGroup caption="Cache">
+                <property key="enabled" type="expression" defaultValue="true">
+                    <caption>Enabled</caption>
+                    <description>False: every call goes to the server (the cache is cleared).</description>
+                    <returnType type="Boolean" />
+                </property>
+                <property key="rules" type="string" required="false" multiline="true">
+                    <caption>Cached microflows</caption>
+                    <description>One per line: operationId=seconds (max 600). Find the operationId in Diagnostic mode: call the microflow, tap the Cache label, copy the id marked "clean read". Only listed microflows are cached, and only when their answer is a clean read.</description>
+                </property>
+                <property key="debugMode" type="boolean" defaultValue="false">
+                    <caption>Diagnostic mode</caption>
+                    <description>Shows a small Cache label on the page: tap it for hits, misses and the microflow calls seen (with operationId, time, size, clean read). Turn off before release.</description>
+                </property>
+            </propertyGroup>
+        </propertyGroup>
+    </properties>
+</widget>
