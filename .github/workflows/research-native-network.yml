@@ -1,8 +1,8 @@
-name: research-native-back
-# One-off: find how the Mendix 10.24 native client handles the Android back button and navigation.
+name: research-native-network
+# One-off: how the Mendix 10.24 native client talks to the runtime (request/response format), for a client-side cache.
 on:
   push:
-    branches: [research/native-back]
+    branches: [research/native-network]
 jobs:
   scan:
     runs-on: ubuntu-latest
@@ -15,14 +15,15 @@ jobs:
         run: |
           F="$HOME/mxb/10.24.13/modeler/tools/node/node_modules/mendix/native.js"
           ls -la "$F"
-          for pat in 'BottomBar.Navigator' 'backBehavior' 'createDrawerNavigator()' 'Drawer.Navigator' 'RootNavigator=' 'useRootNavigator' 'SIDEBAR_DEFAULT",component' 'name:"BOTTOM_BAR"' 'name:"STACK"' 'inRootNavigation'; do
+          echo "== files next to it"; ls "$(dirname "$F")" | head -50
+          for pat in '"/xas/"' 'xas/' 'runtimeOperation' 'operationId' 'executeaction' 'retrieve_by_xpath' 'X-Csrf-Token' 'XMLHttpRequest' 'fetch(' 'keepalive' 'instructions' '"objects"' 'objects:' 'changes:' 'responseText' 'synchronize' 'sessionObjectId' 'Content-Type'; do
             echo "################ $pat  (count: $(grep -oF -- "$pat" "$F" | wc -l))"
             python3 - "$F" "$pat" <<'PY'
           import sys
           s=open(sys.argv[1],encoding="utf-8",errors="replace").read(); p=sys.argv[2]; i=0; n=0
-          while n<3:
+          while n<2:
               i=s.find(p,i)
               if i<0: break
-              print("---", i); print(s[max(0,i-1200):i+2200]); i+=len(p); n+=1
+              print("---", i); print(s[max(0,i-700):i+900]); i+=len(p); n+=1
           PY
           done
