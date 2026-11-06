@@ -18,6 +18,18 @@
                     <caption>Cached microflows</caption>
                     <description>One per line: operationId=seconds (max 600). Find the operationId in Diagnostic mode: call the microflow, tap the Cache label, copy the id marked "clean read". Only listed microflows are cached, and only when their answer is a clean read.</description>
                 </property>
+                <property key="useFor" type="enumeration" defaultValue="pageOpen">
+                    <caption>Use the cache for</caption>
+                    <description>Page opens (recommended): only the loads right after a page opens or the user goes back come from the cache; a tap on an open page (for example a refresh button, also in a pop-up) always gets fresh data. Always: every listed call within the time limit.</description>
+                    <enumerationValues>
+                        <enumerationValue key="pageOpen">Page opens and going back (recommended)</enumerationValue>
+                        <enumerationValue key="always">Always within the time limit</enumerationValue>
+                    </enumerationValues>
+                </property>
+                <property key="pageOpenWindowMs" type="integer" defaultValue="3000">
+                    <caption>Page open window (ms)</caption>
+                    <description>How long after a page opens its loads may use the cache (500 to 10000).</description>
+                </property>
                 <property key="clearOn" type="enumeration" defaultValue="otherMicroflows">
                     <caption>Clear the cache</caption>
                     <description>Safest: whenever a microflow that is not in the list runs (it may save data on the server or call a REST POST/PUT). Writes only: when an answer shows a commit, delete or new object (more hits, but a REST write without a Mendix commit is not seen).</description>

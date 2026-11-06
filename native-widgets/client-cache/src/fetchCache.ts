@@ -19,6 +19,12 @@ export interface CacheConfig {
     /** otherMicroflows (safest): any microflow that is not in the list clears the cache before it runs.
      *  writes: only when its answer shows a write (commits, deletes, new objects). */
     clearOn: "otherMicroflows" | "writes";
+    /** pageOpen: answer from the cache only for loads right after a page opens or the user goes back; a call made
+     *  later on an open page (a refresh button, also in a pop-up) always goes to the server.
+     *  always: within the TTL every listed call is answered from the cache. */
+    useFor: "pageOpen" | "always";
+    /** pageOpen: how long after a page opens its loads may use the cache */
+    pageOpenWindowMs: number;
 }
 
 type FetchFn = (input: any, init?: any) => Promise<any>;
@@ -36,7 +42,15 @@ export class FetchCache {
         log: [],
         seen: new Map()
     };
-    config: CacheConfig = { enabled: true, rules: [], clearOn: "otherMicroflows" };
+    config: CacheConfig = {
+        enabled: true,
+        rules: [],
+        clearOn: "otherMicroflows",
+        useFor: "pageOpen",
+        pageOpenWindowMs: 3000
+    };
+    private windowUntil = Number.NEGATIVE_INFINITY;
+    private servedInWindow = new Set<string>();
     private inflight = new Map<string, Promise<{ status: number; text: string; headers: Record<string, string> }>>();
     private generation = 0; // bumps on every invalidation: late responses of older requests are not stored
 
@@ -45,6 +59,20 @@ export class FetchCache {
         private now: () => number = () => Date.now()
     ) {
         this.store = new ResponseStore(now);
+    }
+
+    /** A page opened or the user went back: its first loads may come from the cache. */
+    markPageOpen(): void {
+        this.windowUntil = this.now() + this.config.pageOpenWindowMs;
+        this.servedInWindow.clear();
+    }
+
+    private mayServe(key: string): boolean {
+        if (this.config.useFor === "always") {
+            return true;
+        }
+        // once per page opening: a second identical call right after opening is a refresh
+        return this.now() <= this.windowUntil && !this.servedInWindow.has(key);
     }
 
     private remember(opId: string | undefined, ms: number, status: number, text: string): void {
@@ -120,8 +148,9 @@ export class FetchCache {
                 return res;
             }
             const key = decision.key as string;
-            const hit = this.store.get(key);
+            const hit = this.mayServe(key) ? this.store.get(key) : undefined;
             if (hit) {
+                this.servedInWindow.add(key);
                 this.stats.hits++;
                 this.note(`HIT ${shortKey(key)} (${hit.hits})`);
                 return this.makeResponse(hit.text, 200, hit.headers);
@@ -133,6 +162,7 @@ export class FetchCache {
                 return this.makeResponse(r.text, r.status, r.headers);
             }
             this.stats.misses++;
+            this.servedInWindow.add(key);
             const gen = this.generation;
             const started = this.now();
             const run = (async () => {

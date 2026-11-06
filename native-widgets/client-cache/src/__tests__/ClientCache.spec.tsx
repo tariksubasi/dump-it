@@ -12,7 +12,7 @@ const server = jest.fn(async () => new WhatwgResponse(CLEAN, { status: 200 }));
 (globalThis as any).Response = WhatwgResponse;
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { ClientCache } = require("../ClientCache");
+const { ClientCache, cache } = require("../ClientCache");
 
 const call = (): Promise<any> =>
     (globalThis as any).fetch("https://app/xas/", {
@@ -26,7 +26,7 @@ const call = (): Promise<any> =>
         })
     });
 
-it("wraps the global fetch: the second call within the TTL does not reach the server", async () => {
+it("wraps the global fetch: a page opened again within the TTL gets its data from the cache", async () => {
     const r = render(
         <ClientCache
             name="cc"
@@ -34,11 +34,14 @@ it("wraps the global fetch: the second call within the TTL does not reach the se
             enabled={{ status: ValueStatus.Available, value: true }}
             rules={"opRest=30"}
             clearOn="otherMicroflows"
+            useFor="pageOpen"
+            pageOpenWindowMs={3000}
             debugMode
         />
     );
-    const a = await (await call()).text();
-    const b = await (await call()).text();
+    const a = await (await call()).text(); // page opened on mount: miss, stored
+    cache.markPageOpen(); // user comes back to the page
+    const b = await (await call()).text(); // from the cache
     expect(a).toBe(CLEAN);
     expect(b).toBe(CLEAN);
     expect(server).toHaveBeenCalledTimes(1);
@@ -73,13 +76,57 @@ it("a JavaScript action can clear the cache through globalThis.dumpitClientCache
             enabled={{ status: ValueStatus.Available, value: true }}
             rules={"opRest=30"}
             clearOn="otherMicroflows"
+            useFor="pageOpen"
+            pageOpenWindowMs={3000}
             debugMode={false}
         />
     );
     await call();
+    cache.markPageOpen();
     await call();
     expect(server).toHaveBeenCalledTimes(1);
     (globalThis as any).dumpitClientCache.clear("pull to refresh");
+    cache.markPageOpen();
     await call();
     expect(server).toHaveBeenCalledTimes(2);
+});
+
+it("a focus event of the page (back navigation, tab switch) opens the cache window; a later tap goes to the server", async () => {
+    jest.useFakeTimers({ doNotFake: ["nextTick", "setImmediate"] } as any);
+    server.mockClear();
+    (globalThis as any).dumpitClientCache.clear("test");
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { NavigationContext } = require("@react-navigation/native");
+    const listeners: Array<() => void> = [];
+    const navigation = {
+        isFocused: () => false,
+        addListener: (_e: string, fn: () => void) => {
+            listeners.push(fn);
+            return () => undefined;
+        }
+    };
+    render(
+        <NavigationContext.Provider value={navigation}>
+            <ClientCache
+                name="cc"
+                style={[]}
+                enabled={{ status: ValueStatus.Available, value: true }}
+                rules={"opRest=30"}
+                clearOn="otherMicroflows"
+                useFor="pageOpen"
+                pageOpenWindowMs={3000}
+                debugMode={false}
+            />
+        </NavigationContext.Provider>
+    );
+    listeners.forEach(l => l()); // page shown
+    await call(); // miss, stored
+    jest.advanceTimersByTime(10_000);
+    listeners.forEach(l => l()); // user comes back to the page
+    await call(); // from the cache
+    expect(server).toHaveBeenCalledTimes(1);
+    jest.advanceTimersByTime(5_000); // later: taps "Refresh data" in a pop-up
+    await call();
+    expect(server).toHaveBeenCalledTimes(2);
+    jest.useRealTimers();
 });

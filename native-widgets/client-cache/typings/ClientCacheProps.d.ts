@@ -6,6 +6,8 @@
 import { DynamicValue } from "mendix";
 import { CSSProperties } from "react";
 
+export type UseForEnum = "pageOpen" | "always";
+
 export type ClearOnEnum = "otherMicroflows" | "writes";
 
 export interface ClientCacheProps<Style> {
@@ -13,6 +15,8 @@ export interface ClientCacheProps<Style> {
     style: Style[];
     enabled: DynamicValue<boolean>;
     rules: string;
+    useFor: UseForEnum;
+    pageOpenWindowMs: number;
     clearOn: ClearOnEnum;
     debugMode: boolean;
 }
@@ -30,6 +34,8 @@ export interface ClientCachePreviewProps {
     translate: (text: string) => string;
     enabled: string;
     rules: string;
+    useFor: UseForEnum;
+    pageOpenWindowMs: number | null;
     clearOn: ClearOnEnum;
     debugMode: boolean;
 }

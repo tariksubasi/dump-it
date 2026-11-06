@@ -40,7 +40,13 @@ function setup(
         return new WhatwgResponse(text, { status, headers: { "content-type": "application/json" } });
     });
     const cache = new FetchCache(makeResponse, () => t.now);
-    cache.config = { enabled: true, rules: parseRules("opRead=30\nopRead2=5"), clearOn: "otherMicroflows" };
+    cache.config = {
+        enabled: true,
+        rules: parseRules("opRead=30\nopRead2=5"),
+        clearOn: "otherMicroflows",
+        useFor: "always",
+        pageOpenWindowMs: 3000
+    };
     return { cache, fetch: cache.wrap(server), server, t };
 }
 
@@ -213,7 +219,13 @@ describe("FetchCache with the Mendix client's fetch use", () => {
             return new WhatwgResponse(b.action === "commit" ? "{}" : CLEAN, { status: 200 });
         });
         const cache = new FetchCache(makeResponse, () => t.now);
-        cache.config = { enabled: true, rules: parseRules("opRead=30"), clearOn: "otherMicroflows" };
+        cache.config = {
+            enabled: true,
+            rules: parseRules("opRead=30"),
+            clearOn: "otherMicroflows",
+            useFor: "always",
+            pageOpenWindowMs: 3000
+        };
         const f = cache.wrap(server);
         const slow = mendixPost(f, op("opRead"));
         await mendixPost(f, body({ action: "commit" }));
@@ -237,5 +249,65 @@ describe("FetchCache with the Mendix client's fetch use", () => {
         await mendixPost(fetch, op("opOther"));
         expect(cache.stats.seen.get("opRead")?.clean).toBe(true);
         expect(cache.stats.seen.get("opOther")?.clean).toBe(false);
+    });
+});
+
+describe("use the cache only for page opens (default)", () => {
+    function pageSetup(): ReturnType<typeof setup> {
+        const r = setup({ opRead: CLEAN, opRead2: CLEAN });
+        r.cache.config = { ...r.cache.config, useFor: "pageOpen", pageOpenWindowMs: 3000 };
+        return r;
+    }
+    const ops = (server: jest.Mock): string[] => server.mock.calls.map(c => JSON.parse(c[1].body).operationId);
+
+    it("page open loads come from the cache; a refresh tap on the open page goes to the server", async () => {
+        const { fetch, server, cache, t } = pageSetup();
+        cache.markPageOpen(); // first visit
+        await mendixPost(fetch, op("opRead")); // miss, stored
+        t.now = 10_000;
+        cache.markPageOpen(); // user goes back to the page
+        await mendixPost(fetch, op("opRead")); // hit
+        expect(ops(server)).toEqual(["opRead"]);
+        t.now = 15_000; // later: user taps "Refresh data" in a pop-up
+        await mendixPost(fetch, op("opRead"));
+        expect(ops(server)).toEqual(["opRead", "opRead"]);
+    });
+
+    it("the same call twice right after opening: the second is a refresh and goes to the server", async () => {
+        const { fetch, server, cache, t } = pageSetup();
+        cache.markPageOpen();
+        await mendixPost(fetch, op("opRead"));
+        t.now = 20_000;
+        cache.markPageOpen();
+        await mendixPost(fetch, op("opRead")); // hit
+        t.now = 20_500;
+        await mendixPost(fetch, op("opRead")); // pull to refresh right away
+        expect(ops(server)).toEqual(["opRead", "opRead"]);
+    });
+
+    it("several different loads of one page all use the cache", async () => {
+        const { fetch, server, cache, t } = pageSetup();
+        cache.markPageOpen();
+        await mendixPost(fetch, op("opRead"));
+        await mendixPost(fetch, op("opRead2"));
+        t.now = 4_000; // within the 5 s TTL of opRead2
+        cache.markPageOpen();
+        await mendixPost(fetch, op("opRead"));
+        await mendixPost(fetch, op("opRead2"));
+        expect(ops(server)).toEqual(["opRead", "opRead2"]);
+    });
+
+    it("without a page open nothing is answered from the cache", async () => {
+        const { fetch, server } = pageSetup();
+        await mendixPost(fetch, op("opRead"));
+        await mendixPost(fetch, op("opRead"));
+        expect(server).toHaveBeenCalledTimes(2);
+    });
+
+    it("parallel identical loads still go to the server once", async () => {
+        const { fetch, server, cache } = pageSetup();
+        cache.markPageOpen();
+        await Promise.all([mendixPost(fetch, op("opRead")), mendixPost(fetch, op("opRead"))]);
+        expect(server).toHaveBeenCalledTimes(1);
     });
 });

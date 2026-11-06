@@ -1,13 +1,14 @@
 /* global globalThis */
-import { ReactElement, useEffect, useLayoutEffect, useState } from "react";
+import { ReactElement, useContext, useEffect, useLayoutEffect, useState } from "react";
 import { Alert, Pressable, StyleSheet, Text } from "react-native";
+import { NavigationContext } from "@react-navigation/native";
 import { ValueStatus } from "mendix";
 
 import { ClientCacheProps } from "../typings/ClientCacheProps";
 import { parseRules } from "./cacheRules";
 import { FetchCache, isWrapped } from "./fetchCache";
 
-const VERSION = "1.0.1";
+const VERSION = "1.0.2";
 
 function makeResponse(text: string, status: number, headers: Record<string, string>): any {
     const R = (globalThis as any).Response;
@@ -69,12 +70,26 @@ function report(): string {
 
 export function ClientCache(props: ClientCacheProps<object>): ReactElement | null {
     const [, setTick] = useState(0);
+    const navigation = useContext(NavigationContext);
+    // Page opened (mount while focused) or shown again (focus, e.g. back): start the page-open window.
+    useEffect(() => {
+        if (!navigation || navigation.isFocused()) {
+            cache.markPageOpen();
+        }
+        return navigation?.addListener("focus", () => cache.markPageOpen());
+    }, [navigation]);
     useLayoutEffect(() => {
         const enabled = props.enabled.status !== ValueStatus.Available || props.enabled.value !== false;
         if (!enabled && cache.config.enabled) {
             cache.invalidate("disabled");
         }
-        cache.config = { enabled, rules: parseRules(props.rules), clearOn: props.clearOn };
+        cache.config = {
+            enabled,
+            rules: parseRules(props.rules),
+            clearOn: props.clearOn,
+            useFor: props.useFor,
+            pageOpenWindowMs: Math.min(10_000, Math.max(500, props.pageOpenWindowMs))
+        };
     });
     useEffect(() => {
         install();

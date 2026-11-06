@@ -2,7 +2,11 @@
 
 Repeated calls of **chosen read-only microflows** (for example the ones that call REST) are answered from memory for a
 few seconds instead of going to the server. Put it **once on each layout** (in the same snippet as NetworkActivity).
-Package: `dist/1.0.1/dumpit.ClientCache.mpk`.
+Package: `dist/1.0.2/dumpit.ClientCache.mpk`.
+
+**Nothing to add to your pages or flows.** By default the cache only answers the loads right after a page opens or the
+user goes back to it (the widget sees the page's focus). A tap on an open page — a "Refresh data" button, also in a
+pop-up, a pull to refresh — always goes to the server.
 
 **GET only?** At HTTP level every Mendix microflow call is a `POST /xas/` (reads too), so an HTTP-GET rule would cache
 nothing. "Read only" is decided by (1) your list — put there only microflows that **read** (REST **GET**) — and (2) the
@@ -22,13 +26,16 @@ answer itself: an answer that writes or has a side effect is never stored.
 
 | Situation | What happens |
 |---|---|
-| Listed microflow (`operationId=seconds`), same params/objects, within TTL | answered from memory (no network, no NetworkActivity overlay) |
+| Page opens / user goes back (first 3 s, setting *Page open window*), listed microflow, same params/objects, within TTL | answered from memory (no network, no NetworkActivity overlay) |
+| The same call again right after opening (pull to refresh) | server — a call is answered from the cache at most once per page opening |
+| A tap later on an open page (refresh button, also in a pop-up) | server, fresh |
+| Setting *Use the cache for = Always* | every listed call within the TTL comes from memory (then use the optional JS action below for refresh buttons) |
 | Two identical listed calls at the same time | one server call, both get the answer |
 | Listed microflow, but the answer **writes** (`commits`, `deletes`, `newpersistable`) or has a side-effect instruction (message, download, logout, show login) or a validation message | not stored; the cache is cleared when it wrote |
 | Listed microflow with unsent client changes (`changes`) or async (`asyncid`) | goes to the server |
 | **Any microflow that is not in the list** (default "On any other microflow") | cache cleared **before** it runs — covers saves that only call a REST POST/PUT and commit nothing in Mendix |
 | Another microflow that writes (seen in its answer) — mode "Only on writes" | cache cleared |
-| Refresh button / pull to refresh | add the JavaScript action below to the nanoflow before the call |
+| Refresh button / pull to refresh | fresh by default (page-open rule); nothing to add |
 | Device clock set back | entry treated as stale |
 | `commit`, `delete`, `rollback`, `synchronize_objects`, `login`, `logout` | cache cleared |
 | Server error, network error | passed to Mendix unchanged; nothing stored, nothing invented |
@@ -48,9 +55,9 @@ is not visible in the answer), so there is **no wildcard**.
 4. Copy the ids marked `clean read` into **Cached microflows**, one per line: `3f2a…=30`.
 5. Diagnostic mode = No before release.
 
-## Refresh buttons: JavaScript action `ClearClientCache`
+## Optional (only with *Use the cache for = Always*): JavaScript action `ClearClientCache`
 
-Create a JavaScript action without parameters in Studio Pro and put one line between the user-code markers:
+Not needed with the default. Create a JavaScript action without parameters and put one line between the markers:
 
 ```js
 export async function ClearClientCache() {
@@ -69,7 +76,7 @@ fresh data when they ask for it. Without the ClientCache widget the line does no
 |---|---|
 | Opens a screen again within the TTL | instant, no spinner |
 | Saved something (any other microflow, commit, sync) | next read is fresh |
-| Taps Refresh / pulls to refresh (with `ClearClientCache`) | fresh |
+| Taps Refresh / pulls to refresh, also in a pop-up | fresh (default) |
 | Another user changed the data | visible after the TTL at the latest — keep TTL short (10–30 s) on screens where this matters |
 | Server error / no network | the same error as without the cache (no old data pretending to be new) |
 | Log out / log in as someone else | cache cleared |
@@ -96,5 +103,5 @@ dump-it can build this (`createEntity`, `callRest` with `"response": "string"`, 
 variable) through the normal dry run + approval code.
 
 ```bash
-npm install && npm run release   # npm test: 25 tests (Mendix fetch use simulated with React Native's Response)
+npm install && npm run release   # npm test: 31 tests (Mendix fetch use simulated with React Native's Response)
 ```
