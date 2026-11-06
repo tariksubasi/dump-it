@@ -32,7 +32,7 @@ export interface NetworkActivityStyle {
     buttonText?: TextStyle;
 }
 
-const VERSION = "1.1.0";
+const VERSION = "1.2.0";
 
 // ---- one tracker and one controller for the whole app ----------------------------
 export const tracker = new NetworkTracker();
@@ -65,9 +65,9 @@ function textOf(v: DynamicValue<string> | undefined, fallback: string): string {
 
 function merge(styles: NetworkActivityStyle[] | undefined): Required<NetworkActivityStyle> {
     const out: Required<NetworkActivityStyle> = {
-        backdrop: { backgroundColor: "rgba(11,27,43,0.45)" },
+        backdrop: { backgroundColor: "rgba(0,0,0,0.18)" },
         card: {},
-        indicator: { color: "#1558B0" },
+        indicator: {},
         text: {},
         button: {},
         buttonText: {}
@@ -98,7 +98,7 @@ function describeRecent(): string {
 
 let nextInstance = 1;
 
-type SpinnerKind = "ring" | "ringPulse" | "native";
+type SpinnerKind = "minimal" | "ring" | "native";
 
 let gradientSeq = 0;
 
@@ -175,57 +175,70 @@ function GradientRing(props: {
     );
 }
 
+/** iOS-style minimal indicator: 12 short rounded bars with fading opacity, turning in 12 steps per second.
+ *  Drawn with plain views; the rotation runs on the UI thread (native driver), not affected by the Android
+ *  animation scale and still turning while the app is busy. */
+function PetalSpinner({ size, color }: { size: number; color: string }): ReactElement {
+    const [spin] = useState(() => new Animated.Value(0));
+    useLoop(spin, () =>
+        Animated.timing(spin, {
+            toValue: 1,
+            duration: 1000,
+            easing: t => Math.floor(t * 12) / 12,
+            useNativeDriver: true
+        })
+    );
+    const rotate = spin.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
+    const barWidth = Math.max(2, Math.round(size * 0.09));
+    const barHeight = Math.round(size * 0.28);
+    return (
+        <Animated.View testID="network-activity-minimal" style={{ width: size, height: size, transform: [{ rotate }] }}>
+            {Array.from({ length: 12 }, (_, i) => (
+                <View
+                    key={i}
+                    style={[StyleSheet.absoluteFill, { alignItems: "center", transform: [{ rotate: `${i * 30}deg` }] }]}
+                >
+                    <View
+                        style={{
+                            width: barWidth,
+                            height: barHeight,
+                            borderRadius: barWidth / 2,
+                            backgroundColor: color,
+                            opacity: 0.15 + (0.85 * (i + 1)) / 12
+                        }}
+                    />
+                </View>
+            ))}
+        </Animated.View>
+    );
+}
+
 function Spinner(props: {
     kind: SpinnerKind;
+    size: number;
     color?: string;
     colorEnd?: string;
     track?: string;
-    reduceMotion: boolean;
 }): ReactElement {
-    const from = props.color ?? "#1558B0";
-    const to = props.colorEnd ?? "#38BDF8";
-    const track = props.track ?? "rgba(21,88,176,0.12)";
-    const [pulse] = useState(() => new Animated.Value(0));
-    const pulsing = props.kind === "ringPulse" && !props.reduceMotion;
-    useLoop(
-        pulse,
-        () =>
-            Animated.sequence([
-                Animated.timing(pulse, {
-                    toValue: 1,
-                    duration: 900,
-                    easing: Easing.inOut(Easing.ease),
-                    useNativeDriver: true
-                }),
-                Animated.timing(pulse, {
-                    toValue: 0,
-                    duration: 900,
-                    easing: Easing.inOut(Easing.ease),
-                    useNativeDriver: true
-                })
-            ]),
-        pulsing
-    );
-    // "native" only when chosen. Reduced motion keeps the rings (a progress indicator is essential motion) and only
-    // drops the pulse; the system spinner stands still on Android when animations are turned off.
     if (props.kind === "native") {
+        return <ActivityIndicator size="small" color={props.color ?? "#3A3A3C"} testID="network-activity-native" />;
+    }
+    if (props.kind === "ring") {
         return (
-            <View style={styles.pulseBox}>
-                <ActivityIndicator size="large" color={from} testID="network-activity-native" />
+            <View style={{ width: props.size, height: props.size }} testID="network-activity-ring">
+                <GradientRing
+                    size={props.size}
+                    stroke={Math.max(2, Math.round(props.size / 10))}
+                    from={props.color ?? "#1558B0"}
+                    to={props.colorEnd ?? "#38BDF8"}
+                    track={props.track ?? "rgba(21,88,176,0.12)"}
+                    arc={0.3}
+                    durationMs={900}
+                />
             </View>
         );
     }
-    const scale = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.86, 1.1] });
-    const opacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.18, 0.04] });
-    return (
-        <View style={styles.pulseBox} testID="network-activity-ring">
-            {pulsing ? (
-                <Animated.View style={[styles.halo, { backgroundColor: to, opacity, transform: [{ scale }] }]} />
-            ) : null}
-            <GradientRing size={60} stroke={6} from={from} to={to} track={track} arc={0.3} durationMs={900} />
-            <GradientRing size={40} stroke={3} from={to} to={from} arc={0.22} durationMs={1500} reverse />
-        </View>
-    );
+    return <PetalSpinner size={props.size} color={props.color ?? "#3A3A3C"} />;
 }
 
 export function NetworkActivity(props: NetworkActivityProps<NetworkActivityStyle>): ReactElement | null {
@@ -296,7 +309,9 @@ export function NetworkActivity(props: NetworkActivityProps<NetworkActivityStyle
         return null;
     }
     const slow = state.phase === "slow";
-    const spinnerInfo = `animation ${props.spinner}, reduce motion ${reduceMotion ? "on (no pulse)" : "off"}`;
+    const spinnerInfo = `animation ${props.spinner} ${props.spinnerSize}px, reduce motion ${
+        reduceMotion ? "on" : "off"
+    }`;
     const message = slow
         ? textOf(props.slowMessage, "This takes longer than usual…")
         : textOf(props.message, "Loading…");
@@ -326,12 +341,12 @@ export function NetworkActivity(props: NetworkActivityProps<NetworkActivityStyle
                 >
                     <Spinner
                         kind={props.spinner}
+                        size={Math.min(64, Math.max(16, props.spinnerSize))}
                         color={s.indicator.color}
                         colorEnd={s.indicator.colorEnd}
                         track={s.indicator.trackColor}
-                        reduceMotion={reduceMotion}
                     />
-                    <Text style={[styles.text, s.text]}>{message}</Text>
+                    {props.showMessage || slow ? <Text style={[styles.text, s.text]}>{message}</Text> : null}
                     {slow ? (
                         <Pressable
                             onPress={() => controller.dismiss()}
@@ -365,26 +380,25 @@ export function NetworkActivity(props: NetworkActivityProps<NetworkActivityStyle
 const styles = StyleSheet.create({
     backdrop: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
     card: {
-        minWidth: 160,
-        maxWidth: 320,
+        minWidth: 72,
+        minHeight: 72,
+        maxWidth: 280,
         alignItems: "center",
-        paddingVertical: 24,
-        paddingHorizontal: 28,
-        borderRadius: 16,
+        justifyContent: "center",
+        padding: 22,
+        borderRadius: 14,
         backgroundColor: "#FFFFFF",
         ...Platform.select<ViewStyle>({
-            android: { elevation: 8 },
+            android: { elevation: 6 },
             default: {
-                shadowColor: "#0B1B2B",
-                shadowOpacity: 0.18,
-                shadowRadius: 16,
-                shadowOffset: { width: 0, height: 6 }
+                shadowColor: "#000000",
+                shadowOpacity: 0.12,
+                shadowRadius: 12,
+                shadowOffset: { width: 0, height: 4 }
             }
         })
     },
-    pulseBox: { width: 76, height: 76, alignItems: "center", justifyContent: "center" },
-    halo: { position: "absolute", width: 76, height: 76, borderRadius: 38 },
-    text: { marginTop: 12, fontSize: 16, lineHeight: 23, color: "#1B2430", textAlign: "center" },
+    text: { marginTop: 12, fontSize: 14, lineHeight: 20, color: "#3A3A3C", textAlign: "center" },
     button: {
         marginTop: 16,
         minHeight: 44,

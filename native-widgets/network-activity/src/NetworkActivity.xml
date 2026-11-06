@@ -38,14 +38,22 @@
                     <caption>Ignore requests</caption>
                     <description>Regular expression (one per line) on "METHOD url body". Matching requests never show the overlay. Use Diagnostic mode to see the requests.</description>
                 </property>
-                <property key="spinner" type="enumeration" defaultValue="ringPulse">
-                    <caption>Animation</caption>
-                    <description>Spinning ring (same on iOS and Android), ring with a soft pulse, or the system spinner. With reduced motion (or animations off in Android developer options) the ring keeps spinning and the pulse is left out.</description>
+                <property key="spinner" type="enumeration" defaultValue="minimal">
+                    <caption>Indicator</caption>
+                    <description>Minimal: small dark iOS-style indicator on a small white card (same on iOS and Android, keeps turning with Android animations off). Ring: one blue gradient ring. System: the platform spinner (on Android it stands still when animations are turned off).</description>
                     <enumerationValues>
-                        <enumerationValue key="ringPulse">Spinning ring + pulse</enumerationValue>
-                        <enumerationValue key="ring">Spinning ring</enumerationValue>
+                        <enumerationValue key="minimal">Minimal (iOS style)</enumerationValue>
+                        <enumerationValue key="ring">Ring</enumerationValue>
                         <enumerationValue key="native">System spinner</enumerationValue>
                     </enumerationValues>
+                </property>
+                <property key="spinnerSize" type="integer" defaultValue="28">
+                    <caption>Indicator size</caption>
+                    <description>In points, 16 to 64. 28 is close to the iOS default.</description>
+                </property>
+                <property key="showMessage" type="boolean" defaultValue="false">
+                    <caption>Show message</caption>
+                    <description>No: only the indicator; the message appears when it takes long (with the Hide button). Yes: always show the message under the indicator.</description>
                 </property>
                 <property key="debugMode" type="boolean" defaultValue="false">
                     <caption>Diagnostic mode</caption>
