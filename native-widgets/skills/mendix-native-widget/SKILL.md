@@ -49,8 +49,10 @@ sections when a step needs them. If something is not in this file, say **"NOT IN
 | 29 | Untyped npm package → `typings/modules.d.ts` with `declare module "pkg";` (or `@types/pkg`) | TS7016 breaks the build |
 | 30 | Rollup warnings are errors in build/release (except circular, this-is-undefined, unused external import) | build exits 1 |
 | 31 | Never write the widget id by hand from a "nice" name. The build writes `<packagePath>/<widgetName lower>/<WidgetName>.android.js`; the id must be exactly `<packagePath>.<widgetName lower>.<WidgetName>` (`TeiMealCard` → `tei.teimealcard.TeiMealCard`, **not** `tei.mealcard.TeiMealCard`). After every release run `node ../tools/check-mpk.mjs dist/<v>/<file>.mpk`; it must print OK | red screen on the device: `Unable to resolve module ../widgets/<a>/<b>/<Name>` … `None of these files exist` |
-| 31 | LF line endings | lint fails on CRLF (Windows: `git config core.autocrlf input`) |
-| 32 | `.prettierignore` must list `config.projectPath` when it is inside the widget (`tests/testProject/`) and `dist/` | hundreds of lint errors |
+| 32 | LF line endings | lint fails on CRLF (Windows: `git config core.autocrlf input`) |
+| 33 | `.prettierignore` must list `config.projectPath` when it is inside the widget (`tests/testProject/`) and `dist/` | hundreds of lint errors |
+| 34 | Merge `props.style` **per key** (`{ ...base.container, ...s.container }`). Never `props.style.reduce((a, s) => Object.assign(a, s), base)`: a theme or class `container` then replaces the whole base `container` | fixed `height`, `width`, `overflow` vanish; cards grow with their text |
+| 35 | A fixed-size card needs a **numeric** width when its parent can scroll sideways (horizontal Gallery, horizontal `ScrollView`, row with no width). `width: "100%"` resolves to nothing there; `numberOfLines` then has no width to wrap at, and the card grows with the title. Height = sum of fixed slots (see 17c) | card gets wider with every character; long title on one line |
 
 ---
 
@@ -657,7 +659,7 @@ Adding a native module that is NOT in the app:
 | Double tap | guard with `isExecuting` / debounce |
 | Slow network | non-blocking spinner, timeout fallback |
 | Offline | cached data or clear message, retry when back |
-| Long text / long words | `numberOfLines` or wrap; no overflow |
+| Long text / long words | `numberOfLines` or wrap; no overflow; fixed-size cards: rule 35 + 17c |
 | Many items | paging / virtualized list |
 | Phone, tablet, portrait, landscape, split screen | `useWindowDimensions`, flex, no fixed widths |
 | Keyboard | inputs stay visible (`KeyboardAvoidingView`) |
@@ -736,6 +738,22 @@ Adding a native module that is NOT in the app:
 Share the pure logic with web: `searchLogic.ts` and `useDebounced.ts` from `native-widgets/card-list/src/` work
 unchanged in native (no DOM). Cards: `Pressable` with `android_ripple`, border `#D7DEE6`, radius 12, elevation 2 + iOS
 shadow, min height 48. Use a Database/XPath data source for server-side search (offline apps: the device database).
+
+## 17c. Recipe: fixed-size card (image + title + date + button)
+
+Goal: every card has the same width and height; text never pushes the card or gets clipped.
+
+| Slot | Rule |
+|---|---|
+| Width | prop `cardWidth` (integer, `0` = fill parent). In a vertical list use `"100%"`; in anything that scrolls sideways use the number. Add `maxWidth: windowWidth` as a guard |
+| Height | `IMAGE_H + 2 * padding + titleLines * lh(title) + (gap + lh(date)) + (gap + pill) + 2` (border). `lh(size) = ceil(lineHeight(size) * min(fontScale, 1.3))`; take `fontScale` from `useWindowDimensions()` so it updates live |
+| Text | every `Text`: `numberOfLines` + `maxFontSizeMultiplier={1.3}`; give the button text an explicit `lineHeight` (no default line heights in the sum) |
+| Body | `flex: 1`, `justifyContent: "space-between"` (button stays at the bottom when the title has one line) |
+| Shadow vs clip | outer `View` = size, radius, border, shadow (no `overflow`); inner `Pressable` = `flex: 1`, radius, `overflow: "hidden"`, `android_ripple={{ borderless: false }}`. `overflow: "hidden"` on the shadow view removes the iOS shadow; `borderless: true` lets the ripple leak past the corners |
+| Image | fixed height, `resizeMode="cover"`, fallback `View` with the same height |
+
+Test: a 200-character title, a title with one 60-letter word, no image, no date, system font 200 %, a horizontal Gallery and a
+vertical list. All cards must stay the same size and the button must stay fully visible.
 
 ## 17b. Limits and things people forget
 
