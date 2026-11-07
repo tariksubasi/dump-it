@@ -60,6 +60,14 @@ npm run release                               # XML kontrol + build + mpk
 
 Çıktı: `dist/<package.json version>/dumpit.<WidgetName>.mpk`
 
+**Her mpk'yı kontrol et** (npm gerekmez, sadece Node):
+
+```bash
+node ../tools/check-mpk.mjs dist/1.0.0/dumpit.MyWidget.mpk   # OK yazmalı
+```
+
+Widget id, mpk içindeki klasör ve `package.xml` uyuşmazsa `FAIL` yazar ve doğru id'yi söyler.
+
 | Komut | Ne yapar |
 |---|---|
 | `npm run build` | Geliştirme build'i (`dist/tmp/widgets`) |
@@ -231,6 +239,7 @@ ASCII yerleşim, widget sözleşmeleri, build sonuçları, QA matrisi, son rapor
 | `set-state-in-effect` (lint) | Effect içinde senkron `setState` | Durumu türet / anahtar ile sakla / callback içinde set et |
 | Prettier XML'i bozuyor | `prettier --write .` | Sadece `src/**/*.{ts,tsx}` |
 | Native modül bulunamadı (uygulama açılırken çöker) | Native npm paketi uygulamada yok | Native Template `package.json`'a ekle + uygulamayı yeniden derle; Make It Native sadece içindeki modülleri bilir |
+| Telefonda kırmızı ekran: `Unable to resolve module ../widgets/x/y/Ad` … `None of these files exist` | XML'deki widget id mpk içindeki klasörle uyuşmuyor (örn. id `tei.mealcard.TeiMealCard`, dosyalar `tei/teimealcard/`) | id = `<packagePath>.<widgetName küçük harf>.<WidgetName>`; `package.xml` → `<file path="<packagePath>/<widgetName küçük harf>"/>`. Yeniden build, `tools/check-mpk.mjs` OK, F4, widget'ı sayfadan silip yeniden koy, Run Locally'yi yeniden başlat |
 | Widget değişmiyor | Aynı sürüm / eski mpk | Sürümü artır, eski mpk'yı sil, F4 |
 | Her komutta "Update dependencies?" sorusu | `react`, `react-native` veya `@types/react` package.json'a yazılmış | Onları sil (uygulama zaten sağlar). Soruyu atlamak için `CI=true` |
 | `TS7016 Could not find a declaration file` | Tipleri olmayan npm paketi | `typings/modules.d.ts` içine `declare module "paket";` |

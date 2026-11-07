@@ -20,7 +20,7 @@ say **"NOT IN SKILL"** and ask; never invent an API.
 |---|---|---|
 | 1 | Node **22.18+**, npm 8+ | Tools exit: "a minimum node version ^22.18.0 is required" |
 | 2 | `package.json` `widgetName` = `src/<WidgetName>.tsx` = `src/<WidgetName>.xml` = clientModule `name` | "Cannot find a widget entry file" |
-| 3 | Widget id = `<packagePath>.<widgetname lower>.<WidgetName>` | widget files not found |
+| 3 | Widget id = `<packagePath>.<widgetname lower>.<WidgetName>` — never shorten it by hand (`TeiMealCard` → `tei.teimealcard.TeiMealCard`). Check every mpk with `node ../tools/check-mpk.mjs dist/<v>/<file>.mpk` | widget files not found / empty widget |
 | 4 | `src/package.xml` `<file path="<packagePath>/<widgetname lower>" />` | empty widget |
 | 5 | `supportedPlatform="Web"` (default) for web widgets | `Native` gives native typings |
 | 6 | Element order inside `<property>` (XSD sequence): `caption`, `category?`, `description`, `attributeTypes?`, `associationTypes?`, `selectionTypes?`, `enumerationValues?`, `properties?`, `returnType?`, `translations?`, `actionVariables?` | Studio Pro: "invalid child element …" |
@@ -526,7 +526,7 @@ paging (`setLimit` called), filter (`setFilter` called), keyboard (Enter/Space).
 ## 13. Release and install
 
 1. Bump `package.json` `version` and `src/package.xml` `version`.
-2. `npm run release` → `dist/<version>/<packagePath>.<Widget>.mpk`.
+2. `npm run release` → `dist/<version>/<packagePath>.<Widget>.mpk`, then `node ../tools/check-mpk.mjs <that mpk>` → must print `OK`.
 3. Copy to `<Mendix project>/widgets/` (or `config.projectPath`), remove older copies, F4 in Studio Pro.
 4. Run, hard-refresh the browser (Ctrl+F5) to drop cached widget files.
 5. Commit the mpk; never commit `node_modules/` or `dist/tmp/`.

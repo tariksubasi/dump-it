@@ -48,6 +48,7 @@ sections when a step needs them. If something is not in this file, say **"NOT IN
 | 28 | `release` does **not** copy to `config.projectPath`; only `build` / `start` do | copy the mpk yourself |
 | 29 | Untyped npm package → `typings/modules.d.ts` with `declare module "pkg";` (or `@types/pkg`) | TS7016 breaks the build |
 | 30 | Rollup warnings are errors in build/release (except circular, this-is-undefined, unused external import) | build exits 1 |
+| 31 | Never write the widget id by hand from a "nice" name. The build writes `<packagePath>/<widgetName lower>/<WidgetName>.android.js`; the id must be exactly `<packagePath>.<widgetName lower>.<WidgetName>` (`TeiMealCard` → `tei.teimealcard.TeiMealCard`, **not** `tei.mealcard.TeiMealCard`). After every release run `node ../tools/check-mpk.mjs dist/<v>/<file>.mpk`; it must print OK | red screen on the device: `Unable to resolve module ../widgets/<a>/<b>/<Name>` … `None of these files exist` |
 | 31 | LF line endings | lint fails on CRLF (Windows: `git config core.autocrlf input`) |
 | 32 | `.prettierignore` must list `config.projectPath` when it is inside the widget (`tests/testProject/`) and `dist/` | hundreds of lint errors |
 
@@ -687,6 +688,7 @@ Adding a native module that is NOT in the app:
 
 1. Bump `version` in `package.json` and `src/package.xml`.
 2. `npm run release` → `dist/<version>/<packagePath>.<Widget>.mpk`.
+2b. `node ../tools/check-mpk.mjs dist/<version>/<packagePath>.<Widget>.mpk` → must print `OK` (id ↔ folder ↔ package.xml). Do not hand over an mpk that fails.
 3. Copy to `<Mendix project>/widgets/` (or set `config.projectPath`), delete older mpk of the same widget.
 4. Studio Pro: F4 → place the widget → Run Locally → reload the app.
 5. Commit the mpk (the repo keeps `dist/<version>/` for users without npm), not `dist/tmp/` and not `node_modules/`.
@@ -698,6 +700,7 @@ Adding a native module that is NOT in the app:
 | Error | Fix |
 |---|---|
 | `a minimum node version ^22.18.0 is required` | install Node 22.18+ |
+| Red screen `Unable to resolve module ../widgets/x/y/Name from …/deployment/native/pages/…` + `None of these files exist` | widget id does not match the files in the mpk. Run `tools/check-mpk.mjs`; set id `<packagePath>.<widgetName lower>.<WidgetName>` and `<file path="<packagePath>/<widgetName lower>"/>`, rebuild, F4, delete the widget from the pages and place it again, restart Run Locally |
 | `Cannot find a widget entry file` | `src/<widgetName>.tsx` missing / name mismatch |
 | `TS6133 'createElement' is declared but its value is never read` | remove the import |
 | `TS2307 Cannot find module 'x'` | `npm i x` (dependencies) |
